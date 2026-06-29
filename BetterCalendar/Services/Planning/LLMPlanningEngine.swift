@@ -42,8 +42,10 @@ struct LLMPlanningEngine: PlanningEngine {
             for i in blocks.indices where !seen.contains(i) { order.append(i) }  // 补齐遗漏
 
             let ordered = order.map { blocks[$0] }
+            DevLog.shared.info("排程", "云端成功 · \(ordered.count) 块")
             return PlanDecision(orderedBlocks: ordered, note: wire.note)
         } catch {
+            DevLog.shared.warn("排程", "云端失败，回退本地：\(error.localizedDescription)")
             return try await fallback.arrange(blocks, now: now)
         }
     }

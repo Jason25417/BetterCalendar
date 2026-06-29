@@ -44,9 +44,14 @@ struct ClaudeScheduleParser: ScheduleParsing {
                     priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal,
                     deadline: DateParsing.parse(b.deadline))
             }
-            guard !blocks.isEmpty else { return try await fallback.parse(text, referenceDate: referenceDate) }
+            guard !blocks.isEmpty else {
+                DevLog.shared.warn("解析", "云端返回 0 块，回退本地")
+                return try await fallback.parse(text, referenceDate: referenceDate)
+            }
+            DevLog.shared.info("解析", "云端成功 · \(blocks.count) 块 · \(CloudSettings.model)")
             return ParsedPlan(blocks: blocks)
         } catch {
+            DevLog.shared.warn("解析", "云端失败，回退本地：\(error.localizedDescription)")
             return try await fallback.parse(text, referenceDate: referenceDate)
         }
     }
