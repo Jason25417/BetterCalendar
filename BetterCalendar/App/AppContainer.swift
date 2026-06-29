@@ -15,9 +15,11 @@ final class AppContainer {
     let planner: PlanningEngine
     let refiner: PlanRefining
     let calendarStore: FakeCalendarStore       // 假日历（预览页观察用）
-    let routingStore: RoutingCalendarStore     // 写入走它：按设置转发 假/真
+    let routingStore: RoutingCalendarStore     // 写日历走它：按设置转发 假/真
     let reminderStore: FakeReminderStore
+    let routingReminder: RoutingReminderStore  // 写提醒走它：同一开关，假/真
     let focus: TimerOnlyFocusService
+    let exporter: ICSExporting
 
     init() {
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
@@ -28,7 +30,9 @@ final class AppContainer {
         self.calendarStore = FakeCalendarStore()
         self.routingStore = RoutingCalendarStore(fake: calendarStore, eventKit: EventKitCalendarStore())
         self.reminderStore = FakeReminderStore()
+        self.routingReminder = RoutingReminderStore(fake: reminderStore, eventKit: EventKitReminderStore())
         self.focus = TimerOnlyFocusService()
+        self.exporter = ICSExporter()
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。

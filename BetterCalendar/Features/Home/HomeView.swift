@@ -6,17 +6,25 @@
 //
 
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+import UniformTypeIdentifiers
+#endif
 
 struct HomeView: View {
     let container: AppContainer
     @State private var model: HomeViewModel
+    // 实时跟随设置里的日历后端开关（按钮文字热切换）
+    @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
 
     init(container: AppContainer) {
         self.container = container
         _model = State(initialValue: HomeViewModel(
             arrangeDay: container.arrangeDay,
             refiner: container.refiner,
-            calendarStore: container.routingStore))
+            calendarStore: container.routingStore,
+            reminderStore: container.routingReminder,
+            exporter: container.exporter))
     }
 
     var body: some View {
@@ -100,9 +108,15 @@ struct HomeView: View {
 
                     HStack {
                         Button { Task { await model.confirm() } } label: {
-                            Label("确认写入（假）日历", systemImage: "checkmark.circle")
+                            Label(calendarBackendRaw == "eventKit"
+                                  ? "确认写入真日历(Dev)" : "确认写入（假）日历",
+                                  systemImage: "checkmark.circle")
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(model.isWorking)
+                        Button { exportICS() } label: {
+                            Label("导出 ICS", systemImage: "square.and.arrow.up")
+                        }
                         if let c = model.committedCount {
                             Text(model.committedToReal
                                  ? "已写入真日历(Dev) \(c) 项 → 打开 Apple 日历查看"
@@ -127,6 +141,17 @@ struct HomeView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func exportICS() {
+        #if canImport(AppKit)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "BetterCalendar计划.ics"
+        panel.allowedContentTypes = [UTType(filenameExtension: "ics") ?? .data]
+        if panel.runModal() == .OK, let url = panel.url {
+            try? model.currentICS().write(to: url, atomically: true, encoding: .utf8)
+        }
+        #endif
     }
 }
 

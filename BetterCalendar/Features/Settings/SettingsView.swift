@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var useCloud: Bool = CloudSettings.useCloud
     @State private var hasKey: Bool = KeychainStore.loadAPIKey() != nil
     @State private var backend: CalendarBackend = CalendarSettings.backend
+    @State private var leadMinutes: Int = ReminderSettings.leadMinutes
     @State private var savedHint: String?
 
     var body: some View {
@@ -56,9 +57,16 @@ struct SettingsView: View {
                 Text("可随时切换、即时生效。真模式首次写会请求日历权限，写进「BetterCalendar · 计划 (Dev)」日历（绿色），可整本删、不污染你别的日历。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section("提醒事项") {
+                Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
+                    .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
+                Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。真模式首次写弹权限。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding()
-        .frame(minWidth: 460, minHeight: 380)
+        .frame(minWidth: 460, minHeight: 420)
     }
 
     private func save() {
@@ -70,6 +78,7 @@ struct SettingsView: View {
         CloudSettings.model = model
         CloudSettings.useCloud = useCloud
         CalendarSettings.backend = backend
+        ReminderSettings.leadMinutes = leadMinutes
         savedHint = "已保存"
     }
 }

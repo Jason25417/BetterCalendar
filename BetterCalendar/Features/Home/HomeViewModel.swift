@@ -40,6 +40,8 @@ final class HomeViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let refiner: PlanRefining
     private let calendarStore: CalendarStore
+    private let reminderStore: ReminderStore
+    private let exporter: ICSExporting
 
     var inputText: String = ""
     var refineText: String = ""
@@ -50,10 +52,21 @@ final class HomeViewModel {
     var committedCount: Int?
     var committedToReal: Bool = false
 
-    init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining, calendarStore: CalendarStore) {
+    init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
+         calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
+        self.reminderStore = reminderStore
+        self.exporter = exporter
+    }
+
+    /// 当前草稿 → ICS 文本（导出/分享）。
+    func currentICS() -> String {
+        let drafts = blocks.sorted { $0.start < $1.start }.map {
+            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
+        }
+        return exporter.ics(for: drafts)
     }
 
     func arrange() async {
@@ -85,9 +98,14 @@ final class HomeViewModel {
         let drafts = blocks.sorted { $0.start < $1.start }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
         }
+        let reminders = blocks.filter { $0.priority == .important }.map {
+            ReminderDraft(title: $0.title, due: $0.start, priority: 1, notes: nil,
+                          leadMinutes: ReminderSettings.leadMinutes)
+        }
         isWorking = true; errorText = nil
         do {
-            try await calendarStore.write(drafts)   // 路由：假日历 或 真 Apple 日历
+            try await calendarStore.write(drafts)     // 路由：假/真 日历
+            try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
             committedCount = drafts.count
             committedToReal = (CalendarSettings.backend == .eventKit)
         } catch {

@@ -13,8 +13,9 @@ struct ReminderDraft: Sendable, Identifiable {
     var id = UUID()
     var title: String
     var due: Date?
-    var priority: Int = 0
+    var priority: Int = 0        // EKReminder 口径：0 无 / 1 高 / 5 中 / 9 低
     var notes: String?
+    var leadMinutes: Int?        // 提前提醒：到期前 N 分钟响（nil = 不提醒）
 }
 
 protocol ReminderStore: AnyObject {
