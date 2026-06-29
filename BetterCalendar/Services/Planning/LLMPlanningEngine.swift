@@ -21,7 +21,10 @@ struct LLMPlanningEngine: PlanningEngine {
         guard !blocks.isEmpty else { return try await fallback.arrange(blocks, now: now) }
         do {
             let listing = blocks.enumerated()
-                .map { i, b in "\(i): \(b.title) [\(b.priority.rawValue)] \(Self.hm(b.start))–\(Self.hm(b.end))" }
+                .map { i, b in
+                    let tags = "\(b.priority.rawValue)\(b.isFixed ? ",固定" : "")"
+                    return "\(i): \(b.title) [\(tags)] \(Self.hm(b.start))–\(Self.hm(b.end))"
+                }
                 .joined(separator: "\n")
             let user = """
             现在 \(Self.hm(now))。今日时间块（索引: 标题 [优先级] 起–止）：
@@ -60,8 +63,9 @@ struct LLMPlanningEngine: PlanningEngine {
     static let systemPrompt = """
     你是 BetterCalendar 的「排程大脑」。情感目标 = 掌控感 + 成就感，不是纪律。原则：
     1) 要紧事(important)优先靠前(eat-the-frog)；
-    2) 措辞中性/正向、前向（给下一步），禁用"失败/落后/又没做到"；
-    3) 温和、不施压。
+    2) **固定块（标"固定"，如会议）保持原时间，不要建议挪动**；
+    3) 措辞中性/正向、前向（给下一步），禁用"失败/落后/又没做到"；
+    4) 温和、不施压。
     根据用户今日时间块给出推荐顺序与一句温和的 note。只输出 JSON。
     """
 }

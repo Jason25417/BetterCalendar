@@ -79,11 +79,9 @@ struct HomeView: View {
                     }
 
                     List {
-                        ForEach($model.blocks) { $block in
-                            EditableRow(block: $block) {
-                                model.blocks.removeAll { $0.id == block.id }
-                                model.committedCount = nil
-                            }
+                        ForEach(model.blocks) { item in
+                            EditableRow(block: model.binding(for: item.id),
+                                        onDelete: { model.delete(id: item.id) })
                         }
                         .onMove { model.move($0, $1) }
                     }

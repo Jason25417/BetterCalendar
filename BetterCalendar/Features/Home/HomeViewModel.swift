@@ -98,4 +98,22 @@ final class HomeViewModel {
     func move(_ source: IndexSet, _ destination: Int) {
         blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil
     }
+
+    func delete(id: UUID) {
+        blocks.removeAll { $0.id == id }
+        committedCount = nil
+    }
+
+    /// 按 id 的元素绑定——避免 `ForEach($:)` 在删除时的「独占访问」崩溃。
+    func binding(for id: UUID) -> Binding<EditableBlock> {
+        Binding(
+            get: { self.blocks.first { $0.id == id }
+                   ?? EditableBlock(title: "", start: .now, end: .now) },
+            set: { newValue in
+                if let i = self.blocks.firstIndex(where: { $0.id == id }) {
+                    self.blocks[i] = newValue
+                }
+            }
+        )
+    }
 }
