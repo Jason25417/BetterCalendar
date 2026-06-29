@@ -51,19 +51,24 @@ struct HomeView: View {
                     Text(err).font(.callout).foregroundStyle(.red)
                 }
 
-                // 开发期：把云端/系统调用的失败显出来（产品上架前切回静默）
+                // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
                 if let issue = DevLog.shared.lastIssue {
-                    HStack(spacing: 6) {
-                        Image(systemName: issue.level == .error
-                              ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                        Text("[\(issue.source)] \(issue.message)").font(.caption)
-                        Spacer()
-                        Button("清") { DevLog.shared.clear() }.font(.caption)
+                    NavigationLink {
+                        DevLogView()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: issue.level == .error
+                                  ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            Text("[\(issue.source)] \(issue.message)").font(.caption)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption2)
+                        }
+                        .padding(8)
+                        .foregroundStyle(issue.level == .error ? .red : .orange)
+                        .background((issue.level == .error ? Color.red : Color.orange).opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(8)
-                    .foregroundStyle(issue.level == .error ? .red : .orange)
-                    .background((issue.level == .error ? Color.red : Color.orange).opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .buttonStyle(.plain)
                 }
 
                 List(model.decision?.orderedBlocks ?? []) { block in
@@ -81,22 +86,16 @@ struct HomeView: View {
             }
             .padding()
             .navigationTitle("BetterCalendar")
-            .toolbar {
-                ToolbarItem {
-                    NavigationLink { DevLogView() } label: {
-                        Image(systemName: "ladybug")
-                    }
-                }
-                ToolbarItem {
-                    NavigationLink { ChangelogView() } label: {
-                        Image(systemName: "info.circle")
-                    }
-                }
-            }
             .safeAreaInset(edge: .bottom) {
-                Text("\(AppInfo.copyright) · v\(AppInfo.version)")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .padding(.bottom, 6)
+                // 点版本号 → 更新日志（沿用 EasyReminder 习惯，不占工具栏按钮）
+                NavigationLink {
+                    ChangelogView()
+                } label: {
+                    Text("\(AppInfo.copyright) · v\(AppInfo.version)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .padding(.bottom, 6)
+                }
+                .buttonStyle(.plain)
             }
         }
     }

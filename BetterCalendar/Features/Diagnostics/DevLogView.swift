@@ -26,7 +26,7 @@ struct DevLogView: View {
                 }
             }
         }
-        .navigationTitle("开发日志")
+        .navigationTitle("错误日志（开发期）")
         .toolbar {
             Button("清空") { DevLog.shared.clear() }
         }

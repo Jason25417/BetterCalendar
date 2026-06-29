@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.2", date: "2026-06", changes: [
+            "M1：接入云端 Claude（Anthropic API）——自然语言 → 结构化日程 + 排程大脑排序/温和提示",
+            "API key 存 Keychain；设置(⌘,) 可填 key / 选模型 / 开关云端；失败回退本地",
+            "预留反思层（日记）数据 JournalEntry",
+            "开发期可见报错：失败横幅 + 错误日志页（点版本号看本更新日志）",
+        ]),
         ChangelogEntry(version: "0.1", date: "2026-06", changes: [
             "M0 骨架：分层架构（App / Models / Services 协议+实现 / Features / UseCases）",
             "SwiftData 数据模型（PlanDay / PlanBlock / CompletionLink / ExecutionSession / AppSettings）",
