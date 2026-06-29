@@ -18,8 +18,10 @@ final class AppContainer {
     let focus: TimerOnlyFocusService
 
     init() {
-        self.parser = StubScheduleParser()
-        self.planner = NaivePlanningEngine()
+        // 原型期：解析/排程大脑走云端 Claude；未配 key / 离线 / 失败时各自回退本地实现。
+        let anthropic = AnthropicClient()
+        self.parser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser())
+        self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
         self.calendarStore = FakeCalendarStore()
         self.reminderStore = FakeReminderStore()
         self.focus = TimerOnlyFocusService()
