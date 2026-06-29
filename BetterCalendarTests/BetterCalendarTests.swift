@@ -40,10 +40,9 @@ struct PlanningTests {
         #expect(planned.first?.title == "测试")
     }
 
-    @Test func arrangeDayUseCaseWritesToCalendar() async throws {
+    @Test func arrangeDayUseCaseReturnsBlocks() async throws {
         let useCase = ArrangeDayUseCase(parser: StubScheduleParser(),
-                                        planner: NaivePlanningEngine(),
-                                        calendarStore: FakeCalendarStore())
+                                        planner: NaivePlanningEngine())
         let decision = try await useCase(text: "写代码，开会，健身")
         #expect(decision.orderedBlocks.count == 3)
     }

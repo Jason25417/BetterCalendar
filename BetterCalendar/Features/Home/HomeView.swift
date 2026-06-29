@@ -2,7 +2,7 @@
 //  HomeView.swift
 //  BetterCalendar
 //
-//  首页：说一天 → 排今天 →（假）日历预览。M0 用本地兜底实现，不接系统 API。
+//  首页：说一天 → 排今天 → 可编辑草稿（拖/改/标/删加）→ 自然语言微调 → 确认写入（假）日历。
 //
 
 import SwiftUI
@@ -13,7 +13,10 @@ struct HomeView: View {
 
     init(container: AppContainer) {
         self.container = container
-        _model = State(initialValue: HomeViewModel(arrangeDay: container.arrangeDay))
+        _model = State(initialValue: HomeViewModel(
+            arrangeDay: container.arrangeDay,
+            refiner: container.refiner,
+            calendarStore: container.calendarStore))
     }
 
     var body: some View {
@@ -25,26 +28,21 @@ struct HomeView: View {
                 TextField("例：明早9点写代码两小时，11点开会，下午健身",
                           text: $model.inputText, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...5)
+                    .lineLimit(2...4)
 
                 HStack {
-                    Button {
-                        Task { await model.arrange() }
-                    } label: {
+                    Button { Task { await model.arrange() } } label: {
                         Label("排今天", systemImage: "wand.and.stars")
                     }
                     .disabled(model.isWorking)
-
                     if model.isWorking { ProgressView().controlSize(.small) }
                     Spacer()
                     NavigationLink {
                         CalendarPreviewView(store: container.calendarStore)
-                    } label: {
-                        Label("预览日历", systemImage: "calendar")
-                    }
+                    } label: { Label("预览日历", systemImage: "calendar") }
                 }
 
-                if let note = model.decision?.note {
+                if let note = model.note {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                 }
                 if let err = model.errorText {
@@ -71,23 +69,54 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                 }
 
-                List(model.decision?.orderedBlocks ?? []) { block in
-                    HStack(spacing: 8) {
-                        if block.priority == .important {
-                            Image(systemName: "star.fill").foregroundStyle(.orange)
+                if !model.blocks.isEmpty {
+                    Divider()
+                    HStack {
+                        Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
+                        Spacer()
+                        Button { model.addBlock() } label: { Label("加一项", systemImage: "plus") }
+                            .font(.caption)
+                    }
+
+                    List {
+                        ForEach($model.blocks) { $block in
+                            EditableRow(block: $block) {
+                                model.blocks.removeAll { $0.id == block.id }
+                                model.committedCount = nil
+                            }
                         }
-                        VStack(alignment: .leading) {
-                            Text(block.title)
-                            Text(timeRange(block.start, block.end))
-                                .font(.caption).foregroundStyle(.secondary)
+                        .onMove { model.move($0, $1) }
+                    }
+                    .frame(minHeight: 200)
+
+                    HStack {
+                        TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
+                                  text: $model.refineText)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { Task { await model.refine() } }
+                        Button { Task { await model.refine() } } label: {
+                            Label("AI 调整", systemImage: "sparkles")
+                        }
+                        .disabled(model.isWorking)
+                    }
+
+                    HStack {
+                        Button { Task { await model.confirm() } } label: {
+                            Label("确认写入（假）日历", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        if let c = model.committedCount {
+                            Text("已写入 \(c) 项 → 看「预览日历」")
+                                .font(.caption).foregroundStyle(.green)
                         }
                     }
                 }
+
+                Spacer(minLength: 0)
             }
             .padding()
             .navigationTitle("BetterCalendar")
             .safeAreaInset(edge: .bottom) {
-                // 点版本号 → 更新日志（沿用 EasyReminder 习惯，不占工具栏按钮）
                 NavigationLink {
                     ChangelogView()
                 } label: {
@@ -99,10 +128,42 @@ struct HomeView: View {
             }
         }
     }
+}
 
-    private func timeRange(_ start: Date, _ end: Date) -> String {
-        let s = start.formatted(date: .omitted, time: .shortened)
-        let e = end.formatted(date: .omitted, time: .shortened)
-        return "\(s) – \(e)"
+/// 单个草稿块的可编辑行。
+struct EditableRow: View {
+    @Binding var block: EditableBlock
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                block.priority = (block.priority == .important) ? .normal : .important
+            } label: {
+                Image(systemName: block.priority == .important ? "star.fill" : "star")
+                    .foregroundStyle(block.priority == .important ? .orange : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("标为今日要紧事")
+
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("标题", text: $block.title)
+                HStack(spacing: 6) {
+                    DatePicker("", selection: $block.start, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                    Text("–").foregroundStyle(.secondary)
+                    DatePicker("", selection: $block.end, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                    Toggle("固定", isOn: $block.isFixed)
+                        .toggleStyle(.button).controlSize(.small)
+                    Spacer()
+                    Button(role: .destructive, action: onDelete) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+                .font(.caption)
+            }
+        }
     }
 }

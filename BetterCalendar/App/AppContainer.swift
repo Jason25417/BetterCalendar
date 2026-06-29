@@ -13,22 +13,24 @@ import Observation
 final class AppContainer {
     let parser: ScheduleParsing
     let planner: PlanningEngine
+    let refiner: PlanRefining
     let calendarStore: FakeCalendarStore
     let reminderStore: FakeReminderStore
     let focus: TimerOnlyFocusService
 
     init() {
-        // 原型期：解析/排程大脑走云端 Claude；未配 key / 离线 / 失败时各自回退本地实现。
+        // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
         self.parser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser())
         self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
+        self.refiner = ClaudePlanRefiner(client: anthropic)
         self.calendarStore = FakeCalendarStore()
         self.reminderStore = FakeReminderStore()
         self.focus = TimerOnlyFocusService()
     }
 
-    /// 用例：自然语言 → 排程 → 写（假）日历。GUI 与未来的 App Intent 共用。
+    /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。
     var arrangeDay: ArrangeDayUseCase {
-        ArrangeDayUseCase(parser: parser, planner: planner, calendarStore: calendarStore)
+        ArrangeDayUseCase(parser: parser, planner: planner)
     }
 }

@@ -1,0 +1,70 @@
+//
+//  ClaudePlanRefiner.swift
+//  BetterCalendar
+//
+//  自然语言微调（云端）：把当前块清单 + 用户指令发给 Claude，返回调整后的块清单。
+//  失败 → 原样返回 + 可见报错。
+//
+
+import Foundation
+
+struct ClaudePlanRefiner: PlanRefining {
+    let client: AnthropicClient
+
+    private struct OutBlock: Encodable {
+        let title: String; let start: String; let end: String
+        let isFixed: Bool; let timingStyle: String; let priority: String
+    }
+    private struct Wire: Decodable { let blocks: [WireBlock] }
+    private struct WireBlock: Decodable {
+        let title: String; let start: String; let end: String
+        let isFixed: Bool?; let timingStyle: String?; let priority: String?
+    }
+
+    func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] {
+        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cmd.isEmpty, !blocks.isEmpty else { return blocks }
+        do {
+            let out = blocks.map {
+                OutBlock(title: $0.title, start: Self.fmt($0.start), end: Self.fmt($0.end),
+                         isFixed: $0.isFixed, timingStyle: $0.timingStyle.rawValue, priority: $0.priority.rawValue)
+            }
+            let listing = String(data: try JSONEncoder().encode(["blocks": out]), encoding: .utf8) ?? "{}"
+            let user = """
+            当前日程：\(listing)
+            用户调整指令：\(cmd)
+            按指令修改对应块（时间/标题/固定/计时风格/优先级），未提到的块保持不变。
+            只输出 JSON：{"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"timingStyle":"light","priority":"normal"}]}
+            """
+            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 1500)
+            let json = JSONText.extractObject(raw)
+            guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
+            let wire = try JSONDecoder().decode(Wire.self, from: data)
+            let result: [ScheduledBlock] = wire.blocks.compactMap { b in
+                guard let s = DateParsing.parse(b.start), let e = DateParsing.parse(b.end) else { return nil }
+                return ScheduledBlock(title: b.title, start: s, end: e,
+                                      isFixed: b.isFixed ?? false,
+                                      timingStyle: TimingStyle(rawValue: b.timingStyle ?? "light") ?? .light,
+                                      priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal)
+            }
+            guard !result.isEmpty else {
+                DevLog.shared.warn("微调", "云端返回空，保持原样")
+                return blocks
+            }
+            DevLog.shared.info("微调", "云端成功 · \(result.count) 块")
+            return result
+        } catch {
+            DevLog.shared.warn("微调", "云端失败，保持原样：\(error.localizedDescription)")
+            return blocks
+        }
+    }
+
+    static func fmt(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: d)
+    }
+
+    static let systemPrompt = "你在调整一个已排好的一天日程。依据用户的中文调整指令修改对应的块，未提到的块保持不变。只输出 JSON，不要解释、不要 markdown 围栏。"
+}

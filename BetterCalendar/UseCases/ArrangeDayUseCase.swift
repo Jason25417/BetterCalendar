@@ -2,8 +2,8 @@
 //  ArrangeDayUseCase.swift
 //  BetterCalendar
 //
-//  用例层：把「自然语言 → 解析 → 排程 → 写日历」编排成一个动作。
-//  把业务逻辑从 UI 抽走，GUI 按钮与 App Intent 都能调同一个用例。
+//  用例层：自然语言 → 解析 → 排程，返回决策。
+//  注意：**不写日历**——写入交给「确认」步骤（先让用户预览微调）。
 //
 
 import Foundation
@@ -11,7 +11,6 @@ import Foundation
 struct ArrangeDayUseCase {
     let parser: ScheduleParsing
     let planner: PlanningEngine
-    let calendarStore: CalendarStore
 
     func callAsFunction(text: String, now: Date = .now) async throws -> PlanDecision {
         let parsed = try await parser.parse(text, referenceDate: now)
@@ -21,11 +20,6 @@ struct ArrangeDayUseCase {
                                   isFixed: pb.isFixed, timingStyle: pb.timingStyle,
                                   priority: pb.priority, deadline: pb.deadline)
         }
-        let decision = try await planner.arrange(scheduled, now: now)
-        let drafts = decision.orderedBlocks.map {
-            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
-        }
-        try await calendarStore.write(drafts)
-        return decision
+        return try await planner.arrange(scheduled, now: now)
     }
 }
