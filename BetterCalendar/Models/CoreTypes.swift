@@ -42,6 +42,13 @@ enum PlanCalendarKind: String, Codable, CaseIterable, Sendable {
     case planned, actual
 }
 
+/// 反思层（日记）条目来源（数据预留，功能后做）。
+enum JournalSource: String, Codable, CaseIterable, Sendable {
+    case written
+    case importedFromAppleJournal   // Apple 手记一次性导入（只进不出，见反思层文档 §7）
+    case fromSuggestion
+}
+
 // MARK: - 设置用枚举
 
 enum CalendarBackend: String, Codable, CaseIterable, Sendable {

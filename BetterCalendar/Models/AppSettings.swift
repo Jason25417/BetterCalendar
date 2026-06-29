@@ -18,18 +18,25 @@ final class AppSettings {
     var parserMode: ParserMode
     var calendarBackend: CalendarBackend
     var pushIntensity: Int   // 0 温和（默认）… 2 强
+    // 反思层（日记）预留项，功能后做
+    var journalPrivacyLock: Bool
+    var defaultEditorFormat: String   // "markdown" | "richtext"
 
     init(defaultTimingStyle: TimingStyle = .light,
          hideCompletionRate: Bool = true,
          notifyMode: NotifyMode = .withFixedBlocks,
          parserMode: ParserMode = .cloudLLM,
          calendarBackend: CalendarBackend = .fake,
-         pushIntensity: Int = 0) {
+         pushIntensity: Int = 0,
+         journalPrivacyLock: Bool = false,
+         defaultEditorFormat: String = "markdown") {
         self.defaultTimingStyle = defaultTimingStyle
         self.hideCompletionRate = hideCompletionRate
         self.notifyMode = notifyMode
         self.parserMode = parserMode
         self.calendarBackend = calendarBackend
         self.pushIntensity = pushIntensity
+        self.journalPrivacyLock = journalPrivacyLock
+        self.defaultEditorFormat = defaultEditorFormat
     }
 }

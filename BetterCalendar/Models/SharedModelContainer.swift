@@ -13,7 +13,7 @@ enum SharedModelContainer {
         do {
             return try ModelContainer(
                 for: PlanDay.self, PlanBlock.self, CompletionLink.self,
-                ExecutionSession.self, AppSettings.self)
+                ExecutionSession.self, AppSettings.self, JournalEntry.self)
         } catch {
             fatalError("无法创建 ModelContainer：\(error)")
         }
