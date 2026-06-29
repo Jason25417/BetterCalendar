@@ -39,7 +39,7 @@ struct EditableBlock: Identifiable {
 final class HomeViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let refiner: PlanRefining
-    private let calendarStore: FakeCalendarStore
+    private let calendarStore: CalendarStore
 
     var inputText: String = ""
     var refineText: String = ""
@@ -48,8 +48,9 @@ final class HomeViewModel {
     var isWorking: Bool = false
     var errorText: String?
     var committedCount: Int?
+    var committedToReal: Bool = false
 
-    init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining, calendarStore: FakeCalendarStore) {
+    init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining, calendarStore: CalendarStore) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -84,9 +85,15 @@ final class HomeViewModel {
         let drafts = blocks.sorted { $0.start < $1.start }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
         }
-        calendarStore.clear()          // 重写当天预览
-        try? await calendarStore.write(drafts)
-        committedCount = drafts.count
+        isWorking = true; errorText = nil
+        do {
+            try await calendarStore.write(drafts)   // 路由：假日历 或 真 Apple 日历
+            committedCount = drafts.count
+            committedToReal = (CalendarSettings.backend == .eventKit)
+        } catch {
+            errorText = "写入失败：\(error.localizedDescription)"
+        }
+        isWorking = false
     }
 
     func addBlock() {

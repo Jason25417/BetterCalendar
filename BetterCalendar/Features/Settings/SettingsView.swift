@@ -2,8 +2,7 @@
 //  SettingsView.swift
 //  BetterCalendar
 //
-//  设置（⌘,）：填 Anthropic API key（存 Keychain）+ 选模型 + 云端开关。
-//  未配 key / 关云端 / 调用失败时，解析与排程自动回退本地实现。
+//  设置（⌘,）：Anthropic API key/模型/云端开关 + 日历后端（假/真，可热切换）。
 //
 
 import SwiftUI
@@ -13,6 +12,7 @@ struct SettingsView: View {
     @State private var model: String = CloudSettings.model
     @State private var useCloud: Bool = CloudSettings.useCloud
     @State private var hasKey: Bool = KeychainStore.loadAPIKey() != nil
+    @State private var backend: CalendarBackend = CalendarSettings.backend
     @State private var savedHint: String?
 
     var body: some View {
@@ -44,9 +44,21 @@ struct SettingsView: View {
                 Text("key 存系统 Keychain，不进 git。在 console.anthropic.com 创建。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section("日历后端") {
+                Picker("写入到", selection: $backend) {
+                    Text("假日历（预览，不碰系统）").tag(CalendarBackend.fake)
+                    Text("真 Apple 日历（Dev 专用）").tag(CalendarBackend.eventKit)
+                }
+                .pickerStyle(.inline)
+                .onChange(of: backend) { _, newValue in CalendarSettings.backend = newValue }
+
+                Text("可随时切换、即时生效。真模式首次写会请求日历权限，写进「BetterCalendar · 计划 (Dev)」日历（绿色），可整本删、不污染你别的日历。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding()
-        .frame(minWidth: 440, minHeight: 280)
+        .frame(minWidth: 460, minHeight: 380)
     }
 
     private func save() {
@@ -57,6 +69,7 @@ struct SettingsView: View {
         }
         CloudSettings.model = model
         CloudSettings.useCloud = useCloud
+        CalendarSettings.backend = backend
         savedHint = "已保存"
     }
 }

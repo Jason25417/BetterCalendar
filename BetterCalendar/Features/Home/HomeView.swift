@@ -16,7 +16,7 @@ struct HomeView: View {
         _model = State(initialValue: HomeViewModel(
             arrangeDay: container.arrangeDay,
             refiner: container.refiner,
-            calendarStore: container.calendarStore))
+            calendarStore: container.routingStore))
     }
 
     var body: some View {
@@ -104,7 +104,9 @@ struct HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         if let c = model.committedCount {
-                            Text("已写入 \(c) 项 → 看「预览日历」")
+                            Text(model.committedToReal
+                                 ? "已写入真日历(Dev) \(c) 项 → 打开 Apple 日历查看"
+                                 : "已写入假日历 \(c) 项 → 看「预览日历」")
                                 .font(.caption).foregroundStyle(.green)
                         }
                     }

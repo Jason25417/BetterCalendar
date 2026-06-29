@@ -14,6 +14,8 @@ final class FakeCalendarStore: CalendarStore {
     private(set) var captured: [CalendarEventDraft] = []
 
     func write(_ drafts: [CalendarEventDraft]) async throws {
+        let kinds = Set(drafts.map(\.kind))
+        captured.removeAll { kinds.contains($0.kind) }   // 同类型替换（确认即覆盖当天计划）
         captured.append(contentsOf: drafts)
     }
 

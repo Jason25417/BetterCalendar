@@ -14,7 +14,8 @@ final class AppContainer {
     let parser: ScheduleParsing
     let planner: PlanningEngine
     let refiner: PlanRefining
-    let calendarStore: FakeCalendarStore
+    let calendarStore: FakeCalendarStore       // 假日历（预览页观察用）
+    let routingStore: RoutingCalendarStore     // 写入走它：按设置转发 假/真
     let reminderStore: FakeReminderStore
     let focus: TimerOnlyFocusService
 
@@ -25,6 +26,7 @@ final class AppContainer {
         self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
         self.refiner = ClaudePlanRefiner(client: anthropic)
         self.calendarStore = FakeCalendarStore()
+        self.routingStore = RoutingCalendarStore(fake: calendarStore, eventKit: EventKitCalendarStore())
         self.reminderStore = FakeReminderStore()
         self.focus = TimerOnlyFocusService()
     }
