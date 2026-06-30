@@ -11,12 +11,15 @@ import EventKit
 
 final class EventKitReminderStore: ReminderStore {
     private let store = EKEventStore()
+    private static let listTitle = "BetterCalendar · 要紧事 (Dev)"
 
     func write(_ drafts: [ReminderDraft]) async throws {
         try await ensureAccess()
         guard !drafts.isEmpty else { return }
-        guard let list = store.defaultCalendarForNewReminders() else {
-            throw CalendarError(message: "没有可写的提醒事项列表")
+        let list = try reminderList()   // 专用列表，可明确找到、可整本删
+        // 覆盖：先清掉本列表里旧的未完成提醒，避免多次确认重复累积
+        for r in await existingReminders(in: list) where !r.isCompleted {
+            try? store.remove(r, commit: false)
         }
         for d in drafts {
             let r = EKReminder(eventStore: store)
@@ -34,7 +37,29 @@ final class EventKitReminderStore: ReminderStore {
             try store.save(r, commit: false)
         }
         try store.commit()
-        DevLog.shared.info("提醒", "写入提醒事项 \(drafts.count) 项")
+        DevLog.shared.info("提醒", "写入提醒事项 \(drafts.count) 项 → 「\(Self.listTitle)」列表")
+    }
+
+    /// 找/建专用提醒列表（同日历的 Dev 专用思路）。
+    private func reminderList() throws -> EKCalendar {
+        if let existing = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle }) {
+            return existing
+        }
+        let cal = EKCalendar(for: .reminder, eventStore: store)
+        cal.title = Self.listTitle
+        cal.source = store.defaultCalendarForNewReminders()?.source
+            ?? store.sources.first(where: { $0.sourceType == .local })
+            ?? store.sources.first
+        guard cal.source != nil else { throw CalendarError(message: "找不到可写的提醒源") }
+        try store.saveCalendar(cal, commit: true)
+        return cal
+    }
+
+    private func existingReminders(in list: EKCalendar) async -> [EKReminder] {
+        let pred = store.predicateForReminders(in: [list])
+        return await withCheckedContinuation { cont in
+            store.fetchReminders(matching: pred) { cont.resume(returning: $0 ?? []) }
+        }
     }
 
     private func ensureAccess() async throws {

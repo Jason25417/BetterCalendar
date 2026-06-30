@@ -22,6 +22,8 @@ final class ExecutionViewModel {
     private(set) var done: [ActualRecord] = []
     /// 当前进行中的块（nil = 空档）。
     private(set) var active: ActiveBlock?
+    /// 已选中、待开始的块（换一件后切到它，但要点「开始任务」才真正开始计时）。
+    private(set) var selected: PlannedItem?
     /// 休息态（可发生在空档，或某块中途=暂停那块）。
     private(set) var isOnBreak = false
     private var breakStart: Date?
@@ -83,9 +85,9 @@ final class ExecutionViewModel {
         done.contains { TitleMatch.similarity($0.title, item.title) >= 0.6 }
     }
 
-    /// 还没做、也不是当前块的计划块。
+    /// 还没做、也不是当前块/待开始块的计划块。
     var remaining: [PlannedItem] {
-        planned.filter { $0.id != active?.plannedID && !isDone($0) }
+        planned.filter { $0.id != active?.plannedID && $0.id != selected?.id && !isDone($0) }
     }
 
     /// 建议的下一件 = 最早的剩余块（计划写入时已按策略排过序）。
@@ -108,13 +110,28 @@ final class ExecutionViewModel {
 
     // MARK: - 动作
 
-    /// 开始某块（若已有进行中的块，先记录它=「换一件」语义）。下一件 / 换一件都走这里。
+    /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
     func startBlock(_ item: PlannedItem) async {
         await recordActiveIfAny()
         active = ActiveBlock(plannedID: item.id, title: item.title, start: .now)
+        selected = nil
         isOnBreak = false
         breakStart = nil
         refreshPreview()
+    }
+
+    /// 换一件：结束当前 → 把目标设为「待开始」（**不立即开始**）；要再点「开始任务」才计时。
+    func switchTo(_ item: PlannedItem) async {
+        await recordActiveIfAny()
+        active = nil
+        selected = item
+        refreshPreview()
+    }
+
+    /// 开始之前「换一件」选中的那件。
+    func startSelected() async {
+        guard let s = selected else { return }
+        await startBlock(s)
     }
 
     /// 完成当前块 → 落盘 → 回到空档（不自动开下一件，由你按「下一件」）。
@@ -182,9 +199,20 @@ final class ExecutionViewModel {
     /// 剩余（既非已完成、也非正在做）从此刻 reflow → 橙色预览（当前时刻右侧）；无剩余则清空橙色（日终消失）。
     private func updatePreview() async {
         do {
+            let now0 = Date.now
+            var preview: [ScheduledBlock] = []
+            // ① 正在做的：从现在起 → 预测结束（计划时长 − 已投入），让橙色「当前时刻」就是这件事
+            if let a = active, let p = planned.first(where: { $0.id == a.plannedID }) {
+                let remain = max(60, p.end.timeIntervalSince(p.start) - currentElapsed)
+                preview.append(ScheduledBlock(title: a.title, start: now0,
+                                              end: now0.addingTimeInterval(remain)))
+            }
+            // ② 之后接着排剩余（排除已做 + 正在做），从①的预测结束起
             var excluded = done.map(\.title)
             if let a = active { excluded.append(a.title) }
-            let preview = try await reschedule.continuousReflow(excludeTitles: excluded, now: .now)
+            let restFrom = preview.last?.end ?? now0
+            preview += try await reschedule.continuousReflow(excludeTitles: excluded, now: restFrom)
+
             if preview.isEmpty {
                 try await calendarStore.clear(kind: .preview)
             } else {

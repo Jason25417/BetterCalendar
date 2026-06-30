@@ -49,6 +49,9 @@ struct MenuBarView: View {
                 Label(Self.hms(model.currentElapsed), systemImage: "timer")
                     .font(.callout.monospacedDigit()).foregroundStyle(.blue)
             }
+        } else if let s = model.selected {
+            Text("待开始").font(.caption).foregroundStyle(.secondary)
+            Text(s.title).font(.headline)
         } else {
             Text("空档").font(.headline).foregroundStyle(.secondary)
             if let next = model.nextSuggested {
@@ -77,6 +80,15 @@ struct MenuBarView: View {
                 switchMenu
                 breakButton
             }
+        } else if let s = model.selected {
+            Button { Task { await model.startSelected() } } label: {
+                Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            HStack {
+                switchMenu
+                breakButton
+            }
         } else {
             if let next = model.nextSuggested {
                 Button { Task { await model.startBlock(next) } } label: {
@@ -97,7 +109,7 @@ struct MenuBarView: View {
                 Text("没有其它待做的事")
             } else {
                 ForEach(model.remaining) { item in
-                    Button(item.title) { Task { await model.startBlock(item) } }
+                    Button(item.title) { Task { await model.switchTo(item) } }
                 }
             }
         } label: {
