@@ -49,8 +49,11 @@ final class MenuBarController: NSObject {
         if model.isOnBreak {
             button.title = " ☕ " + MenuBarView.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {
-            // 番茄钟：显示段内剩余（倒计时）
-            button.title = " \(phase.kind == .work ? "🍅" : "☕") " + MenuBarView.hms(phase.remaining)
+            if phase.pendingConfirm {
+                button.title = phase.kind == .work ? " 🍅 ✓该休息" : " ☕ ✓回专注"
+            } else {
+                button.title = " \(phase.kind == .work ? "🍅" : "☕") " + MenuBarView.hms(phase.remaining)
+            }
         } else if model.active != nil, model.activeStyle != TimingStyle.none {
             button.title = " ▶ " + MenuBarView.hms(model.currentElapsed)
         } else {

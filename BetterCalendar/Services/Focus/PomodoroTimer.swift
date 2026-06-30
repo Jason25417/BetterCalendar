@@ -15,6 +15,8 @@ struct PomodoroPhase: Sendable {
     var elapsedInPhase: TimeInterval
     var phaseLength: TimeInterval
     var remaining: TimeInterval { max(0, phaseLength - elapsedInPhase) }
+    /// 段已满、等用户点「确定」才切下一段（不自动切）。
+    var pendingConfirm: Bool { elapsedInPhase >= phaseLength }
 }
 
 enum PomodoroTimer {

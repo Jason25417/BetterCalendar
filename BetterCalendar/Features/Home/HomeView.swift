@@ -11,9 +11,12 @@ import AppKit
 import UniformTypeIdentifiers
 #endif
 
+enum HomeRoute: Hashable { case review, preview }
+
 struct HomeView: View {
     let container: AppContainer
     @State private var model: HomeViewModel
+    @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     // 实时跟随设置里的日历后端开关（按钮文字热切换）
     @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
 
@@ -32,7 +35,7 @@ struct HomeView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("说说你的一天").font(.headline)
@@ -57,13 +60,12 @@ struct HomeView: View {
                     .help("开工晚了？按现在的时间把今天重排，固定块不动")
                     if model.isWorking { ProgressView().controlSize(.small) }
                     Spacer()
-                    NavigationLink {
-                        ReviewView(container: container)
-                    } label: { Label("今日复盘", systemImage: "checkmark.seal") }
-                    NavigationLink {
-                        CalendarPreviewView(store: container.calendarStore,
-                                            reminderStore: container.reminderStore)
-                    } label: { Label("预览", systemImage: "calendar") }
+                    NavigationLink(value: HomeRoute.review) {
+                        Label("今日复盘", systemImage: "checkmark.seal")
+                    }
+                    NavigationLink(value: HomeRoute.preview) {
+                        Label("预览", systemImage: "calendar")
+                    }
                 }
 
                 if let note = model.note {
@@ -146,6 +148,21 @@ struct HomeView: View {
             }
             .padding()
             .navigationTitle("BetterCalendar")
+            .navigationDestination(for: HomeRoute.self) { route in
+                switch route {
+                case .review: ReviewView(container: container)
+                case .preview: CalendarPreviewView(store: container.calendarStore,
+                                                   reminderStore: container.reminderStore)
+                }
+            }
+            .onChange(of: container.router.scheduleRequest) { _, req in
+                guard let req else { return }
+                switch req {
+                case .startToday: Task { await model.startToday() }
+                case .review: navPath = [.review]
+                }
+                container.router.scheduleRequest = nil   // 消费掉
+            }
             .onChange(of: model.targetDay) { _, newDay in
                 model.shiftDraftsToDay(newDay)   // 改日期 → 草稿平移到新日，不丢
             }

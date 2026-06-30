@@ -29,6 +29,8 @@ final class ExecutionViewModel {
     /// 休息态（可发生在空档，或某块中途=暂停那块）。
     private(set) var isOnBreak = false
     private var breakStart: Date?
+    private var pomoSegStart: Date?   // 番茄钟当前段开始时刻（nil = 非番茄）
+    private var pomoIsRest = false    // 当前番茄段是否休息段
 
     private(set) var loaded = false
     var lastError: String?
@@ -137,10 +139,18 @@ final class ExecutionViewModel {
         return max(0, Date.now.timeIntervalSince(bs))
     }
 
-    /// 当前番茄钟段（仅 active 是番茄钟时；nil = 非番茄钟）。
+    /// 当前番茄钟段（仅 active 是番茄钟时；nil = 非番茄钟）。段满后停在满位、等点确定才切。
     var pomodoroPhase: PomodoroPhase? {
-        guard let a = active, a.timingStyle == .pomodoro else { return nil }
-        return PomodoroTimer.phase(elapsed: currentElapsed)
+        guard let a = active, a.timingStyle == .pomodoro, let seg = pomoSegStart else { return nil }
+        let elapsed = max(0, Date.now.timeIntervalSince(seg))
+        let length = pomoIsRest ? PomodoroTimer.rest : PomodoroTimer.work
+        return PomodoroPhase(kind: pomoIsRest ? .rest : .work, elapsedInPhase: elapsed, phaseLength: length)
+    }
+
+    /// 番茄钟段满后，点「确定」切下一段（工作 ⇄ 休息）。
+    func confirmPomodoroNext() {
+        pomoIsRest.toggle()
+        pomoSegStart = .now
     }
 
     /// active 块的计时风格（给 UI 决定显不显时长）。
@@ -156,6 +166,8 @@ final class ExecutionViewModel {
         selected = nil
         isOnBreak = false
         breakStart = nil
+        pomoSegStart = (item.timingStyle == .pomodoro) ? .now : nil   // 番茄钟从工作段起
+        pomoIsRest = false
         refreshPreview()
     }
 
@@ -163,6 +175,7 @@ final class ExecutionViewModel {
     func switchTo(_ item: PlannedItem) async {
         await recordActiveIfAny()
         active = nil
+        pomoSegStart = nil
         selected = item
         refreshPreview()
     }
@@ -177,6 +190,7 @@ final class ExecutionViewModel {
     func completeCurrent() async {
         await recordActiveIfAny()
         active = nil
+        pomoSegStart = nil
         refreshPreview()
     }
 

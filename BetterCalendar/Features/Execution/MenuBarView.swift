@@ -66,10 +66,19 @@ struct MenuBarView: View {
     @ViewBuilder private var activeTiming: some View {
         if let phase = model.pomodoroPhase {
             let isWork = phase.kind == .work
-            Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
-                  systemImage: isWork ? "timer" : "cup.and.saucer")
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(isWork ? .blue : .green)
+            if phase.pendingConfirm {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(isWork ? "专注完成 🎉 该休息一下" : "休息好了，回到专注？")
+                        .font(.callout).foregroundStyle(isWork ? .blue : .green)
+                    Button(isWork ? "开始休息" : "回到专注") { model.confirmPomodoroNext() }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                }
+            } else {
+                Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
+                      systemImage: isWork ? "timer" : "cup.and.saucer")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(isWork ? .blue : .green)
+            }
         } else if model.activeStyle == TimingStyle.none {
             Text("不计时").font(.caption).foregroundStyle(.secondary)
         } else {
