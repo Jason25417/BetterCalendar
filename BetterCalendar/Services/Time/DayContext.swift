@@ -34,15 +34,13 @@ enum DayContext {
         logicalStartOfDay(a) == logicalStartOfDay(b)
     }
 
-    /// 智能默认：现在该给哪个逻辑日排程，返回那天的零点。
-    /// 晚上(≥18) → 逻辑明天；白天/凌晨 → 逻辑今天（凌晨已被日界线归到前一天）。
-    static func defaultTargetDay(_ now: Date) -> Date {
-        let today = logicalStartOfDay(now)
+    /// 智能默认排哪天（**用日历日**，与可点标签的今天/明天一致、直觉）：
+    /// 晚上(≥18) → 日历明天；白天/凌晨 → 日历今天。
+    /// 注：凌晨 4 点日界线只用于 streak/复盘的「今天」判断（isSameLogicalDay），不用于「排哪天」。
+    static func defaultTargetDay(_ now: Date = .now) -> Date {
+        let today = cal.startOfDay(for: now)
         let hour = cal.component(.hour, from: now)
-        if hour >= eveningStartHour {
-            return cal.date(byAdding: .day, value: 1, to: today)!
-        }
-        return today
+        return hour >= eveningStartHour ? (cal.date(byAdding: .day, value: 1, to: today) ?? today) : today
     }
 
     /// 逻辑日的可排尾界 = 次日日界线（凌晨 4 点）。块结束超过它＝真排不下（reflow 冲突判定）。
@@ -51,9 +49,11 @@ enum DayContext {
         return nextDayStart.addingTimeInterval(TimeInterval(dayBoundaryHour * 3600))
     }
 
-    /// 逻辑今天偏移 offset 天的那天零点（offset=0 今天 / 1 明天 / 2 后天）。
-    static func logicalDay(offset: Int, from now: Date = .now) -> Date {
-        cal.date(byAdding: .day, value: offset, to: logicalStartOfDay(now)) ?? logicalStartOfDay(now)
+    /// 日历今天偏移 offset 天的那天零点（offset=-1 昨天 / 0 今天 / 1 明天 / 2 后天）。
+    /// 用日历日（正常午夜日界），给「选哪天排」的标签用——直觉、不受 4 点逻辑日影响。
+    static func calendarDay(offset: Int, from now: Date = .now) -> Date {
+        let today = cal.startOfDay(for: now)
+        return cal.date(byAdding: .day, value: offset, to: today) ?? today
     }
 
     /// 逻辑日的稳定字符串键（yyyy-MM-dd），用于 streak 等按天去重。

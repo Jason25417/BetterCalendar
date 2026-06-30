@@ -201,12 +201,10 @@ struct LogicTests {
     }
 
     @Test func dayContextDefaultTargetDay() {
-        // 晚上 → 明天（前一晚规划）
+        // 目标日用日历日（与可点标签一致）：晚上 → 明天，白天/凌晨 → 日历今天
         #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 22, 0)) == startOfDay(2026, 7, 1))
-        // 白天 → 今天
         #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 15, 0)) == startOfDay(2026, 6, 30))
-        // 凌晨 → 逻辑今天（=日历昨天），即熬夜规划的"这天"
-        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 1, 0)) == startOfDay(2026, 6, 29))
+        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 1, 0)) == startOfDay(2026, 6, 30))
     }
 
     @Test func dayContextSameLogicalDayAcrossMidnight() {

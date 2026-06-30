@@ -31,27 +31,48 @@ final class EventKitCalendarStore: CalendarStore {
     func write(_ drafts: [CalendarEventDraft]) async throws {
         try await ensureAccess()
         guard !drafts.isEmpty else { return }
+        var changed = 0
         for (kind, group) in Dictionary(grouping: drafts, by: \.kind) {
             let cal = try calendar(for: kind)
-            // 覆盖：先删该日历在覆盖日范围内的事件，再写新事件（确认即替换）
+            // 差量 upsert（按 标题+起始 匹配）：已存在且内容没变的**不动**（事件 ID 稳定、不触发索引风暴）；
+            // 变了的更新、没有的新建、范围内多余的删除。比"删全部重写"轻得多。
             let cal0 = Calendar.current
             let lo = cal0.startOfDay(for: group.map(\.start).min() ?? Date())
             let hi = cal0.date(byAdding: .day, value: 1,
                                to: cal0.startOfDay(for: group.map(\.end).max() ?? Date())) ?? Date()
             let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
-            for ev in store.events(matching: pred) { try? store.remove(ev, span: .thisEvent, commit: false) }
+            var byKey: [String: EKEvent] = [:]
+            for ev in store.events(matching: pred) { byKey[Self.eventKey(ev.title ?? "", ev.startDate)] = ev }
+
+            var keep = Set<String>()
             for d in group {
-                let ev = EKEvent(eventStore: store)
-                ev.calendar = cal
-                ev.title = d.title
-                ev.startDate = d.start
-                ev.endDate = d.end
-                ev.notes = d.notes
-                try store.save(ev, span: .thisEvent, commit: false)
+                let k = Self.eventKey(d.title, d.start)
+                keep.insert(k)
+                if let ev = byKey[k] {
+                    let endChanged = abs(ev.endDate.timeIntervalSince(d.end)) >= 30
+                    let notesChanged = (ev.notes ?? "") != (d.notes ?? "")
+                    if endChanged || notesChanged {
+                        ev.endDate = d.end; ev.notes = d.notes
+                        try store.save(ev, span: .thisEvent, commit: false); changed += 1
+                    }
+                } else {
+                    let ev = EKEvent(eventStore: store)
+                    ev.calendar = cal; ev.title = d.title
+                    ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
+                    try store.save(ev, span: .thisEvent, commit: false); changed += 1
+                }
+            }
+            for (k, ev) in byKey where !keep.contains(k) {
+                try? store.remove(ev, span: .thisEvent, commit: false); changed += 1
             }
         }
-        try store.commit()
-        DevLog.shared.info("日历", "写入真日历 \(drafts.count) 项")
+        if changed > 0 { try store.commit() }
+        DevLog.shared.info("日历", "写真日历 \(drafts.count) 项 · 实际变更 \(changed)")
+    }
+
+    /// 事件去重键：标题 + 起始分钟（同标题同起始＝同一事件）。
+    private static func eventKey(_ title: String, _ start: Date) -> String {
+        "\(title)#\(Int(start.timeIntervalSinceReferenceDate / 60))"
     }
 
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft] {

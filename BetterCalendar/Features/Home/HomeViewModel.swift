@@ -141,12 +141,15 @@ final class HomeViewModel {
     func startToday(resolution: ReflowResolution? = nil) async {
         isWorking = true; errorText = nil; committedCount = nil
         do {
-            let decision = try await reschedule.morningReflow(now: .now, resolution: resolution)
+            let decision = try await reschedule.morningReflow(day: targetDay, now: .now, resolution: resolution)
             if decision.orderedBlocks.isEmpty {
-                note = "今天还没有计划可重排——先说说你的一天、确认写入。"
+                note = "这天还没有「确认写入」的计划可重排——先说一句、确认写入，再开始今天。"
             } else {
                 blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
-                note = "已按现在的时间把今天重排好；微调后「确认写入」即可。"
+                let flex = decision.orderedBlocks.filter { !$0.isFixed }.count
+                note = flex == 0
+                    ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
+                    : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
         } catch {

@@ -18,11 +18,18 @@ final class RescheduleService {
         self.planner = planner
     }
 
-    /// 晨间「开始今天」：读今日计划 → （若有用户解法先应用）→ 从开工时刻 reflow → 决策（含排不下冲突）。
-    func morningReflow(now: Date = .now, resolution: ReflowResolution? = nil) async throws -> PlanDecision {
-        var blocks = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(now))
-        guard !blocks.isEmpty else { return PlanDecision() }
+    /// 晨间「开始今天」：读 day（用户看的目标日）的计划 →（若有用户解法先应用）→ 从开工时刻 reflow。
+    func morningReflow(day: Date, now: Date = .now, resolution: ReflowResolution? = nil) async throws -> PlanDecision {
+        var blocks = try planStore.plannedBlocks(on: day)
+        guard !blocks.isEmpty else {
+            DevLog.shared.warn("reflow", "开始今天：该日无计划块——先「确认写入」才有真相源可重排")
+            return PlanDecision()
+        }
         if let r = resolution { blocks = Self.apply(r, to: blocks, from: now) }
+        let flexCount = blocks.filter { !$0.isFixed }.count
+        if flexCount == 0 {
+            DevLog.shared.warn("reflow", "开始今天：\(blocks.count) 块全是固定块，reflow 不移动固定块（任务别标固定）")
+        }
         return try await planner.reflow(blocks, from: now, now: now)
     }
 
