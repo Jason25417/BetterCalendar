@@ -26,6 +26,7 @@ final class AppContainer {
     let notifier: NotificationScheduling       // 早晚极简通知
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
+    let photoStore = PhotoStore()              // 日记照片存 App 容器（R2）
     let calendarSync: CalendarSyncService      // 日历→真相库反向同步（你在日历改动→PlanBlock 跟着改）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）

@@ -34,7 +34,7 @@ struct JournalView: View {
             }
             .navigationTitle("日记")
             .navigationDestination(for: JournalEntry.self) { e in
-                JournalDetailView(entry: e, model: model)
+                JournalDetailView(entry: e, model: model, photoStore: container.photoStore)
             }
         }
         .onAppear { openTodayIfNeeded() }
@@ -56,7 +56,6 @@ struct JournalView: View {
 
     @ViewBuilder private var todayCard: some View {
         if let e = today {
-            @Bindable var entry = e
             VStack(alignment: .leading, spacing: 8) {
                 Text("写下今天").font(.headline)
                 if let prompt = todayPrompt {
@@ -65,18 +64,7 @@ struct JournalView: View {
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                MoodPicker(mood: $entry.mood)
-                TextEditor(text: $entry.body)
-                    .frame(minHeight: 120)
-                    .font(.body)
-                    .overlay(alignment: .topLeading) {
-                        if entry.body.isEmpty {
-                            Text("此刻的感受、想法、为什么有意义…（Markdown）")
-                                .foregroundStyle(.tertiary).padding(8).allowsHitTesting(false)
-                        }
-                    }
-                    .onChange(of: entry.body) { _, _ in entry.modifiedAt = .now; model.save() }
-                    .onChange(of: entry.mood) { _, _ in entry.modifiedAt = .now; model.save() }
+                JournalEditor(entry: e, model: model, photoStore: container.photoStore)
             }
             .padding()
             .background(Color.purple.opacity(0.06))
@@ -147,18 +135,13 @@ struct JournalRow: View {
 struct JournalDetailView: View {
     @Bindable var entry: JournalEntry
     let model: JournalViewModel
+    let photoStore: PhotoStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                MoodPicker(mood: $entry.mood)
-                TextEditor(text: $entry.body)
-                    .frame(minHeight: 240)
-                    .onChange(of: entry.body) { _, _ in entry.modifiedAt = .now; model.save() }
-                    .onChange(of: entry.mood) { _, _ in entry.modifiedAt = .now; model.save() }
-            }
-            .padding()
+            JournalEditor(entry: entry, model: model, photoStore: photoStore)
+                .padding()
         }
         .navigationTitle(entry.date.formatted(date: .abbreviated, time: .omitted))
         .toolbar {

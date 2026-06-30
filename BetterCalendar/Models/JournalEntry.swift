@@ -15,7 +15,8 @@ final class JournalEntry {
     var id: UUID = UUID()
     var date: Date = Date.now      // 关到某一天（与 PlanDay.date 对齐）
     var linkedPlanDayDate: Date?   // 关回当天 → 取"今天做成了什么"当写作素材
-    var body: String = ""          // 正文（富文本/Markdown 待 R 系列定）
+    var body: String = ""          // 正文文本
+    var bodyFormat: String = "markdown"   // 正文格式接口：开发期 markdown；上线换 richtext（见 SPEC §9）
     var mood: String?
     var tags: [String] = []
     var photoRefs: [String] = []   // 图片文件名/相对路径；文件存 App 容器，不塞进 DB
