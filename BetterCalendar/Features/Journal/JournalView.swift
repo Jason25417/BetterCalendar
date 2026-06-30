@@ -83,7 +83,10 @@ struct JournalView: View {
                     .onChange(of: model.searchText) { _, _ in model.reload() }
             }
             if model.history.isEmpty {
-                Text("还没有历史日记").font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                Text(model.entries.isEmpty
+                     ? "还没有日记。在上面「写下今天」就好。"
+                     : "今天的日记在上面 ✏️ · 改动自动保存；往后每天的会按时间出现在这里。")
+                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
             } else {
                 ForEach(model.history) { e in
                     NavigationLink(value: e) { JournalRow(entry: e) }

@@ -23,6 +23,10 @@ struct JournalEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
+                  systemImage: "checkmark.circle.fill")
+                .font(.caption2).foregroundStyle(.green)
+
             MoodPicker(mood: $entry.mood)
                 .onChange(of: entry.mood) { _, _ in touch() }
 
