@@ -16,6 +16,9 @@ final class FakeReminderStore: ReminderStore {
         captured.append(contentsOf: drafts)
     }
 
+    /// 假模式不跟踪打勾（无真提醒），返回空。
+    func completedTitles() async -> [String] { [] }
+
     func clear() {
         captured.removeAll()
     }

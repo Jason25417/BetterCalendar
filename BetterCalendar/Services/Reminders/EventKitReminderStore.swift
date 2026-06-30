@@ -55,6 +55,13 @@ final class EventKitReminderStore: ReminderStore {
         return cal
     }
 
+    func completedTitles() async -> [String] {
+        do { try await ensureAccess() } catch { return [] }
+        guard let list = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle })
+        else { return [] }
+        return (await existingReminders(in: list)).filter(\.isCompleted).compactMap(\.title)
+    }
+
     private func existingReminders(in list: EKCalendar) async -> [EKReminder] {
         let pred = store.predicateForReminders(in: [list])
         return await withCheckedContinuation { cont in

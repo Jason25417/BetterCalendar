@@ -16,6 +16,7 @@ final class ExecutionViewModel {
     private let calendarStore: CalendarStore
     private let reschedule: RescheduleService
     private let planStore: PlanStore
+    private let reminderStore: ReminderStore
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -38,6 +39,7 @@ final class ExecutionViewModel {
         var start: Date
         var end: Date
         var timingStyle: TimingStyle = .light
+        var isFixed: Bool = false
     }
     struct ActualRecord: Identifiable, Sendable {
         let id = UUID()
@@ -54,10 +56,12 @@ final class ExecutionViewModel {
         var timingStyle: TimingStyle = .light
     }
 
-    init(calendarStore: CalendarStore, reschedule: RescheduleService, planStore: PlanStore) {
+    init(calendarStore: CalendarStore, reschedule: RescheduleService,
+         planStore: PlanStore, reminderStore: ReminderStore) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
+        self.reminderStore = reminderStore
     }
 
     // MARK: - 读取今日
@@ -70,13 +74,33 @@ final class ExecutionViewModel {
             let a = try await calendarStore.read(kind: .actual)
             planned = p.sorted { $0.start < $1.start }
                        .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end,
-                                          timingStyle: $0.timingStyle) }
+                                          timingStyle: $0.timingStyle, isFixed: $0.isFixed) }
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
-            let collected = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
-                             .map { ActualRecord(plannedID: nil, title: $0.title,
-                                                 start: $0.start, end: $0.end) }
-            // 进行中的 active 不动；done 用读回的为准（菜单是唯一在写实际的入口，安全）
-            if active == nil { done = collected }
+            var merged = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
+                          .map { ActualRecord(plannedID: nil, title: $0.title,
+                                              start: $0.start, end: $0.end) }
+            let collectedCount = merged.count
+
+            // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒打勾 → 自动并入实际
+            let completed = await reminderStore.completedTitles()
+            let now = Date.now
+            for item in planned where !merged.contains(where: { TitleMatch.similarity($0.title, item.title) >= 0.6 }) {
+                let meetingHappened = item.isFixed && item.end < now
+                let reminderChecked = completed.contains { TitleMatch.similarity($0, item.title) >= 0.6 }
+                if meetingHappened || reminderChecked {
+                    merged.append(ActualRecord(plannedID: item.id, title: item.title,
+                                               start: item.start, end: item.end))
+                }
+            }
+
+            // 进行中的 active 不动；done 用合并后的为准
+            if active == nil {
+                done = merged
+                if merged.count > collectedCount {
+                    DevLog.shared.info("执行", "被动信号并入实际 \(merged.count - collectedCount) 件")
+                    await flushActuals()
+                }
+            }
             loaded = true
         } catch {
             lastError = error.localizedDescription

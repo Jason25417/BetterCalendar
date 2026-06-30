@@ -146,6 +146,9 @@ struct HomeView: View {
             }
             .padding()
             .navigationTitle("BetterCalendar")
+            .onChange(of: model.targetDay) { _, newDay in
+                model.shiftDraftsToDay(newDay)   // 改日期 → 草稿平移到新日，不丢
+            }
             .confirmationDialog(
                 "「\(model.reflowConflict?.blockTitle ?? "")」今天排不下了，怎么办？",
                 isPresented: Binding(get: { model.reflowConflict != nil },

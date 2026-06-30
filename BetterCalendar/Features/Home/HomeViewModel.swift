@@ -163,6 +163,17 @@ final class HomeViewModel {
         await startToday(resolution: r)
     }
 
+    /// 改目标日时，把已有草稿的日期平移到新日（保留时分），而不是丢弃草稿。
+    func shiftDraftsToDay(_ day: Date) {
+        guard !blocks.isEmpty else { return }
+        let cal = Calendar.current
+        func onDay(_ time: Date) -> Date {
+            let t = cal.dateComponents([.hour, .minute], from: time)
+            return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day) ?? time
+        }
+        blocks = blocks.map { var b = $0; b.start = onDay(b.start); b.end = onDay(b.end); return b }
+    }
+
     func addBlock() {
         let start = blocks.map(\.end).max() ?? Date()
         blocks.append(EditableBlock(title: "新事项", start: start, end: start.addingTimeInterval(3600)))

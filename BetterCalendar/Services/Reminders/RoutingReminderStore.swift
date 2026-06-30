@@ -20,4 +20,9 @@ final class RoutingReminderStore: ReminderStore {
         let current: ReminderStore = CalendarSettings.backend == .eventKit ? eventKit : fake
         try await current.write(drafts)
     }
+
+    func completedTitles() async -> [String] {
+        let current: ReminderStore = CalendarSettings.backend == .eventKit ? eventKit : fake
+        return await current.completedTitles()
+    }
 }

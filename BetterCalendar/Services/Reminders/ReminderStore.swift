@@ -20,4 +20,6 @@ struct ReminderDraft: Sendable, Identifiable {
 
 protocol ReminderStore: AnyObject {
     func write(_ drafts: [ReminderDraft]) async throws
+    /// 已打勾完成的提醒标题（被动信号：提醒打勾 → 对应要紧事标完成）。
+    func completedTitles() async -> [String]
 }
