@@ -27,6 +27,7 @@ struct ReviewView: View {
                     accomplishedSection(c)
                     if c.bonusCount > 0 { Text("计划外也算赢——这些是今天的 bonus。").font(.caption).foregroundStyle(.secondary) }
                     detailsSection(c)
+                    writeTodayButton
                 } else if model.isWorking {
                     ProgressView("正在读取今天…")
                 } else {
@@ -41,6 +42,18 @@ struct ReviewView: View {
         }
         .navigationTitle("今日复盘")
         .task { await model.load() }
+    }
+
+    // 写下今天 → 切到日记页、打开当天条目（带入今天的情境）
+    private var writeTodayButton: some View {
+        Button {
+            container.router.journalRequest = .now
+            container.router.selectedTab = .journal
+        } label: {
+            Label("写下今天的感受", systemImage: "square.and.pencil").frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .padding(.top, 4)
     }
 
     // MARK: 正反馈主面

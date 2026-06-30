@@ -18,10 +18,13 @@ struct BetterCalendarApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TabView {
+            TabView(selection: Binding(get: { container.router.selectedTab },
+                                       set: { container.router.selectedTab = $0 })) {
                 HomeView(container: container)
+                    .tag(AppRouter.Tab.schedule)
                     .tabItem { Label("排日程", systemImage: "calendar") }
                 JournalView(container: container)
+                    .tag(AppRouter.Tab.journal)
                     .tabItem { Label("日记", systemImage: "book") }
             }
             #if os(macOS)

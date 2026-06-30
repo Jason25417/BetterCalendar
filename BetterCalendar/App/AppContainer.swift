@@ -21,6 +21,8 @@ final class AppContainer {
     let focus: TimerOnlyFocusService
     let exporter: ICSExporting
     let comparer: PlanComparing                // 计划 × 实际 → 完成度（本地启发式）
+    let router = AppRouter()                    // 跨标签页导航（复盘「写下今天」→ 日记页）
+    let reflectionContext: ReflectionContextProvider  // 日记第一方情境（用当天数据当写作素材）
     let notifier: NotificationScheduling       // 早晚极简通知
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
@@ -41,6 +43,7 @@ final class AppContainer {
         self.focus = TimerOnlyFocusService()
         self.exporter = ICSExporter()
         self.comparer = OverlapTitleComparer()
+        self.reflectionContext = ReflectionContextProvider(calendarStore: routingStore, comparer: comparer)
         self.notifier = UNNotificationService()
         self.planStore = PlanStore()
         self.journalStore = JournalStore()

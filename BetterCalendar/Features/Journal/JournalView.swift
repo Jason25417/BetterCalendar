@@ -15,6 +15,7 @@ struct JournalView: View {
     let container: AppContainer
     @State private var model: JournalViewModel
     @State private var today: JournalEntry?
+    @State private var todayPrompt: String?   // 第一方情境引子（来自当天 PlanComparing）
 
     init(container: AppContainer) {
         self.container = container
@@ -36,7 +37,21 @@ struct JournalView: View {
                 JournalDetailView(entry: e, model: model)
             }
         }
-        .onAppear { if today == nil { today = model.todayEntry() } }
+        .onAppear { openTodayIfNeeded() }
+        .onChange(of: container.router.journalRequest) { _, req in
+            guard req != nil else { return }
+            today = model.todayEntry()
+            loadPrompt()
+            container.router.journalRequest = nil   // 消费掉
+        }
+    }
+
+    private func openTodayIfNeeded() {
+        if today == nil { today = model.todayEntry() }
+        loadPrompt()
+    }
+    private func loadPrompt() {
+        Task { todayPrompt = await container.reflectionContext.todayPrompt() }
     }
 
     @ViewBuilder private var todayCard: some View {
@@ -44,6 +59,12 @@ struct JournalView: View {
             @Bindable var entry = e
             VStack(alignment: .leading, spacing: 8) {
                 Text("写下今天").font(.headline)
+                if let prompt = todayPrompt {
+                    Label(prompt, systemImage: "sparkles")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
                 MoodPicker(mood: $entry.mood)
                 TextEditor(text: $entry.body)
                     .frame(minHeight: 120)
