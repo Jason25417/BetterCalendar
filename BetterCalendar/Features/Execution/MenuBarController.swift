@@ -48,10 +48,13 @@ final class MenuBarController: NSObject {
         guard let button = statusItem.button else { return }
         if model.isOnBreak {
             button.title = " ☕ " + MenuBarView.hms(model.breakElapsed)
-        } else if model.active != nil {
+        } else if let phase = model.pomodoroPhase {
+            // 番茄钟：显示段内剩余（倒计时）
+            button.title = " \(phase.kind == .work ? "🍅" : "☕") " + MenuBarView.hms(phase.remaining)
+        } else if model.active != nil, model.activeStyle != TimingStyle.none {
             button.title = " ▶ " + MenuBarView.hms(model.currentElapsed)
         } else {
-            button.title = ""        // 空档只显图标
+            button.title = ""        // 不计时 / 空档：只显图标
         }
     }
 

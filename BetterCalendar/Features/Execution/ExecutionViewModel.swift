@@ -15,6 +15,7 @@ import Observation
 final class ExecutionViewModel {
     private let calendarStore: CalendarStore
     private let reschedule: RescheduleService
+    private let planStore: PlanStore
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -36,6 +37,7 @@ final class ExecutionViewModel {
         var title: String
         var start: Date
         var end: Date
+        var timingStyle: TimingStyle = .light
     }
     struct ActualRecord: Identifiable, Sendable {
         let id = UUID()
@@ -49,23 +51,26 @@ final class ExecutionViewModel {
         var title: String
         var start: Date
         var pausedTotal: TimeInterval = 0   // 休息累计（从已用时长里扣）
+        var timingStyle: TimingStyle = .light
     }
 
-    init(calendarStore: CalendarStore, reschedule: RescheduleService) {
+    init(calendarStore: CalendarStore, reschedule: RescheduleService, planStore: PlanStore) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
+        self.planStore = planStore
     }
 
     // MARK: - 读取今日
 
-    /// 从日历读回今日 计划 + 已采集实际，重建状态（菜单每次打开都刷新）。
+    /// 重建今日状态：计划从**真相库**读（带 timingStyle 等元数据），实际从日历读。
     func loadToday() async {
         do {
-            let p = try await calendarStore.read(kind: .planned)
+            // 计划块从 PlanStore（带 isFixed/timingStyle），不从日历（日历丢元数据）
+            let p = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(.now))
             let a = try await calendarStore.read(kind: .actual)
-            planned = p.filter { DayContext.isSameLogicalDay($0.start, .now) }
-                       .sorted { $0.start < $1.start }
-                       .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end) }
+            planned = p.sorted { $0.start < $1.start }
+                       .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end,
+                                          timingStyle: $0.timingStyle) }
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
             let collected = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
                              .map { ActualRecord(plannedID: nil, title: $0.title,
@@ -108,12 +113,22 @@ final class ExecutionViewModel {
         return max(0, Date.now.timeIntervalSince(bs))
     }
 
+    /// 当前番茄钟段（仅 active 是番茄钟时；nil = 非番茄钟）。
+    var pomodoroPhase: PomodoroPhase? {
+        guard let a = active, a.timingStyle == .pomodoro else { return nil }
+        return PomodoroTimer.phase(elapsed: currentElapsed)
+    }
+
+    /// active 块的计时风格（给 UI 决定显不显时长）。
+    var activeStyle: TimingStyle? { active?.timingStyle }
+
     // MARK: - 动作
 
     /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
     func startBlock(_ item: PlannedItem) async {
         await recordActiveIfAny()
-        active = ActiveBlock(plannedID: item.id, title: item.title, start: .now)
+        active = ActiveBlock(plannedID: item.id, title: item.title, start: .now,
+                             timingStyle: item.timingStyle)
         selected = nil
         isOnBreak = false
         breakStart = nil

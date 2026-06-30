@@ -44,7 +44,7 @@ final class AppContainer {
         self.planStore = PlanStore()
         self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
-        self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule)
+        self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule, planStore: planStore)
         calendarSync.start()
     }
 

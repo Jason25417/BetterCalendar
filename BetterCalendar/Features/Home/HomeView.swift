@@ -230,6 +230,14 @@ struct EditableRow: View {
                         .labelsHidden()
                     Toggle("固定", isOn: $block.isFixed)
                         .toggleStyle(.button).controlSize(.small)
+                    Menu {
+                        Button("轻计时") { block.timingStyle = .light }
+                        Button("🍅 番茄钟") { block.timingStyle = .pomodoro }
+                        Button("不计时") { block.timingStyle = .none }
+                    } label: {
+                        Text(Self.styleLabel(block.timingStyle))
+                    }
+                    .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
                     Spacer()
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
@@ -238,6 +246,14 @@ struct EditableRow: View {
                 }
                 .font(.caption)
             }
+        }
+    }
+
+    static func styleLabel(_ s: TimingStyle) -> String {
+        switch s {
+        case .light: return "轻计时"
+        case .pomodoro: return "🍅 番茄"
+        case .none: return "不计时"
         }
     }
 }

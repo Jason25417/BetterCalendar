@@ -309,4 +309,19 @@ struct LogicTests {
         #expect(t.morning == at(2026,6,30,8,45))    // 首块前 15 分钟
         #expect(t.evening == at(2026,6,30,21,30))   // 末块后 30 分钟
     }
+
+    // MARK: M6 番茄钟分段
+
+    @Test func pomodoroPhaseWorkRestCycle() {
+        let w = PomodoroTimer.phase(elapsed: 10 * 60)       // 10 分钟 → 工作段
+        #expect(w.kind == .work)
+        #expect(w.remaining == 15 * 60)
+        let r = PomodoroTimer.phase(elapsed: 27 * 60)       // 27 分钟 → 休息段
+        #expect(r.kind == .rest)
+        #expect(r.elapsedInPhase == 2 * 60)
+        #expect(r.remaining == 3 * 60)
+        let w2 = PomodoroTimer.phase(elapsed: 31 * 60)      // 31 分钟 → 第二轮工作
+        #expect(w2.kind == .work)
+        #expect(w2.elapsedInPhase == 1 * 60)
+    }
 }

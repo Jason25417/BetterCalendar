@@ -46,8 +46,7 @@ struct MenuBarView: View {
             Text("正在做").font(.caption).foregroundStyle(.secondary)
             Text(a.title).font(.headline)
             TimelineView(.periodic(from: .now, by: 1)) { _ in
-                Label(Self.hms(model.currentElapsed), systemImage: "timer")
-                    .font(.callout.monospacedDigit()).foregroundStyle(.blue)
+                activeTiming
             }
         } else if let s = model.selected {
             Text("待开始").font(.caption).foregroundStyle(.secondary)
@@ -60,6 +59,22 @@ struct MenuBarView: View {
                 Text(model.planned.isEmpty ? "今天还没排计划" : "今天的计划都做完了 🎉")
                     .font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // 正在做的计时显示：番茄钟显段(专注/休息+段内进度)、轻计时显已用、不计时不显
+    @ViewBuilder private var activeTiming: some View {
+        if let phase = model.pomodoroPhase {
+            let isWork = phase.kind == .work
+            Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
+                  systemImage: isWork ? "timer" : "cup.and.saucer")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(isWork ? .blue : .green)
+        } else if model.activeStyle == TimingStyle.none {
+            Text("不计时").font(.caption).foregroundStyle(.secondary)
+        } else {
+            Label(Self.hms(model.currentElapsed), systemImage: "timer")
+                .font(.callout.monospacedDigit()).foregroundStyle(.blue)
         }
     }
 
