@@ -10,6 +10,8 @@ import SwiftUI
 import PhotosUI
 #if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 struct JournalEditor: View {
@@ -132,6 +134,9 @@ struct JournalEditor: View {
     private func loadImage(_ ref: String) -> Image? {
         #if canImport(AppKit)
         if let ns = NSImage(contentsOf: photoStore.url(for: ref)) { return Image(nsImage: ns) }
+        #elseif canImport(UIKit)
+        if let data = try? Data(contentsOf: photoStore.url(for: ref)),
+           let ui = UIImage(data: data) { return Image(uiImage: ui) }
         #endif
         return nil
     }
