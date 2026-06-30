@@ -60,12 +60,6 @@ struct HomeView: View {
                     .help("开工晚了？按现在的时间把今天重排，固定块不动")
                     if model.isWorking { ProgressView().controlSize(.small) }
                     Spacer()
-                    NavigationLink(value: HomeRoute.review) {
-                        Label("今日复盘", systemImage: "checkmark.seal")
-                    }
-                    NavigationLink(value: HomeRoute.preview) {
-                        Label("预览", systemImage: "calendar")
-                    }
                 }
 
                 if let note = model.note {
@@ -148,6 +142,12 @@ struct HomeView: View {
             }
             .padding()
             .navigationTitle("BetterCalendar")
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    NavigationLink(value: HomeRoute.review) { Label("今日复盘", systemImage: "checkmark.seal") }
+                    NavigationLink(value: HomeRoute.preview) { Label("预览", systemImage: "calendar") }
+                }
+            }
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .review: ReviewView(container: container)

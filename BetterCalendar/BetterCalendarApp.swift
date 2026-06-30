@@ -23,6 +23,15 @@ struct BetterCalendarApp: App {
                 HomeView(container: container)
                     .tag(AppRouter.Tab.schedule)
                     .tabItem { Label("排日程", systemImage: "calendar") }
+                #if !os(macOS)
+                // iOS 没 menu bar → 执行陪伴单独一个「今天」标签页
+                NavigationStack {
+                    ScrollView { ExecutionPanel(model: container.execution) }
+                        .navigationTitle("今天")
+                }
+                .tag(AppRouter.Tab.today)
+                .tabItem { Label("今天", systemImage: "play.circle") }
+                #endif
                 JournalView(container: container)
                     .tag(AppRouter.Tab.journal)
                     .tabItem { Label("日记", systemImage: "book") }

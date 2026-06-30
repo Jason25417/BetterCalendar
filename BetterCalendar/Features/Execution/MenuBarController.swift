@@ -5,7 +5,7 @@
 //  菜单栏计时（潮汐式）：用 AppKit NSStatusItem 自管菜单栏项 + 一个 Timer 每秒给 button.title 赋字符串
 //  显示「▶ 12:34」/「☕ 02:10」。这条路绕开了 SwiftUI MenuBarExtra label 那个雷区
 //  （label 里放 TimelineView/周期刷新会失控卡死+内存溢出）——这里只是给 NSButton 赋文字，轻量稳定。
-//  点击弹 NSPopover，内容仍是 SwiftUI 的 MenuBarView（小窗里用 TimelineView 安全）。
+//  点击弹 NSPopover，内容仍是 SwiftUI 的 ExecutionPanel（小窗里用 TimelineView 安全）。
 //
 
 #if os(macOS)
@@ -34,7 +34,7 @@ final class MenuBarController: NSObject {
         }
 
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: MenuBarView(model: model))
+        popover.contentViewController = NSHostingController(rootView: ExecutionPanel(model: model))
 
         // AppKit Timer + 字符串赋值：轻量、不失控（与 SwiftUI label 的周期重绘本质不同）
         timer = Timer.scheduledTimer(timeInterval: 1, target: self,
@@ -47,15 +47,15 @@ final class MenuBarController: NSObject {
     private func updateTitle() {
         guard let button = statusItem.button else { return }
         if model.isOnBreak {
-            button.title = " ☕ " + MenuBarView.hms(model.breakElapsed)
+            button.title = " ☕ " + ExecutionPanel.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {
             if phase.pendingConfirm {
                 button.title = phase.kind == .work ? " 🍅 ✓该休息" : " ☕ ✓回专注"
             } else {
-                button.title = " \(phase.kind == .work ? "🍅" : "☕") " + MenuBarView.hms(phase.remaining)
+                button.title = " \(phase.kind == .work ? "🍅" : "☕") " + ExecutionPanel.hms(phase.remaining)
             }
         } else if model.active != nil, model.activeStyle != TimingStyle.none {
-            button.title = " ▶ " + MenuBarView.hms(model.currentElapsed)
+            button.title = " ▶ " + ExecutionPanel.hms(model.currentElapsed)
         } else {
             button.title = ""        // 不计时 / 空档：只显图标
         }

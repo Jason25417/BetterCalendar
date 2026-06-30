@@ -1,15 +1,17 @@
 //
-//  MenuBarView.swift
+//  ExecutionPanel.swift
 //  BetterCalendar
 //
-//  menu bar 常驻面板（macOS）：当前块 · 已用时长 · 下一件，单键 完成/下一件/换一件 + 休息toggle。
-//  这是「记录 = 导航」的入口：点一下既导航也顺手攒蓝色实际日历。
+//  执行陪伴面板（跨平台）：当前块 · 已用时长 · 下一件，单键 完成/下一件/换一件 + 休息toggle + 番茄段确认。
+//  macOS：装进 menu bar 的 NSPopover；iOS：直接嵌进排日程页（没 menu bar）。「记录 = 导航」的入口。
 //
 
-#if os(macOS)
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
 
-struct MenuBarView: View {
+struct ExecutionPanel: View {
     @Bindable var model: ExecutionViewModel
 
     var body: some View {
@@ -24,7 +26,9 @@ struct MenuBarView: View {
             }
         }
         .padding(12)
+        #if os(macOS)
         .frame(width: 280)
+        #endif
         .task { await model.loadToday() }
     }
 
@@ -34,7 +38,6 @@ struct MenuBarView: View {
         if model.isOnBreak {
             Label("休息中", systemImage: "cup.and.saucer")
                 .font(.headline).foregroundStyle(.secondary)
-            // 小窗只在点开时渲染，TimelineView 不碰 App 启动期，安全
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Label(Self.hms(model.breakElapsed), systemImage: "timer")
                     .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
@@ -62,7 +65,7 @@ struct MenuBarView: View {
         }
     }
 
-    // 正在做的计时显示：番茄钟显段(专注/休息+段内进度)、轻计时显已用、不计时不显
+    // 番茄钟显段(专注/休息+段内进度/段满确认)、轻计时显已用、不计时不显
     @ViewBuilder private var activeTiming: some View {
         if let phase = model.pomodoroPhase {
             let isWork = phase.kind == .work
@@ -100,19 +103,13 @@ struct MenuBarView: View {
                 Label("完成「\(a.title)」", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack {
-                switchMenu
-                breakButton
-            }
+            HStack { switchMenu; breakButton }
         } else if let s = model.selected {
             Button { Task { await model.startSelected() } } label: {
                 Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack {
-                switchMenu
-                breakButton
-            }
+            HStack { switchMenu; breakButton }
         } else {
             if let next = model.nextSuggested {
                 Button { Task { await model.startBlock(next) } } label: {
@@ -120,10 +117,7 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            HStack {
-                switchMenu
-                breakButton
-            }
+            HStack { switchMenu; breakButton }
         }
     }
 
@@ -156,12 +150,13 @@ struct MenuBarView: View {
             Text("今日：完成 \(model.doneCount) · 剩 \(model.remaining.count)")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
-            // 面板每次打开会自动重读今日计划（.task），不另设手动刷新按钮
+            #if os(macOS)
             Button { NSApp.terminate(nil) } label: {
                 Label("退出", systemImage: "power")
             }
             .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
             .help("退出 BetterCalendar")
+            #endif
         }
     }
 
@@ -173,9 +168,3 @@ struct MenuBarView: View {
                      : String(format: "%02d:%02d", m, s)
     }
 }
-
-// ⚠️ 不要在 MenuBarExtra 的 label 里放 TimelineView / 任何周期刷新：
-// 菜单栏 label 桥接到 NSStatusItem button，启动即渲染，周期刷新会失控重绘
-// → 主线程卡死、内存溢出、进程杀不掉（已两次踩雷）。
-// label 用静态 systemImage；菜单栏直显计时（潮汐式）须走 AppKit NSStatusItem，另做。
-#endif
