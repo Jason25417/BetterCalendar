@@ -23,6 +23,7 @@ final class AppContainer {
     let comparer: PlanComparing                // 计划 × 实际 → 完成度（本地启发式）
     let notifier: NotificationScheduling       // 早晚极简通知
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
+    let calendarSync: CalendarSyncService      // 日历→真相库反向同步（你在日历改动→PlanBlock 跟着改）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
 
@@ -41,8 +42,10 @@ final class AppContainer {
         self.comparer = OverlapTitleComparer()
         self.notifier = UNNotificationService()
         self.planStore = PlanStore()
+        self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
         self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule)
+        calendarSync.start()
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。
