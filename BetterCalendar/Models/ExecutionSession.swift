@@ -12,11 +12,11 @@ import SwiftData
 @Model
 final class ExecutionSession {
     var blockID: UUID?
-    var start: Date
+    var start: Date = Date.now
     var end: Date?
-    var timingStyle: TimingStyle
+    var timingStyle: TimingStyle = TimingStyle.light
     var completedCount: Int?
-    var interruptions: Int
+    var interruptions: Int = 0
 
     init(blockID: UUID? = nil, start: Date = .now, end: Date? = nil,
          timingStyle: TimingStyle = .light, completedCount: Int? = nil,

@@ -12,16 +12,16 @@ import SwiftData
 
 @Model
 final class JournalEntry {
-    var id: UUID
-    var date: Date                 // 关到某一天（与 PlanDay.date 对齐）
+    var id: UUID = UUID()
+    var date: Date = Date.now      // 关到某一天（与 PlanDay.date 对齐）
     var linkedPlanDayDate: Date?   // 关回当天 → 取"今天做成了什么"当写作素材
-    var body: String               // 正文（富文本/Markdown 待 R 系列定）
+    var body: String = ""          // 正文（富文本/Markdown 待 R 系列定）
     var mood: String?
-    var tags: [String]
-    var photoRefs: [String]        // 图片文件名/相对路径；文件存 App 容器，不塞进 DB
-    var source: JournalSource
-    var createdAt: Date
-    var modifiedAt: Date
+    var tags: [String] = []
+    var photoRefs: [String] = []   // 图片文件名/相对路径；文件存 App 容器，不塞进 DB
+    var source: JournalSource = JournalSource.written
+    var createdAt: Date = Date.now
+    var modifiedAt: Date = Date.now
 
     init(id: UUID = UUID(),
          date: Date,

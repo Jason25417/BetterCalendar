@@ -13,18 +13,18 @@ import SwiftData
 
 @Model
 final class PlanBlock {
-    var id: UUID
-    var title: String
-    var start: Date
-    var end: Date
-    var isFixed: Bool
-    var category: String
-    var kind: BlockKind
-    var timingStyle: TimingStyle
-    var priority: BlockPriority
+    var id: UUID = UUID()
+    var title: String = ""
+    var start: Date = Date.now
+    var end: Date = Date.now
+    var isFixed: Bool = false
+    var category: String = ""
+    var kind: BlockKind = BlockKind.planned
+    var timingStyle: TimingStyle = TimingStyle.light
+    var priority: BlockPriority = BlockPriority.normal
     var deadline: Date?
-    var assignedBy: AssignedBy
-    var labels: [String]            // 扩展接口
+    var assignedBy: AssignedBy = AssignedBy.selfAssigned
+    var labels: [String] = []       // 扩展接口
     var externalEventID: String?
     var completion: CompletionStatus?
 

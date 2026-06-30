@@ -12,15 +12,15 @@ import SwiftData
 final class AppSettings {
     var plannedCalendarID: String?
     var actualCalendarID: String?
-    var defaultTimingStyle: TimingStyle
-    var hideCompletionRate: Bool
-    var notifyMode: NotifyMode
-    var parserMode: ParserMode
-    var calendarBackend: CalendarBackend
-    var pushIntensity: Int   // 0 温和（默认）… 2 强
+    var defaultTimingStyle: TimingStyle = TimingStyle.light
+    var hideCompletionRate: Bool = true
+    var notifyMode: NotifyMode = NotifyMode.withFixedBlocks
+    var parserMode: ParserMode = ParserMode.cloudLLM
+    var calendarBackend: CalendarBackend = CalendarBackend.fake
+    var pushIntensity: Int = 0   // 0 温和（默认）… 2 强
     // 反思层（日记）预留项，功能后做
-    var journalPrivacyLock: Bool
-    var defaultEditorFormat: String   // "markdown" | "richtext"
+    var journalPrivacyLock: Bool = false
+    var defaultEditorFormat: String = "markdown"   // "markdown" | "richtext"
 
     init(defaultTimingStyle: TimingStyle = .light,
          hideCompletionRate: Bool = true,

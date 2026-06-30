@@ -10,10 +10,10 @@ import SwiftData
 
 @Model
 final class PlanDay {
-    var date: Date
+    var date: Date = Date.now
     var plannedStartAnchor: Date?
     var actualStartTime: Date?
-    var source: String
+    var source: String = "manual"
 
     init(date: Date, plannedStartAnchor: Date? = nil,
          actualStartTime: Date? = nil, source: String = "manual") {

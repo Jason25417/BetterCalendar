@@ -10,9 +10,9 @@ import SwiftData
 
 @Model
 final class CompletionLink {
-    var plannedBlockID: UUID
+    var plannedBlockID: UUID = UUID()
     var actualBlockID: UUID?
-    var status: CompletionStatus
+    var status: CompletionStatus = CompletionStatus.done
 
     init(plannedBlockID: UUID, actualBlockID: UUID? = nil, status: CompletionStatus) {
         self.plannedBlockID = plannedBlockID
