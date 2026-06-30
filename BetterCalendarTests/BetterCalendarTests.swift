@@ -8,6 +8,7 @@
 
 import Testing
 import Foundation
+import SwiftData
 @testable import BetterCalendar
 
 @MainActor
@@ -113,5 +114,201 @@ struct LogicTests {
         try await routing.write([CalendarEventDraft(title: "T", start: now,
                                                     end: now.addingTimeInterval(3600), kind: .planned)])
         #expect(fake.captured.count == 1)        // 路由到假日历
+    }
+
+    // MARK: 标题匹配
+
+    @Test func titleSimilarityBasics() {
+        #expect(TitleMatch.similarity("写代码", "写代码") == 1)         // 完全相同
+        #expect(TitleMatch.similarity("写代码", "写代码 (上午)") == 0.9) // 子串
+        #expect(TitleMatch.similarity("健身", "跑步") < 0.5)            // 不相关
+        #expect(TitleMatch.similarity("", "x") == 0)
+    }
+
+    // MARK: 计划 × 实际 对比
+
+    private func planned(_ title: String, _ h: Int, _ durMin: Int) -> CalendarEventDraft {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: h, minute: 0, second: 0, of: Date())!
+        return CalendarEventDraft(title: title, start: start,
+                                  end: start.addingTimeInterval(Double(durMin) * 60), kind: .planned)
+    }
+    private func actual(_ title: String, _ h: Int, _ durMin: Int) -> CalendarEventDraft {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: h, minute: 0, second: 0, of: Date())!
+        return CalendarEventDraft(title: title, start: start,
+                                  end: start.addingTimeInterval(Double(durMin) * 60), kind: .actual)
+    }
+
+    @Test func comparerMarksDoneWhenMatchedSameLength() {
+        let c = OverlapTitleComparer().compare(
+            planned: [planned("写代码", 9, 120)],
+            actual:  [actual("写代码", 9, 120)])
+        #expect(c.items.count == 1)
+        #expect(c.items.first?.status == .done)
+        #expect(c.accomplishedCount == 1)
+        #expect(c.effectiveMinutes == 120)
+        #expect(c.missedCount == 0)
+    }
+
+    @Test func comparerMarksMissedAndExtra() {
+        let c = OverlapTitleComparer().compare(
+            planned: [planned("读书", 20, 60)],          // 计划了没做
+            actual:  [actual("读论文", 14, 60)])          // 计划外做了别的
+        #expect(c.missedCount == 1)
+        #expect(c.bonusCount == 1)
+        #expect(c.accomplishedCount == 1)              // 只有 bonus 进「做成了」
+        #expect(c.missed.first?.plannedTitle == "读书")
+        #expect(c.bonus.first?.actualTitle == "读论文")
+    }
+
+    @Test func comparerMatchesContentChangeBySameTime() {
+        // 健身 → 跑步：标题不同但时间重叠 → 匹配上（内容变更），不算 missed
+        let c = OverlapTitleComparer().compare(
+            planned: [planned("健身", 17, 60)],
+            actual:  [actual("跑步", 17, 60)])
+        #expect(c.missedCount == 0)
+        #expect(c.bonusCount == 0)
+        #expect(c.items.first?.isContentChange == true)
+    }
+
+    @Test func comparerMarksPartialWhenShorter() {
+        let c = OverlapTitleComparer().compare(
+            planned: [planned("写代码", 9, 120)],
+            actual:  [actual("写代码", 9, 40)])           // 只做了 1/3
+        #expect(c.items.first?.status == .partial)
+    }
+
+    // MARK: 跨天 / 逻辑日（M5 地基）—— 冒烟测难覆盖，靠注入时间的集成测试
+
+    /// 构造「某年月日某点」的本地时刻。
+    private func at(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int = 0) -> Date {
+        var c = DateComponents()
+        c.year = y; c.month = mo; c.day = d; c.hour = h; c.minute = mi
+        return Calendar.current.date(from: c)!
+    }
+    private func startOfDay(_ y: Int, _ mo: Int, _ d: Int) -> Date {
+        Calendar.current.startOfDay(for: at(y, mo, d, 12))
+    }
+
+    @Test func dayContextLogicalBoundaryAt4am() {
+        // 凌晨 4 点是日界线：之前算前一天，之后算当天
+        #expect(DayContext.logicalStartOfDay(at(2026, 6, 30, 2, 0)) == startOfDay(2026, 6, 29))
+        #expect(DayContext.logicalStartOfDay(at(2026, 6, 30, 3, 59)) == startOfDay(2026, 6, 29))
+        #expect(DayContext.logicalStartOfDay(at(2026, 6, 30, 4, 0)) == startOfDay(2026, 6, 30))
+        #expect(DayContext.logicalStartOfDay(at(2026, 6, 30, 15, 0)) == startOfDay(2026, 6, 30))
+        #expect(DayContext.logicalStartOfDay(at(2026, 6, 30, 23, 0)) == startOfDay(2026, 6, 30))
+    }
+
+    @Test func dayContextDefaultTargetDay() {
+        // 晚上 → 明天（前一晚规划）
+        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 22, 0)) == startOfDay(2026, 7, 1))
+        // 白天 → 今天
+        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 15, 0)) == startOfDay(2026, 6, 30))
+        // 凌晨 → 逻辑今天（=日历昨天），即熬夜规划的"这天"
+        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 1, 0)) == startOfDay(2026, 6, 29))
+    }
+
+    @Test func dayContextSameLogicalDayAcrossMidnight() {
+        // 6/29 晚 23 点 与 6/30 凌晨 1 点 属同一逻辑日
+        #expect(DayContext.isSameLogicalDay(at(2026, 6, 29, 23, 0), at(2026, 6, 30, 1, 0)))
+        // 6/30 凌晨 2 点 与 6/30 早 5 点 跨了日界线，不同逻辑日
+        #expect(!DayContext.isSameLogicalDay(at(2026, 6, 30, 2, 0), at(2026, 6, 30, 5, 0)))
+    }
+
+    @Test func streakAccumulatesByLogicalDayWithDedup() {
+        var days = Set<String>()
+        days.insert(DayContext.dayKey(at(2026, 6, 28, 10, 0)))   // 6/28
+        days.insert(DayContext.dayKey(at(2026, 6, 29, 10, 0)))   // 6/29
+        days.insert(DayContext.dayKey(at(2026, 6, 29, 20, 0)))   // 6/29 再次 → 去重
+        #expect(days.count == 2)
+        // 6/30 凌晨 2 点 → 归到逻辑日 6/29 → 不增（验证凌晨归并）
+        days.insert(DayContext.dayKey(at(2026, 6, 30, 2, 0)))
+        #expect(days.count == 2)
+        // 6/30 上午 → 真正的新逻辑日
+        days.insert(DayContext.dayKey(at(2026, 6, 30, 10, 0)))
+        #expect(days.count == 3)
+    }
+
+    // MARK: M5 reflow（晨间平移 / 撞固定块顺延 / 真相源往返）
+
+    @Test func naiveReflowAnchorsFixedAndShiftsFlexible() async throws {
+        let planner = NaivePlanningEngine()
+        let code = ScheduledBlock(title: "写代码", start: at(2026,6,30,9), end: at(2026,6,30,10))
+        let meeting = ScheduledBlock(title: "开会", start: at(2026,6,30,11),
+                                     end: at(2026,6,30,12), isFixed: true)
+        let read = ScheduledBlock(title: "读书", start: at(2026,6,30,13), end: at(2026,6,30,14))
+        let now = at(2026,6,30,9,40)                       // 9:40 才开工
+        let blocks = try await planner.reflow([code, meeting, read], from: now, now: now).orderedBlocks
+        #expect(blocks.first { $0.title == "开会" }?.start == at(2026,6,30,11))   // 固定锚住
+        #expect(blocks.first { $0.title == "写代码" }?.start == now)              // 从开工点起
+        // 读书本应接在 10:40，但会撞 11:00 会议 → 顺延到会议后 12:00
+        #expect(blocks.first { $0.title == "读书" }?.start == at(2026,6,30,12))
+    }
+
+    @Test func reflowLayoutDefersFlexibleHittingFixed() {
+        let long = ScheduledBlock(title: "长任务", start: at(2026,6,30,10), end: at(2026,6,30,11,30)) // 90min
+        let fixed = ScheduledBlock(title: "会议", start: at(2026,6,30,11),
+                                   end: at(2026,6,30,12), isFixed: true)
+        let laid = ReflowLayout.layOut(flexible: [long], fixed: [fixed], from: at(2026,6,30,10,30))
+        #expect(laid.first { $0.title == "长任务" }?.start == at(2026,6,30,12))   // 撞会议→顺延到其后
+        #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
+    }
+
+    @Test func planStoreRoundTripsMetadataAndReplaces() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let day = at(2026,6,30,12)
+        try store.replacePlanned([
+            ScheduledBlock(title: "开会", start: at(2026,6,30,9), end: at(2026,6,30,10),
+                           isFixed: true, priority: .important)
+        ], on: day)
+        let read = try store.plannedBlocks(on: day)
+        #expect(read.count == 1)
+        #expect(read.first?.isFixed == true)            // 固定信息保住（reflow 命门）
+        #expect(read.first?.priority == .important)
+        // 覆盖写：替换不累积
+        try store.replacePlanned([
+            ScheduledBlock(title: "换了", start: at(2026,6,30,9), end: at(2026,6,30,10))
+        ], on: day)
+        #expect(try store.plannedBlocks(on: day).count == 1)
+        #expect(try store.plannedBlocks(on: day).first?.title == "换了")
+    }
+
+    // MARK: M5 尾巴（排不下冲突 / 解法 / 通知时间）
+
+    @Test func reflowConflictWhenOverflowsDayEnd() {
+        let now = at(2026,6,30,10)
+        let huge = ScheduledBlock(title: "超长", start: at(2026,6,30,10), end: at(2026,7,1,16)) // ~30h
+        let laid = ReflowLayout.layOut(flexible: [huge], fixed: [], from: now)
+        let conflict = ReflowLayout.conflict(in: laid, now: now)
+        #expect(conflict?.blockTitle == "超长")   // 超过次日 4 点日界线 → 冲突
+    }
+
+    @Test func reflowResolutionSkipRemovesBlock() {
+        let blocks = [
+            ScheduledBlock(title: "A", start: at(2026,6,30,9), end: at(2026,6,30,10)),
+            ScheduledBlock(title: "B", start: at(2026,6,30,10), end: at(2026,6,30,11)),
+        ]
+        let result = RescheduleService.apply(.skip("B"), to: blocks, from: at(2026,6,30,9))
+        #expect(result.map(\.title) == ["A"])
+    }
+
+    @Test func reflowResolutionSplitMakesTwoHalves() {
+        let blocks = [ScheduledBlock(title: "长", start: at(2026,6,30,9), end: at(2026,6,30,11))] // 2h
+        let result = RescheduleService.apply(.split("长"), to: blocks, from: at(2026,6,30,9))
+        #expect(result.count == 2)
+        #expect(result.allSatisfy { $0.end.timeIntervalSince($0.start) == 3600 })   // 各 1h
+    }
+
+    @Test func reminderTimesFromFirstAndLastBlock() {
+        let blocks = [
+            ScheduledBlock(title: "早", start: at(2026,6,30,9), end: at(2026,6,30,10)),
+            ScheduledBlock(title: "晚", start: at(2026,6,30,20), end: at(2026,6,30,21)),
+        ]
+        let t = RescheduleService.reminderTimes(for: blocks)
+        #expect(t.morning == at(2026,6,30,8,45))    // 首块前 15 分钟
+        #expect(t.evening == at(2026,6,30,21,30))   // 末块后 30 分钟
     }
 }

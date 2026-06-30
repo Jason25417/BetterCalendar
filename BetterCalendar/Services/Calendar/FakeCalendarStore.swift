@@ -23,6 +23,10 @@ final class FakeCalendarStore: CalendarStore {
         captured.filter { $0.kind == kind }
     }
 
+    func clear(kind: PlanCalendarKind) async throws {
+        captured.removeAll { $0.kind == kind }
+    }
+
     func clear() {
         captured.removeAll()
     }

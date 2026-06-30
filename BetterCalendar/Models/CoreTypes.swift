@@ -39,7 +39,9 @@ enum CompletionStatus: String, Codable, CaseIterable, Sendable {
 }
 
 enum PlanCalendarKind: String, Codable, CaseIterable, Sendable {
-    case planned, actual
+    case planned    // 绿：预先设计 / 今日计划（对比基线）
+    case actual     // 蓝：实际（当前时刻左侧，实时增长）
+    case preview    // 橙：从现在起的可行预览（当前时刻右侧，随 re-flow 动态，被蓝色蚕食，日终消失）
 }
 
 /// 反思层（日记）条目来源（数据预留，功能后做）。
@@ -100,10 +102,24 @@ struct ScheduledBlock: Sendable, Identifiable {
     var deadline: Date?
 }
 
-/// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）。
+/// reflow 排不下（弹性块结束超过逻辑日尾/睡前）时的冲突。
+struct ReflowConflict: Sendable {
+    var blockTitle: String
+    var overflowMinutes: Int
+}
+
+/// 撞固定块 / 排不下时，用户选的解法（LLM 兜底之后才问用户）。
+enum ReflowResolution: Sendable {
+    case compress        // 压缩弹性块、塞进今天
+    case skip(String)    // 跳过某块（今天不做）
+    case split(String)   // 把某块拆两段塞空隙
+}
+
+/// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）+（reflow 时）排不下的冲突。
 struct PlanDecision: Sendable {
     var orderedBlocks: [ScheduledBlock] = []
     var note: String?
+    var conflict: ReflowConflict?
 }
 
 /// 写日历用的事件草稿：FakeCalendarStore / 未来 EventKitCalendarStore 都消费它。

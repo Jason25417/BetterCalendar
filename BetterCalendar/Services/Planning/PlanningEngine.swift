@@ -11,4 +11,8 @@ import Foundation
 
 protocol PlanningEngine {
     func arrange(_ blocks: [ScheduledBlock], now: Date) async throws -> PlanDecision
+
+    /// 自愈 re-flow：从 startTime 起把剩余弹性块铺开、固定块锚住，返回「从现在起可行」的安排。
+    /// 晨间（开工晚了整体平移）与全天连续（某块超时后重排剩余）都走它。
+    func reflow(_ blocks: [ScheduledBlock], from startTime: Date, now: Date) async throws -> PlanDecision
 }

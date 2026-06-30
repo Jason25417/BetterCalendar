@@ -28,6 +28,14 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.3", date: "2026-06", changes: [
+            "M5 自愈 re-flow：三色日历（绿计划/蓝实际/橙预览）+「开始今天」晨间重排 + 全天连续橙色预览（被实际蚕食、日终消失）；撞固定块由 LLM 智能重排避让",
+            "计划块真相源迁到 SwiftData（PlanStore），reflow 能读回固定/优先级；逻辑日 DayContext（凌晨 4 点日界线 + 智能默认排今天/明天）",
+            "M4 签名功能：计划(绿) × 实际(蓝) 对比 + 正反馈复盘——只放大「做成了什么」（含计划外 bonus），完成率/缺口默认隐藏",
+            "menu bar 单键导航（记录=导航）：当前块·已用时长·下一件，完成/换一件/休息(单键toggle)，顺手攒蓝色实际日历",
+            "晚间回填降级：menu bar 没抓到的/临时多做的，说一句补进实际（合并不覆盖）",
+            "本地对比引擎 OverlapTitleComparer（时间重叠 × 标题相似），云端无关、可单测",
+        ]),
         ChangelogEntry(version: "0.2", date: "2026-06", changes: [
             "M1：接入云端 Claude（Anthropic API）——自然语言 → 结构化日程 + 排程大脑排序/温和提示",
             "API key 存 Keychain；设置(⌘,) 可填 key / 选模型 / 开关云端；失败回退本地",

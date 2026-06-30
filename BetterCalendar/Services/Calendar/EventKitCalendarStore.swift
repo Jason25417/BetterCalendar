@@ -25,6 +25,7 @@ final class EventKitCalendarStore: CalendarStore {
     private let titles: [PlanCalendarKind: String] = [
         .planned: "BetterCalendar · 计划 (Dev)",
         .actual: "BetterCalendar · 实际 (Dev)",
+        .preview: "BetterCalendar · 预览 (Dev)",
     ]
 
     func write(_ drafts: [CalendarEventDraft]) async throws {
@@ -67,6 +68,18 @@ final class EventKitCalendarStore: CalendarStore {
         }
     }
 
+    func clear(kind: PlanCalendarKind) async throws {
+        try await ensureAccess()
+        guard let title = titles[kind],
+              let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return }
+        let cal0 = Calendar.current
+        let lo = cal0.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let hi = cal0.date(byAdding: .day, value: 7, to: Date()) ?? Date()
+        let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
+        for ev in store.events(matching: pred) { try? store.remove(ev, span: .thisEvent, commit: false) }
+        try store.commit()
+    }
+
     // MARK: - 权限 / 日历
 
     private func ensureAccess() async throws {
@@ -106,9 +119,17 @@ final class EventKitCalendarStore: CalendarStore {
 
     private static func color(_ kind: PlanCalendarKind) -> CGColor {
         #if canImport(AppKit)
-        return (kind == .planned ? NSColor.systemGreen : NSColor.systemBlue).cgColor
+        switch kind {
+        case .planned: return NSColor.systemGreen.cgColor
+        case .actual:  return NSColor.systemBlue.cgColor
+        case .preview: return NSColor.systemOrange.cgColor
+        }
         #elseif canImport(UIKit)
-        return (kind == .planned ? UIColor.systemGreen : UIColor.systemBlue).cgColor
+        switch kind {
+        case .planned: return UIColor.systemGreen.cgColor
+        case .actual:  return UIColor.systemBlue.cgColor
+        case .preview: return UIColor.systemOrange.cgColor
+        }
         #else
         return CGColor(red: 0, green: 0.7, blue: 0.3, alpha: 1)
         #endif

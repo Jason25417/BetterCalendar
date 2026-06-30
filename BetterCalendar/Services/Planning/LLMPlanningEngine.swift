@@ -53,6 +53,49 @@ struct LLMPlanningEngine: PlanningEngine {
         }
     }
 
+    private struct ReflowWire: Decodable {
+        let flexibleOrder: [Int]?
+        let note: String?
+    }
+
+    /// 自愈 reflow：LLM 决定弹性块执行顺序（撞固定块智能重排），本地用 ReflowLayout 铺时间。失败回退本地。
+    func reflow(_ blocks: [ScheduledBlock], from startTime: Date, now: Date) async throws -> PlanDecision {
+        guard !blocks.isEmpty else { return try await fallback.reflow(blocks, from: startTime, now: now) }
+        do {
+            let listing = blocks.enumerated()
+                .map { i, b in "\(i): \(b.title) [\(b.isFixed ? "固定" : "弹性")] 原 \(Self.hm(b.start))–\(Self.hm(b.end))" }
+                .joined(separator: "\n")
+            let user = """
+            现在 \(Self.hm(startTime))。需要从现在起重排今天剩余。时间块（索引: 标题 [固定/弹性] 原起止）：
+            \(listing)
+            固定块时间不动；弹性块要在固定块开始前尽量塞"力所能及、来得及"的事避冲突。
+            给出**弹性块**的推荐执行顺序（只列弹性块索引）+ 一句温和前向的 note。
+            只输出 JSON：{"flexibleOrder":[弹性块索引...],"note":"一句话"}
+            """
+            let raw = try await client.complete(system: Self.reflowSystemPrompt, user: user, maxTokens: 1024)
+            let json = JSONText.extractObject(raw)
+            guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
+            let wire = try JSONDecoder().decode(ReflowWire.self, from: data)
+
+            let fixed = blocks.filter { $0.isFixed }
+            var seen = Set<Int>()
+            var flexible: [ScheduledBlock] = []
+            for i in (wire.flexibleOrder ?? [])
+            where i >= 0 && i < blocks.count && !blocks[i].isFixed && !seen.contains(i) {
+                seen.insert(i); flexible.append(blocks[i])
+            }
+            for (i, b) in blocks.enumerated() where !b.isFixed && !seen.contains(i) { flexible.append(b) }
+
+            let laid = ReflowLayout.layOut(flexible: flexible, fixed: fixed, from: startTime)
+            DevLog.shared.info("reflow", "云端成功 · \(laid.count) 块")
+            return PlanDecision(orderedBlocks: laid, note: wire.note,
+                                conflict: ReflowLayout.conflict(in: laid, now: now))
+        } catch {
+            DevLog.shared.warn("reflow", "云端失败，回退本地：\(error.localizedDescription)")
+            return try await fallback.reflow(blocks, from: startTime, now: now)
+        }
+    }
+
     static func hm(_ d: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -67,5 +110,14 @@ struct LLMPlanningEngine: PlanningEngine {
     3) 措辞中性/正向、前向（给下一步），禁用"失败/落后/又没做到"；
     4) 温和、不施压。
     根据用户今日时间块给出推荐顺序与一句温和的 note。只输出 JSON。
+    """
+
+    static let reflowSystemPrompt = """
+    你是 BetterCalendar 的「自愈排程大脑」。用户落后了，需要从现在起重排今天剩余。原则：
+    1) **固定块（会议等）时间绝不动**；
+    2) 撞固定块时，优先把"力所能及、固定块开始前来得及"的弹性块排到前面，智能重排顺序避免冲突；
+    3) 只呈现"从现在到睡前可行"的剩余，不回顾已失败；
+    4) 措辞给掌控感（"接下来这样就能收尾"），不施压、不算账，禁用"失败/落后"。
+    只输出 JSON：{"flexibleOrder":[弹性块索引...],"note":"一句温和前向的话"}
     """
 }

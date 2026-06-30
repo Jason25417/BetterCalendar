@@ -24,14 +24,21 @@ struct HomeView: View {
             refiner: container.refiner,
             calendarStore: container.routingStore,
             reminderStore: container.routingReminder,
-            exporter: container.exporter))
+            exporter: container.exporter,
+            planStore: container.planStore,
+            reschedule: container.reschedule,
+            notifier: container.notifier))
     }
 
     var body: some View {
         @Bindable var model = model
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Text("说说你的一天").font(.headline)
+                HStack {
+                    Text("说说你的一天").font(.headline)
+                    Spacer()
+                    targetDayMenu
+                }
 
                 TextField("例：明早9点写代码两小时，11点开会，下午健身",
                           text: $model.inputText, axis: .vertical)
@@ -43,11 +50,20 @@ struct HomeView: View {
                         Label("排今天", systemImage: "wand.and.stars")
                     }
                     .disabled(model.isWorking)
+                    Button { Task { await model.startToday() } } label: {
+                        Label("开始今天", systemImage: "sunrise")
+                    }
+                    .disabled(model.isWorking)
+                    .help("开工晚了？按现在的时间把今天重排，固定块不动")
                     if model.isWorking { ProgressView().controlSize(.small) }
                     Spacer()
                     NavigationLink {
-                        CalendarPreviewView(store: container.calendarStore)
-                    } label: { Label("预览日历", systemImage: "calendar") }
+                        ReviewView(container: container)
+                    } label: { Label("今日复盘", systemImage: "checkmark.seal") }
+                    NavigationLink {
+                        CalendarPreviewView(store: container.calendarStore,
+                                            reminderStore: container.reminderStore)
+                    } label: { Label("预览", systemImage: "calendar") }
                 }
 
                 if let note = model.note {
@@ -130,6 +146,19 @@ struct HomeView: View {
             }
             .padding()
             .navigationTitle("BetterCalendar")
+            .confirmationDialog(
+                "「\(model.reflowConflict?.blockTitle ?? "")」今天排不下了，怎么办？",
+                isPresented: Binding(get: { model.reflowConflict != nil },
+                                     set: { if !$0 { model.reflowConflict = nil } }),
+                presenting: model.reflowConflict
+            ) { conflict in
+                Button("压缩，全塞进今天") { Task { await model.resolveConflict(.compress) } }
+                Button("跳过「\(conflict.blockTitle)」") {
+                    Task { await model.resolveConflict(.skip(conflict.blockTitle)) }
+                }
+                Button("拆成两段塞空隙") { Task { await model.resolveConflict(.split(conflict.blockTitle)) } }
+                Button("就这样吧", role: .cancel) { model.reflowConflict = nil }
+            }
             .safeAreaInset(edge: .bottom) {
                 NavigationLink {
                     ChangelogView()
@@ -141,6 +170,24 @@ struct HomeView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改
+    private var targetDayMenu: some View {
+        Menu {
+            Button("今天") { model.targetDay = DayContext.logicalDay(offset: 0) }
+            Button("明天") { model.targetDay = DayContext.logicalDay(offset: 1) }
+            Button("后天") { model.targetDay = DayContext.logicalDay(offset: 2) }
+        } label: {
+            Label("为 \(Self.dayLabel(model.targetDay)) 安排", systemImage: "calendar")
+                .font(.caption)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    static func dayLabel(_ d: Date) -> String {
+        d.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated))
     }
 
     private func exportICS() {

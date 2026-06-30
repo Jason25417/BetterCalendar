@@ -12,8 +12,9 @@ struct ArrangeDayUseCase {
     let parser: ScheduleParsing
     let planner: PlanningEngine
 
-    func callAsFunction(text: String, now: Date = .now) async throws -> PlanDecision {
-        let parsed = try await parser.parse(text, referenceDate: now)
+    /// referenceDate = 解析相对时间的基准日（排哪天就传哪天）；now = 排序用的此刻。
+    func callAsFunction(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> PlanDecision {
+        let parsed = try await parser.parse(text, referenceDate: referenceDate)
         let scheduled: [ScheduledBlock] = parsed.blocks.compactMap { pb in
             guard let start = pb.start, let end = pb.end else { return nil }
             return ScheduledBlock(title: pb.title, start: start, end: end,

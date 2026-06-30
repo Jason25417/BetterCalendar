@@ -28,4 +28,8 @@ final class RoutingCalendarStore: CalendarStore {
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft] {
         try await current.read(kind: kind)
     }
+
+    func clear(kind: PlanCalendarKind) async throws {
+        try await current.clear(kind: kind)
+    }
 }

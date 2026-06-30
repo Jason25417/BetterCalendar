@@ -42,23 +42,34 @@ final class HomeViewModel {
     private let calendarStore: CalendarStore
     private let reminderStore: ReminderStore
     private let exporter: ICSExporting
+    private let planStore: PlanStore
+    private let reschedule: RescheduleService
+    private let notifier: NotificationScheduling
 
     var inputText: String = ""
     var refineText: String = ""
+    /// 排哪天（无感默认：晚上→明天 / 白天·凌晨→今天；可点标签改）。
+    var targetDay: Date = DayContext.defaultTargetDay(.now)
     var note: String?
     var blocks: [EditableBlock] = []
     var isWorking: Bool = false
     var errorText: String?
     var committedCount: Int?
     var committedToReal: Bool = false
+    /// 晨间 reflow「排不下」时的冲突（非 nil → 弹压缩/跳过/分割）。
+    var reflowConflict: ReflowConflict?
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
-         calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting) {
+         calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
+         planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
         self.reminderStore = reminderStore
         self.exporter = exporter
+        self.planStore = planStore
+        self.reschedule = reschedule
+        self.notifier = notifier
     }
 
     /// 当前草稿 → ICS 文本（导出/分享）。
@@ -74,7 +85,8 @@ final class HomeViewModel {
         guard !trimmed.isEmpty else { return }
         isWorking = true; errorText = nil; committedCount = nil
         do {
-            let decision = try await arrangeDay(text: trimmed)
+            // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
+            let decision = try await arrangeDay(text: trimmed, referenceDate: targetDay)
             blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
             note = decision.note
         } catch {
@@ -102,16 +114,50 @@ final class HomeViewModel {
             ReminderDraft(title: $0.title, due: $0.start, priority: 1, notes: nil,
                           leadMinutes: ReminderSettings.leadMinutes)
         }
+        let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {
+            // 真相源：计划块（带 isFixed/priority）写 SwiftData，reflow 才有元数据可读
+            if let day = sorted.first?.start {
+                try planStore.replacePlanned(sorted.map(\.scheduled), on: day)
+            }
             try await calendarStore.write(drafts)     // 路由：假/真 日历
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
             committedCount = drafts.count
             committedToReal = (CalendarSettings.backend == .eventKit)
+            // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
+            let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
+            await notifier.requestAuthorizationIfNeeded()
+            await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
+                                                  summary: "今天安排了 \(drafts.count) 件，开始吧。")
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
         }
         isWorking = false
+    }
+
+    /// 晨间「开始今天」：从此刻 reflow 今日计划（开工晚了整体平移、固定块锚住）→ 可编辑预览草稿。
+    /// 微调后用「确认写入」回写绿色 + 真相源（方案 A：晨间定稿即绿色基线）。
+    func startToday(resolution: ReflowResolution? = nil) async {
+        isWorking = true; errorText = nil; committedCount = nil
+        do {
+            let decision = try await reschedule.morningReflow(now: .now, resolution: resolution)
+            if decision.orderedBlocks.isEmpty {
+                note = "今天还没有计划可重排——先说说你的一天、确认写入。"
+            } else {
+                blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+                note = "已按现在的时间把今天重排好；微调后「确认写入」即可。"
+            }
+            reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
+        } catch {
+            errorText = "重排失败：\(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+
+    /// 用户对「排不下」的选择 → 带解法重排。
+    func resolveConflict(_ r: ReflowResolution) async {
+        await startToday(resolution: r)
     }
 
     func addBlock() {

@@ -11,4 +11,6 @@ import Foundation
 protocol CalendarStore: AnyObject {
     func write(_ drafts: [CalendarEventDraft]) async throws
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft]
+    /// 清空某一类（如橙色预览日终消失）。
+    func clear(kind: PlanCalendarKind) async throws
 }

@@ -1,0 +1,133 @@
+//
+//  ReviewViewModel.swift
+//  BetterCalendar
+//
+//  晚间复盘（降级版）：menu bar 已无感采集实际后，这里只做两件轻事——
+//  ① 正反馈展示（读回 绿/蓝 → PlanComparing）；② 30 秒补漏 + 计划外 bonus 的回填。
+//  回填复用「解析 → 可编辑草稿 → 确认写入」那套，只是 kind=.actual，且**合并**进已采集实际（不覆盖）。
+//
+
+import Foundation
+import Observation
+import SwiftUI   // Binding
+
+@Observable
+final class ReviewViewModel {
+    private let calendarStore: CalendarStore
+    private let comparer: PlanComparing
+    private let arrangeDay: ArrangeDayUseCase
+
+    var comparison: DayComparison?
+    var showDetails = false        // 完成率/缺口默认隐藏，主动点才看
+    var isWorking = false
+    var errorText: String?
+
+    // 活跃天累计 + 今日「最有价值的一件」
+    var activeDayCount = 0
+    var mvpTitle: String?
+    var mvpNote = ""
+
+    // 降级回填：补今天 menu bar 没抓到的 / 计划外的
+    var backfillText = ""
+    var backfillBlocks: [EditableBlock] = []
+    var backfillCommitted: Int?
+
+    init(calendarStore: CalendarStore, comparer: PlanComparing, arrangeDay: ArrangeDayUseCase) {
+        self.calendarStore = calendarStore
+        self.comparer = comparer
+        self.arrangeDay = arrangeDay
+    }
+
+    // MARK: - 对比
+
+    func load() async {
+        isWorking = true; errorText = nil
+        do {
+            let planned = try await calendarStore.read(kind: .planned)
+                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            let actual = try await calendarStore.read(kind: .actual)
+                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            comparison = comparer.compare(planned: planned, actual: actual)
+            // 当天做成 ≥1 件 → 计入活跃日（极低门槛）
+            if let c = comparison, c.accomplishedCount > 0 { ReviewLocalStore.markActive() }
+        } catch {
+            errorText = "读取失败：\(error.localizedDescription)"
+            DevLog.shared.warn("复盘", "读取对比失败：\(error.localizedDescription)")
+        }
+        activeDayCount = ReviewLocalStore.activeDayCount
+        mvpTitle = ReviewLocalStore.todayMVP
+        mvpNote = ReviewLocalStore.todayMVPNote
+        isWorking = false
+    }
+
+    /// 设/取消「今日最有价值的一件」（再点同一项＝取消）。
+    func toggleMVP(_ title: String) {
+        mvpTitle = (mvpTitle == title) ? nil : title
+        ReviewLocalStore.todayMVP = mvpTitle
+    }
+
+    func saveMVPNote() {
+        ReviewLocalStore.todayMVPNote = mvpNote.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - 回填（解析 → 草稿）
+
+    func parseBackfill() async {
+        let t = backfillText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        isWorking = true; backfillCommitted = nil; errorText = nil
+        do {
+            let decision = try await arrangeDay(text: t)   // referenceDate 默认今天
+            backfillBlocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+        } catch {
+            errorText = "解析失败：\(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+
+    /// 写蓝色实际日历：与已采集实际**合并**（保留 menu bar 攒的），再刷新对比。
+    func confirmBackfill() async {
+        guard !backfillBlocks.isEmpty else { return }
+        isWorking = true; errorText = nil
+        let newDrafts = backfillBlocks.sorted { $0.start < $1.start }.map {
+            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual)
+        }
+        do {
+            let existing = try await calendarStore.read(kind: .actual)
+            try await calendarStore.write(existing + newDrafts)
+            backfillCommitted = newDrafts.count
+            backfillBlocks = []
+            backfillText = ""
+            await load()
+        } catch {
+            errorText = "写入失败：\(error.localizedDescription)"
+        }
+        isWorking = false
+    }
+
+    // MARK: - 草稿编辑（与首页同模式：按值遍历 + 按 id 绑定/删除，避开独占访问崩溃）
+
+    func addBackfillBlock() {
+        let start = backfillBlocks.map(\.end).max() ?? Date()
+        backfillBlocks.append(EditableBlock(title: "做了点别的", start: start,
+                                            end: start.addingTimeInterval(1800)))
+        backfillCommitted = nil
+    }
+
+    func deleteBackfill(id: UUID) {
+        backfillBlocks.removeAll { $0.id == id }
+        backfillCommitted = nil
+    }
+
+    func binding(for id: UUID) -> Binding<EditableBlock> {
+        Binding(
+            get: { self.backfillBlocks.first { $0.id == id }
+                   ?? EditableBlock(title: "", start: .now, end: .now) },
+            set: { newValue in
+                if let i = self.backfillBlocks.firstIndex(where: { $0.id == id }) {
+                    self.backfillBlocks[i] = newValue
+                }
+            }
+        )
+    }
+}
