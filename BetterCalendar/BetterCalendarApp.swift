@@ -18,11 +18,16 @@ struct BetterCalendarApp: App {
 
     var body: some Scene {
         WindowGroup {
-            HomeView(container: container)
+            TabView {
+                HomeView(container: container)
+                    .tabItem { Label("排日程", systemImage: "calendar") }
+                JournalView(container: container)
+                    .tabItem { Label("日记", systemImage: "book") }
+            }
             #if os(macOS)
-                .onAppear {
-                    if menuBar == nil { menuBar = MenuBarController(model: container.execution) }
-                }
+            .onAppear {
+                if menuBar == nil { menuBar = MenuBarController(model: container.execution) }
+            }
             #endif
         }
         .modelContainer(SharedModelContainer.shared)

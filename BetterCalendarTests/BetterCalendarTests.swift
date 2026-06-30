@@ -324,4 +324,21 @@ struct LogicTests {
         #expect(w2.kind == .work)
         #expect(w2.elapsedInPhase == 1 * 60)
     }
+
+    // MARK: M9/R1 日记
+
+    @Test func journalStoreTodayIsSingletonAndSearchable() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: JournalEntry.self, configurations: config)
+        let store = JournalStore(context: container.mainContext)
+        let e1 = store.entryForToday()
+        e1.body = "今天写代码很顺"; store.save()
+        let e2 = store.entryForToday()
+        #expect(e1.id == e2.id)                       // 一天最多一条
+        #expect(store.allEntries().count == 1)
+        #expect(store.search("写代码").count == 1)    // 全文搜
+        #expect(store.search("钓鱼").count == 0)
+        store.delete(e1)
+        #expect(store.allEntries().isEmpty)
+    }
 }
