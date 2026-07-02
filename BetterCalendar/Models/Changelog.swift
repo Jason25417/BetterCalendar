@@ -28,6 +28,13 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.4", date: "2026-07", changes: [
+            "iOS 适配：三 tab（排日程/今天/日记）+ App 内设置页 + ICS 用 ShareLink 分享",
+            "Live Activity（iOS）：执行时灵动岛 + 锁屏实时计时——轻计时正计/番茄段倒计/休息冻结，系统自动跑不耗电",
+            "并行多任务：前台一件精细计时，「同时做」把别的事放后台并行（自己按墙钟跑、✓ 完成自动记蓝色实际）",
+            "排日程页自动加载所选目标日的已确认计划（标「已确认的计划」，改动后再点确认写入生效）",
+            "macOS：点红叉关窗不退出、menu bar 计时常驻；修菜单栏弹窗在其他 App/全屏页看不见",
+        ]),
         ChangelogEntry(version: "0.3", date: "2026-06", changes: [
             "M5 自愈 re-flow：三色日历（绿计划/蓝实际/橙预览）+「开始今天」晨间重排 + 全天连续橙色预览（被实际蚕食、日终消失）；撞固定块由 LLM 智能重排避让",
             "计划块真相源迁到 SwiftData（PlanStore），reflow 能读回固定/优先级；逻辑日 DayContext（凌晨 4 点日界线 + 智能默认排今天/明天）",
