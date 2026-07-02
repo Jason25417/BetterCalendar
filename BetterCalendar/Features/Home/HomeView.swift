@@ -108,7 +108,12 @@ struct HomeView: View {
                 if !model.blocks.isEmpty {
                     Divider()
                     HStack {
-                        Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
+                        if model.draftSource == .loaded {
+                            Label("已确认的计划 · 改动后点「确认写入」生效", systemImage: "checkmark.seal")
+                                .font(.subheadline.bold()).foregroundStyle(.green)
+                        } else {
+                            Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
+                        }
                         Spacer()
                         Button { model.addBlock() } label: { Label("加一项", systemImage: "plus") }
                             .font(.caption)
@@ -203,8 +208,13 @@ struct HomeView: View {
                 }
                 container.router.scheduleRequest = nil   // 消费掉
             }
+            .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
             .onChange(of: model.targetDay) { _, newDay in
-                model.shiftDraftsToDay(newDay)   // 改日期 → 草稿平移到新日，不丢
+                if model.draftSource == .arranged {
+                    model.shiftDraftsToDay(newDay)   // 未确认的新草稿跟人走：平移到新日、不丢
+                } else {
+                    model.loadConfirmedPlan()        // 已确认视图：切目标日 = 加载那天的计划
+                }
             }
             .confirmationDialog(
                 "「\(model.reflowConflict?.blockTitle ?? "")」今天排不下了，怎么办？",

@@ -274,6 +274,58 @@ struct LogicTests {
         #expect(try store.plannedBlocks(on: day).first?.title == "换了")
     }
 
+    /// 排日程页自动加载目标日已确认计划（2026-07-01 Jason 定）：
+    /// 进页/切目标日加载真相源；未确认的新草稿不被覆盖；切到空的一天清掉加载视图。
+    @Test func homeAutoLoadsConfirmedPlanForTargetDay() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let vm = Self.makeHomeVM(planStore: store)
+        let day = at(2026, 7, 2, 12)
+        try store.replacePlanned([
+            ScheduledBlock(title: "写代码", start: at(2026, 7, 2, 9), end: at(2026, 7, 2, 11)),
+            ScheduledBlock(title: "健身", start: at(2026, 7, 2, 15), end: at(2026, 7, 2, 16)),
+        ], on: day)
+
+        vm.targetDay = day
+        vm.autoLoadOnAppear()
+        #expect(vm.blocks.count == 2)
+        #expect(vm.draftSource == .loaded)
+
+        // 未确认的新草稿（arranged）不被自动加载覆盖
+        vm.blocks = [EditableBlock(title: "新草稿", start: day, end: day.addingTimeInterval(3600))]
+        vm.draftSource = .arranged
+        vm.autoLoadOnAppear()
+        #expect(vm.blocks.count == 1)
+        #expect(vm.blocks.first?.title == "新草稿")
+
+        // 已确认视图下切到没计划的一天 → 清空、回 empty
+        vm.draftSource = .loaded
+        vm.targetDay = at(2026, 7, 3, 12)
+        vm.loadConfirmedPlan()
+        #expect(vm.blocks.isEmpty)
+        #expect(vm.draftSource == .empty)
+    }
+
+    private static func makeHomeVM(planStore: PlanStore) -> HomeViewModel {
+        struct NoRefine: PlanRefining {
+            func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] { blocks }
+        }
+        struct NoNotify: NotificationScheduling {
+            func requestAuthorizationIfNeeded() async {}
+            func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {}
+        }
+        return HomeViewModel(
+            arrangeDay: ArrangeDayUseCase(parser: StubScheduleParser(), planner: NaivePlanningEngine()),
+            refiner: NoRefine(),
+            calendarStore: FakeCalendarStore(),
+            reminderStore: FakeReminderStore(),
+            exporter: ICSExporter(),
+            planStore: planStore,
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            notifier: NoNotify())
+    }
+
     // MARK: M5 尾巴（排不下冲突 / 解法 / 通知时间）
 
     @Test func reflowConflictWhenOverflowsDayEnd() {

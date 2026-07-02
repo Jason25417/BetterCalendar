@@ -35,6 +35,13 @@ struct EditableBlock: Identifiable {
     }
 }
 
+/// 草稿从哪来：决定切目标日/重进页面时怎么对待当前列表。
+enum DraftSource {
+    case empty       // 什么都没有
+    case arranged    // 刚「排今天」出的新草稿，还没确认——切日走平移、不被自动加载覆盖
+    case loaded      // 从真相源加载的已确认计划——切日即切内容，编辑后需再「确认写入」
+}
+
 @Observable
 final class HomeViewModel {
     private let arrangeDay: ArrangeDayUseCase
@@ -52,6 +59,7 @@ final class HomeViewModel {
     var targetDay: Date = DayContext.defaultTargetDay(.now)
     var note: String?
     var blocks: [EditableBlock] = []
+    var draftSource: DraftSource = .empty
     var isWorking: Bool = false
     var errorText: String?
     var committedCount: Int?
@@ -72,6 +80,29 @@ final class HomeViewModel {
         self.notifier = notifier
     }
 
+    // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
+
+    /// 从真相源读**所选目标日**的已确认计划 → 可编辑列表。
+    /// 加载后的一切编辑都是「对计划日历的修改」，仍需点「确认写入」才生效（幂等覆盖当天）。
+    /// 不显示完成状态——完成态归执行/复盘页，排日程页保持纯规划面。
+    func loadConfirmedPlan() {
+        let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
+        if stored.isEmpty {
+            // 这天没有已确认计划：之前显示的是别天加载来的就清掉；别动用户排的新草稿
+            if draftSource == .loaded { blocks = []; draftSource = .empty }
+            return
+        }
+        blocks = stored.map(EditableBlock.init(from:))
+        draftSource = .loaded
+        committedCount = nil
+    }
+
+    /// 进入排日程页时自动加载（不覆盖还没确认的新草稿）。
+    func autoLoadOnAppear() {
+        guard draftSource != .arranged else { return }
+        loadConfirmedPlan()
+    }
+
     /// 当前草稿 → ICS 文本（导出/分享）。
     func currentICS() -> String {
         let drafts = blocks.sorted { $0.start < $1.start }.map {
@@ -88,6 +119,7 @@ final class HomeViewModel {
             // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
             let decision = try await arrangeDay(text: trimmed, referenceDate: targetDay)
             blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+            draftSource = .arranged
             note = decision.note
         } catch {
             errorText = "排程失败：\(error.localizedDescription)"
@@ -125,6 +157,7 @@ final class HomeViewModel {
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
             committedCount = drafts.count
             committedToReal = (CalendarSettings.backend == .eventKit)
+            draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
             let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
             await notifier.requestAuthorizationIfNeeded()
@@ -146,6 +179,7 @@ final class HomeViewModel {
                 note = "这天还没有「确认写入」的计划可重排——先说一句、确认写入，再开始今天。"
             } else {
                 blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+                draftSource = .arranged   // reflow 结果也是待确认草稿
                 let flex = decision.orderedBlocks.filter { !$0.isFixed }.count
                 note = flex == 0
                     ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
