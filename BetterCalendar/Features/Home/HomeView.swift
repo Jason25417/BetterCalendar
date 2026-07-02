@@ -6,17 +6,33 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 #if canImport(AppKit)
 import AppKit
-import UniformTypeIdentifiers
 #endif
 
 enum HomeRoute: Hashable { case review, preview }
+
+#if !os(macOS)
+/// iOS 分享用：把当前计划的 ICS 文本包成可分享的 .ics 文件（ShareLink）。
+struct ICSDocument: Transferable {
+    let text: String
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: UTType(filenameExtension: "ics") ?? .plainText) {
+            Data($0.text.utf8)
+        }
+        .suggestedFileName("BetterCalendar计划.ics")
+    }
+}
+#endif
 
 struct HomeView: View {
     let container: AppContainer
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
+    #if !os(macOS)
+    @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
+    #endif
     // 实时跟随设置里的日历后端开关（按钮文字热切换）
     @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
 
@@ -126,9 +142,16 @@ struct HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.isWorking)
+                        #if os(macOS)
                         Button { exportICS() } label: {
                             Label("导出 ICS", systemImage: "square.and.arrow.up")
                         }
+                        #else
+                        ShareLink(item: ICSDocument(text: model.currentICS()),
+                                  preview: SharePreview("BetterCalendar 计划.ics")) {
+                            Label("导出 ICS", systemImage: "square.and.arrow.up")
+                        }
+                        #endif
                         if let c = model.committedCount {
                             Text(model.committedToReal
                                  ? "已写入真日历(Dev) \(c) 项 → 打开 Apple 日历查看"
@@ -146,8 +169,25 @@ struct HomeView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink(value: HomeRoute.review) { Label("今日复盘", systemImage: "checkmark.seal") }
                     NavigationLink(value: HomeRoute.preview) { Label("预览", systemImage: "calendar") }
+                    #if !os(macOS)
+                    Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
+                    #endif
                 }
             }
+            #if !os(macOS)
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                        .navigationTitle("设置")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("完成") { showSettings = false }
+                            }
+                        }
+                }
+            }
+            #endif
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
                 case .review: ReviewView(container: container)
@@ -212,16 +252,16 @@ struct HomeView: View {
         d.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated))
     }
 
+    #if os(macOS)
     private func exportICS() {
-        #if canImport(AppKit)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "BetterCalendar计划.ics"
         panel.allowedContentTypes = [UTType(filenameExtension: "ics") ?? .data]
         if panel.runModal() == .OK, let url = panel.url {
             try? model.currentICS().write(to: url, atomically: true, encoding: .utf8)
         }
-        #endif
     }
+    #endif
 }
 
 /// 单个草稿块的可编辑行。

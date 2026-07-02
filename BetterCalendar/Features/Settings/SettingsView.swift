@@ -66,7 +66,9 @@ struct SettingsView: View {
             }
         }
         .padding()
+        #if os(macOS)
         .frame(minWidth: 460, minHeight: 420)
+        #endif
     }
 
     private func save() {
