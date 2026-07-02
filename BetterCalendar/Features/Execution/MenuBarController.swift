@@ -68,6 +68,14 @@ final class MenuBarController: NSObject {
         } else {
             Task { await model.loadToday() }   // 打开即刷新今日
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // 让弹窗能出现在任何 Space / 全屏 App 之上：
+            // 弹窗窗口默认只属于本 App 的 Space（桌面）——在别的 App/全屏页点图标时会"看不见"。
+            // 不用 NSApp.activate（会把你拽回主窗口所在桌面），只把弹窗窗口设为跨 Space + 全屏辅助层。
+            if let win = popover.contentViewController?.view.window {
+                win.collectionBehavior.insert(.canJoinAllSpaces)
+                win.collectionBehavior.insert(.fullScreenAuxiliary)
+                win.makeKey()
+            }
         }
     }
 }
