@@ -14,6 +14,8 @@ struct BetterCalendarApp: App {
     #if os(macOS)
     // 菜单栏项改由 AppKit NSStatusItem 自管（潮汐式直显计时），不再用 MenuBarExtra。
     @State private var menuBar: MenuBarController?
+    // 关窗不退出 → 常驻 menu bar（见 AppDelegate）。
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
 
     var body: some Scene {
