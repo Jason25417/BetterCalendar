@@ -17,13 +17,17 @@ final class ExecutionViewModel {
     private let reschedule: RescheduleService
     private let planStore: PlanStore
     private let reminderStore: ReminderStore
+    private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
     /// 已记录的实际块（蓝日历的来源）。
     private(set) var done: [ActualRecord] = []
-    /// 当前进行中的块（nil = 空档）。
+    /// 当前进行中的块（nil = 空档）。前台块：占用 menu bar + Live Activity + 计时风格控制。
     private(set) var active: ActiveBlock?
+    /// 后台并行进行的块（不占 menu bar/前台、不显灵动岛，自己按墙钟计时、完成时自动记蓝色实际）。
+    /// 支持「一次做多件」：前台一件精细计时，其余同时在后台慢慢跑。
+    private(set) var background: [BackgroundRun] = []
     /// 已选中、待开始的块（换一件后切到它，但要点「开始任务」才真正开始计时）。
     private(set) var selected: PlannedItem?
     /// 休息态（可发生在空档，或某块中途=暂停那块）。
@@ -57,13 +61,22 @@ final class ExecutionViewModel {
         var pausedTotal: TimeInterval = 0   // 休息累计（从已用时长里扣）
         var timingStyle: TimingStyle = .light
     }
+    /// 后台并行块：只记起点，按墙钟计时（不支持番茄/休息——那是前台块的精细玩法）。
+    struct BackgroundRun: Identifiable, Sendable {
+        let id = UUID()
+        var plannedID: UUID?
+        var title: String
+        var start: Date
+    }
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
-         planStore: PlanStore, reminderStore: ReminderStore) {
+         planStore: PlanStore, reminderStore: ReminderStore,
+         liveActivity: ExecutionLiveActivity) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
         self.reminderStore = reminderStore
+        self.liveActivity = liveActivity
     }
 
     // MARK: - 读取今日
@@ -116,9 +129,20 @@ final class ExecutionViewModel {
         done.contains { TitleMatch.similarity($0.title, item.title) >= 0.6 }
     }
 
-    /// 还没做、也不是当前块/待开始块的计划块。
+    /// 某块是否正在后台并行进行。
+    func isRunningInBackground(_ item: PlannedItem) -> Bool {
+        background.contains { $0.plannedID == item.id }
+    }
+
+    /// 还没做、也不是当前块/待开始块/后台并行块的计划块。
     var remaining: [PlannedItem] {
-        planned.filter { $0.id != active?.plannedID && $0.id != selected?.id && !isDone($0) }
+        planned.filter { $0.id != active?.plannedID && $0.id != selected?.id
+                         && !isDone($0) && !isRunningInBackground($0) }
+    }
+
+    /// 后台某并行块已跑多久（按墙钟）。
+    func backgroundElapsed(_ run: BackgroundRun) -> TimeInterval {
+        max(0, Date.now.timeIntervalSince(run.start))
     }
 
     /// 建议的下一件 = 最早的剩余块（计划写入时已按策略排过序）。
@@ -151,6 +175,22 @@ final class ExecutionViewModel {
     func confirmPomodoroNext() {
         pomoIsRest.toggle()
         pomoSegStart = .now
+        if let s = liveSnapshot() { liveActivity.update(s) }
+    }
+
+    /// 当前执行状态 → Live Activity 快照（无 active 则 nil）。
+    private func liveSnapshot() -> LiveActivitySnapshot? {
+        guard let a = active else { return nil }
+        let mode: LiveActivityMode = a.timingStyle == .pomodoro ? .pomodoro : .light
+        var phaseEndsAt: Date?
+        if a.timingStyle == .pomodoro, let seg = pomoSegStart {
+            phaseEndsAt = seg.addingTimeInterval(pomoIsRest ? PomodoroTimer.rest : PomodoroTimer.work)
+        }
+        return LiveActivitySnapshot(
+            title: a.title,
+            timerStart: Date.now.addingTimeInterval(-currentElapsed),
+            pausedAt: isOnBreak ? (breakStart ?? .now) : nil,
+            mode: mode, phaseEndsAt: phaseEndsAt, phaseIsRest: pomoIsRest)
     }
 
     /// active 块的计时风格（给 UI 决定显不显时长）。
@@ -169,6 +209,7 @@ final class ExecutionViewModel {
         pomoSegStart = (item.timingStyle == .pomodoro) ? .now : nil   // 番茄钟从工作段起
         pomoIsRest = false
         refreshPreview()
+        if let s = liveSnapshot() { liveActivity.start(s) }
     }
 
     /// 换一件：结束当前 → 把目标设为「待开始」（**不立即开始**）；要再点「开始任务」才计时。
@@ -178,6 +219,7 @@ final class ExecutionViewModel {
         pomoSegStart = nil
         selected = item
         refreshPreview()
+        liveActivity.end()
     }
 
     /// 开始之前「换一件」选中的那件。
@@ -186,12 +228,31 @@ final class ExecutionViewModel {
         await startBlock(s)
     }
 
+    /// 同时开始另一件（后台并行）：不动前台正在计时的块，这件在后台自己按墙钟跑。
+    func startAlso(_ item: PlannedItem) {
+        guard item.id != active?.plannedID,
+              !isRunningInBackground(item) else { return }
+        background.append(BackgroundRun(plannedID: item.id, title: item.title, start: .now))
+        refreshPreview()   // 从橙色预览里剔除它（正在做，不该再出现在"从现在起"）
+    }
+
+    /// 完成一件后台并行任务 → 记 [start, now] 进蓝色实际 → 移出后台。
+    func completeBackground(_ id: UUID) async {
+        guard let i = background.firstIndex(where: { $0.id == id }) else { return }
+        let run = background.remove(at: i)
+        done.append(ActualRecord(plannedID: run.plannedID, title: run.title,
+                                 start: run.start, end: .now))
+        await flushActuals()
+        refreshPreview()
+    }
+
     /// 完成当前块 → 落盘 → 回到空档（不自动开下一件，由你按「下一件」）。
     func completeCurrent() async {
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
         refreshPreview()
+        liveActivity.end()
     }
 
     /// 单按钮 toggle：开始休息 ⇄ 结束休息。休息=暂停（保留当前块），结束后回来继续同一件。
@@ -206,6 +267,7 @@ final class ExecutionViewModel {
             isOnBreak = true
             breakStart = .now
         }
+        if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
     // MARK: - 落盘
@@ -260,9 +322,10 @@ final class ExecutionViewModel {
                 preview.append(ScheduledBlock(title: a.title, start: now0,
                                               end: now0.addingTimeInterval(remain)))
             }
-            // ② 之后接着排剩余（排除已做 + 正在做），从①的预测结束起
+            // ② 之后接着排剩余（排除已做 + 前台正在做 + 后台并行），从①的预测结束起
             var excluded = done.map(\.title)
             if let a = active { excluded.append(a.title) }
+            excluded.append(contentsOf: background.map(\.title))
             let restFrom = preview.last?.end ?? now0
             preview += try await reschedule.continuousReflow(excludeTitles: excluded, now: restFrom)
 

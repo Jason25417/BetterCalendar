@@ -31,6 +31,7 @@ final class AppContainer {
     let photoStore = PhotoStore()              // 日记照片存 App 容器（R2）
     let calendarSync: CalendarSyncService      // 日历→真相库反向同步（你在日历改动→PlanBlock 跟着改）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
+    let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
 
     init() {
@@ -54,8 +55,14 @@ final class AppContainer {
         self.journalStore = JournalStore()
         self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
+        #if os(iOS)
+        self.liveActivity = ActivityKitLiveActivity()   // iOS：灵动岛 + 锁屏实时模块
+        #else
+        self.liveActivity = NoLiveActivity()            // macOS：无 Live Activity → no-op
+        #endif
         self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule,
-                                            planStore: planStore, reminderStore: routingReminder)
+                                            planStore: planStore, reminderStore: routingReminder,
+                                            liveActivity: liveActivity)
         calendarSync.start()
     }
 

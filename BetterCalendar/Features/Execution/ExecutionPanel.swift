@@ -19,6 +19,7 @@ struct ExecutionPanel: View {
             header
             Divider()
             actions
+            backgroundSection
             Divider()
             footer
             if let err = model.lastError {
@@ -103,13 +104,13 @@ struct ExecutionPanel: View {
                 Label("完成「\(a.title)」", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack { switchMenu; breakButton }
+            HStack { switchMenu; alsoMenu; breakButton }
         } else if let s = model.selected {
             Button { Task { await model.startSelected() } } label: {
                 Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack { switchMenu; breakButton }
+            HStack { switchMenu; alsoMenu; breakButton }
         } else {
             if let next = model.nextSuggested {
                 Button { Task { await model.startBlock(next) } } label: {
@@ -117,7 +118,7 @@ struct ExecutionPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            HStack { switchMenu; breakButton }
+            HStack { switchMenu; alsoMenu; breakButton }
         }
     }
 
@@ -137,9 +138,53 @@ struct ExecutionPanel: View {
         .disabled(model.remaining.isEmpty)
     }
 
+    /// 同时做另一件（后台并行，不打断前台计时）。
+    private var alsoMenu: some View {
+        Menu {
+            if model.remaining.isEmpty {
+                Text("没有其它待做的事")
+            } else {
+                ForEach(model.remaining) { item in
+                    Button(item.title) { model.startAlso(item) }
+                }
+            }
+        } label: {
+            Label("同时做", systemImage: "plus.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(model.remaining.isEmpty)
+    }
+
     private var breakButton: some View {
         Button { Task { await model.toggleBreak() } } label: {
             Label("开始休息", systemImage: "cup.and.saucer")
+        }
+    }
+
+    // MARK: 后台并行区（同时进行的其它事，各自按墙钟计时；点 ✓ 完成即记蓝色实际）
+
+    @ViewBuilder private var backgroundSection: some View {
+        if !model.background.isEmpty {
+            Divider()
+            Text("同时进行（后台）").font(.caption).foregroundStyle(.secondary)
+            ForEach(model.background) { run in
+                HStack(spacing: 8) {
+                    Image(systemName: "circle.dotted").foregroundStyle(.purple).font(.caption)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(run.title).font(.caption).lineLimit(1)
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            Text(Self.hms(model.backgroundElapsed(run)))
+                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button { Task { await model.completeBackground(run.id) } } label: {
+                        Image(systemName: "checkmark.circle")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.green)
+                    .help("完成这件后台任务")
+                }
+            }
         }
     }
 
@@ -147,7 +192,8 @@ struct ExecutionPanel: View {
 
     private var footer: some View {
         HStack {
-            Text("今日：完成 \(model.doneCount) · 剩 \(model.remaining.count)")
+            Text("今日：完成 \(model.doneCount) · 剩 \(model.remaining.count)"
+                 + (model.background.isEmpty ? "" : " · 同时 \(model.background.count)"))
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             #if os(macOS)
