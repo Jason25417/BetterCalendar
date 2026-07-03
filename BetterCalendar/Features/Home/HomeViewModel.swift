@@ -150,9 +150,11 @@ final class HomeViewModel {
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {
-            // 真相源：计划块（带 isFixed/priority）写 SwiftData，reflow 才有元数据可读
-            if let day = sorted.first?.start {
-                try planStore.replacePlanned(sorted.map(\.scheduled), on: day)
+            // 真相源：计划块（带 isFixed/priority）写 SwiftData，reflow 才有元数据可读。
+            // 按日历日分组逐日 replace——草稿跨日（如排到次日凌晨）时不残留/不误删别天的块。
+            let byDay = Dictionary(grouping: sorted) { Calendar.current.startOfDay(for: $0.start) }
+            for (day, dayBlocks) in byDay {
+                try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
             }
             try await calendarStore.write(drafts)     // 路由：假/真 日历
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）

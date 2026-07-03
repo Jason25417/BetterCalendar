@@ -13,7 +13,9 @@ import Foundation
 #if os(iOS)
 import ActivityKit
 
-struct ExecutionActivityAttributes: ActivityAttributes {
+// nonisolated：纯数据类型，摘掉默认 MainActor 隔离——否则 ActivityAttributes 一致性带主 actor
+// 隔离，在 @concurrent 上下文（ActivityKit 内部）使用会告警（Swift 6 模式下是 error）。
+nonisolated struct ExecutionActivityAttributes: ActivityAttributes {
     /// 随执行状态变化的动态部分（换块 / 休息 / 番茄段切换都走 update，不重开活动）。
     public struct ContentState: Codable, Hashable {
         /// 当前在做的事。

@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.6.2", date: "2026-07", changes: [
+            "修复：确认写入跨日草稿（排到次日凌晨）时真相源残留旧块",
+            "修复：Live Activity 数据类型的 Swift 6 并发告警（隔离一致性）",
+        ]),
         ChangelogEntry(version: "0.6.1", date: "2026-07", changes: [
             "实际(蓝色)写入改为「合并不覆盖」：menu bar 采集、复盘回填、另一台设备三方并发都不会互删",
         ]),
