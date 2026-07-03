@@ -203,6 +203,11 @@ struct HomeView: View {
             .onChange(of: container.router.scheduleRequest) { _, req in
                 guard let req else { return }
                 switch req {
+                case .arrangeToday(let text):
+                    if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        model.inputText = text
+                        Task { await model.arrange() }
+                    }
                 case .startToday: Task { await model.startToday() }
                 case .review: navPath = [.review]
                 }

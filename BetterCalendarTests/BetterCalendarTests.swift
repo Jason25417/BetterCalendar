@@ -31,6 +31,29 @@ struct LogicTests {
         #expect(JSONText.extractObject("{\"a\":1}") == "{\"a\":1}")
     }
 
+    @Test func appIntentRequestQueuesAndConsumesOnce() {
+        _ = AppIntentRequest.consume()
+        AppIntentRequest.enqueue(.startToday)
+        #expect(AppIntentRequest.consume() == .startToday)
+        #expect(AppIntentRequest.consume() == nil)
+    }
+
+    @Test func appIntentRequestCarriesOptionalPlanText() {
+        _ = AppIntentRequest.consume()
+        AppIntentRequest.enqueue(.arrangeToday, payload: "写代码两小时，下午健身")
+        #expect(AppIntentRequest.payload() == "写代码两小时，下午健身")
+        #expect(AppIntentRequest.consume() == .arrangeToday)
+        #expect(AppIntentRequest.payload() == nil)
+    }
+
+    @Test func handoffUserInfoRoundTripsRoute() {
+        let info = BetterCalendarHandoff.userInfo(tab: .today, activeTitle: "写代码")
+        let route = BetterCalendarHandoff.route(from: info)
+        #expect(route?.tab == .today)
+        #expect(route?.activeTitle == "写代码")
+        #expect(BetterCalendarHandoff.route(from: ["tab": "missing"]) == nil)
+    }
+
     // MARK: 本地排程
 
     @Test func naivePlannerPutsImportantFirst() async throws {
@@ -177,6 +200,29 @@ struct LogicTests {
             planned: [planned("写代码", 9, 120)],
             actual:  [actual("写代码", 9, 40)])           // 只做了 1/3
         #expect(c.items.first?.status == .partial)
+    }
+
+    @Test func reviewShareSummaryLeadsWithAccomplishments() {
+        let c = OverlapTitleComparer().compare(
+            planned: [
+                planned("写代码", 9, 120),
+                planned("读书", 20, 60),
+            ],
+            actual: [
+                actual("写代码", 9, 90),
+                actual("读论文", 14, 60),
+            ])
+        let text = ReviewSummaryText.make(comparison: c,
+                                          activeDayCount: 5,
+                                          mvpTitle: "写代码",
+                                          mvpNote: "今天最稳的一件")
+        #expect(text.contains("今天做成 2 件"))
+        #expect(text.contains("计划外"))
+        #expect(text.contains("有效投入 2 小时 30 分"))
+        #expect(text.contains("今日最有价值：写代码"))
+        #expect(text.contains("- 读论文"))
+        #expect(!text.contains("读书"))
+        #expect(!text.contains("未做"))
     }
 
     // MARK: 跨天 / 逻辑日（M5 地基）—— 冒烟测难覆盖，靠注入时间的集成测试

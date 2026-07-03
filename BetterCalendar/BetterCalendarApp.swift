@@ -11,6 +11,7 @@ import SwiftData
 @main
 struct BetterCalendarApp: App {
     @State private var container = AppContainer()
+    @Environment(\.scenePhase) private var scenePhase
     #if os(macOS)
     // 菜单栏项改由 AppKit NSStatusItem 自管（潮汐式直显计时），不再用 MenuBarExtra。
     @State private var menuBar: MenuBarController?
@@ -41,8 +42,22 @@ struct BetterCalendarApp: App {
             #if os(macOS)
             .onAppear {
                 if menuBar == nil { menuBar = MenuBarController(model: container.execution) }
+                handlePendingAppIntent()
             }
+            #else
+            .onAppear { handlePendingAppIntent() }
             #endif
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { handlePendingAppIntent() }
+            }
+            .userActivity(BetterCalendarHandoff.activityType, isActive: true) { activity in
+                BetterCalendarHandoff.configure(activity,
+                                                router: container.router,
+                                                execution: container.execution)
+            }
+            .onContinueUserActivity(BetterCalendarHandoff.activityType) { activity in
+                continueFromHandoff(activity)
+            }
         }
         .modelContainer(SharedModelContainer.shared)
 
@@ -51,5 +66,86 @@ struct BetterCalendarApp: App {
             SettingsView()
         }
         #endif
+    }
+
+    @MainActor
+    private func handlePendingAppIntent() {
+        let payload = AppIntentRequest.payload()
+        guard let request = AppIntentRequest.consume() else { return }
+        switch request {
+        case .arrangeToday:
+            container.router.selectedTab = .schedule
+            container.router.scheduleRequest = .arrangeToday(payload)
+        case .openSchedule:
+            container.router.selectedTab = .schedule
+        case .openToday:
+            selectTodayTab()
+        case .openJournal:
+            container.router.selectedTab = .journal
+        case .startToday:
+            container.router.selectedTab = .schedule
+            container.router.scheduleRequest = .startToday
+        case .startFocus:
+            selectTodayTab()
+            startNextFromIntent()
+        case .completeCurrent:
+            selectTodayTab()
+            completeOrStartFromIntent()
+        case .review:
+            container.router.selectedTab = .schedule
+            container.router.scheduleRequest = .review
+        }
+    }
+
+    @MainActor
+    private func continueFromHandoff(_ activity: NSUserActivity) {
+        guard let route = BetterCalendarHandoff.route(from: activity) else { return }
+        switch route.tab {
+        case .schedule:
+            container.router.selectedTab = .schedule
+        case .today:
+            selectTodayTab()
+        case .journal:
+            container.router.selectedTab = .journal
+            container.router.journalRequest = .now
+        }
+    }
+
+    @MainActor
+    private func selectTodayTab() {
+        #if os(macOS)
+        container.router.selectedTab = .schedule
+        #else
+        container.router.selectedTab = .today
+        #endif
+    }
+
+    @MainActor
+    private func startNextFromIntent() {
+        let execution = container.execution
+        Task {
+            if !execution.loaded { await execution.loadToday() }
+            if execution.active != nil { return }
+            if execution.selected != nil {
+                await execution.startSelected()
+            } else if let next = execution.nextSuggested {
+                await execution.startBlock(next)
+            }
+        }
+    }
+
+    @MainActor
+    private func completeOrStartFromIntent() {
+        let execution = container.execution
+        Task {
+            if !execution.loaded { await execution.loadToday() }
+            if execution.active != nil {
+                await execution.completeCurrent()
+            } else if execution.selected != nil {
+                await execution.startSelected()
+            } else if let next = execution.nextSuggested {
+                await execution.startBlock(next)
+            }
+        }
     }
 }

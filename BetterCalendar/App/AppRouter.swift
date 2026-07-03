@@ -10,12 +10,12 @@ import Observation
 
 @Observable
 final class AppRouter {
-    enum Tab: Hashable { case schedule, today, journal }   // today 仅 iOS（macOS 走 menu bar）
+    enum Tab: String, Hashable { case schedule, today, journal }   // today 仅 iOS（macOS 走 menu bar）
     var selectedTab: Tab = .schedule
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。
     var journalRequest: Date?
 
     /// 通知 deep-link 请求（点早通知→开始今天 / 点晚通知→复盘）；HomeView 消费后清空。
-    enum ScheduleRequest { case startToday, review }
+    enum ScheduleRequest: Equatable { case arrangeToday(String?), startToday, review }
     var scheduleRequest: ScheduleRequest?
 }

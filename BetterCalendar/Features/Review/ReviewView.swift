@@ -27,6 +27,7 @@ struct ReviewView: View {
                     accomplishedSection(c)
                     if c.bonusCount > 0 { Text("计划外也算赢——这些是今天的 bonus。").font(.caption).foregroundStyle(.secondary) }
                     detailsSection(c)
+                    shareSummaryButton(c)
                     writeTodayButton
                 } else if model.isWorking {
                     ProgressView("正在读取今天…")
@@ -54,6 +55,17 @@ struct ReviewView: View {
         }
         .buttonStyle(.borderedProminent)
         .padding(.top, 4)
+    }
+
+    private func shareSummaryButton(_ c: DayComparison) -> some View {
+        let text = ReviewSummaryText.make(comparison: c,
+                                          activeDayCount: model.activeDayCount,
+                                          mvpTitle: model.mvpTitle,
+                                          mvpNote: model.mvpNote)
+        return ShareLink(item: text, preview: SharePreview("BetterCalendar 今日小结")) {
+            Label("分享今日小结", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     // MARK: 正反馈主面

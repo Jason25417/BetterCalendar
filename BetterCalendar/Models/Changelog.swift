@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.5", date: "2026-07", changes: [
+            "Siri / 快捷指令 / Spotlight：说「排今天 / 开始今天 / 开始专注 / 完成当前 / 打开复盘」直接触发，无需先打开 App",
+            "Handoff 跨设备接力：在一台设备上做到哪，另一台顶部/程序坞点一下就续上当前页面",
+            "复盘页「分享今日小结」：一键分享今天做成了什么（正反馈措辞，默认不含缺口）",
+            "iOS 修复：补上启动屏，去掉启动黑屏 / 画面不占满屏（letterbox）",
+        ]),
         ChangelogEntry(version: "0.4", date: "2026-07", changes: [
             "iOS 适配：三 tab（排日程/今天/日记）+ App 内设置页 + ICS 用 ShareLink 分享",
             "Live Activity（iOS）：执行时灵动岛 + 锁屏实时计时——轻计时正计/番茄段倒计/休息冻结，系统自动跑不耗电",
