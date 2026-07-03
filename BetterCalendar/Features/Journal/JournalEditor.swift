@@ -132,11 +132,12 @@ struct JournalEditor: View {
         picked = []; touch()
     }
     private func loadImage(_ ref: String) -> Image? {
+        // 走 PhotoStore.data：本地缓存优先，云端同步来的照片从 DB 取（跨端可见）
+        guard let data = photoStore.data(for: ref) else { return nil }
         #if canImport(AppKit)
-        if let ns = NSImage(contentsOf: photoStore.url(for: ref)) { return Image(nsImage: ns) }
+        if let ns = NSImage(data: data) { return Image(nsImage: ns) }
         #elseif canImport(UIKit)
-        if let data = try? Data(contentsOf: photoStore.url(for: ref)),
-           let ui = UIImage(data: data) { return Image(uiImage: ui) }
+        if let ui = UIImage(data: data) { return Image(uiImage: ui) }
         #endif
         return nil
     }

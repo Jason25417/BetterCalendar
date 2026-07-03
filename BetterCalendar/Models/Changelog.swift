@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.9", date: "2026-07", changes: [
+            "日记照片跨端同步：照片本体随 iCloud 同步（CKAsset），Mac 贴的图 iPhone 也能看到；旧照片自动迁移",
+        ]),
         ChangelogEntry(version: "0.8.1", date: "2026-07", changes: [
             "日记隐私锁：设置里开启后，进日记页需 Face ID / Touch ID / 密码；退后台自动重新上锁",
         ]),

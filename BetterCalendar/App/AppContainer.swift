@@ -29,7 +29,7 @@ final class AppContainer {
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
     let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
-    let photoStore = PhotoStore()              // 日记照片存 App 容器（R2）
+    let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
     let calendarSync: CalendarSyncService      // 日历→真相库反向同步（你在日历改动→PlanBlock 跟着改）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
@@ -55,6 +55,7 @@ final class AppContainer {
         self.planStore = PlanStore()
         self.reviewStore = ReviewLocalStore()
         self.journalStore = JournalStore()
+        self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
         self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
         #if os(iOS)

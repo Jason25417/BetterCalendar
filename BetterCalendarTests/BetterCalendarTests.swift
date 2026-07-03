@@ -299,6 +299,34 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 日记照片跨端（JournalPhoto：DB 真相源 + 本地缓存 + 旧文件迁移）
+
+    @Test func photoStoreRoundTripsViaDBAndMigratesLocalFiles() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bc-photo-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: JournalPhoto.self, configurations: config)
+
+        // 预置一张「旧版本只存了本地文件」的照片 → init 时应迁入 DB
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        let legacy = "legacy.jpg"
+        try Data([0xFF, 0xD8, 0xFF]).write(to: tmp.appendingPathComponent(legacy))
+
+        let store = PhotoStore(context: container.mainContext, directory: tmp)
+        let inDB = try container.mainContext.fetch(FetchDescriptor<JournalPhoto>())
+        #expect(inDB.contains { $0.ref == legacy })          // 旧文件迁入
+
+        // save → DB + 缓存；删缓存文件后 data(for:) 仍能从 DB 取回（模拟另一端同步到的照片）
+        let ref = store.save(Data([0x01, 0x02, 0x03]))
+        #expect(ref != nil)
+        try FileManager.default.removeItem(at: store.url(for: ref!))
+        #expect(store.data(for: ref!) == Data([0x01, 0x02, 0x03]))
+
+        store.delete(ref!)
+        #expect(store.data(for: ref!) == nil)
+    }
+
     // MARK: 日记 R5：导出 markdown + 往年今天
 
     @Test func journalExportMarkdownOrdersAndFormats() {
