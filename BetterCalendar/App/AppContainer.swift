@@ -64,7 +64,8 @@ final class AppContainer {
         #endif
         self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule,
                                             planStore: planStore, reminderStore: routingReminder,
-                                            liveActivity: liveActivity)
+                                            liveActivity: liveActivity,
+                                            sessionStore: ExecutionSessionStore())
         calendarSync.start()
     }
 

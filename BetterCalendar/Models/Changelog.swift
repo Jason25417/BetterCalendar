@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.7", date: "2026-07", changes: [
+            "执行会话开始落库（iCloud 同步）：每次完成/切走记 净时长·计时风格·番茄工作段数·休息次数——为日后趋势统计（正向口径）铺数据",
+        ]),
         ChangelogEntry(version: "0.6.3", date: "2026-07", changes: [
             "硬截止（DDL）贯通：说「10 点前必须交」AI 解析的 DDL 现在会显示在草稿行（🏁红旗）、写进提醒事项并按它提前提醒",
             "带 DDL 的事即使不标 ★要紧 也会进提醒事项（要紧=高优先级、DDL=中优先级）",

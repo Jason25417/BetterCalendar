@@ -299,6 +299,23 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 执行会话落库（ExecutionSession，趋势统计数据源）
+
+    @Test func executionSessionStoreRecordsAndQueriesByLogicalDay() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: ExecutionSession.self, configurations: config)
+        let store = ExecutionSessionStore(context: container.mainContext)
+        store.record(blockID: UUID(), title: "写代码", start: at(2026,7,4,9), end: at(2026,7,4,10,30),
+                     timingStyle: .pomodoro, pomodoroWorkSegments: 3, interruptions: 1)
+        store.record(blockID: nil, title: "凌晨收尾", start: at(2026,7,5,1), end: at(2026,7,5,2),
+                     timingStyle: .light, pomodoroWorkSegments: nil, interruptions: 0)
+        let day = store.sessions(onLogicalDay: at(2026,7,4,12))
+        #expect(day.count == 2)                             // 凌晨 1 点 = 同一逻辑日
+        #expect(day.first?.completedCount == 3)             // 番茄段数保住
+        #expect(day.first?.interruptions == 1)
+        #expect(store.sessions(onLogicalDay: at(2026,7,6,12)).isEmpty)
+    }
+
     // MARK: deadline（硬 DDL）贯通：解析 → 草稿 → 真相源/提醒
 
     @Test func editableBlockCarriesDeadlineThrough() {

@@ -18,6 +18,7 @@ final class ExecutionViewModel {
     private let planStore: PlanStore
     private let reminderStore: ReminderStore
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
+    private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -35,6 +36,8 @@ final class ExecutionViewModel {
     private var breakStart: Date?
     private var pomoSegStart: Date?   // 番茄钟当前段开始时刻（nil = 非番茄）
     private var pomoIsRest = false    // 当前番茄段是否休息段
+    private var pomoWorkSegmentsDone = 0   // 本次会话完成的番茄工作段数（落 ExecutionSession）
+    private var breakCount = 0             // 本次会话中途休息次数（落 ExecutionSession）
 
     private(set) var loaded = false
     var lastError: String?
@@ -71,12 +74,13 @@ final class ExecutionViewModel {
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
          planStore: PlanStore, reminderStore: ReminderStore,
-         liveActivity: ExecutionLiveActivity) {
+         liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
         self.reminderStore = reminderStore
         self.liveActivity = liveActivity
+        self.sessionStore = sessionStore
     }
 
     // MARK: - 读取今日
@@ -176,6 +180,7 @@ final class ExecutionViewModel {
 
     /// 番茄钟段满后，点「确定」切下一段（工作 ⇄ 休息）。
     func confirmPomodoroNext() {
+        if !pomoIsRest { pomoWorkSegmentsDone += 1 }   // 工作段→休息 = 完成一个工作段
         pomoIsRest.toggle()
         pomoSegStart = .now
         if let s = liveSnapshot() { liveActivity.update(s) }
@@ -211,6 +216,8 @@ final class ExecutionViewModel {
         breakStart = nil
         pomoSegStart = (item.timingStyle == .pomodoro) ? .now : nil   // 番茄钟从工作段起
         pomoIsRest = false
+        pomoWorkSegmentsDone = 0
+        breakCount = 0
         refreshPreview()
         if let s = liveSnapshot() { liveActivity.start(s) }
     }
@@ -245,6 +252,11 @@ final class ExecutionViewModel {
         let run = background.remove(at: i)
         done.append(ActualRecord(plannedID: run.plannedID, title: run.title,
                                  start: run.start, end: .now))
+        // 后台块也是一次会话（墙钟粗计时，不计段数/休息）
+        sessionStore?.record(blockID: run.plannedID, title: run.title,
+                             start: run.start, end: .now,
+                             timingStyle: TimingStyle.none,
+                             pomodoroWorkSegments: nil, interruptions: 0)
         await flushActuals()
         refreshPreview()
     }
@@ -272,6 +284,7 @@ final class ExecutionViewModel {
         } else {
             isOnBreak = true
             breakStart = .now
+            if active != nil { breakCount += 1 }   // 中途休息计入会话 interruptions
         }
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
@@ -292,6 +305,14 @@ final class ExecutionViewModel {
         let effective = max(0, Date.now.timeIntervalSince(a.start) - paused)
         done.append(ActualRecord(plannedID: a.plannedID, title: a.title,
                                  start: a.start, end: a.start.addingTimeInterval(effective)))
+        // 执行会话落库（M6b 细化）：净时长 + 番茄段数 + 休息次数，给趋势统计铺数据
+        sessionStore?.record(blockID: a.plannedID, title: a.title,
+                             start: a.start, end: a.start.addingTimeInterval(effective),
+                             timingStyle: a.timingStyle,
+                             pomodoroWorkSegments: a.timingStyle == .pomodoro ? pomoWorkSegmentsDone : nil,
+                             interruptions: breakCount)
+        pomoWorkSegmentsDone = 0
+        breakCount = 0
         await flushActuals()
     }
 
