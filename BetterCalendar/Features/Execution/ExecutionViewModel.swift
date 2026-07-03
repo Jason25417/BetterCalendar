@@ -164,9 +164,12 @@ final class ExecutionViewModel {
     }
 
     /// 当前番茄钟段（仅 active 是番茄钟时；nil = 非番茄钟）。段满后停在满位、等点确定才切。
+    /// 休息（手动 toggleBreak）期间**冻结**段内已用——与「休息=暂停当前块」契约一致；
+    /// 休息结束时 toggleBreak 会把 pomoSegStart 后移相应时长，段内进度不被休息污染。
     var pomodoroPhase: PomodoroPhase? {
         guard let a = active, a.timingStyle == .pomodoro, let seg = pomoSegStart else { return nil }
-        let elapsed = max(0, Date.now.timeIntervalSince(seg))
+        let endRef = isOnBreak ? (breakStart ?? .now) : .now
+        let elapsed = max(0, endRef.timeIntervalSince(seg))
         let length = pomoIsRest ? PomodoroTimer.rest : PomodoroTimer.work
         return PomodoroPhase(kind: pomoIsRest ? .rest : .work, elapsedInPhase: elapsed, phaseLength: length)
     }
@@ -258,8 +261,11 @@ final class ExecutionViewModel {
     /// 单按钮 toggle：开始休息 ⇄ 结束休息。休息=暂停（保留当前块），结束后回来继续同一件。
     func toggleBreak() async {
         if isOnBreak {
-            if let bs = breakStart, active != nil {
-                active?.pausedTotal += Date.now.timeIntervalSince(bs)
+            if let bs = breakStart {
+                let pause = Date.now.timeIntervalSince(bs)
+                if active != nil { active?.pausedTotal += pause }
+                // 番茄段起点同步后移，让「段内已用」把这段休息扣掉（休息=暂停，段不吃休息时间）
+                if let seg = pomoSegStart { pomoSegStart = seg.addingTimeInterval(pause) }
             }
             isOnBreak = false
             breakStart = nil

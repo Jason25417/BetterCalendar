@@ -134,6 +134,7 @@ final class HomeViewModel {
         let scheduled = blocks.map(\.scheduled)
         let result = (try? await refiner.refine(scheduled, command: cmd, now: .now)) ?? scheduled
         blocks = result.map(EditableBlock.init(from:))
+        draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
         isWorking = false
     }
@@ -208,19 +209,25 @@ final class HomeViewModel {
         blocks = blocks.map { var b = $0; b.start = onDay(b.start); b.end = onDay(b.end); return b }
     }
 
+    /// 用户编辑了「已加载的确认计划」→ 它变成未确认草稿：不再被 autoLoad/切日静默覆盖
+    /// （与 .arranged 同待遇：切日平移不丢、需再「确认写入」才回写）。徽章也随之从「已确认」变回「草稿」。
+    private func markEditedIfLoaded() {
+        if draftSource == .loaded { draftSource = .arranged }
+    }
+
     func addBlock() {
         let start = blocks.map(\.end).max() ?? Date()
         blocks.append(EditableBlock(title: "新事项", start: start, end: start.addingTimeInterval(3600)))
-        committedCount = nil
+        committedCount = nil; markEditedIfLoaded()
     }
 
     func move(_ source: IndexSet, _ destination: Int) {
-        blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil
+        blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil; markEditedIfLoaded()
     }
 
     func delete(id: UUID) {
         blocks.removeAll { $0.id == id }
-        committedCount = nil
+        committedCount = nil; markEditedIfLoaded()
     }
 
     /// 按 id 的元素绑定——避免 `ForEach($:)` 在删除时的「独占访问」崩溃。
@@ -231,6 +238,7 @@ final class HomeViewModel {
             set: { newValue in
                 if let i = self.blocks.firstIndex(where: { $0.id == id }) {
                     self.blocks[i] = newValue
+                    self.markEditedIfLoaded()   // 内联改标题/时间/星标 → 变未确认草稿
                 }
             }
         )

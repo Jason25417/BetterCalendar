@@ -307,6 +307,32 @@ struct LogicTests {
         #expect(vm.draftSource == .empty)
     }
 
+    /// 修复回归：编辑「已加载的确认计划」后未点确认 → 切 tab / 再次进页不能静默丢弃编辑。
+    @Test func homeKeepsUnconfirmedEditsToLoadedPlan() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let vm = Self.makeHomeVM(planStore: store)
+        let day = at(2026, 7, 2, 12)
+        try store.replacePlanned([
+            ScheduledBlock(title: "写代码", start: at(2026, 7, 2, 9), end: at(2026, 7, 2, 11)),
+            ScheduledBlock(title: "健身", start: at(2026, 7, 2, 15), end: at(2026, 7, 2, 16)),
+        ], on: day)
+        vm.targetDay = day
+        vm.autoLoadOnAppear()
+        #expect(vm.draftSource == .loaded)
+        #expect(vm.blocks.count == 2)
+
+        // 编辑已加载计划（删一项）→ 变「未确认草稿」
+        vm.delete(id: vm.blocks[0].id)
+        #expect(vm.draftSource == .arranged)
+        #expect(vm.blocks.count == 1)
+
+        // 再次进页（切 tab 回来触发 onAppear）→ 编辑必须保住，不被从库重载覆盖
+        vm.autoLoadOnAppear()
+        #expect(vm.blocks.count == 1)   // 仍是编辑后的 1 项，而非库里的 2 项
+    }
+
     private static func makeHomeVM(planStore: PlanStore) -> HomeViewModel {
         struct NoRefine: PlanRefining {
             func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] { blocks }

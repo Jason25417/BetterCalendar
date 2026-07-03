@@ -78,11 +78,14 @@ private struct LockScreenView: View {
 
 // MARK: - 共享的展示逻辑
 
-/// 计时文本：番茄段 → 倒计时；轻计时 → 正计时（休息时用 pauseTime 冻结）。
+/// 计时文本：番茄段 → 倒计时；轻计时 → 正计时。休息（pausedAt）一律冻结，与 App 内一致。
 @ViewBuilder
 private func timerText(_ s: ExecutionActivityAttributes.ContentState) -> some View {
     if s.mode == .pomodoro, let end = s.phaseEndsAt {
-        if end > .now {
+        if let paused = s.pausedAt {
+            // 休息中：冻结显示段剩余（否则倒计时会一边说「已暂停」一边继续减，自相矛盾）
+            Text(clock(end.timeIntervalSince(paused)))
+        } else if end > .now {
             Text(timerInterval: Date.now...end, countsDown: true)
         } else {
             Text("0:00")   // 段满、等点「确定」切段
@@ -91,6 +94,12 @@ private func timerText(_ s: ExecutionActivityAttributes.ContentState) -> some Vi
         Text(timerInterval: s.timerStart...Date.distantFuture,
              pauseTime: s.pausedAt, countsDown: false)
     }
+}
+
+/// 秒 → m:ss（休息冻结时的静态显示；负数归零）。
+private func clock(_ ti: TimeInterval) -> String {
+    let t = max(0, Int(ti))
+    return String(format: "%d:%02d", t / 60, t % 60)
 }
 
 private func iconName(_ s: ExecutionActivityAttributes.ContentState) -> String {
