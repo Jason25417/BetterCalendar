@@ -27,6 +27,7 @@ final class AppContainer {
     let reflectionContext: ReflectionContextProvider  // 日记第一方情境（用当天数据当写作素材）
     let notifier: NotificationScheduling       // 早晚极简通知
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
+    let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore = PhotoStore()              // 日记照片存 App 容器（R2）
     let calendarSync: CalendarSyncService      // 日历→真相库反向同步（你在日历改动→PlanBlock 跟着改）
@@ -52,6 +53,7 @@ final class AppContainer {
         self.reflectionContext = ReflectionContextProvider(calendarStore: routingStore, comparer: comparer)
         self.notifier = UNNotificationService()
         self.planStore = PlanStore()
+        self.reviewStore = ReviewLocalStore()
         self.journalStore = JournalStore()
         self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
@@ -73,6 +75,7 @@ final class AppContainer {
 
     /// 复盘 VM（每次进视图新建一份；依赖从容器取）。
     var reviewModel: ReviewViewModel {
-        ReviewViewModel(calendarStore: routingStore, comparer: comparer, arrangeDay: arrangeDay)
+        ReviewViewModel(calendarStore: routingStore, comparer: comparer,
+                        arrangeDay: arrangeDay, localStore: reviewStore)
     }
 }

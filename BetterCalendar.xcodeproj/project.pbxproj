@@ -65,19 +65,19 @@
 			);
 			target = B5317EE62FF4A5C6008A96E1 /* BetterCalendarWidgetsExtension */;
 		};
-		B5C0FFEE2FF4A5C7008A96E1 /* Exceptions for "BetterCalendar" folder in "BetterCalendarWidgetsExtension" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Services/Execution/ExecutionActivityAttributes.swift,
-			);
-			target = B5317EE62FF4A5C6008A96E1 /* BetterCalendarWidgetsExtension */;
-		};
 		B5A1C0DE2FF5070300000001 /* Exceptions for "BetterCalendar" folder in "BetterCalendar" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
 			target = B5590C912FF29322008C3840 /* BetterCalendar */;
+		};
+		B5C0FFEE2FF4A5C7008A96E1 /* Exceptions for "BetterCalendar" folder in "BetterCalendarWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Services/Execution/ExecutionActivityAttributes.swift,
+			);
+			target = B5317EE62FF4A5C6008A96E1 /* BetterCalendarWidgetsExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -93,8 +93,8 @@
 		B5590C942FF29322008C3840 /* BetterCalendar */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B5C0FFEE2FF4A5C7008A96E1 /* Exceptions for "BetterCalendar" folder in "BetterCalendarWidgetsExtension" target */,
 				B5A1C0DE2FF5070300000001 /* Exceptions for "BetterCalendar" folder in "BetterCalendar" target */,
+				B5C0FFEE2FF4A5C7008A96E1 /* Exceptions for "BetterCalendar" folder in "BetterCalendarWidgetsExtension" target */,
 			);
 			path = BetterCalendar;
 			sourceTree = "<group>";
@@ -380,13 +380,13 @@
 				INFOPLIST_FILE = BetterCalendarWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = BetterCalendarWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -412,13 +412,13 @@
 				INFOPLIST_FILE = BetterCalendarWidgets/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = BetterCalendarWidgets;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -487,7 +487,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -545,7 +545,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -558,7 +558,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = BetterCalendar.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "BetterCalendar-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "BetterCalendar-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = BetterCalendar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -566,18 +568,18 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BetterCalendar/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
-				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -598,7 +600,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = BetterCalendar.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "BetterCalendar-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "BetterCalendar-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = BetterCalendar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -606,18 +610,18 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
+				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BetterCalendar/Info.plist;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
-				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -641,8 +645,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 0.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -662,8 +666,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 0.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -682,7 +686,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -701,7 +705,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;

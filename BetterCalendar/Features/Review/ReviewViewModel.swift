@@ -16,6 +16,7 @@ final class ReviewViewModel {
     private let calendarStore: CalendarStore
     private let comparer: PlanComparing
     private let arrangeDay: ArrangeDayUseCase
+    private let localStore: ReviewLocalStore
 
     var comparison: DayComparison?
     var showDetails = false        // 完成率/缺口默认隐藏，主动点才看
@@ -32,10 +33,12 @@ final class ReviewViewModel {
     var backfillBlocks: [EditableBlock] = []
     var backfillCommitted: Int?
 
-    init(calendarStore: CalendarStore, comparer: PlanComparing, arrangeDay: ArrangeDayUseCase) {
+    init(calendarStore: CalendarStore, comparer: PlanComparing,
+         arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
+        self.localStore = localStore
     }
 
     // MARK: - 对比
@@ -49,25 +52,25 @@ final class ReviewViewModel {
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
             comparison = comparer.compare(planned: planned, actual: actual)
             // 当天做成 ≥1 件 → 计入活跃日（极低门槛）
-            if let c = comparison, c.accomplishedCount > 0 { ReviewLocalStore.markActive() }
+            if let c = comparison, c.accomplishedCount > 0 { localStore.markActive() }
         } catch {
             errorText = "读取失败：\(error.localizedDescription)"
             DevLog.shared.warn("复盘", "读取对比失败：\(error.localizedDescription)")
         }
-        activeDayCount = ReviewLocalStore.activeDayCount
-        mvpTitle = ReviewLocalStore.todayMVP
-        mvpNote = ReviewLocalStore.todayMVPNote
+        activeDayCount = localStore.activeDayCount
+        mvpTitle = localStore.todayMVP
+        mvpNote = localStore.todayMVPNote
         isWorking = false
     }
 
     /// 设/取消「今日最有价值的一件」（再点同一项＝取消）。
     func toggleMVP(_ title: String) {
         mvpTitle = (mvpTitle == title) ? nil : title
-        ReviewLocalStore.todayMVP = mvpTitle
+        localStore.todayMVP = mvpTitle
     }
 
     func saveMVPNote() {
-        ReviewLocalStore.todayMVPNote = mvpNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        localStore.todayMVPNote = mvpNote.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - 回填（解析 → 草稿）

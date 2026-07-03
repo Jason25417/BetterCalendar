@@ -299,6 +299,38 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 活跃天数 / 今日 MVP（DayRecord，跨端同步的复盘小数据）
+
+    @Test func dayRecordStoreCountsDistinctActiveDaysAndIsIdempotent() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: DayRecord.self, configurations: config)
+        let store = ReviewLocalStore(context: container.mainContext)
+        #expect(store.activeDayCount == 0)
+        store.markActive(on: at(2026,6,30,12))
+        store.markActive(on: at(2026,6,30,20))   // 同一逻辑日重复标 → 不重复计
+        store.markActive(on: at(2026,7,1,1))     // 凌晨 1 点 = 逻辑日 6/30 → 也不重复计
+        #expect(store.activeDayCount == 1)
+        store.markActive(on: at(2026,7,1,9))     // 新的一天
+        #expect(store.activeDayCount == 2)
+    }
+
+    @Test func dayRecordStoreMVPRoundTripsAndDedupsByLatest() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: DayRecord.self, configurations: config)
+        let store = ReviewLocalStore(context: container.mainContext)
+        store.todayMVP = "写代码"
+        store.todayMVPNote = "最稳的一件"
+        #expect(store.todayMVP == "写代码")
+        #expect(store.todayMVPNote == "最稳的一件")
+        // 模拟两端并发写出的重复 dayKey 记录：新 modifiedAt 优先
+        let key = DayContext.dayKey(.now)
+        container.mainContext.insert(
+            DayRecord(dayKey: key, isActive: true, mvpTitle: "健身",
+                      modifiedAt: .now.addingTimeInterval(60)))
+        #expect(store.todayMVP == "健身")
+        #expect(store.activeDayCount == 1)   // 重复 dayKey 只算一天
+    }
+
     @Test func planStoreRoundTripsMetadataAndReplaces() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
