@@ -19,6 +19,7 @@ struct ExecutionPanel: View {
             header
             Divider()
             actions
+            focusHint
             backgroundSection
             Divider()
             footer
@@ -159,6 +160,27 @@ struct ExecutionPanel: View {
         Button { Task { await model.toggleBreak() } } label: {
             Label("开始休息", systemImage: "cup.and.saucer")
         }
+    }
+
+    // MARK: 专注引导（macOS 无屏蔽 API 的降级：番茄钟时温和提示可开系统专注模式，不强推）
+
+    @ViewBuilder private var focusHint: some View {
+        #if os(macOS)
+        if model.activeStyle == .pomodoro, !model.isOnBreak {
+            HStack(spacing: 6) {
+                Image(systemName: "moon.circle").font(.caption).foregroundStyle(.indigo)
+                Text("想更沉浸？可顺手开系统专注模式").font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Button("打开设置") {
+                    // 专注模式无公开 API 可编程开启 → 引导到系统设置的专注面板
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Focus-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption2).controlSize(.mini)
+            }
+        }
+        #endif
     }
 
     // MARK: 后台并行区（同时进行的其它事，各自按墙钟计时；点 ✓ 完成即记蓝色实际）

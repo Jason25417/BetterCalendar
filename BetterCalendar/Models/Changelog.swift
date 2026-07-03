@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.7.1", date: "2026-07", changes: [
+            "macOS：番茄钟进行时温和提示可开系统专注模式（一键跳设置；macOS 无屏蔽 API 的替代方案）",
+        ]),
         ChangelogEntry(version: "0.7", date: "2026-07", changes: [
             "执行会话开始落库（iCloud 同步）：每次完成/切走记 净时长·计时风格·番茄工作段数·休息次数——为日后趋势统计（正向口径）铺数据",
         ]),
