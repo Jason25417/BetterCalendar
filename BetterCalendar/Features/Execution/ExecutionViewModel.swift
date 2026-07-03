@@ -10,6 +10,9 @@
 
 import Foundation
 import Observation
+#if os(iOS)
+import WidgetKit
+#endif
 
 @Observable
 final class ExecutionViewModel {
@@ -121,10 +124,26 @@ final class ExecutionViewModel {
                 }
             }
             loaded = true
+            publishWidgetSnapshot()
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.warn("执行", "读取今日计划/实际失败：\(error.localizedDescription)")
         }
+    }
+
+    /// 执行状态 → 主屏小组件快照（App Group JSON + 刷时间线）。iOS 专属，macOS no-op。
+    private func publishWidgetSnapshot() {
+        #if os(iOS)
+        let snap = WidgetSnapshot(
+            updatedAt: .now,
+            doneCount: doneCount,
+            activeTitle: active?.title,
+            remaining: remaining.prefix(4).map {
+                WidgetSnapshot.Item(title: $0.title, start: $0.start, end: $0.end)
+            })
+        WidgetSnapshotStore.save(snap)
+        WidgetCenter.shared.reloadTimelines(ofKind: "BetterCalendarTodayWidget")
+        #endif
     }
 
     // MARK: - 派生状态（给 UI）
@@ -398,6 +417,7 @@ final class ExecutionViewModel {
                     CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .preview)
                 })
             }
+            publishWidgetSnapshot()   // 每次动作后的重排点 = 小组件刷新点
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.warn("reflow", "更新橙色预览失败：\(error.localizedDescription)")

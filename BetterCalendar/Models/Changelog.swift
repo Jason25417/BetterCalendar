@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.11", date: "2026-07", changes: [
+            "iOS 主屏小组件「今天」：正在做 / 接下来 / 今日做成 N 件（正反馈口径，不显完成率），执行动作后即时刷新",
+            "iOS 控制中心控件：一键「完成当前 / 开始下一件」",
+            "快捷指令请求改走 App Group（控制中心控件在扩展进程执行也能递到主 App）",
+        ]),
         ChangelogEntry(version: "0.10", date: "2026-07", changes: [
             "新快捷指令「标记完成」：按任务名把今日某件事标为已完成（正在做的走正常完成、后台的收尾、其余按计划时段记实际）",
             "为 Claude Code 完成信号铺路：在快捷指令 App 包一层接收文本的指令后，命令行 shortcuts run 即可让 AI 干完活自动标完成",

@@ -19,31 +19,40 @@ enum AppIntentRequest: String, Sendable {
     case markDone      // 带 payload=任务标题：按标题标完成（Claude Code 完成信号入口）
     case review
 
+    /// iOS 走 App Group defaults：Control Center 控件的 intent 在 **widget 扩展进程**里执行，
+    /// 各进程的 UserDefaults.standard 互不相通——共享域才能把请求递给主 App。macOS 无控件，照旧 standard。
+    nonisolated private static var store: UserDefaults {
+        #if os(iOS)
+        UserDefaults(suiteName: "group.com.jason.BetterCalendar") ?? .standard
+        #else
+        .standard
+        #endif
+    }
+
     nonisolated static func enqueue(_ request: AppIntentRequest, payload: String? = nil) {
         let key = "appIntent.pendingRequest"
         let payloadKey = "appIntent.pendingPayload"
-        UserDefaults.standard.set(request.rawValue, forKey: key)
+        store.set(request.rawValue, forKey: key)
         if let payload, !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            UserDefaults.standard.set(payload, forKey: payloadKey)
+            store.set(payload, forKey: payloadKey)
         } else {
-            UserDefaults.standard.removeObject(forKey: payloadKey)
+            store.removeObject(forKey: payloadKey)
         }
     }
 
     nonisolated static func payload() -> String? {
-        let payloadKey = "appIntent.pendingPayload"
-        return UserDefaults.standard.string(forKey: payloadKey)
+        store.string(forKey: "appIntent.pendingPayload")
     }
 
     nonisolated static func consume() -> AppIntentRequest? {
         let key = "appIntent.pendingRequest"
         let payloadKey = "appIntent.pendingPayload"
-        guard let raw = UserDefaults.standard.string(forKey: key),
+        guard let raw = store.string(forKey: key),
               let request = AppIntentRequest(rawValue: raw) else {
             return nil
         }
-        UserDefaults.standard.removeObject(forKey: key)
-        UserDefaults.standard.removeObject(forKey: payloadKey)
+        store.removeObject(forKey: key)
+        store.removeObject(forKey: payloadKey)
         return request
     }
 }
