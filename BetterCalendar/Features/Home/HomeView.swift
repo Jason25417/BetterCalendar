@@ -313,6 +313,11 @@ struct EditableRow: View {
                         Text(Self.styleLabel(block.timingStyle))
                     }
                     .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
+                    if let ddl = block.deadline {
+                        Label(ddl.formatted(.dateTime.hour().minute()), systemImage: "flag.checkered")
+                            .font(.caption2).foregroundStyle(.red)
+                            .help("硬截止（DDL）：必须在此之前完成——会写进提醒事项、按它提前提醒")
+                    }
                     Spacer()
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")

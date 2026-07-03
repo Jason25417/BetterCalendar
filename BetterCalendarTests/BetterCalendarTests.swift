@@ -299,6 +299,17 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: deadline（硬 DDL）贯通：解析 → 草稿 → 真相源/提醒
+
+    @Test func editableBlockCarriesDeadlineThrough() {
+        let ddl = at(2026,7,4,22)
+        let b = ScheduledBlock(title: "交作业", start: at(2026,7,4,19), end: at(2026,7,4,21),
+                               priority: .normal, deadline: ddl)
+        let editable = EditableBlock(from: b)
+        #expect(editable.deadline == ddl)              // 草稿携带（之前在这里丢）
+        #expect(editable.scheduled.deadline == ddl)    // 回转不丢 → 真相源/提醒都拿得到
+    }
+
     // MARK: 实际写入「合并不覆盖」（工程债修复：menu bar × 回填 × 双端并发）
 
     @Test func calendarMergeUnionKeepsExistingAndOverridesSameKey() {

@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.6.3", date: "2026-07", changes: [
+            "硬截止（DDL）贯通：说「10 点前必须交」AI 解析的 DDL 现在会显示在草稿行（🏁红旗）、写进提醒事项并按它提前提醒",
+            "带 DDL 的事即使不标 ★要紧 也会进提醒事项（要紧=高优先级、DDL=中优先级）",
+        ]),
         ChangelogEntry(version: "0.6.2", date: "2026-07", changes: [
             "修复：确认写入跨日草稿（排到次日凌晨）时真相源残留旧块",
             "修复：Live Activity 数据类型的 Swift 6 并发告警（隔离一致性）",
