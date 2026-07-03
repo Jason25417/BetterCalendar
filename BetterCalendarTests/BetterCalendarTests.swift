@@ -299,6 +299,20 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 实际写入「合并不覆盖」（工程债修复：menu bar × 回填 × 双端并发）
+
+    @Test func calendarMergeUnionKeepsExistingAndOverridesSameKey() {
+        let e1 = CalendarEventDraft(title: "回填的事", start: at(2026,7,4,14), end: at(2026,7,4,15), kind: .actual)
+        let e2 = CalendarEventDraft(title: "写代码", start: at(2026,7,4,9), end: at(2026,7,4,10), kind: .actual)
+        // done 里同键（写代码@9点）但时长更新到 10:30；新增一件
+        let a1 = CalendarEventDraft(title: "写代码", start: at(2026,7,4,9), end: at(2026,7,4,10,30), kind: .actual)
+        let a2 = CalendarEventDraft(title: "健身", start: at(2026,7,4,16), end: at(2026,7,4,17), kind: .actual)
+        let merged = CalendarMerge.union(existing: [e1, e2], additions: [a1, a2], kind: .actual)
+        #expect(merged.count == 3)                                    // 回填的保住、同键不重复
+        #expect(merged.first { $0.title == "写代码" }?.end == at(2026,7,4,10,30))   // additions 覆盖同键
+        #expect(merged.contains { $0.title == "回填的事" })            // 别处写的不被删
+    }
+
     // MARK: 活跃天数 / 今日 MVP（DayRecord，跨端同步的复盘小数据）
 
     @Test func dayRecordStoreCountsDistinctActiveDaysAndIsIdempotent() throws {

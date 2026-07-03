@@ -295,15 +295,18 @@ final class ExecutionViewModel {
         await flushActuals()
     }
 
-    /// 把全量 done 覆盖写进蓝色「实际」日历（write 按 kind 覆盖当天，幂等）。
+    /// 把 done 写进蓝色「实际」日历——**合并不覆盖**（工程债修复 2026-07-04）：
+    /// 先读日历已有实际、与 done 做 union 再写，别处产生的实际（复盘回填/另一台设备）不会被删。
     private func flushActuals() async {
         let drafts = done.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual)
         }
         guard !drafts.isEmpty else { return }
         do {
-            try await calendarStore.write(drafts)
-            DevLog.shared.info("执行", "实际日历已更新：\(drafts.count) 项")
+            let existing = (try? await calendarStore.read(kind: .actual)) ?? []
+            let merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
+            try await calendarStore.write(merged)
+            DevLog.shared.info("执行", "实际日历已更新：本次 \(drafts.count) 项 · 合并后 \(merged.count) 项")
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.error("执行", "写入实际日历失败：\(error.localizedDescription)")

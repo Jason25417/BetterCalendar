@@ -97,7 +97,9 @@ final class ReviewViewModel {
         }
         do {
             let existing = try await calendarStore.read(kind: .actual)
-            try await calendarStore.write(existing + newDrafts)
+            // union 去重（同 标题+起始分钟 = 同一事件），比裸拼接稳：重复确认不产生双份
+            try await calendarStore.write(
+                CalendarMerge.union(existing: existing, additions: newDrafts, kind: .actual))
             backfillCommitted = newDrafts.count
             backfillBlocks = []
             backfillText = ""

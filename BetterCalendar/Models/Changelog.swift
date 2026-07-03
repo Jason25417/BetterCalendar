@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.6.1", date: "2026-07", changes: [
+            "实际(蓝色)写入改为「合并不覆盖」：menu bar 采集、复盘回填、另一台设备三方并发都不会互删",
+        ]),
         ChangelogEntry(version: "0.6", date: "2026-07", changes: [
             "首个 TestFlight 内测版：图标、隐私清单、双端发版适配全就绪（更新走 TestFlight 自动提示）",
             "活跃天数 / 今日 MVP 改为 iCloud 跨端同步（原来 Mac/iPhone 各记各的；旧数据自动迁移）",
