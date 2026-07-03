@@ -9,6 +9,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import LocalAuthentication
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -33,37 +34,96 @@ struct JournalView: View {
     @State private var model: JournalViewModel
     @State private var today: JournalEntry?
     @State private var todayPrompt: String?   // 第一方情境引子（来自当天 PlanComparing）
+    @State private var unlocked = false       // 隐私锁（R5）：本次前台会话是否已解锁
+    @State private var authFailedHint: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     init(container: AppContainer) {
         self.container = container
         _model = State(initialValue: JournalViewModel(store: container.journalStore))
     }
 
+    private var locked: Bool { JournalSettings.privacyLock && !unlocked }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    todayCard
-                    onThisDayCard
-                    Divider()
-                    historySection
+            Group {
+                if locked {
+                    lockedView
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            todayCard
+                            onThisDayCard
+                            Divider()
+                            historySection
+                        }
+                        .padding()
+                    }
                 }
-                .padding()
             }
             .navigationTitle("日记")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) { exportButton }
+                if !locked {
+                    ToolbarItem(placement: .primaryAction) { exportButton }
+                }
             }
             .navigationDestination(for: JournalEntry.self) { e in
                 JournalDetailView(entry: e, model: model, photoStore: container.photoStore)
             }
         }
-        .onAppear { openTodayIfNeeded() }
+        .onAppear {
+            if locked { unlock() }
+            openTodayIfNeeded()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // 退后台自动重新上锁（下次回前台需再解锁）
+            if phase == .background, JournalSettings.privacyLock { unlocked = false }
+        }
         .onChange(of: container.router.journalRequest) { _, req in
             guard req != nil else { return }
+            if locked { unlock() }
             today = model.todayEntry()
             loadPrompt()
             container.router.journalRequest = nil   // 消费掉
+        }
+    }
+
+    // MARK: 隐私锁（R5）
+
+    private var lockedView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(.secondary)
+            Text("日记已上锁").font(.headline)
+            Button { unlock() } label: {
+                Label("解锁日记", systemImage: "faceid")
+            }
+            .buttonStyle(.borderedProminent)
+            if let hint = authFailedHint {
+                Text(hint).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private func unlock() {
+        let ctx = LAContext()
+        var err: NSError?
+        // 设备没设任何锁 → 直接放行（别把用户永久锁在外面）
+        guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err) else {
+            unlocked = true
+            return
+        }
+        Task {
+            do {
+                let ok = try await ctx.evaluatePolicy(.deviceOwnerAuthentication,
+                                                      localizedReason: "解锁日记")
+                unlocked = ok
+                authFailedHint = ok ? nil : "没认出来，再试一次"
+            } catch {
+                authFailedHint = "已取消 · 点「解锁日记」重试"
+            }
         }
     }
 
