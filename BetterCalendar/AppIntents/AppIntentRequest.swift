@@ -16,6 +16,7 @@ enum AppIntentRequest: String, Sendable {
     case startToday
     case startFocus
     case completeCurrent
+    case markDone      // 带 payload=任务标题：按标题标完成（Claude Code 完成信号入口）
     case review
 
     nonisolated static func enqueue(_ request: AppIntentRequest, payload: String? = nil) {

@@ -95,6 +95,26 @@ struct CompleteCurrentIntent: AppIntent {
     }
 }
 
+struct MarkDoneIntent: AppIntent {
+    static var title: LocalizedStringResource = "标记完成"
+    static var description = IntentDescription("按任务名把今日计划里的某件事标为已完成（记入实际）。可被快捷指令/自动化调用——例如 Claude Code 干完活时经 shortcuts 命令行标完成。")
+    static var openAppWhenRun = true
+
+    @Parameter(title: "任务名", requestValueDialog: "完成的是哪件事？")
+    var taskTitle: String
+
+    init() {}
+
+    init(taskTitle: String) {
+        self.taskTitle = taskTitle
+    }
+
+    func perform() async throws -> some IntentResult {
+        AppIntentRequest.enqueue(.markDone, payload: taskTitle)
+        return .result()
+    }
+}
+
 struct OpenReviewIntent: AppIntent {
     static var title: LocalizedStringResource = "打开复盘"
     static var description = IntentDescription("打开今天的正反馈复盘。")
@@ -146,6 +166,16 @@ struct BetterCalendarShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "完成当前",
             systemImageName: "checkmark.circle"
+        )
+
+        AppShortcut(
+            intent: MarkDoneIntent(),
+            phrases: [
+                "在 \(.applicationName) 标记完成",
+                "用 \(.applicationName) 标记完成"
+            ],
+            shortTitle: "标记完成",
+            systemImageName: "checkmark.seal"
         )
 
         AppShortcut(

@@ -91,6 +91,12 @@ struct BetterCalendarApp: App {
         case .completeCurrent:
             selectTodayTab()
             completeOrStartFromIntent()
+        case .markDone:
+            selectTodayTab()
+            if let title = payload, !title.isEmpty {
+                let execution = container.execution
+                Task { await execution.markDone(titleLike: title) }
+            }
         case .review:
             container.router.selectedTab = .schedule
             container.router.scheduleRequest = .review

@@ -289,6 +289,38 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
+    /// 按标题把某块标完成（App Intent「标记完成」/ Claude Code 完成信号 §2.1 路径c）。
+    /// 相似度 ≥0.6 的最佳匹配：前台块 → completeCurrent（保真计时）；后台并行块 → completeBackground；
+    /// 其余计划块 → 按计划时段记实际（同「提醒打勾」被动信号口径）。返回匹配标题，nil=没找到。
+    @discardableResult
+    func markDone(titleLike title: String) async -> String? {
+        if !loaded { await loadToday() }
+        if let a = active, TitleMatch.similarity(a.title, title) >= 0.6 {
+            let t = a.title
+            await completeCurrent()
+            return t
+        }
+        if let run = background.first(where: { TitleMatch.similarity($0.title, title) >= 0.6 }) {
+            await completeBackground(run.id)
+            return run.title
+        }
+        let candidates = planned.filter { !isDone($0) }
+        guard let best = candidates.max(by: {
+                  TitleMatch.similarity($0.title, title) < TitleMatch.similarity($1.title, title) }),
+              TitleMatch.similarity(best.title, title) >= 0.6 else {
+            DevLog.shared.warn("执行", "标记完成：今日计划里没找到匹配「\(title)」的块")
+            return nil
+        }
+        done.append(ActualRecord(plannedID: best.id, title: best.title,
+                                 start: best.start, end: best.end))
+        await flushActuals()
+        // 同步等预览更新（不 fire-and-forget）：Intent 返回时状态已就绪；
+        // 也避免游离 Task 活过调用方作用域（单测里曾撞已析构的内存库 → SwiftData trap）。
+        await updatePreview()
+        DevLog.shared.info("执行", "标记完成：\(best.title)（来自快捷指令/外部信号）")
+        return best.title
+    }
+
     // MARK: - 落盘
 
     private func recordActiveIfAny() async {

@@ -299,6 +299,40 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 标记完成（MarkDone Intent → ExecutionViewModel.markDone）
+
+    @Test func markDoneRecordsActualForMatchingPlannedBlock() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        try planStore.replacePlanned([
+            ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600)),
+            ScheduledBlock(title: "读书", start: s.addingTimeInterval(3600), end: s.addingTimeInterval(7200)),
+        ], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity())
+        await vm.loadToday()
+        #expect(vm.doneCount == 0)
+        let hit = await vm.markDone(titleLike: "写代码")
+        #expect(hit == "写代码")
+        #expect(vm.doneCount == 1)
+        let miss = await vm.markDone(titleLike: "完全无关的事")
+        #expect(miss == nil)
+        #expect(vm.doneCount == 1)
+    }
+
+    @Test func appIntentMarkDoneCarriesTitlePayload() {
+        _ = AppIntentRequest.consume()
+        AppIntentRequest.enqueue(.markDone, payload: "写代码")
+        #expect(AppIntentRequest.payload() == "写代码")
+        #expect(AppIntentRequest.consume() == .markDone)
+    }
+
     // MARK: 日记照片跨端（JournalPhoto：DB 真相源 + 本地缓存 + 旧文件迁移）
 
     @Test func photoStoreRoundTripsViaDBAndMigratesLocalFiles() throws {

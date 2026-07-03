@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.10", date: "2026-07", changes: [
+            "新快捷指令「标记完成」：按任务名把今日某件事标为已完成（正在做的走正常完成、后台的收尾、其余按计划时段记实际）",
+            "为 Claude Code 完成信号铺路：在快捷指令 App 包一层接收文本的指令后，命令行 shortcuts run 即可让 AI 干完活自动标完成",
+        ]),
         ChangelogEntry(version: "0.9", date: "2026-07", changes: [
             "日记照片跨端同步：照片本体随 iCloud 同步（CKAsset），Mac 贴的图 iPhone 也能看到；旧照片自动迁移",
         ]),
