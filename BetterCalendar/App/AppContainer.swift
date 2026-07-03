@@ -8,6 +8,7 @@
 
 import Foundation
 import Observation
+import SwiftData
 import UserNotifications
 
 @Observable
