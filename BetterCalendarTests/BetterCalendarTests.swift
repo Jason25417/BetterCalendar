@@ -299,6 +299,33 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 日记 R5：导出 markdown + 往年今天
+
+    @Test func journalExportMarkdownOrdersAndFormats() {
+        let old = JournalEntry(date: at(2025,7,4,21), body: "去年今天", mood: "😌", tags: ["回顾"])
+        let new = JournalEntry(date: at(2026,7,3,22), body: "昨天", mood: nil, tags: [])
+        let md = JournalExport.markdown([new, old])
+        #expect(md.hasPrefix("# BetterCalendar 日记"))
+        #expect(md.contains("😌"))
+        #expect(md.contains("#回顾"))
+        // 按时间正序：去年的在前
+        #expect(md.range(of: "去年今天")!.lowerBound < md.range(of: "昨天")!.lowerBound)
+    }
+
+    @Test func journalOnThisDayFindsSameMonthDayInPastYears() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: JournalEntry.self, configurations: config)
+        let store = JournalStore(context: container.mainContext)
+        let vm = JournalViewModel(store: store)
+        _ = store  // silence unused warning path
+        container.mainContext.insert(JournalEntry(date: at(2025,7,4,20), body: "去年今天"))
+        container.mainContext.insert(JournalEntry(date: at(2025,7,1,20), body: "去年七月一"))
+        try container.mainContext.save()
+        vm.reload()
+        #expect(vm.onThisDay(at(2026,7,4,12))?.body == "去年今天")   // 同月同日命中
+        #expect(vm.onThisDay(at(2026,7,2,12)) == nil)                // 无同月同日 → nil
+    }
+
     // MARK: 执行会话落库（ExecutionSession，趋势统计数据源）
 
     @Test func executionSessionStoreRecordsAndQueriesByLogicalDay() throws {

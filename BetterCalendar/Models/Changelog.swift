@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.8", date: "2026-07", changes: [
+            "日记「往年今天」：有往年同月同日的日记时，顶部出现回顾卡片、点开重温（用得越久越有味道）",
+            "日记一键导出 Markdown：全部条目（日期/心情/标签/正文）——macOS 存文件 / iOS 分享",
+        ]),
         ChangelogEntry(version: "0.7.1", date: "2026-07", changes: [
             "macOS：番茄钟进行时温和提示可开系统专注模式（一键跳设置；macOS 无屏蔽 API 的替代方案）",
         ]),

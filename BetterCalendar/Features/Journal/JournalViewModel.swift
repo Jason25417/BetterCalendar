@@ -33,6 +33,20 @@ final class JournalViewModel {
         entries.filter { !DayContext.isSameLogicalDay($0.date, .now) }
     }
 
+    /// 「往年今天」（R5）：往年同月同日的条目，最近一年优先；没有则 nil（内测头一年自然不出现）。
+    func onThisDay(_ now: Date = .now) -> JournalEntry? {
+        let cal = Calendar.current
+        let today = cal.dateComponents([.month, .day], from: now)
+        let thisYear = cal.component(.year, from: now)
+        return entries.first {
+            let c = cal.dateComponents([.year, .month, .day], from: $0.date)
+            return c.month == today.month && c.day == today.day && (c.year ?? thisYear) < thisYear
+        }
+    }
+
+    /// 全部日记 → markdown（导出/备份；R5）。
+    func exportMarkdown() -> String { JournalExport.markdown(entries) }
+
     func save() { store.save(); reload() }
     func delete(_ e: JournalEntry) { store.delete(e); reload() }
 }

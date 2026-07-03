@@ -8,8 +8,25 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
+#if canImport(AppKit)
+import AppKit
+#endif
 
 let journalMoods = ["😊", "😌", "😐", "😔", "😤", "🥳", "😴", "🤔"]
+
+#if !os(macOS)
+/// iOS 分享用：日记 markdown 导出文件（ShareLink）。
+struct MarkdownDocument: Transferable {
+    let text: String
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: UTType(filenameExtension: "md") ?? .plainText) {
+            Data($0.text.utf8)
+        }
+        .suggestedFileName("BetterCalendar日记.md")
+    }
+}
+#endif
 
 struct JournalView: View {
     let container: AppContainer
@@ -27,12 +44,16 @@ struct JournalView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     todayCard
+                    onThisDayCard
                     Divider()
                     historySection
                 }
                 .padding()
             }
             .navigationTitle("日记")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { exportButton }
+            }
             .navigationDestination(for: JournalEntry.self) { e in
                 JournalDetailView(entry: e, model: model, photoStore: container.photoStore)
             }
@@ -71,6 +92,53 @@ struct JournalView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
+
+    /// 「往年今天」（R5）：有往年同月同日的日记就轻轻放一张卡，点开重温。内测头一年自然不出现。
+    @ViewBuilder private var onThisDayCard: some View {
+        if let e = model.onThisDay() {
+            NavigationLink(value: e) {
+                HStack(spacing: 10) {
+                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.purple)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("往年今天 · \(e.date.formatted(date: .abbreviated, time: .omitted)) \(e.mood ?? "")")
+                            .font(.subheadline.bold())
+                        Text(e.body.isEmpty ? "（只记了心情）" : e.body)
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                }
+                .padding(10)
+                .background(Color.purple.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 导出全部日记为 markdown（R5）：macOS 存盘 / iOS 分享。
+    @ViewBuilder private var exportButton: some View {
+        #if os(macOS)
+        Button { exportMarkdown() } label: { Label("导出日记", systemImage: "square.and.arrow.up") }
+            .help("把全部日记导出为 Markdown 文件")
+        #else
+        ShareLink(item: MarkdownDocument(text: model.exportMarkdown()),
+                  preview: SharePreview("BetterCalendar 日记.md")) {
+            Label("导出日记", systemImage: "square.and.arrow.up")
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    private func exportMarkdown() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "BetterCalendar日记.md"
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        if panel.runModal() == .OK, let url = panel.url {
+            try? model.exportMarkdown().write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+    #endif
 
     private var historySection: some View {
         @Bindable var model = model
