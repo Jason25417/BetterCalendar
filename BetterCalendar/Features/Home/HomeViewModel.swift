@@ -111,12 +111,15 @@ final class HomeViewModel {
             savedAt: .now))
     }
 
-    /// 启动还原：未确认草稿（arranged）整份还原；loaded/empty 只还原输入框文本
-    /// （已确认计划由 autoLoadOnAppear 从真相源重新加载，快照不越权）。
+    /// 启动还原：**新鲜的**未确认草稿（arranged 且目标日未过期）整份还原；否则只还原输入框文本
+    /// （已确认计划由 autoLoadOnAppear 从真相源重新加载，快照不越权——
+    ///  0.14.1 修复：过期草稿曾永远盖住已确认计划的自动加载）。
     private func restoreDraftIfAny() {
         guard let snap = draftStore?.load() else { return }
         inputText = snap.inputText
-        if snap.draftSourceRaw == DraftSource.arranged.rawValue, !snap.blocks.isEmpty {
+        let cal = Calendar.current
+        let fresh = cal.startOfDay(for: snap.targetDay) >= cal.startOfDay(for: .now)
+        if snap.draftSourceRaw == DraftSource.arranged.rawValue, !snap.blocks.isEmpty, fresh {
             blocks = snap.blocks.map(\.editable)
             targetDay = snap.targetDay
             draftSource = .arranged
@@ -125,6 +128,16 @@ final class HomeViewModel {
                                cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
             }
         }
+    }
+
+    /// 放弃当前未确认草稿 → 回到该目标日的已确认计划视图。
+    func discardDraft() {
+        blocks = []
+        pendingLongTasks = []
+        note = nil
+        draftSource = .empty
+        loadConfirmedPlan()
+        persistDraft()
     }
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）

@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.14.1", date: "2026-07", changes: [
+            "修复：过期的未确认草稿不再盖住「已确认计划」的自动显示（打开排日程页看不到当天计划的根因）",
+            "草稿态新增「放弃草稿」：一键丢弃、回到已确认的计划",
+        ]),
         ChangelogEntry(version: "0.14", date: "2026-07", changes: [
             "跨端日志：Mac 和 iPhone 的运行日志随 iCloud 同步汇总（保留 7 天）——开发者（Claude）可从 Mac 命令行直接查看双端内测日志，远程排障不再靠猜",
         ]),

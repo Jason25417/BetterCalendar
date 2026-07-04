@@ -123,6 +123,10 @@ struct HomeView: View {
                                 .font(.subheadline.bold()).foregroundStyle(.green)
                         } else {
                             Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
+                            Button("放弃草稿") { model.discardDraft() }
+                                .font(.caption).foregroundStyle(.secondary)
+                                .buttonStyle(.plain).underline()
+                                .help("丢掉这份未确认草稿，回到已确认的计划")
                         }
                         Spacer()
                         #if !os(macOS)
