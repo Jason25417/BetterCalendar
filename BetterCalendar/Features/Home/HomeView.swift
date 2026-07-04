@@ -85,7 +85,7 @@ struct HomeView: View {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                 }
                 if !model.pendingLongTasks.isEmpty {
-                    Label("识别到长期事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「在途」",
+                    Label("识别到长期事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「长期任务」",
                           systemImage: "tray.and.arrow.down")
                         .font(.caption).foregroundStyle(.purple)
                 }
@@ -333,9 +333,9 @@ struct HomeView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "tray.full").foregroundStyle(.purple)
                     if store.items.isEmpty {
-                        Text("在途 · 空").font(.caption).foregroundStyle(.secondary)
+                        Text("长期任务 · 空").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text("在途 \(store.items.count) 件"
+                        Text("长期任务 \(store.items.count) 件"
                              + nearestDDLLabel(store.items)).font(.caption)
                     }
                 }
@@ -457,7 +457,7 @@ struct EditableRow: View {
 
             if block.fromPool {
                 Image(systemName: "tray.full").font(.caption).foregroundStyle(.purple)
-                    .help("来自「在途」的建议——不想今天做直接删掉即可")
+                    .help("来自「长期任务」的建议——不想今天做直接删掉即可")
             }
 
             VStack(alignment: .leading, spacing: 4) {

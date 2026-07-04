@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.16.2", date: "2026-07", changes: [
+            "术语零成本化（§5.9 原则落地）：「在途」→「长期任务」——名词只负责秒懂；气质词以后随皮肤系统回归",
+        ]),
         ChangelogEntry(version: "0.16.1", date: "2026-07", changes: [
             "设置页分层：主页面只留常用项（API key、日历后端、日记隐私锁），AI 模型选择和提醒提前量收进「进阶设置」——新手打开不再眼花",
         ]),
