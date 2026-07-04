@@ -18,17 +18,12 @@ struct SettingsView: View {
     @State private var savedHint: String?
     @State private var testing = false
     @State private var testResult: String?
+    @State private var showAdvanced = false
 
     var body: some View {
         Form {
             Section("云端排程大脑（Anthropic API）") {
                 Toggle("启用云端", isOn: $useCloud)
-
-                Picker("模型", selection: $model) {
-                    ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
-                }
-                Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。")
-                    .font(.caption).foregroundStyle(.secondary)
 
                 SecureField(hasKey ? "已存有 key（留空＝不修改）" : "粘贴 Anthropic API key",
                             text: $apiKey)
@@ -75,11 +70,20 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("提醒事项") {
-                Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
-                    .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
-                Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。真模式首次写弹权限。")
-                    .font(.caption).foregroundStyle(.secondary)
+            // 进阶设置（渐进披露，§5.9）：新手用不到的都收在这——皮肤/开发者项日后也进此区
+            Section {
+                DisclosureGroup("进阶设置", isExpanded: $showAdvanced) {
+                    Picker("AI 模型", selection: $model) {
+                        ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
+                    }
+                    Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。改完点上方「保存」。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
+                        .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
+                    Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .padding()

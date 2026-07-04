@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.16.1", date: "2026-07", changes: [
+            "设置页分层：主页面只留常用项（API key、日历后端、日记隐私锁），AI 模型选择和提醒提前量收进「进阶设置」——新手打开不再眼花",
+        ]),
         ChangelogEntry(version: "0.16", date: "2026-07", changes: [
             "排日程页改为「文件模型」（与 Jason 共同定稿）：看到的 = 已保存的计划 + 你未保存的修改；「确认写入」= 保存；「放弃修改」= 不保存",
             "打开 App 永远先显示已保存的计划；上次退出留有未保存修改时，顶部一行小字可「恢复 / 丢弃」（不弹窗打断）",
