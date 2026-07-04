@@ -81,6 +81,7 @@ final class AppContainer {
     /// 复盘 VM（每次进视图新建一份；依赖从容器取）。
     var reviewModel: ReviewViewModel {
         ReviewViewModel(calendarStore: routingStore, comparer: comparer,
-                        arrangeDay: arrangeDay, localStore: reviewStore)
+                        arrangeDay: arrangeDay, localStore: reviewStore,
+                        longTasks: longTasks)
     }
 }

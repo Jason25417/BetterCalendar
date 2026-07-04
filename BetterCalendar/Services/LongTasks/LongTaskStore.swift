@@ -89,4 +89,34 @@ final class LongTaskStore {
         try? context.save()
         reload()
     }
+
+    // MARK: 累计投入（M10-3，正反馈口径：只算做了多少，不算剩多少）
+
+    private func sessions() -> [ExecutionSession] {
+        (try? context.fetch(FetchDescriptor<ExecutionSession>())) ?? []
+    }
+
+    /// 某在途任务的累计投入分钟：按标题相似聚合执行会话（0.7 起自动落库，同库直查）。
+    func investedMinutes(for task: LongTask, on day: Date? = nil) -> Int {
+        sessions()
+            .filter { s in
+                guard TitleMatch.similarity(s.title, task.title) >= 0.6 else { return false }
+                if let day { return DayContext.isSameLogicalDay(s.start, day) }
+                return true
+            }
+            .compactMap { s in s.end.map { Int($0.timeIntervalSince(s.start) / 60) } }
+            .reduce(0, +)
+    }
+
+    /// 复盘用的一行长线推进（今天动过的在途才上榜；没有则 nil——不无中生有）。
+    /// 例：「长线推进：论文 +2 小时（累计 6 小时）· 学 Swift +45 分钟（累计 3 小时）」
+    func progressLine(now: Date = .now) -> String? {
+        let parts: [String] = active().compactMap { task in
+            let today = investedMinutes(for: task, on: now)
+            guard today > 0 else { return nil }
+            let total = investedMinutes(for: task)
+            return "\(task.title) +\(ReviewSummaryText.hm(today))（累计 \(ReviewSummaryText.hm(total))）"
+        }
+        return parts.isEmpty ? nil : "长线推进：" + parts.joined(separator: " · ")
+    }
 }

@@ -26,6 +26,10 @@ struct ReviewView: View {
                     mvpSection()
                     accomplishedSection(c)
                     if c.bonusCount > 0 { Text("计划外也算赢——这些是今天的 bonus。").font(.caption).foregroundStyle(.secondary) }
+                    if let lp = model.longTaskProgress {
+                        Label(lp, systemImage: "tray.full")
+                            .font(.caption).foregroundStyle(.purple)
+                    }
                     detailsSection(c)
                     shareSummaryButton(c)
                     writeTodayButton

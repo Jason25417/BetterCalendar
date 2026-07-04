@@ -17,6 +17,7 @@ final class ReviewViewModel {
     private let comparer: PlanComparing
     private let arrangeDay: ArrangeDayUseCase
     private let localStore: ReviewLocalStore
+    private let longTasks: LongTaskStore?   // 长线推进行（M10-3）；nil=不显示
 
     var comparison: DayComparison?
     var showDetails = false        // 完成率/缺口默认隐藏，主动点才看
@@ -27,6 +28,8 @@ final class ReviewViewModel {
     var activeDayCount = 0
     var mvpTitle: String?
     var mvpNote = ""
+    /// 长线推进行（M10-3，今天动过的在途；nil=今天没动长线，不显示）。
+    var longTaskProgress: String?
 
     // 降级回填：补今天 menu bar 没抓到的 / 计划外的
     var backfillText = ""
@@ -34,11 +37,13 @@ final class ReviewViewModel {
     var backfillCommitted: Int?
 
     init(calendarStore: CalendarStore, comparer: PlanComparing,
-         arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore) {
+         arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
+         longTasks: LongTaskStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
         self.localStore = localStore
+        self.longTasks = longTasks
     }
 
     // MARK: - 对比
@@ -60,6 +65,7 @@ final class ReviewViewModel {
         activeDayCount = localStore.activeDayCount
         mvpTitle = localStore.todayMVP
         mvpNote = localStore.todayMVPNote
+        longTaskProgress = longTasks?.progressLine()
         isWorking = false
     }
 

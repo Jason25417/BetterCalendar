@@ -312,6 +312,11 @@ struct HomeView: View {
                     if let c = task.cadenceMinutesPerWeek {
                         Text("每周约 \(c / 60) 小时").font(.caption2).foregroundStyle(.secondary)
                     }
+                    let invested = container.longTasks.investedMinutes(for: task)
+                    if invested > 0 {
+                        Text("已投入 \(ReviewSummaryText.hm(invested))")
+                            .font(.caption2).foregroundStyle(.green)
+                    }
                 }
             }
             Spacer()

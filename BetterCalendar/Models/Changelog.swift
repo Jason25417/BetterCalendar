@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.12.2", date: "2026-07", changes: [
+            "「在途」累计投入（M10 完结）：抽屉里每件长线显示「已投入 X 小时」——只算做了多少，不算剩多少",
+            "复盘页新增「长线推进」行：今天动过的在途 +今日投入（累计 N 小时），随分享小结一起见证积累",
+        ]),
         ChangelogEntry(version: "0.12.1", date: "2026-07", changes: [
             "排程大脑会看「在途」了：排今天时若有空档，AI 从在途池挑 0–2 件建议排入（DDL 近的优先）",
             "建议块带 🗂 标记、删掉即今天不做——建议不是命令",
