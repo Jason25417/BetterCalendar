@@ -45,7 +45,7 @@ struct EditableBlock: Identifiable {
 enum DraftSource: String {
     case empty       // 什么都没有
     case arranged    // 刚「排今天」出的新草稿，还没确认——切日走平移、不被自动加载覆盖
-    case loaded      // 从真相源加载的已确认计划——切日即切内容，编辑后需再「确认写入」
+    case loaded      // 从真相源加载的已确认计划——切日即切内容；编辑防抖自动回写（0.15）
 }
 
 @Observable
@@ -76,6 +76,9 @@ final class HomeViewModel {
     var pendingLongTasks: [ParsedLongTask] = []
     /// 晨间 reflow「排不下」时的冲突（非 nil → 弹压缩/跳过/分割）。
     var reflowConflict: ReflowConflict?
+    /// 已确认计划最近一次自动保存时刻（0.15：编辑即回写，UI 显示反馈）。
+    private(set) var lastAutoSaved: Date?
+    @ObservationIgnored private var autoCommitTask: Task<Void, Never>?
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
@@ -143,7 +146,7 @@ final class HomeViewModel {
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
 
     /// 从真相源读**所选目标日**的已确认计划 → 可编辑列表。
-    /// 加载后的一切编辑都是「对计划日历的修改」，仍需点「确认写入」才生效（幂等覆盖当天）。
+    /// 加载后的编辑**自动保存**（0.15：防抖回写真相源+日历，不再要求二次确认）。
     /// 不显示完成状态——完成态归执行/复盘页，排日程页保持纯规划面。
     func loadConfirmedPlan() {
         let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
@@ -307,10 +310,48 @@ final class HomeViewModel {
         persistDraft()
     }
 
-    /// 用户编辑了「已加载的确认计划」→ 它变成未确认草稿：不再被 autoLoad/切日静默覆盖
-    /// （与 .arranged 同待遇：切日平移不丢、需再「确认写入」才回写）。徽章也随之从「已确认」变回「草稿」。
+    /// 编辑动作后的归属处理（0.15 语义升级，Jason 定 2026-07-04）：
+    /// - loaded（已确认计划）：**保持 loaded**，防抖 0.8s 自动回写真相源+日历——编辑即生效，不再要求二次确认；
+    /// - arranged（新草稿）：不动，仍需「确认写入」（还没入库，无从自动保存）。
     private func markEditedIfLoaded() {
-        if draftSource == .loaded { draftSource = .arranged }
+        if draftSource == .loaded { scheduleAutoCommit() }
+    }
+
+    private func scheduleAutoCommit() {
+        autoCommitTask?.cancel()
+        autoCommitTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            await self?.autoCommitNow()
+        }
+    }
+
+    /// 立即回写已确认计划的修改（防抖到点/测试同步等 共用；进入即取消挂起任务，无游离 Task）。
+    func autoCommitNow() async {
+        autoCommitTask?.cancel()
+        autoCommitTask = nil
+        guard draftSource == .loaded else { return }
+        let sorted = blocks.sorted { $0.start < $1.start }
+        do {
+            if sorted.isEmpty {
+                // 删光了 = 清空该目标日计划（日历侧留给差量写/同步收敛）
+                try planStore.replacePlanned([], on: targetDay)
+            } else {
+                let byDay = Dictionary(grouping: sorted) { Calendar.current.startOfDay(for: $0.start) }
+                for (day, dayBlocks) in byDay {
+                    try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
+                }
+                try await calendarStore.write(sorted.map {
+                    CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
+                })
+            }
+            lastAutoSaved = .now
+            persistDraft()
+            DevLog.shared.info("排程", "已确认计划的修改已自动保存（\(sorted.count) 块）")
+        } catch {
+            errorText = "自动保存失败：\(error.localizedDescription)"
+            DevLog.shared.error("排程", "自动保存失败：\(error.localizedDescription)")
+        }
     }
 
     func addBlock() {

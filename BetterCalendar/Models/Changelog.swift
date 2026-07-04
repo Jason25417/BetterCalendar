@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.15", date: "2026-07", changes: [
+            "已确认计划编辑即生效：改时间/标题/删块 0.8 秒后自动写回日历和数据库，不再需要点「确认写入」（新草稿仍需确认）",
+            "绿色徽章实时显示「改动已自动保存 · 时间」",
+        ]),
         ChangelogEntry(version: "0.14.1", date: "2026-07", changes: [
             "修复：过期的未确认草稿不再盖住「已确认计划」的自动显示（打开排日程页看不到当天计划的根因）",
             "草稿态新增「放弃草稿」：一键丢弃、回到已确认的计划",

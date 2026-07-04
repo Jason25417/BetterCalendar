@@ -119,7 +119,10 @@ struct HomeView: View {
                     Divider()
                     HStack {
                         if model.draftSource == .loaded {
-                            Label("已确认的计划 · 改动后点「确认写入」生效", systemImage: "checkmark.seal")
+                            Label(model.lastAutoSaved.map {
+                                      "已确认的计划 · 改动已自动保存 \($0.formatted(date: .omitted, time: .standard))"
+                                  } ?? "已确认的计划 · 改动自动保存",
+                                  systemImage: "checkmark.seal")
                                 .font(.subheadline.bold()).foregroundStyle(.green)
                         } else {
                             Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
