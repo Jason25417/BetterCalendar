@@ -16,6 +16,8 @@ struct SettingsView: View {
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
     @State private var journalLock: Bool = JournalSettings.privacyLock
     @State private var savedHint: String?
+    @State private var testing = false
+    @State private var testResult: String?
 
     var body: some View {
         Form {
@@ -33,6 +35,9 @@ struct SettingsView: View {
 
                 HStack {
                     Button("保存") { save() }
+                    Button("测试") { testKey() }
+                        .disabled(testing || (apiKey.isEmpty && !hasKey))
+                    if testing { ProgressView().controlSize(.small) }
                     if hasKey {
                         Button("清除 key", role: .destructive) {
                             KeychainStore.deleteAPIKey(); hasKey = false; savedHint = "已清除 key"
@@ -41,6 +46,10 @@ struct SettingsView: View {
                     if let hint = savedHint {
                         Text(hint).font(.caption).foregroundStyle(.green)
                     }
+                }
+                if let result = testResult {
+                    Text(result).font(.caption)
+                        .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
                 }
 
                 Text("key 存系统 Keychain，不进 git。在 console.anthropic.com 创建。")
@@ -77,6 +86,22 @@ struct SettingsView: View {
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 420)
         #endif
+    }
+
+    /// 测试 API key：输入框有内容测输入框的（未保存也能测），否则测已保存的。
+    private func testKey() {
+        let candidate = apiKey.isEmpty ? (KeychainStore.loadAPIKey() ?? "") : apiKey
+        guard !candidate.isEmpty else { return }
+        testing = true; testResult = nil
+        let m = model
+        Task {
+            let r = await AnthropicClient.test(key: candidate, model: m)
+            switch r {
+            case .success(let model): testResult = "✅ key 有效 · \(model) 可用"
+            case .failure(let e): testResult = "❌ \(e.message)"
+            }
+            testing = false
+        }
     }
 
     private func save() {

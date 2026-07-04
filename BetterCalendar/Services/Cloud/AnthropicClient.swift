@@ -18,6 +18,19 @@ struct AnthropicClient {
     var model: () -> String = { CloudSettings.model }
     var useCloud: () -> Bool = { CloudSettings.useCloud }
 
+    /// 连通性测试（设置页「测试」按钮）：最小请求验证 key + 模型可用。成功返回模型名。
+    static func test(key: String, model: String) async -> Result<String, AnthropicError> {
+        let probe = AnthropicClient(apiKey: { key }, model: { model }, useCloud: { true })
+        do {
+            _ = try await probe.complete(system: "只回复 ok", user: "ping", maxTokens: 64)
+            return .success(model)
+        } catch let e as AnthropicError {
+            return .failure(e)
+        } catch {
+            return .failure(AnthropicError(message: error.localizedDescription))
+        }
+    }
+
     /// 一次问答。返回模型的纯文本。
     func complete(system: String, user: String, maxTokens: Int = 2048) async throws -> String {
         guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
