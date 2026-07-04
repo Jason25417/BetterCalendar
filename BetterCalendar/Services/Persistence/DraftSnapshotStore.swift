@@ -48,6 +48,7 @@ nonisolated struct DraftSnapshot: Codable {
     var blocks: [Block] = []
     var pendingLongTasks: [PendingLongTask] = []
     var savedAt: Date = .now
+    var dirty: Bool? = nil   // 0.16：是否含未保存修改（optional 兼容旧快照）
 }
 
 @MainActor

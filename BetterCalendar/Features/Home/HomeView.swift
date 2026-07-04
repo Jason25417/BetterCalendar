@@ -92,6 +92,18 @@ struct HomeView: View {
                 if let err = model.errorText {
                     Text(err).font(.callout).foregroundStyle(.red)
                 }
+                if let snap = model.pendingRestore {
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath").font(.caption).foregroundStyle(.secondary)
+                        Text("上次有未保存的修改（为 \(Self.dayLabel(snap.targetDay)) · 存于 \(snap.savedAt.formatted(date: .omitted, time: .shortened))）")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("恢复") { model.applyPendingRestore() }
+                            .font(.caption).buttonStyle(.plain).foregroundStyle(.blue).underline()
+                        Button("丢弃") { model.dismissPendingRestore() }
+                            .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+                        Spacer()
+                    }
+                }
 
                 ongoingSection
 
@@ -118,18 +130,16 @@ struct HomeView: View {
                 if !model.blocks.isEmpty {
                     Divider()
                     HStack {
-                        if model.draftSource == .loaded {
-                            Label(model.lastAutoSaved.map {
-                                      "已确认的计划 · 改动已自动保存 \($0.formatted(date: .omitted, time: .standard))"
-                                  } ?? "已确认的计划 · 改动自动保存",
-                                  systemImage: "checkmark.seal")
-                                .font(.subheadline.bold()).foregroundStyle(.green)
-                        } else {
-                            Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
-                            Button("放弃草稿") { model.discardDraft() }
+                        if model.hasUnsavedChanges {
+                            Label("未保存修改 · 点「确认写入」保存", systemImage: "pencil.circle")
+                                .font(.subheadline.bold()).foregroundStyle(.orange)
+                            Button("放弃修改") { model.discardDraft() }
                                 .font(.caption).foregroundStyle(.secondary)
                                 .buttonStyle(.plain).underline()
-                                .help("丢掉这份未确认草稿，回到已确认的计划")
+                                .help("不保存，回到已保存的计划")
+                        } else {
+                            Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
+                                .font(.subheadline.bold()).foregroundStyle(.green)
                         }
                         Spacer()
                         #if !os(macOS)
@@ -169,7 +179,7 @@ struct HomeView: View {
                                   systemImage: "checkmark.circle")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(model.isWorking)
+                        .disabled(model.isWorking || !model.hasUnsavedChanges)
                         #if os(macOS)
                         Button { exportICS() } label: {
                             Label("导出 ICS", systemImage: "square.and.arrow.up")
@@ -261,10 +271,10 @@ struct HomeView: View {
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
             .onChange(of: model.targetDay) { _, newDay in
-                if model.draftSource == .arranged {
-                    model.shiftDraftsToDay(newDay)   // 未确认的新草稿跟人走：平移到新日、不丢
+                if model.hasUnsavedChanges {
+                    model.shiftDraftsToDay(newDay)   // 未保存的修改跟人走：平移到新日、不丢
                 } else {
-                    model.loadConfirmedPlan()        // 已确认视图：切目标日 = 加载那天的计划
+                    model.loadConfirmedPlan()        // 已保存视图：切目标日 = 加载那天的计划
                 }
             }
             .confirmationDialog(

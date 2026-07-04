@@ -76,9 +76,10 @@ final class HomeViewModel {
     var pendingLongTasks: [ParsedLongTask] = []
     /// 晨间 reflow「排不下」时的冲突（非 nil → 弹压缩/跳过/分割）。
     var reflowConflict: ReflowConflict?
-    /// 已确认计划最近一次自动保存时刻（0.15：编辑即回写，UI 显示反馈）。
-    private(set) var lastAutoSaved: Date?
-    @ObservationIgnored private var autoCommitTask: Task<Void, Never>?
+    /// 未保存修改（0.16 文件模型，D-f）：任何编辑/新草稿置真；「确认写入」=保存清零。
+    private(set) var hasUnsavedChanges = false
+    /// 上次退出时留下的未保存修改（D-g：不自动还原，顶部小字邀请「恢复/丢弃」）。
+    private(set) var pendingRestore: DraftSnapshot?
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
@@ -111,34 +112,49 @@ final class HomeViewModel {
                 DraftSnapshot.PendingLongTask(title: $0.title, deadline: $0.deadline,
                                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
             },
-            savedAt: .now))
+            savedAt: .now,
+            dirty: hasUnsavedChanges))
     }
 
-    /// 启动还原：**新鲜的**未确认草稿（arranged 且目标日未过期）整份还原；否则只还原输入框文本
-    /// （已确认计划由 autoLoadOnAppear 从真相源重新加载，快照不越权——
-    ///  0.14.1 修复：过期草稿曾永远盖住已确认计划的自动加载）。
+    /// 启动检查（0.16，D-g）：**永远先显示已保存态**；上次退出时若留有未保存修改，
+    /// 只存入 pendingRestore——顶部一行小字邀请「恢复/丢弃」，点了恢复才应用。
+    /// （取代旧的自动还原：消灭「过期快照盖住已保存计划」整类问题，新鲜度检查随之删除。）
     private func restoreDraftIfAny() {
         guard let snap = draftStore?.load() else { return }
         inputText = snap.inputText
-        let cal = Calendar.current
-        let fresh = cal.startOfDay(for: snap.targetDay) >= cal.startOfDay(for: .now)
-        if snap.draftSourceRaw == DraftSource.arranged.rawValue, !snap.blocks.isEmpty, fresh {
-            blocks = snap.blocks.map(\.editable)
-            targetDay = snap.targetDay
-            draftSource = .arranged
-            pendingLongTasks = snap.pendingLongTasks.map {
-                ParsedLongTask(title: $0.title, deadline: $0.deadline,
-                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
-            }
+        let wasDirty = snap.dirty ?? (snap.draftSourceRaw == DraftSource.arranged.rawValue)
+        if wasDirty, !snap.blocks.isEmpty {
+            pendingRestore = snap
         }
     }
 
-    /// 放弃当前未确认草稿 → 回到该目标日的已确认计划视图。
+    /// 用户点「恢复」：应用上次未保存的修改。
+    func applyPendingRestore() {
+        guard let snap = pendingRestore else { return }
+        blocks = snap.blocks.map(\.editable)
+        targetDay = snap.targetDay
+        draftSource = DraftSource(rawValue: snap.draftSourceRaw) ?? .arranged
+        pendingLongTasks = snap.pendingLongTasks.map {
+            ParsedLongTask(title: $0.title, deadline: $0.deadline,
+                           cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+        }
+        hasUnsavedChanges = true
+        pendingRestore = nil
+    }
+
+    /// 用户点「丢弃」：清掉恢复入口并以当前（已保存）状态覆盖快照。
+    func dismissPendingRestore() {
+        pendingRestore = nil
+        persistDraft()
+    }
+
+    /// 放弃未保存修改 → 回到该目标日的已保存计划（文件模型的「不保存关闭」）。
     func discardDraft() {
         blocks = []
         pendingLongTasks = []
         note = nil
         draftSource = .empty
+        hasUnsavedChanges = false
         loadConfirmedPlan()
         persistDraft()
     }
@@ -157,12 +173,13 @@ final class HomeViewModel {
         }
         blocks = stored.map(EditableBlock.init(from:))
         draftSource = .loaded
+        hasUnsavedChanges = false
         committedCount = nil
     }
 
-    /// 进入排日程页时自动加载（不覆盖还没确认的新草稿）。
+    /// 进入排日程页时自动加载已保存计划（有未保存修改时绝不覆盖——文件模型）。
     func autoLoadOnAppear() {
-        guard draftSource != .arranged else { return }
+        guard !hasUnsavedChanges else { return }
         loadConfirmedPlan()
     }
 
@@ -206,6 +223,7 @@ final class HomeViewModel {
             draftSource = .arranged
             note = outcome.decision.note
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
+            hasUnsavedChanges = true
             persistDraft()
         } catch {
             errorText = "排程失败：\(error.localizedDescription)"
@@ -223,6 +241,7 @@ final class HomeViewModel {
         blocks = result.sorted { $0.start < $1.start }.map(EditableBlock.init(from:))
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
+        hasUnsavedChanges = true
         persistDraft()
         isWorking = false
     }
@@ -257,7 +276,8 @@ final class HomeViewModel {
                                    cadenceMinutesPerWeek: p.cadenceMinutesPerWeek)
             }
             pendingLongTasks = []
-            persistDraft()   // 已确认：快照降级为只还原输入文本
+            hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
+            persistDraft()
             // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
             let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
             await notifier.requestAuthorizationIfNeeded()
@@ -286,6 +306,7 @@ final class HomeViewModel {
                     : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
+            hasUnsavedChanges = true
             persistDraft()
         } catch {
             errorText = "重排失败：\(error.localizedDescription)"
@@ -310,48 +331,9 @@ final class HomeViewModel {
         persistDraft()
     }
 
-    /// 编辑动作后的归属处理（0.15 语义升级，Jason 定 2026-07-04）：
-    /// - loaded（已确认计划）：**保持 loaded**，防抖 0.8s 自动回写真相源+日历——编辑即生效，不再要求二次确认；
-    /// - arranged（新草稿）：不动，仍需「确认写入」（还没入库，无从自动保存）。
+    /// 标记未保存修改（0.16 文件模型：任何来源的编辑都不自动写库——「确认写入」才保存）。
     private func markEditedIfLoaded() {
-        if draftSource == .loaded { scheduleAutoCommit() }
-    }
-
-    private func scheduleAutoCommit() {
-        autoCommitTask?.cancel()
-        autoCommitTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(800))
-            guard !Task.isCancelled else { return }
-            await self?.autoCommitNow()
-        }
-    }
-
-    /// 立即回写已确认计划的修改（防抖到点/测试同步等 共用；进入即取消挂起任务，无游离 Task）。
-    func autoCommitNow() async {
-        autoCommitTask?.cancel()
-        autoCommitTask = nil
-        guard draftSource == .loaded else { return }
-        let sorted = blocks.sorted { $0.start < $1.start }
-        do {
-            if sorted.isEmpty {
-                // 删光了 = 清空该目标日计划（日历侧留给差量写/同步收敛）
-                try planStore.replacePlanned([], on: targetDay)
-            } else {
-                let byDay = Dictionary(grouping: sorted) { Calendar.current.startOfDay(for: $0.start) }
-                for (day, dayBlocks) in byDay {
-                    try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
-                }
-                try await calendarStore.write(sorted.map {
-                    CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
-                })
-            }
-            lastAutoSaved = .now
-            persistDraft()
-            DevLog.shared.info("排程", "已确认计划的修改已自动保存（\(sorted.count) 块）")
-        } catch {
-            errorText = "自动保存失败：\(error.localizedDescription)"
-            DevLog.shared.error("排程", "自动保存失败：\(error.localizedDescription)")
-        }
+        hasUnsavedChanges = true
     }
 
     func addBlock() {

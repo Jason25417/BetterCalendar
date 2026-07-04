@@ -379,24 +379,26 @@ struct LogicTests {
         vm1.draftSource = .arranged
         vm1.pendingLongTasks = [ParsedLongTask(title: "交论文", deadline: at(2026,7,11,22),
                                                cadenceMinutesPerWeek: nil)]
+        vm1.delete(id: UUID())   // 触发 markDirty（不删任何块，仅置未保存标记）
         vm1.persistDraft()
 
-        // 第二个 VM（模拟崩溃后重启）：整份还原
+        // 第二个 VM（模拟重启，0.16 文件模型）：**不自动还原**，只给恢复入口
         let vm2 = Self.makeHomeVM(planStore: planStore, draftStore: store)
         #expect(vm2.inputText == "写代码两小时，下午健身")
-        #expect(vm2.draftSource == .arranged)
+        #expect(vm2.blocks.isEmpty)                 // 默认显示已保存态
+        #expect(vm2.pendingRestore != nil)          // 小字入口在
+        vm2.applyPendingRestore()                   // 点「恢复」
+        #expect(vm2.hasUnsavedChanges == true)
         #expect(vm2.blocks.count == 1)
         #expect(vm2.blocks.first?.title == "写代码")
-        #expect(vm2.blocks.first?.priority == .important)
         #expect(vm2.pendingLongTasks.first?.title == "交论文")
 
-        // 已确认（loaded）状态的快照 → 重启只还原输入文本，块交给真相源自动加载
-        vm2.draftSource = .loaded
-        vm2.persistDraft()
+        // 干净（已保存）状态的快照 → 重启无恢复入口
+        vm2.discardDraft()
         let vm3 = Self.makeHomeVM(planStore: planStore, draftStore: store)
         #expect(vm3.inputText == "写代码两小时，下午健身")
         #expect(vm3.blocks.isEmpty)
-        #expect(vm3.draftSource == .empty)
+        #expect(vm3.pendingRestore == nil)
     }
 
     // MARK: 排X天按钮文案（目标日口语词）
@@ -682,9 +684,10 @@ struct LogicTests {
         #expect(vm.blocks.count == 2)
         #expect(vm.draftSource == .loaded)
 
-        // 未确认的新草稿（arranged）不被自动加载覆盖
+        // 未保存的修改（0.16 文件模型：脏标）不被自动加载覆盖
         vm.blocks = [EditableBlock(title: "新草稿", start: day, end: day.addingTimeInterval(3600))]
         vm.draftSource = .arranged
+        vm.delete(id: UUID())   // 走编辑入口置脏（不删任何块）
         vm.autoLoadOnAppear()
         #expect(vm.blocks.count == 1)
         #expect(vm.blocks.first?.title == "新草稿")
@@ -698,7 +701,7 @@ struct LogicTests {
     }
 
     /// 修复回归：编辑「已加载的确认计划」后未点确认 → 切 tab / 再次进页不能静默丢弃编辑。
-    @Test func homeAutoSavesEditsToLoadedPlan() async throws {
+    @Test func homeFileModelKeepsEditsUnsavedUntilConfirm() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
@@ -710,18 +713,29 @@ struct LogicTests {
         ], on: day)
         vm.targetDay = day
         vm.autoLoadOnAppear()
-        #expect(vm.draftSource == .loaded)
+        #expect(vm.hasUnsavedChanges == false)   // 打开 = 已保存态
         #expect(vm.blocks.count == 2)
 
-        // 0.15：编辑已加载计划（删一项）→ **保持已确认视图**，自动回写真相源
+        // 0.16 文件模型：编辑 → 未保存修改；真相源**不动**
         vm.delete(id: vm.blocks[0].id)
-        #expect(vm.draftSource == .loaded)
-        await vm.autoCommitNow()   // 冲掉防抖直接落盘（也取消挂起任务，防游离 Task）
-        #expect(try store.plannedBlocks(on: day).count == 1)   // 真相源已更新
+        #expect(vm.hasUnsavedChanges == true)
+        #expect(try store.plannedBlocks(on: day).count == 2)   // 库仍是保存前的 2 项
+
+        // 有未保存修改时，重进页不被已保存态覆盖
+        vm.autoLoadOnAppear()
+        #expect(vm.blocks.count == 1)
+
+        // 确认写入 = 保存 → 库更新、dirty 清零
+        await vm.confirm()
+        #expect(vm.hasUnsavedChanges == false)
+        #expect(try store.plannedBlocks(on: day).count == 1)
         #expect(try store.plannedBlocks(on: day).first?.title == "健身")
 
-        // 再次进页 → 重载出的就是保存后的 1 项（编辑即真相，不存在"被覆盖"）
-        vm.autoLoadOnAppear()
+        // 放弃修改 = 回到已保存态
+        vm.delete(id: vm.blocks[0].id)
+        #expect(vm.hasUnsavedChanges == true)
+        vm.discardDraft()
+        #expect(vm.hasUnsavedChanges == false)
         #expect(vm.blocks.count == 1)
     }
 
