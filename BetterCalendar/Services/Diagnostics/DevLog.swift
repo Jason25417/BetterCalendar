@@ -28,10 +28,15 @@ final class DevLog {
     /// 最近一条 警告/错误（首页横幅用）。
     var lastIssue: Entry? { entries.last { $0.level != .info } }
 
+    /// 外挂 sink（0.14：LogSyncService 收走进 CloudKit 跨端日志）。
+    var onAppend: ((Entry) -> Void)?
+
     func log(_ level: Level, _ source: String, _ message: String) {
-        entries.append(Entry(level: level, source: source, message: message))
+        let entry = Entry(level: level, source: source, message: message)
+        entries.append(entry)
         if entries.count > 300 { entries.removeFirst(entries.count - 300) }
         print("[\(level.rawValue.uppercased())] \(source): \(message)")  // 也进 Xcode 控制台
+        onAppend?(entry)
     }
 
     func info(_ source: String, _ message: String) { log(.info, source, message) }

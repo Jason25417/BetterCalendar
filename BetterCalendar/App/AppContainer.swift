@@ -30,6 +30,7 @@ final class AppContainer {
     let planStore: PlanStore                   // 计划块真相源（SwiftData，reflow 读元数据）
     let longTasks: LongTaskStore               // 「在途」池：跨日任务/长线作业（M10）
     let draftSnapshots = DraftSnapshotStore()  // 排日程草稿快照（崩溃/重启还原）
+    let logSync: LogSyncService                // 跨端日志：DevLog→CloudKit→(Mac)容器纯文本
     let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
@@ -71,6 +72,8 @@ final class AppContainer {
                                             planStore: planStore, reminderStore: routingReminder,
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore())
+        self.logSync = LogSyncService()
+        logSync.start()
         calendarSync.start()
     }
 

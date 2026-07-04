@@ -312,6 +312,31 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 跨端日志（DeviceLog：追加/保留7天）
+
+    @Test func logSyncFlushAppendsAndPrunesOldDays() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: DeviceLog.self, configurations: config)
+        let sync = LogSyncService(context: container.mainContext)
+        sync.dumpEnabled = false
+        // 旧记录（10 天前）应被清
+        container.mainContext.insert(DeviceLog(deviceID: "x", deviceName: "old", dayKey: "2026-06-20"))
+        try container.mainContext.save()
+
+        sync.start()
+        DevLog.shared.info("测试", "第一条")
+        DevLog.shared.warn("测试", "第二条")
+        sync.flush(now: at(2026,7,5,12))
+        DevLog.shared.onAppend = nil   // 摘钩，别影响其它测试
+
+        let logs = try container.mainContext.fetch(FetchDescriptor<DeviceLog>())
+        #expect(logs.count == 1)                          // 旧的清了、今天的建了
+        let today = logs.first { $0.dayKey == "2026-07-05" }
+        #expect(today != nil)
+        #expect(today?.text.contains("第一条") == true)
+        #expect(today?.text.contains("[WARNING] 测试: 第二条") == true)
+    }
+
     // MARK: 草稿快照（崩溃/重启还原）
 
     @Test func draftSnapshotPersistsAndRestoresUnconfirmedDraft() throws {
