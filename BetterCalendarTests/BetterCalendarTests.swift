@@ -299,6 +299,43 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 「在途」池（M10：LongTask 跨日任务/长线作业）
+
+    @Test func longTaskStoreAddsDedupsAndLifecycles() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let ddl = at(2026,7,11,22)
+        store.add(title: "交论文", deadline: ddl)
+        store.add(title: "学 Swift", cadenceMinutesPerWeek: 300)
+        #expect(store.active().count == 2)
+        #expect(store.active().first?.title == "交论文")          // 有 DDL 的排前
+        // 幂等：同名再确认一次 → 不重复、只更新 DDL
+        store.add(title: "交论文", deadline: at(2026,7,12,22))
+        #expect(store.active().count == 2)
+        #expect(store.active().first?.deadline == at(2026,7,12,22))
+        // 生命周期：完成/放下出池；改期顺延
+        let swift = store.active().first { $0.title == "学 Swift" }!
+        store.pushDeadline(swift, days: 7)
+        #expect(swift.deadline != nil)
+        store.complete(store.active().first!)
+        #expect(store.active().count == 1)
+        store.shelve(store.active().first!)
+        #expect(store.active().isEmpty)
+    }
+
+    @Test func longTaskOverdueQuery() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        store.add(title: "早该交的", deadline: at(2026,7,1,22))
+        store.add(title: "还早", deadline: at(2026,12,1,22))
+        store.add(title: "无 DDL")
+        let od = store.overdue(now: at(2026,7,4,12))
+        #expect(od.count == 1)
+        #expect(od.first?.title == "早该交的")
+    }
+
     // MARK: 标记完成（MarkDone Intent → ExecutionViewModel.markDone）
 
     @Test func markDoneRecordsActualForMatchingPlannedBlock() async throws {

@@ -86,8 +86,17 @@ struct ParsedBlock: Sendable, Identifiable {
     var deadline: Date?
 }
 
+/// 解析出的「在途」长期事项提案（M10）：远期 DDL 任务 / 长线作业，确认写入时入池。
+struct ParsedLongTask: Sendable, Identifiable {
+    var id = UUID()
+    var title: String
+    var deadline: Date?
+    var cadenceMinutesPerWeek: Int?
+}
+
 struct ParsedPlan: Sendable {
     var blocks: [ParsedBlock] = []
+    var longTasks: [ParsedLongTask] = []   // 长期事项另放（不占当日块）
 }
 
 /// 排程大脑的「已定时」块（已有明确起止）。

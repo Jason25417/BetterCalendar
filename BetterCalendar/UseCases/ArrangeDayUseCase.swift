@@ -12,8 +12,14 @@ struct ArrangeDayUseCase {
     let parser: ScheduleParsing
     let planner: PlanningEngine
 
+    /// 完整产出：当日排程决策 + 识别到的长期事项提案（M10「在途」）。
+    struct Outcome {
+        var decision: PlanDecision
+        var longTasks: [ParsedLongTask] = []
+    }
+
     /// referenceDate = 解析相对时间的基准日（排哪天就传哪天）；now = 排序用的此刻。
-    func callAsFunction(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> PlanDecision {
+    func full(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> Outcome {
         let parsed = try await parser.parse(text, referenceDate: referenceDate)
         let scheduled: [ScheduledBlock] = parsed.blocks.compactMap { pb in
             guard let start = pb.start, let end = pb.end else { return nil }
@@ -21,6 +27,12 @@ struct ArrangeDayUseCase {
                                   isFixed: pb.isFixed, timingStyle: pb.timingStyle,
                                   priority: pb.priority, deadline: pb.deadline)
         }
-        return try await planner.arrange(scheduled, now: now)
+        let decision = try await planner.arrange(scheduled, now: now)
+        return Outcome(decision: decision, longTasks: parsed.longTasks)
+    }
+
+    /// 兼容旧调用（复盘回填等只要决策）。
+    func callAsFunction(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> PlanDecision {
+        try await full(text: text, referenceDate: referenceDate, now: now).decision
     }
 }

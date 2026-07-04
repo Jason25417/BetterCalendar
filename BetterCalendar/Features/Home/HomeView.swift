@@ -46,7 +46,8 @@ struct HomeView: View {
             exporter: container.exporter,
             planStore: container.planStore,
             reschedule: container.reschedule,
-            notifier: container.notifier))
+            notifier: container.notifier,
+            longTaskStore: container.longTasks))
     }
 
     var body: some View {
@@ -81,9 +82,16 @@ struct HomeView: View {
                 if let note = model.note {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                 }
+                if !model.pendingLongTasks.isEmpty {
+                    Label("识别到长期事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「在途」",
+                          systemImage: "tray.and.arrow.down")
+                        .font(.caption).foregroundStyle(.purple)
+                }
                 if let err = model.errorText {
                     Text(err).font(.callout).foregroundStyle(.red)
                 }
+
+                ongoingSection
 
                 // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
                 if let issue = DevLog.shared.lastIssue {
@@ -245,6 +253,91 @@ struct HomeView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    // MARK: 「在途」（M10）：跨日任务池——收起一行，点开轻抽屉；不做管理界面，只做决策现场的入口
+
+    @State private var ongoingExpanded = false
+    @State private var newOngoingTitle = ""
+
+    @ViewBuilder private var ongoingSection: some View {
+        let store = container.longTasks
+        DisclosureGroup(isExpanded: $ongoingExpanded) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(store.items) { task in
+                        ongoingRow(task, overdue: (task.deadline ?? .distantFuture) < .now)
+                    }
+                    HStack {
+                        TextField("手动加一件（主路径是直接在上面说）", text: $newOngoingTitle)
+                            .textFieldStyle(.roundedBorder)
+                        Button("加入") {
+                            let t = newOngoingTitle.trimmingCharacters(in: .whitespaces)
+                            guard !t.isEmpty else { return }
+                            store.add(title: t)
+                            newOngoingTitle = ""
+                        }
+                        .disabled(newOngoingTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    .font(.caption)
+                }
+                .padding(.top, 4)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "tray.full").foregroundStyle(.purple)
+                    if store.items.isEmpty {
+                        Text("在途 · 空").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("在途 \(store.items.count) 件"
+                             + nearestDDLLabel(store.items)).font(.caption)
+                    }
+                }
+            }
+    }
+
+    private func nearestDDLLabel(_ items: [LongTask]) -> String {
+        guard let next = items.compactMap(\.deadline).min() else { return "" }
+        return " · 最近：\(next.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated)))"
+    }
+
+    private func ongoingRow(_ task: LongTask, overdue: Bool) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(task.title).font(.callout)
+                HStack(spacing: 6) {
+                    if let d = task.deadline {
+                        Text((overdue ? "原定 " : "DDL ") + d.formatted(.dateTime.month(.defaultDigits).day()))
+                            .font(.caption2)
+                            .foregroundStyle(overdue ? .orange : .secondary)
+                    }
+                    if let c = task.cadenceMinutesPerWeek {
+                        Text("每周约 \(c / 60) 小时").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Spacer()
+            if overdue {
+                // 温和三选（D-d 拍板）：不留红色残留、放下也是体面出口
+                Button("今天排上") { model.addBlockFromLongTask(task.title) }
+                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                Button("推一周") { container.longTasks.pushDeadline(task) }
+                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                Button("先放下") { container.longTasks.shelve(task) }
+                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+            } else {
+                Menu {
+                    Button("排进今天") { model.addBlockFromLongTask(task.title) }
+                    Button("做成了 🎉") { container.longTasks.complete(task) }
+                    Button("推一周") { container.longTasks.pushDeadline(task) }
+                    Button("先放下") { container.longTasks.shelve(task) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.caption)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+            }
+        }
+        .padding(6)
+        .background((overdue ? Color.orange : Color.purple).opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改

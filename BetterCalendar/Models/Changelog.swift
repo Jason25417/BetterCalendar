@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.12", date: "2026-07", changes: [
+            "新「在途」（M10 第一步）：远期 DDL 任务和长线作业有地方待了——说「下周五前交论文」会自动识别、确认时入池",
+            "排日程页顶部收起一行「在途 N 件」，点开可 排进今天/做成/推一周/先放下；DDL 过了温和三选，不见红",
+            "在途随 iCloud 跨端同步（⚠️ 需重新 Deploy CloudKit schema）",
+        ]),
         ChangelogEntry(version: "0.11", date: "2026-07", changes: [
             "iOS 主屏小组件「今天」：正在做 / 接下来 / 今日做成 N 件（正反馈口径，不显完成率），执行动作后即时刷新",
             "iOS 控制中心控件：一键「完成当前 / 开始下一件」",

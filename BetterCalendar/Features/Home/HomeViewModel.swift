@@ -57,6 +57,7 @@ final class HomeViewModel {
     private let planStore: PlanStore
     private let reschedule: RescheduleService
     private let notifier: NotificationScheduling
+    private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
 
     var inputText: String = ""
     var refineText: String = ""
@@ -69,12 +70,15 @@ final class HomeViewModel {
     var errorText: String?
     var committedCount: Int?
     var committedToReal: Bool = false
+    /// 解析识别到、待确认入池的长期事项（确认写入时入「在途」）。
+    var pendingLongTasks: [ParsedLongTask] = []
     /// 晨间 reflow「排不下」时的冲突（非 nil → 弹压缩/跳过/分割）。
     var reflowConflict: ReflowConflict?
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
-         planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling) {
+         planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling,
+         longTaskStore: LongTaskStore? = nil) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -83,6 +87,7 @@ final class HomeViewModel {
         self.planStore = planStore
         self.reschedule = reschedule
         self.notifier = notifier
+        self.longTaskStore = longTaskStore
     }
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
@@ -122,10 +127,11 @@ final class HomeViewModel {
         isWorking = true; errorText = nil; committedCount = nil
         do {
             // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
-            let decision = try await arrangeDay(text: trimmed, referenceDate: targetDay)
-            blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+            let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay)
+            blocks = outcome.decision.orderedBlocks.map(EditableBlock.init(from:))
             draftSource = .arranged
-            note = decision.note
+            note = outcome.decision.note
+            pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
         } catch {
             errorText = "排程失败：\(error.localizedDescription)"
         }
@@ -168,6 +174,12 @@ final class HomeViewModel {
             committedCount = drafts.count
             committedToReal = (CalendarSettings.backend == .eventKit)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
+            // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
+            for p in pendingLongTasks {
+                longTaskStore?.add(title: p.title, deadline: p.deadline,
+                                   cadenceMinutesPerWeek: p.cadenceMinutesPerWeek)
+            }
+            pendingLongTasks = []
             // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
             let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
             await notifier.requestAuthorizationIfNeeded()
@@ -228,6 +240,14 @@ final class HomeViewModel {
         let start = blocks.map(\.end).max() ?? Date()
         blocks.append(EditableBlock(title: "新事项", start: start, end: start.addingTimeInterval(3600)))
         committedCount = nil; markEditedIfLoaded()
+    }
+
+    /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
+    func addBlockFromLongTask(_ title: String) {
+        let start = blocks.map(\.end).max() ?? Date()
+        blocks.append(EditableBlock(title: title, start: start, end: start.addingTimeInterval(3600)))
+        committedCount = nil; markEditedIfLoaded()
+        if draftSource == .empty { draftSource = .arranged }   // 空列表加块 = 新草稿
     }
 
     func move(_ source: IndexSet, _ destination: Int) {
