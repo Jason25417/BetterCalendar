@@ -194,7 +194,8 @@ final class HomeViewModel {
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
         isWorking = true; committedCount = nil
         let scheduled = blocks.map(\.scheduled)
-        let result = (try? await refiner.refine(scheduled, command: cmd, now: .now)) ?? scheduled
+        let result = (try? await refiner.refine(scheduled, command: cmd,
+                                                originalRequest: inputText, now: .now)) ?? scheduled
         blocks = result.sorted { $0.start < $1.start }.map(EditableBlock.init(from:))
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""

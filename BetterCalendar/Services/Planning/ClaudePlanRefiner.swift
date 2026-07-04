@@ -21,7 +21,8 @@ struct ClaudePlanRefiner: PlanRefining {
         let isFixed: Bool?; let timingStyle: String?; let priority: String?
     }
 
-    func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] {
+    func refine(_ blocks: [ScheduledBlock], command: String,
+                originalRequest: String, now: Date) async throws -> [ScheduledBlock] {
         let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, !blocks.isEmpty else { return blocks }
         do {
@@ -30,10 +31,16 @@ struct ClaudePlanRefiner: PlanRefining {
                          isFixed: $0.isFixed, timingStyle: $0.timingStyle.rawValue, priority: $0.priority.rawValue)
             }
             let listing = String(data: try JSONEncoder().encode(["blocks": out]), encoding: .utf8) ?? "{}"
+            let req = originalRequest.trimmingCharacters(in: .whitespacesAndNewlines)
+            let reqSection = req.isEmpty ? "" : """
+            用户最初的排程需求（这些约束仍然有效，调整时不要违背）：
+            \(req)
+
+            """
             let user = """
-            当前日程：\(listing)
+            \(reqSection)当前日程：\(listing)
             用户调整指令：\(cmd)
-            按指令修改对应块（时间/标题/固定/计时风格/优先级），未提到的块保持不变。
+            按指令修改对应块（时间/标题/固定/计时风格/优先级），未提到的块保持不变，且不违背最初需求里的约束（如娱乐时长下限、结束时间等）。
             只输出 JSON：{"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"timingStyle":"light","priority":"normal"}]}
             """
             let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 1500)

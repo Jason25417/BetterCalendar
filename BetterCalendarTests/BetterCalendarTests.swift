@@ -105,9 +105,9 @@ struct LogicTests {
         let refiner = ClaudePlanRefiner(client: noKey)
         let now = Date()
         let block = ScheduledBlock(title: "x", start: now, end: now.addingTimeInterval(3600))
-        let onFailure = try await refiner.refine([block], command: "把x挪到下午", now: now)
+        let onFailure = try await refiner.refine([block], command: "把x挪到下午", originalRequest: "写一天代码", now: now)
         #expect(onFailure.count == 1)            // 云端失败 → 原样
-        let onEmpty = try await refiner.refine([block], command: "  ", now: now)
+        let onEmpty = try await refiner.refine([block], command: "  ", originalRequest: "", now: now)
         #expect(onEmpty.count == 1)              // 空指令 → 原样
     }
 
@@ -665,7 +665,8 @@ struct LogicTests {
     private static func makeHomeVM(planStore: PlanStore,
                                    draftStore: DraftSnapshotStore? = nil) -> HomeViewModel {
         struct NoRefine: PlanRefining {
-            func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] { blocks }
+            func refine(_ blocks: [ScheduledBlock], command: String,
+                        originalRequest: String, now: Date) async throws -> [ScheduledBlock] { blocks }
         }
         struct NoNotify: NotificationScheduling {
             func requestAuthorizationIfNeeded() async {}

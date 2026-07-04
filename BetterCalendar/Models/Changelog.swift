@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.13", date: "2026-07", changes: [
+            "「AI 调整」现在记得你最初的要求：微调时不会违背原始约束（如娱乐时长下限、结束时间）",
+            "修复：目标日锚定——排 5 号的日程不会再跑到 6 号（真实时间与目标日分开告知 AI）",
+            "支持并行日程：明确说「这几件可以并行/同时做」时，AI 会把它们排成重叠时段",
+        ]),
         ChangelogEntry(version: "0.12.4", date: "2026-07", changes: [
             "排日程草稿随时落盘：输入框文字和 AI 排出的未确认草稿逐次保存，崩溃/强退/重启后打开自动还原到之前的画面",
         ]),

@@ -9,5 +9,7 @@
 import Foundation
 
 protocol PlanRefining {
-    func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock]
+    /// originalRequest = 用户最初的排程原文（约束上下文，微调不违背；可空串）。
+    func refine(_ blocks: [ScheduledBlock], command: String,
+                originalRequest: String, now: Date) async throws -> [ScheduledBlock]
 }
