@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.13.2", date: "2026-07", changes: [
+            "iOS：草稿区新增「放大」按钮——全屏浏览/编辑/拖动排序日程块，改完点完成回来（小窗不再挤）",
+        ]),
         ChangelogEntry(version: "0.13.1", date: "2026-07", changes: [
             "排程会看你的真实日历了：目标日已有的日程（其它日历的会议等）作为已占用时段，AI 自动避开",
             "目标日到期的提醒事项也会纳入考虑（不硬塞，只是知道）——真日历模式下生效",

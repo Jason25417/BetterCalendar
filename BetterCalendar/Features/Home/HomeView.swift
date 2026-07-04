@@ -32,6 +32,7 @@ struct HomeView: View {
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     #if !os(macOS)
     @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
+    @State private var showDraftExpanded = false   // iOS 草稿全屏浏览/编辑（小窗太挤）
     #endif
     // 实时跟随设置里的日历后端开关（按钮文字热切换）
     @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
@@ -124,6 +125,12 @@ struct HomeView: View {
                             Text("草稿 · 可拖动排序、直接编辑").font(.subheadline.bold())
                         }
                         Spacer()
+                        #if !os(macOS)
+                        Button { showDraftExpanded = true } label: {
+                            Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
+                        }
+                        .font(.caption)
+                        #endif
                         Button { model.addBlock() } label: { Label("加一项", systemImage: "plus") }
                             .font(.caption)
                     }
@@ -189,6 +196,28 @@ struct HomeView: View {
                 }
             }
             #if !os(macOS)
+            // 草稿全屏浏览/编辑（同一份数据，改动即生效；小窗只是入口）
+            .sheet(isPresented: $showDraftExpanded) {
+                NavigationStack {
+                    List {
+                        ForEach(model.blocks) { item in
+                            EditableRow(block: model.binding(for: item.id),
+                                        onDelete: { model.delete(id: item.id) })
+                        }
+                        .onMove { model.move($0, $1) }
+                    }
+                    .navigationTitle("草稿 · \(model.blocks.count) 块")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { model.addBlock() } label: { Image(systemName: "plus") }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showDraftExpanded = false }
+                        }
+                    }
+                }
+            }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
                     SettingsView()
