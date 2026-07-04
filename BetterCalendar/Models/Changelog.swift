@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.15.1", date: "2026-07", changes: [
+            "启动自愈：打开 App 时若日历里有今天的绿色计划、内部数据缺失（换设备/重装等），自动从日历重建——排日程页直接显示当天计划",
+        ]),
         ChangelogEntry(version: "0.15", date: "2026-07", changes: [
             "已确认计划编辑即生效：改时间/标题/删块 0.8 秒后自动写回日历和数据库，不再需要点「确认写入」（新草稿仍需确认）",
             "绿色徽章实时显示「改动已自动保存 · 时间」",

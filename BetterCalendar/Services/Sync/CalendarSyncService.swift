@@ -23,13 +23,16 @@ final class CalendarSyncService {
         self.planStore = planStore
     }
 
-    /// 开始监听系统日历变化。
+    /// 开始监听系统日历变化 + **启动对账一次**（0.15.1）：
+    /// 日历里已有今天的绿色计划、本机真相源却缺（换设备 / dev↔TestFlight 环境切换 / 重装）→
+    /// 启动即从日历重建 PlanBlock，排日程页能直接显示当天计划（自愈，不等日历变更事件）。
     func start() {
         listenTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .EKEventStoreChanged) {
                 self?.scheduleSync()
             }
         }
+        scheduleSync()
     }
 
     private func scheduleSync() {
