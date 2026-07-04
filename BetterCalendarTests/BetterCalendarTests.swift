@@ -299,6 +299,19 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 排X天按钮文案（目标日口语词）
+
+    @Test func relativeDayWordFollowsTargetDay() {
+        let cal = Calendar.current
+        let now = Date.now
+        func day(_ offset: Int) -> Date { cal.date(byAdding: .day, value: offset, to: now)! }
+        #expect(HomeView.relativeDayWord(day(0), from: now) == "今天")
+        #expect(HomeView.relativeDayWord(day(1), from: now) == "明天")
+        #expect(HomeView.relativeDayWord(day(2), from: now) == "后天")
+        #expect(HomeView.relativeDayWord(day(-1), from: now) == "昨天")
+        #expect(HomeView.relativeDayWord(day(5), from: now) != "今天")   // 远日显日期
+    }
+
     // MARK: 「在途」池（M10：LongTask 跨日任务/长线作业）
 
     @Test func planningEnginePoolDefaultIgnoresPool() async throws {

@@ -80,7 +80,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
         你把用户用自然语言描述的一天，转成结构化日程。当前时间：\(now)。
         只输出一个 JSON 对象，不要任何解释、不要 markdown 代码围栏。格式：
         {"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":"YYYY-MM-DD HH:mm 或 null","cadenceMinutesPerWeek":null}]}
-        规则：start/end 用 24 小时制本地时间；**isFixed 只给「与他人约定、时刻不可改」的事**（会议/上课/约诊/班车等）=true；**个人任务**（写作业/写代码/健身/读书/吃饭等）即使提到时间也 isFixed=false（它们时间可被自动 re-flow 调整，标 fixed 会导致排不动）；timingStyle ∈ pomodoro/light/none，默认 light；priority ∈ normal/important（要紧/紧急的事用 important）；deadline 为硬截止时间或 null。相对时间（如"明早"）按当前时间推算。
+        规则：start/end 用 24 小时制本地时间；**isFixed 只给「与他人约定、时刻不可改」的事**（会议/上课/约诊/班车等）=true；**个人任务**（写作业/写代码/健身/读书/吃饭等）即使提到时间也 isFixed=false（它们时间可被自动 re-flow 调整，标 fixed 会导致排不动）；timingStyle ∈ pomodoro/light/none，默认 light；priority ∈ normal/important（要紧/紧急的事用 important）；deadline 为硬截止时间或 null。相对时间（如"明早"）按当前时间推算。**跨过午夜的块（睡前/凌晨的事）start/end 日期用次日**，别写成目标日的 00:xx。
         **longTasks（长期事项）**：截止在目标日之后的远期任务（"下周五前交论文"）或多天持续的长线（"这学期学完 X""每周健身三次"）放 longTasks，**不放 blocks**——除非用户明确今天也要做一段（则两边都出：blocks 出今天这段，longTasks 出整件事）。cadenceMinutesPerWeek = 每周投入分钟数（"每天学 1 小时"≈420），没提就 null。没有长期事项时 longTasks 给 []。
         """
     }

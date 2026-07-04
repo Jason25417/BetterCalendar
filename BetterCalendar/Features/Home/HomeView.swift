@@ -67,7 +67,7 @@ struct HomeView: View {
 
                 HStack {
                     Button { Task { await model.arrange() } } label: {
-                        Label("排今天", systemImage: "wand.and.stars")
+                        Label("排\(Self.relativeDayWord(model.targetDay))", systemImage: "wand.and.stars")
                     }
                     .disabled(model.isWorking)
                     Button { Task { await model.startToday() } } label: {
@@ -363,6 +363,20 @@ struct HomeView: View {
 
     static func dayLabel(_ d: Date) -> String {
         d.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated))
+    }
+
+    /// 目标日的口语词（按钮文案随所选日变）：今天/明天/后天/昨天，再远显日期。
+    static func relativeDayWord(_ d: Date, from now: Date = .now) -> String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
+                                      to: cal.startOfDay(for: d)).day ?? 0
+        switch days {
+        case 0: return "今天"
+        case 1: return "明天"
+        case 2: return "后天"
+        case -1: return "昨天"
+        default: return d.formatted(.dateTime.month(.defaultDigits).day())
+        }
     }
 
     #if os(macOS)

@@ -134,11 +134,15 @@ final class HomeViewModel {
             }
             // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
             let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay, pool: pool)
-            blocks = outcome.decision.orderedBlocks.map { b in
-                var eb = EditableBlock(from: b)
-                eb.fromPool = outcome.decision.poolSuggestedTitles.contains(b.title)
-                return eb
-            }
+            // 草稿按时间从早到晚显示（完整 Date 排序：凌晨块带次日日期自然垫底，不会窜到最前）。
+            // 「推荐顺序」信息不丢——要紧事有 ★、note 里有先做什么的建议。
+            blocks = outcome.decision.orderedBlocks
+                .sorted { $0.start < $1.start }
+                .map { b in
+                    var eb = EditableBlock(from: b)
+                    eb.fromPool = outcome.decision.poolSuggestedTitles.contains(b.title)
+                    return eb
+                }
             draftSource = .arranged
             note = outcome.decision.note
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
@@ -154,7 +158,7 @@ final class HomeViewModel {
         isWorking = true; committedCount = nil
         let scheduled = blocks.map(\.scheduled)
         let result = (try? await refiner.refine(scheduled, command: cmd, now: .now)) ?? scheduled
-        blocks = result.map(EditableBlock.init(from:))
+        blocks = result.sorted { $0.start < $1.start }.map(EditableBlock.init(from:))
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
         isWorking = false
