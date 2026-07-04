@@ -43,7 +43,7 @@ struct ClaudePlanRefiner: PlanRefining {
             按指令修改对应块（时间/标题/固定/计时风格/优先级），未提到的块保持不变，且不违背最初需求里的约束（如娱乐时长下限、结束时间等）。
             只输出 JSON：{"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"timingStyle":"light","priority":"normal"}]}
             """
-            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 1500)
+            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000)
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(Wire.self, from: data)

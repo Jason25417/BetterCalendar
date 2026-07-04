@@ -48,6 +48,10 @@ struct AnthropicClient {
               let content = obj["content"] as? [[String: Any]] else {
             throw AnthropicError(message: "响应格式异常")
         }
+        // 截断检测：长日程输出超过 max_tokens 会拦腰截断 → JSON 必坏，明确报因（别让上层看天书）
+        if let stop = obj["stop_reason"] as? String, stop == "max_tokens" {
+            throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
+        }
         let text = content.compactMap { $0["text"] as? String }.joined()
         guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
         return text

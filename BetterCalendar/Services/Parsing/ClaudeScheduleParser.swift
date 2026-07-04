@@ -12,24 +12,36 @@ struct ClaudeScheduleParser: ScheduleParsing {
     let client: AnthropicClient
     let fallback: ScheduleParsing
 
-    private struct WirePlan: Decodable {
-        let blocks: [WireBlock]
-        let longTasks: [WireLongTask]?
-    }
-    private struct WireBlock: Decodable {
-        let title: String
-        let start: String
-        let end: String
-        let isFixed: Bool?
-        let category: String?
-        let timingStyle: String?
-        let priority: String?
-        let deadline: String?
-    }
-    private struct WireLongTask: Decodable {
-        let title: String
-        let deadline: String?
-        let cadenceMinutesPerWeek: Int?
+    /// 宽容解码（0.15.2）：JSONSerialization 手工取值——字段类型不合/多余字段/单块损坏都不废全包，
+    /// 坏块跳过并计数。严格 Codable 曾因 LLM 一个字段类型漂移整包报废 → 回退本地桩产垃圾草稿。
+    static func decodePlan(_ json: String) -> (blocks: [ParsedBlock], longTasks: [ParsedLongTask], dropped: Int)? {
+        guard let data = json.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        var dropped = 0
+        var blocks: [ParsedBlock] = []
+        for b in (obj["blocks"] as? [[String: Any]]) ?? [] {
+            guard let title = b["title"] as? String,
+                  let start = DateParsing.parse(b["start"] as? String),
+                  let end = DateParsing.parse(b["end"] as? String) else { dropped += 1; continue }
+            blocks.append(ParsedBlock(
+                title: title, start: start, end: end,
+                durationMinutes: Int(end.timeIntervalSince(start) / 60),
+                isFixed: b["isFixed"] as? Bool ?? false,
+                category: b["category"] as? String ?? "",
+                timingStyle: TimingStyle(rawValue: b["timingStyle"] as? String ?? "light") ?? .light,
+                priority: BlockPriority(rawValue: b["priority"] as? String ?? "normal") ?? .normal,
+                deadline: DateParsing.parse(b["deadline"] as? String)))
+        }
+        var longTasks: [ParsedLongTask] = []
+        for t in (obj["longTasks"] as? [[String: Any]]) ?? [] {
+            guard let title = t["title"] as? String, !title.isEmpty else { dropped += 1; continue }
+            let cadence = (t["cadenceMinutesPerWeek"] as? Int)
+                ?? (t["cadenceMinutesPerWeek"] as? String).flatMap(Int.init)
+            longTasks.append(ParsedLongTask(title: title,
+                                            deadline: DateParsing.parse(t["deadline"] as? String),
+                                            cadenceMinutesPerWeek: cadence))
+        }
+        return (blocks, longTasks, dropped)
     }
 
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan {
@@ -38,29 +50,20 @@ struct ClaudeScheduleParser: ScheduleParsing {
 
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
         do {
+            // 长日程输出可观（20+ 块 + 长期任务），上限给足（曾因默认 2048 截断 → JSON 报废）
             let raw = try await client.complete(
-                system: Self.systemPrompt(referenceDate: referenceDate, context: context), user: text)
+                system: Self.systemPrompt(referenceDate: referenceDate, context: context),
+                user: text, maxTokens: 6000)
             let json = JSONText.extractObject(raw)
-            guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
-            let wire = try JSONDecoder().decode(WirePlan.self, from: data)
-            let blocks: [ParsedBlock] = wire.blocks.compactMap { b in
-                guard let s = DateParsing.parse(b.start), let e = DateParsing.parse(b.end) else { return nil }
-                return ParsedBlock(
-                    title: b.title,
-                    start: s,
-                    end: e,
-                    durationMinutes: Int(e.timeIntervalSince(s) / 60),
-                    isFixed: b.isFixed ?? false,
-                    category: b.category ?? "",
-                    timingStyle: TimingStyle(rawValue: b.timingStyle ?? "light") ?? .light,
-                    priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal,
-                    deadline: DateParsing.parse(b.deadline))
+            guard let decoded = Self.decodePlan(json) else {
+                DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")
+                throw AnthropicError(message: "JSON 解码失败")
             }
-            let longTasks: [ParsedLongTask] = (wire.longTasks ?? []).map {
-                ParsedLongTask(title: $0.title,
-                               deadline: DateParsing.parse($0.deadline),
-                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+            if decoded.dropped > 0 {
+                DevLog.shared.warn("解析", "跳过 \(decoded.dropped) 个损坏条目（其余正常解析）")
             }
+            let blocks = decoded.blocks
+            let longTasks = decoded.longTasks
             guard !blocks.isEmpty || !longTasks.isEmpty else {
                 DevLog.shared.warn("解析", "云端返回 0 块，回退本地")
                 return try await fallback.parse(text, referenceDate: referenceDate, context: context)

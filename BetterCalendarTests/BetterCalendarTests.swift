@@ -104,6 +104,29 @@ struct LogicTests {
         #expect(prompt.contains("已有的安排"))
     }
 
+    @Test func decodePlanIsLenientToDirtyLLMOutput() {
+        // 单块损坏（缺 end）跳过不废全包；cadence 数字/字符串都认；多余字段无害
+        let dirty = """
+        {"blocks":[
+          {"title":"写代码","start":"2026-07-05 09:00","end":"2026-07-05 11:00","priority":"important","extra":1},
+          {"title":"坏块","start":"2026-07-05 12:00"}
+        ],
+        "longTasks":[
+          {"title":"通识课作业","deadline":null,"cadenceMinutesPerWeek":"540"},
+          {"title":"量化学习","cadenceMinutesPerWeek":360}
+        ]}
+        """
+        let d = ClaudeScheduleParser.decodePlan(dirty)
+        #expect(d != nil)
+        #expect(d?.blocks.count == 1)
+        #expect(d?.blocks.first?.priority == .important)
+        #expect(d?.dropped == 1)
+        #expect(d?.longTasks.count == 2)
+        #expect(d?.longTasks.first?.cadenceMinutesPerWeek == 540)   // 字符串数字也认
+        // 截断的 JSON（模拟 max_tokens 拦腰）→ 整体解不开 → nil（上层回退+记原文）
+        #expect(ClaudeScheduleParser.decodePlan("{\"blocks\":[{\"title\":\"半截") == nil)
+    }
+
     @Test func plannerFallsBackToLocalWhenNoKey() async throws {
         let noKey = AnthropicClient(apiKey: { nil }, useCloud: { true })
         let planner = LLMPlanningEngine(client: noKey, fallback: NaivePlanningEngine())

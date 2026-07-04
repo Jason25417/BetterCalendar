@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.15.2", date: "2026-07", changes: [
+            "修复：长输入（一天说很多件事+长期任务）解析失败——AI 回复上限从 2048 提到 6000 token，不再拦腰截断",
+            "解析改宽容模式：个别条目格式异常只跳过该条，不再整包报废退回乱切草稿；截断/解码失败会记录原文便于排查",
+        ]),
         ChangelogEntry(version: "0.15.1", date: "2026-07", changes: [
             "启动自愈：打开 App 时若日历里有今天的绿色计划、内部数据缺失（换设备/重装等），自动从日历重建——排日程页直接显示当天计划",
         ]),
