@@ -388,6 +388,11 @@ struct EditableRow: View {
             .buttonStyle(.plain)
             .help("标为今日要紧事")
 
+            if block.fromPool {
+                Image(systemName: "tray.full").font(.caption).foregroundStyle(.purple)
+                    .help("来自「在途」的建议——不想今天做直接删掉即可")
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 TextField("标题", text: $block.title)
                 HStack(spacing: 6) {

@@ -124,11 +124,20 @@ enum ReflowResolution: Sendable {
     case split(String)   // 把某块拆两段塞空隙
 }
 
+/// 「在途」摘要（M10-2）：给排程大脑的池上下文（实现无关 DTO）。
+struct LongTaskBrief: Sendable {
+    var title: String
+    var deadline: Date?
+    var cadenceMinutesPerWeek: Int?
+}
+
 /// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）+（reflow 时）排不下的冲突。
 struct PlanDecision: Sendable {
     var orderedBlocks: [ScheduledBlock] = []
     var note: String?
     var conflict: ReflowConflict?
+    /// 来自「在途」的建议块标题（M10-2：UI 标来源、删除零成本）。
+    var poolSuggestedTitles: [String] = []
 }
 
 /// 写日历用的事件草稿：FakeCalendarStore / 未来 EventKitCalendarStore 都消费它。

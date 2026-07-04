@@ -15,9 +15,20 @@ struct LLMPlanningEngine: PlanningEngine {
     private struct Wire: Decodable {
         let orderedIndexes: [Int]?
         let note: String?
+        let poolSuggestions: [WirePoolSuggestion]?
+    }
+    private struct WirePoolSuggestion: Decodable {
+        let poolIndex: Int
+        let start: String
+        let end: String
     }
 
     func arrange(_ blocks: [ScheduledBlock], now: Date) async throws -> PlanDecision {
+        try await arrange(blocks, pool: [], now: now)
+    }
+
+    /// 带「在途」池的排程（M10-2）：池摘要进 prompt，LLM 可在空档给 0–2 个建议块（标来源）。
+    func arrange(_ blocks: [ScheduledBlock], pool: [LongTaskBrief], now: Date) async throws -> PlanDecision {
         guard !blocks.isEmpty else { return try await fallback.arrange(blocks, now: now) }
         do {
             let listing = blocks.enumerated()
@@ -26,11 +37,25 @@ struct LLMPlanningEngine: PlanningEngine {
                     return "\(i): \(b.title) [\(tags)] \(Self.hm(b.start))–\(Self.hm(b.end))"
                 }
                 .joined(separator: "\n")
+            let poolListing = pool.enumerated().map { i, t -> String in
+                var parts = ["P\(i): \(t.title)"]
+                if let d = t.deadline { parts.append("DDL \(Self.ymdhm(d))") }
+                if let c = t.cadenceMinutesPerWeek { parts.append("每周约 \(c) 分钟") }
+                return parts.joined(separator: " · ")
+            }.joined(separator: "\n")
+            let poolSection = pool.isEmpty ? "" : """
+
+            「在途」长期事项池（用户跨日在做的事）：
+            \(poolListing)
+            若当日有空档且合适，可从池中挑 **0–2 件** 建议排入（DDL 近的优先、节奏欠账的优先；已在今日块里的同名事不要重复建议；不合适就不建议——宁缺毋滥）。
+            """
             let user = """
             现在 \(Self.hm(now))。今日时间块（索引: 标题 [优先级] 起–止）：
             \(listing)
+            \(poolSection)
             按行为策略排出推荐顺序，并写一句温和、前向的 note。
-            只输出 JSON：{"orderedIndexes":[按推荐顺序的索引数组],"note":"一句话"}
+            只输出 JSON：{"orderedIndexes":[按推荐顺序的索引数组],"note":"一句话","poolSuggestions":[{"poolIndex":0,"start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm"}]}
+            没有建议时 poolSuggestions 给 []。
             """
             let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 1024)
             let json = JSONText.extractObject(raw)
@@ -44,9 +69,22 @@ struct LLMPlanningEngine: PlanningEngine {
             }
             for i in blocks.indices where !seen.contains(i) { order.append(i) }  // 补齐遗漏
 
-            let ordered = order.map { blocks[$0] }
-            DevLog.shared.info("排程", "云端成功 · \(ordered.count) 块")
-            return PlanDecision(orderedBlocks: ordered, note: wire.note)
+            var ordered = order.map { blocks[$0] }
+            // 池建议块（≤2）：附在后面，标题记入 poolSuggestedTitles 供 UI 标来源
+            var suggestedTitles: [String] = []
+            for s in (wire.poolSuggestions ?? []).prefix(2)
+            where s.poolIndex >= 0 && s.poolIndex < pool.count {
+                guard let start = DateParsing.parse(s.start), let end = DateParsing.parse(s.end),
+                      end > start else { continue }
+                let t = pool[s.poolIndex]
+                ordered.append(ScheduledBlock(title: t.title, start: start, end: end,
+                                              deadline: t.deadline))
+                suggestedTitles.append(t.title)
+            }
+            DevLog.shared.info("排程", "云端成功 · \(ordered.count) 块"
+                               + (suggestedTitles.isEmpty ? "" : " · 在途建议 \(suggestedTitles.count)"))
+            return PlanDecision(orderedBlocks: ordered, note: wire.note,
+                                poolSuggestedTitles: suggestedTitles)
         } catch {
             DevLog.shared.warn("排程", "云端失败，回退本地：\(error.localizedDescription)")
             return try await fallback.arrange(blocks, now: now)
@@ -100,6 +138,13 @@ struct LLMPlanningEngine: PlanningEngine {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "HH:mm"
+        return f.string(from: d)
+    }
+
+    static func ymdhm(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
         return f.string(from: d)
     }
 

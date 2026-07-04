@@ -20,6 +20,7 @@ struct EditableBlock: Identifiable {
     var timingStyle: TimingStyle
     var priority: BlockPriority
     var deadline: Date?   // 硬 DDL（≠isFixed）：必须在此之前做完；LLM 解析给出，提醒 due 优先用它
+    var fromPool: Bool = false   // 来自「在途」的建议块（M10-2：UI 标来源，删除零成本）
 
     init(from b: ScheduledBlock) {
         id = b.id; title = b.title; start = b.start; end = b.end
@@ -126,9 +127,18 @@ final class HomeViewModel {
         guard !trimmed.isEmpty else { return }
         isWorking = true; errorText = nil; committedCount = nil
         do {
+            // 在途摘要给排程大脑（M10-2：LLM 可建议 0–2 块，标来源、删除零成本）
+            let pool = (longTaskStore?.active() ?? []).map {
+                LongTaskBrief(title: $0.title, deadline: $0.deadline,
+                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+            }
             // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
-            let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay)
-            blocks = outcome.decision.orderedBlocks.map(EditableBlock.init(from:))
+            let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay, pool: pool)
+            blocks = outcome.decision.orderedBlocks.map { b in
+                var eb = EditableBlock(from: b)
+                eb.fromPool = outcome.decision.poolSuggestedTitles.contains(b.title)
+                return eb
+            }
             draftSource = .arranged
             note = outcome.decision.note
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」

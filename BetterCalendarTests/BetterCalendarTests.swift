@@ -301,6 +301,16 @@ struct LogicTests {
 
     // MARK: 「在途」池（M10：LongTask 跨日任务/长线作业）
 
+    @Test func planningEnginePoolDefaultIgnoresPool() async throws {
+        // 协议扩展默认实现：本地引擎带池调用 = 不带池（建议是 LLM 的活，Naive 不产建议块）
+        let planner = NaivePlanningEngine()
+        let b = ScheduledBlock(title: "写代码", start: at(2026,7,4,9), end: at(2026,7,4,10))
+        let pool = [LongTaskBrief(title: "论文", deadline: at(2026,7,11,22), cadenceMinutesPerWeek: nil)]
+        let d = try await planner.arrange([b], pool: pool, now: at(2026,7,4,8))
+        #expect(d.orderedBlocks.count == 1)
+        #expect(d.poolSuggestedTitles.isEmpty)
+    }
+
     @Test func longTaskStoreAddsDedupsAndLifecycles() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, configurations: config)

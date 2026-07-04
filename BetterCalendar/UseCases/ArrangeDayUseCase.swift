@@ -18,8 +18,10 @@ struct ArrangeDayUseCase {
         var longTasks: [ParsedLongTask] = []
     }
 
-    /// referenceDate = 解析相对时间的基准日（排哪天就传哪天）；now = 排序用的此刻。
-    func full(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> Outcome {
+    /// referenceDate = 解析相对时间的基准日（排哪天就传哪天）；now = 排序用的此刻；
+    /// pool = 「在途」摘要（M10-2，LLM 可据此给建议块；空 = 不建议）。
+    func full(text: String, referenceDate: Date = .now, now: Date = .now,
+              pool: [LongTaskBrief] = []) async throws -> Outcome {
         let parsed = try await parser.parse(text, referenceDate: referenceDate)
         let scheduled: [ScheduledBlock] = parsed.blocks.compactMap { pb in
             guard let start = pb.start, let end = pb.end else { return nil }
@@ -27,7 +29,7 @@ struct ArrangeDayUseCase {
                                   isFixed: pb.isFixed, timingStyle: pb.timingStyle,
                                   priority: pb.priority, deadline: pb.deadline)
         }
-        let decision = try await planner.arrange(scheduled, now: now)
+        let decision = try await planner.arrange(scheduled, pool: pool, now: now)
         return Outcome(decision: decision, longTasks: parsed.longTasks)
     }
 
