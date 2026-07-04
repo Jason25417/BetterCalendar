@@ -36,6 +36,8 @@ struct HomeView: View {
     #endif
     // 实时跟随设置里的日历后端开关（按钮文字热切换）
     @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
+    @AppStorage("home.inputHeight") private var inputHeight: Double = 96   // 输入框高度（拖拽可调，记忆）
+    @State private var dragBaseHeight: Double?
 
     init(container: AppContainer) {
         self.container = container
@@ -55,6 +57,7 @@ struct HomeView: View {
     var body: some View {
         @Bindable var model = model
         NavigationStack(path: $navPath) {
+            ScrollView {   // 页面过长可整页滚动（0.16.3）
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("说说你的一天").font(.headline)
@@ -62,10 +65,35 @@ struct HomeView: View {
                     targetDayMenu
                 }
 
-                TextField("例：明早9点写代码两小时，11点开会，下午健身",
-                          text: $model.inputText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...4)
+                // 可滚动多行输入 + 底部把手拖拽调高（写长了也能看全，0.16.3）
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $model.inputText)
+                        .font(.body)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                    if model.inputText.isEmpty {
+                        Text("例：明早9点写代码两小时，11点开会，下午健身")
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 11).padding(.vertical, 14)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .frame(height: CGFloat(inputHeight))
+                .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+                Capsule().fill(.quaternary)
+                    .frame(width: 44, height: 5)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle().inset(by: -8))
+                    .gesture(
+                        DragGesture()
+                            .onChanged { v in
+                                if dragBaseHeight == nil { dragBaseHeight = inputHeight }
+                                inputHeight = min(max(72, (dragBaseHeight ?? inputHeight) + v.translation.height), 420)
+                            }
+                            .onEnded { _ in dragBaseHeight = nil }
+                    )
+                    .help("拖动调整输入框高度")
 
                 HStack {
                     Button { Task { await model.arrange() } } label: {
@@ -159,7 +187,7 @@ struct HomeView: View {
                         }
                         .onMove { model.move($0, $1) }
                     }
-                    .frame(minHeight: 200)
+                    .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
 
                     HStack {
                         TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
@@ -202,6 +230,7 @@ struct HomeView: View {
                 Spacer(minLength: 0)
             }
             .padding()
+            }
             .navigationTitle("BetterCalendar")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {

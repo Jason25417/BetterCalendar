@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.16.3", date: "2026-07", changes: [
+            "输入框写长了能滚动看全了；底部小把手可拖拽调高（高度会记住）；整个排日程页过长时可整页滚动",
+            "并行日程命名优化：每块用自己任务的名字（如「并行 · Watch Chatbot」），不再把所有并行任务名拼进每个块；并行不再被误标固定",
+        ]),
         ChangelogEntry(version: "0.16.2", date: "2026-07", changes: [
             "术语零成本化（§5.9 原则落地）：「在途」→「长期任务」——名词只负责秒懂；气质词以后随皮肤系统回归",
         ]),
