@@ -299,6 +299,45 @@ struct LogicTests {
         #expect(laid.first { $0.title == "会议" }?.start == at(2026,6,30,11))     // 固定不动
     }
 
+    // MARK: 草稿快照（崩溃/重启还原）
+
+    @Test func draftSnapshotPersistsAndRestoresUnconfirmedDraft() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bc-draft-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let store = DraftSnapshotStore(directory: tmp)
+
+        // 第一个 VM：造未确认草稿 → persistDraft
+        let vm1 = Self.makeHomeVM(planStore: planStore, draftStore: store)
+        vm1.inputText = "写代码两小时，下午健身"
+        vm1.blocks = [EditableBlock(title: "写代码", start: at(2026,7,5,9), end: at(2026,7,5,11),
+                                    priority: .important)]
+        vm1.draftSource = .arranged
+        vm1.pendingLongTasks = [ParsedLongTask(title: "交论文", deadline: at(2026,7,11,22),
+                                               cadenceMinutesPerWeek: nil)]
+        vm1.persistDraft()
+
+        // 第二个 VM（模拟崩溃后重启）：整份还原
+        let vm2 = Self.makeHomeVM(planStore: planStore, draftStore: store)
+        #expect(vm2.inputText == "写代码两小时，下午健身")
+        #expect(vm2.draftSource == .arranged)
+        #expect(vm2.blocks.count == 1)
+        #expect(vm2.blocks.first?.title == "写代码")
+        #expect(vm2.blocks.first?.priority == .important)
+        #expect(vm2.pendingLongTasks.first?.title == "交论文")
+
+        // 已确认（loaded）状态的快照 → 重启只还原输入文本，块交给真相源自动加载
+        vm2.draftSource = .loaded
+        vm2.persistDraft()
+        let vm3 = Self.makeHomeVM(planStore: planStore, draftStore: store)
+        #expect(vm3.inputText == "写代码两小时，下午健身")
+        #expect(vm3.blocks.isEmpty)
+        #expect(vm3.draftSource == .empty)
+    }
+
     // MARK: 排X天按钮文案（目标日口语词）
 
     @Test func relativeDayWordFollowsTargetDay() {
@@ -623,7 +662,8 @@ struct LogicTests {
         #expect(vm.blocks.count == 1)   // 仍是编辑后的 1 项，而非库里的 2 项
     }
 
-    private static func makeHomeVM(planStore: PlanStore) -> HomeViewModel {
+    private static func makeHomeVM(planStore: PlanStore,
+                                   draftStore: DraftSnapshotStore? = nil) -> HomeViewModel {
         struct NoRefine: PlanRefining {
             func refine(_ blocks: [ScheduledBlock], command: String, now: Date) async throws -> [ScheduledBlock] { blocks }
         }
@@ -639,7 +679,8 @@ struct LogicTests {
             exporter: ICSExporter(),
             planStore: planStore,
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
-            notifier: NoNotify())
+            notifier: NoNotify(),
+            draftStore: draftStore)
     }
 
     // MARK: M5 尾巴（排不下冲突 / 解法 / 通知时间）

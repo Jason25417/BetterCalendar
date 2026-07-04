@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.12.4", date: "2026-07", changes: [
+            "排日程草稿随时落盘：输入框文字和 AI 排出的未确认草稿逐次保存，崩溃/强退/重启后打开自动还原到之前的画面",
+        ]),
         ChangelogEntry(version: "0.12.3", date: "2026-07", changes: [
             "「排今天」按钮文案随目标日变：排今天/明天/后天/昨天（更远显日期）",
             "AI 排出的草稿按时间从早到晚显示；跨午夜的凌晨块按次日日期垫底、不再窜到最前",

@@ -42,7 +42,7 @@ struct EditableBlock: Identifiable {
 }
 
 /// 草稿从哪来：决定切目标日/重进页面时怎么对待当前列表。
-enum DraftSource {
+enum DraftSource: String {
     case empty       // 什么都没有
     case arranged    // 刚「排今天」出的新草稿，还没确认——切日走平移、不被自动加载覆盖
     case loaded      // 从真相源加载的已确认计划——切日即切内容，编辑后需再「确认写入」
@@ -59,6 +59,7 @@ final class HomeViewModel {
     private let reschedule: RescheduleService
     private let notifier: NotificationScheduling
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
+    private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
 
     var inputText: String = ""
     var refineText: String = ""
@@ -79,7 +80,7 @@ final class HomeViewModel {
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
          planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling,
-         longTaskStore: LongTaskStore? = nil) {
+         longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -89,6 +90,41 @@ final class HomeViewModel {
         self.reschedule = reschedule
         self.notifier = notifier
         self.longTaskStore = longTaskStore
+        self.draftStore = draftStore
+        restoreDraftIfAny()
+    }
+
+    // MARK: - 草稿快照（崩溃/重启还原；Jason 定 2026-07-04）
+
+    /// 每次草稿变更即整份落盘（几 KB JSON，无感）；HomeView 对 inputText 变化也会调它。
+    func persistDraft() {
+        guard let draftStore else { return }
+        draftStore.save(DraftSnapshot(
+            inputText: inputText,
+            targetDay: targetDay,
+            draftSourceRaw: draftSource.rawValue,
+            blocks: blocks.map(DraftSnapshot.Block.init(from:)),
+            pendingLongTasks: pendingLongTasks.map {
+                DraftSnapshot.PendingLongTask(title: $0.title, deadline: $0.deadline,
+                                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+            },
+            savedAt: .now))
+    }
+
+    /// 启动还原：未确认草稿（arranged）整份还原；loaded/empty 只还原输入框文本
+    /// （已确认计划由 autoLoadOnAppear 从真相源重新加载，快照不越权）。
+    private func restoreDraftIfAny() {
+        guard let snap = draftStore?.load() else { return }
+        inputText = snap.inputText
+        if snap.draftSourceRaw == DraftSource.arranged.rawValue, !snap.blocks.isEmpty {
+            blocks = snap.blocks.map(\.editable)
+            targetDay = snap.targetDay
+            draftSource = .arranged
+            pendingLongTasks = snap.pendingLongTasks.map {
+                ParsedLongTask(title: $0.title, deadline: $0.deadline,
+                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+            }
+        }
     }
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
@@ -146,6 +182,7 @@ final class HomeViewModel {
             draftSource = .arranged
             note = outcome.decision.note
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
+            persistDraft()
         } catch {
             errorText = "排程失败：\(error.localizedDescription)"
         }
@@ -161,6 +198,7 @@ final class HomeViewModel {
         blocks = result.sorted { $0.start < $1.start }.map(EditableBlock.init(from:))
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
+        persistDraft()
         isWorking = false
     }
 
@@ -194,6 +232,7 @@ final class HomeViewModel {
                                    cadenceMinutesPerWeek: p.cadenceMinutesPerWeek)
             }
             pendingLongTasks = []
+            persistDraft()   // 已确认：快照降级为只还原输入文本
             // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
             let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
             await notifier.requestAuthorizationIfNeeded()
@@ -222,6 +261,7 @@ final class HomeViewModel {
                     : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
+            persistDraft()
         } catch {
             errorText = "重排失败：\(error.localizedDescription)"
         }
@@ -242,6 +282,7 @@ final class HomeViewModel {
             return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day) ?? time
         }
         blocks = blocks.map { var b = $0; b.start = onDay(b.start); b.end = onDay(b.end); return b }
+        persistDraft()
     }
 
     /// 用户编辑了「已加载的确认计划」→ 它变成未确认草稿：不再被 autoLoad/切日静默覆盖
@@ -253,7 +294,7 @@ final class HomeViewModel {
     func addBlock() {
         let start = blocks.map(\.end).max() ?? Date()
         blocks.append(EditableBlock(title: "新事项", start: start, end: start.addingTimeInterval(3600)))
-        committedCount = nil; markEditedIfLoaded()
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
     /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
@@ -262,15 +303,16 @@ final class HomeViewModel {
         blocks.append(EditableBlock(title: title, start: start, end: start.addingTimeInterval(3600)))
         committedCount = nil; markEditedIfLoaded()
         if draftSource == .empty { draftSource = .arranged }   // 空列表加块 = 新草稿
+        persistDraft()
     }
 
     func move(_ source: IndexSet, _ destination: Int) {
-        blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil; markEditedIfLoaded()
+        blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
     func delete(id: UUID) {
         blocks.removeAll { $0.id == id }
-        committedCount = nil; markEditedIfLoaded()
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
     /// 按 id 的元素绑定——避免 `ForEach($:)` 在删除时的「独占访问」崩溃。
@@ -282,6 +324,7 @@ final class HomeViewModel {
                 if let i = self.blocks.firstIndex(where: { $0.id == id }) {
                     self.blocks[i] = newValue
                     self.markEditedIfLoaded()   // 内联改标题/时间/星标 → 变未确认草稿
+                    self.persistDraft()
                 }
             }
         )

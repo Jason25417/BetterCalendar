@@ -47,7 +47,8 @@ struct HomeView: View {
             planStore: container.planStore,
             reschedule: container.reschedule,
             notifier: container.notifier,
-            longTaskStore: container.longTasks))
+            longTaskStore: container.longTasks,
+            draftStore: container.draftSnapshots))
     }
 
     var body: some View {
@@ -222,6 +223,7 @@ struct HomeView: View {
                 container.router.scheduleRequest = nil   // 消费掉
             }
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
+            .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
             .onChange(of: model.targetDay) { _, newDay in
                 if model.draftSource == .arranged {
                     model.shiftDraftsToDay(newDay)   // 未确认的新草稿跟人走：平移到新日、不丢
