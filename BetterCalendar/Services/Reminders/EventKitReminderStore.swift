@@ -62,6 +62,24 @@ final class EventKitReminderStore: ReminderStore {
         return (await existingReminders(in: list)).filter(\.isCompleted).compactMap(\.title)
     }
 
+    /// 某日历日到期、未完成的提醒（排除本 App 自建列表）——给排程当上下文。
+    func dueReminders(on day: Date) async -> [String] {
+        do { try await ensureAccess() } catch { return [] }
+        let others = store.calendars(for: .reminder).filter { $0.title != Self.listTitle }
+        guard !others.isEmpty else { return [] }
+        let all: [EKReminder] = await withCheckedContinuation { cont in
+            store.fetchReminders(matching: store.predicateForReminders(in: others)) {
+                cont.resume(returning: $0 ?? [])
+            }
+        }
+        let cal = Calendar.current
+        return all.filter { r in
+            guard !r.isCompleted, let comps = r.dueDateComponents,
+                  let due = cal.date(from: comps) else { return false }
+            return cal.isDate(due, inSameDayAs: day)
+        }.compactMap(\.title)
+    }
+
     private func existingReminders(in list: EKCalendar) async -> [EKReminder] {
         let pred = store.predicateForReminders(in: [list])
         return await withCheckedContinuation { cont in

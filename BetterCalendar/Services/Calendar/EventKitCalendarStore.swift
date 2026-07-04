@@ -101,6 +101,22 @@ final class EventKitCalendarStore: CalendarStore {
         try store.commit()
     }
 
+    /// 目标日系统里已有的安排（所有事件日历，排除本 App 的三本 Dev 日历）。
+    /// 权限没给/读失败 → 空（上下文缺失不挡排程）。
+    func existingEvents(on day: Date) async -> [BusySlot] {
+        do { try await ensureAccess() } catch { return [] }
+        let cal0 = Calendar.current
+        let lo = cal0.startOfDay(for: day)
+        guard let hi = cal0.date(byAdding: .day, value: 1, to: lo) else { return [] }
+        let ours = Set(titles.values)
+        let others = store.calendars(for: .event).filter { !ours.contains($0.title) }
+        guard !others.isEmpty else { return [] }
+        let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: others)
+        return store.events(matching: pred)
+            .filter { !$0.isAllDay }   // 全天事件不占时段
+            .map { BusySlot(title: $0.title ?? "（无标题）", start: $0.startDate, end: $0.endDate) }
+    }
+
     // MARK: - 权限 / 日历
 
     private func ensureAccess() async throws {

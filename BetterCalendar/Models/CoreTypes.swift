@@ -124,6 +124,20 @@ enum ReflowResolution: Sendable {
     case split(String)   // 把某块拆两段塞空隙
 }
 
+/// 目标日已被占用的时段（已有日历事件；排程避开它们）。
+struct BusySlot: Sendable {
+    var title: String
+    var start: Date
+    var end: Date
+}
+
+/// 解析上下文（0.13.1）：目标日已有日程 + 当天到期提醒——让排程大脑"看得见"现实。
+struct ParseContext: Sendable {
+    var busy: [BusySlot] = []
+    var dueReminders: [String] = []
+    var isEmpty: Bool { busy.isEmpty && dueReminders.isEmpty }
+}
+
 /// 「在途」摘要（M10-2）：给排程大脑的池上下文（实现无关 DTO）。
 struct LongTaskBrief: Sendable {
     var title: String

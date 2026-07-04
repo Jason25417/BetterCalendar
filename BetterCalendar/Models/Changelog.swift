@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.13.1", date: "2026-07", changes: [
+            "排程会看你的真实日历了：目标日已有的日程（其它日历的会议等）作为已占用时段，AI 自动避开",
+            "目标日到期的提醒事项也会纳入考虑（不硬塞，只是知道）——真日历模式下生效",
+        ]),
         ChangelogEntry(version: "0.13", date: "2026-07", changes: [
             "「AI 调整」现在记得你最初的要求：微调时不会违背原始约束（如娱乐时长下限、结束时间）",
             "修复：目标日锚定——排 5 号的日程不会再跑到 6 号（真实时间与目标日分开告知 AI）",

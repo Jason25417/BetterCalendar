@@ -22,4 +22,10 @@ protocol ReminderStore: AnyObject {
     func write(_ drafts: [ReminderDraft]) async throws
     /// 已打勾完成的提醒标题（被动信号：提醒打勾 → 对应要紧事标完成）。
     func completedTitles() async -> [String]
+    /// 某日历日到期、未完成的提醒标题（排除本 App 自建列表），给排程当上下文。默认空。
+    func dueReminders(on day: Date) async -> [String]
+}
+
+extension ReminderStore {
+    func dueReminders(on day: Date) async -> [String] { [] }
 }

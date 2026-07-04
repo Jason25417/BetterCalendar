@@ -91,6 +91,19 @@ struct LogicTests {
         #expect(plan.blocks.count == 2)          // 回退本地桩按逗号切
     }
 
+    @Test func parseContextDefaultIgnoredByStubAndPromptIncludesBusy() async throws {
+        // 协议扩展默认：Stub 带上下文调用 = 不带（本地兜底不看上下文）
+        let ctx = ParseContext(busy: [BusySlot(title: "牙医", start: at(2026,7,5,10), end: at(2026,7,5,11))],
+                               dueReminders: ["交电费"])
+        let plan = try await StubScheduleParser().parse("写代码", referenceDate: at(2026,7,5,0), context: ctx)
+        #expect(plan.blocks.count == 1)
+        // 云端 prompt 注入：已有日程/提醒进 system prompt
+        let prompt = ClaudeScheduleParser.systemPrompt(referenceDate: at(2026,7,5,0), context: ctx)
+        #expect(prompt.contains("牙医"))
+        #expect(prompt.contains("交电费"))
+        #expect(prompt.contains("已有的安排"))
+    }
+
     @Test func plannerFallsBackToLocalWhenNoKey() async throws {
         let noKey = AnthropicClient(apiKey: { nil }, useCloud: { true })
         let planner = LLMPlanningEngine(client: noKey, fallback: NaivePlanningEngine())

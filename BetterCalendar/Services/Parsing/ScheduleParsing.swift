@@ -11,4 +11,12 @@ import Foundation
 
 protocol ScheduleParsing {
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan
+    /// 带上下文（目标日已有日程/到期提醒）；默认忽略（Stub 等本地兜底）。
+    func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan
+}
+
+extension ScheduleParsing {
+    func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
+        try await parse(text, referenceDate: referenceDate)
+    }
 }

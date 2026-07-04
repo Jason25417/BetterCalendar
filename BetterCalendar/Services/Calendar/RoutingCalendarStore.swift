@@ -32,4 +32,8 @@ final class RoutingCalendarStore: CalendarStore {
     func clear(kind: PlanCalendarKind) async throws {
         try await current.clear(kind: kind)
     }
+
+    func existingEvents(on day: Date) async -> [BusySlot] {
+        await current.existingEvents(on: day)
+    }
 }

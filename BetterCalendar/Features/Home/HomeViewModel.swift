@@ -168,8 +168,16 @@ final class HomeViewModel {
                 LongTaskBrief(title: $0.title, deadline: $0.deadline,
                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
             }
+            // 现实上下文（0.13.1）：目标日已有日程 + 到期提醒 → 排程避开/纳入考虑
+            async let busy = calendarStore.existingEvents(on: targetDay)
+            async let due = reminderStore.dueReminders(on: targetDay)
+            let context = ParseContext(busy: await busy, dueReminders: await due)
+            if !context.isEmpty {
+                DevLog.shared.info("排程", "上下文：已有日程 \(context.busy.count) · 到期提醒 \(context.dueReminders.count)")
+            }
             // referenceDate = 目标日 → 不写日期时也排到对的那天（晚上默认明天）
-            let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay, pool: pool)
+            let outcome = try await arrangeDay.full(text: trimmed, referenceDate: targetDay,
+                                                    pool: pool, context: context)
             // 草稿按时间从早到晚显示（完整 Date 排序：凌晨块带次日日期自然垫底，不会窜到最前）。
             // 「推荐顺序」信息不丢——要紧事有 ★、note 里有先做什么的建议。
             blocks = outcome.decision.orderedBlocks
