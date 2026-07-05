@@ -40,6 +40,7 @@ final class ExecutionViewModel {
     private var pomoSegStart: Date?   // 番茄钟当前段开始时刻（nil = 非番茄）
     private var pomoIsRest = false    // 当前番茄段是否休息段
     private var pomoWorkSegmentsDone = 0   // 本次会话完成的番茄工作段数（落 ExecutionSession）
+    private var pomoRestAccumulated: TimeInterval = 0   // 本次番茄休息段累计时长（「继续计时」算净专注=总时长-番茄休息）
     private var breakCount = 0             // 本次会话中途休息次数（落 ExecutionSession）
 
     private(set) var loaded = false
@@ -211,9 +212,27 @@ final class ExecutionViewModel {
     /// 番茄钟段满后点「确定」/ 段中途「提前结束本段」，切下一段（工作 ⇄ 休息）。
     /// 0.17：不必等段满——用户可随时提前结束当前段（继续软化番茄的刚性）。
     func confirmPomodoroNext() {
+        // 离开休息段(回到工作) → 累计这段休息时长，供「继续计时」算净专注（总时长扣掉番茄休息）
+        if pomoIsRest, let seg = pomoSegStart {
+            let endRef = isOnBreak ? (breakStart ?? .now) : .now
+            pomoRestAccumulated += max(0, endRef.timeIntervalSince(seg))
+        }
         if !pomoIsRest { pomoWorkSegmentsDone += 1 }   // 工作段→休息 = 完成一个工作段
         pomoIsRest.toggle()
         pomoSegStart = .now
+        if let s = liveSnapshot() { liveActivity.update(s) }
+    }
+
+    /// 番茄工作段满 →「继续计时」：转成不计时式往上记（§5.10 到点行为，运行态非属性）。
+    /// 从**净专注时长**起（总时长扣掉番茄休息段，与投入口径一致）；退出番茄段循环、从此不再打断。
+    /// 只改运行态 active.timingStyle（块存的 PlanBlock.timingStyle 不动）。
+    func continueUntimed() {
+        guard var a = active else { return }
+        let netWork = max(0, currentElapsed - pomoRestAccumulated)
+        a.timingStyle = .light        // 往上记显时长（不再有番茄段/提示）
+        a.start = Date.now.addingTimeInterval(-(netWork + a.pausedTotal))   // 让 currentElapsed 续到净专注
+        active = a
+        pomoSegStart = nil
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
@@ -248,6 +267,7 @@ final class ExecutionViewModel {
         pomoSegStart = (item.timingStyle == .pomodoro) ? .now : nil   // 番茄钟从工作段起
         pomoIsRest = false
         pomoWorkSegmentsDone = 0
+        pomoRestAccumulated = 0
         breakCount = 0
         refreshPreview()
         if let s = liveSnapshot() { liveActivity.start(s) }

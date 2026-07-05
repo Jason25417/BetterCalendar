@@ -50,7 +50,7 @@ final class MenuBarController: NSObject {
             button.title = " ☕ " + ExecutionPanel.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {
             if phase.pendingConfirm {
-                button.title = phase.kind == .work ? " 🍅 ✓该休息" : " ☕ ✓回专注"
+                button.title = phase.kind == .work ? " 🍅 ✓段满" : " ☕ ✓回专注"
             } else {
                 button.title = " \(phase.kind == .work ? "🍅" : "☕") " + ExecutionPanel.hms(phase.remaining)
             }

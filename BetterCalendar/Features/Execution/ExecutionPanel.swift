@@ -91,10 +91,22 @@ struct ExecutionPanel: View {
             let isWork = phase.kind == .work
             if phase.pendingConfirm {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isWork ? "专注完成 🎉 该休息一下" : "休息好了，回到专注？")
-                        .font(.callout).foregroundStyle(isWork ? .blue : .green)
-                    Button(isWork ? "开始休息" : "回到专注") { model.confirmPomodoroNext() }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    if isWork {
+                        // 工作段满：两选（顶替原「开始休息」）——继续=转不计时逃生舱、再来一段=休息+专注循环
+                        Text("专注完成 🎉").font(.callout).foregroundStyle(.blue)
+                        HStack(spacing: 8) {
+                            Button("继续计时") { model.continueUntimed() }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .help("不休息、接着做——转成往上记的计时（从已专注时长起），从此不再打断")
+                            Button("再来一段") { model.confirmPomodoroNext() }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                                .help("先休息一小段，再来一段专注")
+                        }
+                    } else {
+                        Text("休息好了，回到专注？").font(.callout).foregroundStyle(.green)
+                        Button("回到专注") { model.confirmPomodoroNext() }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
                 }
             } else {
                 HStack(spacing: 8) {
