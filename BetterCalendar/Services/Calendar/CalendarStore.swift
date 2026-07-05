@@ -13,6 +13,8 @@ protocol CalendarStore: AnyObject {
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft]
     /// 清空某一类（如橙色预览日终消失）。
     func clear(kind: PlanCalendarKind) async throws
+    /// 清空**某一天**某一类（删光当天所有块并确认写入时用：write 空数组会早退、不会清，得靠它）。
+    func clear(kind: PlanCalendarKind, on day: Date) async throws
 
     /// 某日历日**系统里已有**的安排（排除本 App 自建日历），给排程当"已占用"上下文。
     /// 默认空（假日历/开发期不看系统）。

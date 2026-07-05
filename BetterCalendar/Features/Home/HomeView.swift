@@ -176,7 +176,8 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !model.blocks.isEmpty {
+                // 有块、或有未保存修改（含"删到空"）都保留写入区——否则删掉最后一件就没法确认保存
+                if !model.blocks.isEmpty || model.hasUnsavedChanges {
                     Divider()
                     HStack {
                         if model.hasUnsavedChanges {
@@ -201,15 +202,22 @@ struct HomeView: View {
                             .font(.caption)
                     }
 
-                    List {
-                        ForEach(model.blocks) { item in
-                            EditableRow(block: model.binding(for: item.id),
-                                        poolTasks: container.longTasks.items,
-                                        onDelete: { model.delete(id: item.id) })
+                    if model.blocks.isEmpty {
+                        Label("这天已清空 · 点「确认写入」保存为没有安排的一天，或再加一项",
+                              systemImage: "calendar.badge.minus")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    } else {
+                        List {
+                            ForEach(model.blocks) { item in
+                                EditableRow(block: model.binding(for: item.id),
+                                            poolTasks: container.longTasks.items,
+                                            onDelete: { model.delete(id: item.id) })
+                            }
+                            .onMove { model.move($0, $1) }
                         }
-                        .onMove { model.move($0, $1) }
+                        .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
                     }
-                    .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
 
                     // 要紧事软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都要紧=什么都不要紧
                     let mitCount = model.blocks.filter { $0.priority == .important }.count
@@ -219,15 +227,17 @@ struct HomeView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
 
-                    HStack {
-                        TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
-                                  text: $model.refineText)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { Task { await model.refine() } }
-                        Button { Task { await model.refine() } } label: {
-                            Label("AI 调整", systemImage: "sparkles")
+                    if !model.blocks.isEmpty {
+                        HStack {
+                            TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
+                                      text: $model.refineText)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { Task { await model.refine() } }
+                            Button { Task { await model.refine() } } label: {
+                                Label("AI 调整", systemImage: "sparkles")
+                            }
+                            .disabled(model.isWorking)
                         }
-                        .disabled(model.isWorking)
                     }
 
                     HStack {
@@ -537,27 +547,6 @@ struct EditableRow: View {
             .buttonStyle(.plain)
             .help("标为今日要紧事")
 
-            // 归属：这件属于哪个未来任务——投入会精确记到它名下（自动匹配，可手动改/清）
-            if !poolTasks.isEmpty || block.linkedTaskID != nil {
-                Menu {
-                    Button("无归属") { block.linkedTaskID = nil }
-                    if !poolTasks.isEmpty { Divider() }
-                    ForEach(poolTasks) { t in
-                        Button(t.title) { block.linkedTaskID = t.id }
-                    }
-                } label: {
-                    HStack(spacing: 2) {
-                        Image(systemName: block.linkedTaskID != nil ? "tray.full.fill" : "tray")
-                            .foregroundStyle(block.linkedTaskID != nil ? .purple : .secondary)
-                        if let linkedTitle {
-                            Text(linkedTitle).font(.caption2).foregroundStyle(.purple).lineLimit(1)
-                        }
-                    }
-                }
-                .menuStyle(.borderlessButton).fixedSize()
-                .help("这件属于哪个未来任务——投入会精确记到它名下")
-            }
-
             VStack(alignment: .leading, spacing: 4) {
                 TextField("标题", text: $block.title)
                 HStack(spacing: 6) {
@@ -582,6 +571,26 @@ struct EditableRow: View {
                             .help("硬截止（DDL）：必须在此之前完成——会写进提醒事项、按它提前提醒")
                     }
                     Spacer()
+                    // 归属未来任务：放右侧空位（不破坏左侧标题对齐）；投入精确记到它名下
+                    if !poolTasks.isEmpty || block.linkedTaskID != nil {
+                        Menu {
+                            Button("无归属") { block.linkedTaskID = nil }
+                            if !poolTasks.isEmpty { Divider() }
+                            ForEach(poolTasks) { t in
+                                Button(t.title) { block.linkedTaskID = t.id }
+                            }
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: block.linkedTaskID != nil ? "tray.full.fill" : "tray")
+                                    .foregroundStyle(block.linkedTaskID != nil ? .purple : .secondary)
+                                if let linkedTitle {
+                                    Text(linkedTitle).foregroundStyle(.purple).lineLimit(1)
+                                }
+                            }
+                        }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help("这件属于哪个未来任务——投入会精确记到它名下")
+                    }
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
                     }

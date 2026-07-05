@@ -27,6 +27,10 @@ final class FakeCalendarStore: CalendarStore {
         captured.removeAll { $0.kind == kind }
     }
 
+    func clear(kind: PlanCalendarKind, on day: Date) async throws {
+        captured.removeAll { $0.kind == kind && Calendar.current.isDate($0.start, inSameDayAs: day) }
+    }
+
     func clear() {
         captured.removeAll()
     }

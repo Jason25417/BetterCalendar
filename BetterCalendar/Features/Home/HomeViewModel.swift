@@ -293,11 +293,19 @@ final class HomeViewModel {
         do {
             // 真相源：计划块（带 isFixed/priority）写 SwiftData，reflow 才有元数据可读。
             // 按日历日分组逐日 replace——草稿跨日（如排到次日凌晨）时不残留/不误删别天的块。
-            let byDay = Dictionary(grouping: sorted) { Calendar.current.startOfDay(for: $0.start) }
+            let cal = Calendar.current
+            let targetDayStart = cal.startOfDay(for: targetDay)
+            var byDay = Dictionary(grouping: sorted) { cal.startOfDay(for: $0.start) }
+            // 删光最后一件也要能保存：目标日即使无块也纳入 replace（清空真相源那天）。
+            if byDay[targetDayStart] == nil { byDay[targetDayStart] = [] }
             for (day, dayBlocks) in byDay {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
             }
             try await calendarStore.write(drafts)     // 路由：假/真 日历
+            // 目标日被清空 → write(空)会早退不清绿色事件，显式按日清那天，避免残留与真相源不一致。
+            if (byDay[targetDayStart] ?? []).isEmpty {
+                try await calendarStore.clear(kind: .planned, on: targetDay)
+            }
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
             committedCount = drafts.count
             committedToReal = (CalendarSettings.backend == .eventKit)

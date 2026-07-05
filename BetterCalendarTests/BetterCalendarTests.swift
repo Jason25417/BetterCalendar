@@ -710,6 +710,19 @@ struct LogicTests {
     }
 
     // MARK: 要紧事兑现红利（0.18.3）——只庆祝做成的，没做成的不罚、不留校
+    // MARK: 按日清日历（0.18.6：删光当天最后一件也能确认写入=清空那天，不误删别天）
+    @Test func fakeCalendarClearsSingleDayOnly() async throws {
+        let store = FakeCalendarStore()
+        try await store.write([
+            CalendarEventDraft(title: "今天A", start: at(2026,7,6,9), end: at(2026,7,6,10), kind: .planned),
+            CalendarEventDraft(title: "明天B", start: at(2026,7,7,9), end: at(2026,7,7,10), kind: .planned),
+        ])
+        try await store.clear(kind: .planned, on: at(2026,7,6,0))
+        let left = try await store.read(kind: .planned)
+        #expect(left.count == 1)
+        #expect(left.first?.title == "明天B")   // 只清了 7/6，7/7 保留
+    }
+
     @Test func reviewMITCashInOnlyCelebratesDone() {
         let done = ReviewViewModel.mitDone(importantTitles: ["写论文", "复习考试"],
                                            accomplishedTitles: ["写论文", "健身"])
