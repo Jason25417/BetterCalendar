@@ -19,6 +19,10 @@ final class ReviewViewModel {
     private let localStore: ReviewLocalStore
     private let longTasks: LongTaskStore?   // 长线推进行（M10-3）；nil=不显示
     private let planStore: PlanStore?       // 读当日锚点标题（午饭/通勤等），复盘对比跳过它们；nil=不跳
+    private let looseDays: LooseDayStore?    // 松散日 → 复盘转"休息肯定"（§5.12）；nil=不转
+
+    /// 今天是否松散日 → 复盘转肯定（不显对比/完成率，措辞赋义）。
+    var isLooseToday: Bool { looseDays?.isLoose(.now) ?? false }
 
     var comparison: DayComparison?
     var showDetails = false        // 完成率/缺口默认隐藏，主动点才看
@@ -41,13 +45,15 @@ final class ReviewViewModel {
 
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
-         longTasks: LongTaskStore? = nil, planStore: PlanStore? = nil) {
+         longTasks: LongTaskStore? = nil, planStore: PlanStore? = nil,
+         looseDays: LooseDayStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
         self.localStore = localStore
         self.longTasks = longTasks
         self.planStore = planStore
+        self.looseDays = looseDays
     }
 
     /// 剥离锚点：午饭/通勤/午休这类作息不是"要完成的任务"，不进对比（否则会算成 missed）。

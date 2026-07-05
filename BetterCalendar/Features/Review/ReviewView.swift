@@ -22,17 +22,24 @@ struct ReviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let c = model.comparison {
-                    summaryCard(c)
-                    mitSection()
-                    mvpSection()
-                    accomplishedSection(c)
-                    if let lp = model.longTaskProgress {
-                        Label(lp, systemImage: "tray.full")
-                            .font(.caption).foregroundStyle(.purple)
+                    if model.isLooseToday {
+                        // 松散日：复盘转"休息肯定"——不显对比/完成率/要紧事压力，措辞赋义（§5.12）
+                        looseAffirmation(c)
+                        if !c.accomplished.isEmpty { accomplishedSection(c) }
+                        writeTodayButton
+                    } else {
+                        summaryCard(c)
+                        mitSection()
+                        mvpSection()
+                        accomplishedSection(c)
+                        if let lp = model.longTaskProgress {
+                            Label(lp, systemImage: "tray.full")
+                                .font(.caption).foregroundStyle(.purple)
+                        }
+                        calibrationSection(c)
+                        shareSummaryButton(c)
+                        writeTodayButton
                     }
-                    calibrationSection(c)
-                    shareSummaryButton(c)
-                    writeTodayButton
                 } else if model.isWorking {
                     ProgressView("正在读取今天…")
                 } else {
@@ -70,6 +77,23 @@ struct ReviewView: View {
             Label("分享今日小结", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
+    }
+
+    // MARK: 松散日「休息肯定」（退场+见证：不算账、赋义措辞；做了就平权庆祝、没做也不愧疚）
+
+    private func looseAffirmation(_ c: DayComparison) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("今天，你允许自己好好休息了", systemImage: "moon.stars.fill")
+                .font(.title3.bold()).foregroundStyle(.purple)
+            Text(c.accomplishedCount > 0
+                 ? "顺手还做了 \(c.accomplishedCount) 件——都算数，但今天不必用它们证明什么。"
+                 : "什么都没做也很好。休息本身，就是今天的意义。")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.purple.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: 正反馈主面

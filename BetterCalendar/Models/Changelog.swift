@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.8", date: "2026-07", changes: [
+            "松散日复盘：把某天标为松散后，当晚复盘会转成「休息肯定」——「今天，你允许自己好好休息了」，不显完成率/对比/要紧事；整天没做事也不愧疚，做了几件就轻声庆祝",
+        ]),
         ChangelogEntry(version: "0.18.7", date: "2026-07", changes: [
             "复盘去对比化：晚间复盘默认只呈现「今天做成了什么」——所有做成的事一律平权庆祝，不再单独标「计划外/bonus」、不提绿色计划",
             "想看和计划的对照，点开「看看和计划的对照·帮下次排得更准」——完成率/计划外多做的/今天没排上的都收在这里，措辞只为帮你下次排得准，不打分、不扣分",
