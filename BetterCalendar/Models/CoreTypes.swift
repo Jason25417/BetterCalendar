@@ -80,6 +80,7 @@ struct ParsedBlock: Sendable, Identifiable {
     var end: Date?
     var durationMinutes: Int?
     var isFixed: Bool = false
+    var isAnchor: Bool = false   // 作息锚点（午饭/通勤/午休）：排进日程占时间，但不计完成度
     var category: String = ""
     var timingStyle: TimingStyle = .light
     var priority: BlockPriority = .normal
@@ -106,6 +107,7 @@ struct ScheduledBlock: Sendable, Identifiable {
     var start: Date
     var end: Date
     var isFixed: Bool = false
+    var isAnchor: Bool = false   // 作息锚点（午饭/通勤/午休）：占时间但不计完成度
     var timingStyle: TimingStyle = .light
     var priority: BlockPriority = .normal
     var deadline: Date?

@@ -25,7 +25,7 @@ final class PlanStore {
             .filter { $0.kind == .planned && cal.isDate($0.start, inSameDayAs: day) }
             .sorted { $0.start < $1.start }
             .map { ScheduledBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
-                                  isFixed: $0.isFixed, timingStyle: $0.timingStyle,
+                                  isFixed: $0.isFixed, isAnchor: $0.isAnchor, timingStyle: $0.timingStyle,
                                   priority: $0.priority, deadline: $0.deadline) }
         DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(Self.dayStr(day))")
         return result
@@ -39,7 +39,7 @@ final class PlanStore {
         for old in stale { context.delete(old) }
         for b in blocks {
             context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
-                                     isFixed: b.isFixed, kind: .planned,
+                                     isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
                                      timingStyle: b.timingStyle, priority: b.priority,
                                      deadline: b.deadline))
         }

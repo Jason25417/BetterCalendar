@@ -67,12 +67,13 @@ final class ExecutionViewModel {
         var pausedTotal: TimeInterval = 0   // 休息累计（从已用时长里扣）
         var timingStyle: TimingStyle = .light
     }
-    /// 后台并行块：只记起点，按墙钟计时（不支持番茄/休息——那是前台块的精细玩法）。
+    /// 后台并行块：只记起点，按墙钟计时。休息时也一起冻结（0.17：rest=从所有正在做的事休息）。
     struct BackgroundRun: Identifiable, Sendable {
         let id = UUID()
         var plannedID: UUID?
         var title: String
         var start: Date
+        var pausedTotal: TimeInterval = 0
     }
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
@@ -94,7 +95,9 @@ final class ExecutionViewModel {
             // 计划块从 PlanStore（带 isFixed/timingStyle），不从日历（日历丢元数据）
             let p = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(.now))
             let a = try await calendarStore.read(kind: .actual)
-            planned = p.sorted { $0.start < $1.start }
+            // 锚点块（午饭/通勤等）不进执行列表：占日程但不是"要完成的任务"，menu bar 不催你完成（0.17）
+            planned = p.filter { !$0.isAnchor }
+                       .sorted { $0.start < $1.start }
                        .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end,
                                           timingStyle: $0.timingStyle, isFixed: $0.isFixed) }
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
@@ -163,9 +166,10 @@ final class ExecutionViewModel {
                          && !isDone($0) && !isRunningInBackground($0) }
     }
 
-    /// 后台某并行块已跑多久（按墙钟）。
+    /// 后台某并行块的净时长（休息期间冻结、扣掉休息累计）。
     func backgroundElapsed(_ run: BackgroundRun) -> TimeInterval {
-        max(0, Date.now.timeIntervalSince(run.start))
+        let endRef = isOnBreak ? (breakStart ?? .now) : .now
+        return max(0, endRef.timeIntervalSince(run.start) - run.pausedTotal)
     }
 
     /// 建议的下一件 = 最早的剩余块（计划写入时已按策略排过序）。
@@ -197,7 +201,8 @@ final class ExecutionViewModel {
         return PomodoroPhase(kind: pomoIsRest ? .rest : .work, elapsedInPhase: elapsed, phaseLength: length)
     }
 
-    /// 番茄钟段满后，点「确定」切下一段（工作 ⇄ 休息）。
+    /// 番茄钟段满后点「确定」/ 段中途「提前结束本段」，切下一段（工作 ⇄ 休息）。
+    /// 0.17：不必等段满——用户可随时提前结束当前段（继续软化番茄的刚性）。
     func confirmPomodoroNext() {
         if !pomoIsRest { pomoWorkSegmentsDone += 1 }   // 工作段→休息 = 完成一个工作段
         pomoIsRest.toggle()
@@ -268,9 +273,10 @@ final class ExecutionViewModel {
     /// 完成一件后台并行任务 → 记 [start, now] 进蓝色实际 → 移出后台。
     func completeBackground(_ id: UUID) async {
         guard let i = background.firstIndex(where: { $0.id == id }) else { return }
+        let net = backgroundElapsed(background[i])   // 净时长（扣休息），在移除前算
         let run = background.remove(at: i)
         done.append(ActualRecord(plannedID: run.plannedID, title: run.title,
-                                 start: run.start, end: .now))
+                                 start: run.start, end: run.start.addingTimeInterval(net)))
         // 后台块也是一次会话（墙钟粗计时，不计段数/休息）
         sessionStore?.record(blockID: run.plannedID, title: run.title,
                              start: run.start, end: .now,
@@ -295,6 +301,8 @@ final class ExecutionViewModel {
             if let bs = breakStart {
                 let pause = Date.now.timeIntervalSince(bs)
                 if active != nil { active?.pausedTotal += pause }
+                // 后台并行块也一起把这段休息扣掉（rest=从所有正在做的事休息，0.17）
+                for i in background.indices { background[i].pausedTotal += pause }
                 // 番茄段起点同步后移，让「段内已用」把这段休息扣掉（休息=暂停，段不吃休息时间）
                 if let seg = pomoSegStart { pomoSegStart = seg.addingTimeInterval(pause) }
             }

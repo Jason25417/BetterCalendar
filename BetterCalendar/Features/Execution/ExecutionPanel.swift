@@ -79,10 +79,15 @@ struct ExecutionPanel: View {
                         .buttonStyle(.borderedProminent).controlSize(.small)
                 }
             } else {
-                Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
-                      systemImage: isWork ? "timer" : "cup.and.saucer")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(isWork ? .blue : .green)
+                HStack(spacing: 8) {
+                    Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
+                          systemImage: isWork ? "timer" : "cup.and.saucer")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(isWork ? .blue : .green)
+                    Button(isWork ? "提前休息" : "提前结束") { model.confirmPomodoroNext() }
+                        .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+                        .help(isWork ? "不必等满，现在就去休息" : "不必等满，现在就回到专注")
+                }
             }
         } else if model.activeStyle == TimingStyle.none {
             Text("不计时").font(.caption).foregroundStyle(.secondary)
@@ -214,7 +219,7 @@ struct ExecutionPanel: View {
 
     private var footer: some View {
         HStack {
-            Text("今日：完成 \(model.doneCount) · 剩 \(model.remaining.count)"
+            Text("今日：完成 \(model.doneCount)"
                  + (model.background.isEmpty ? "" : " · 同时 \(model.background.count)"))
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()

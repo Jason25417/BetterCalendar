@@ -414,6 +414,31 @@ struct LogicTests {
         #expect(HomeView.relativeDayWord(day(5), from: now) != "今天")   // 远日显日期
     }
 
+    // MARK: 锚点块（午饭/通勤：占日程但不计完成度、不进执行列表）
+
+    @Test func anchorBlockExcludedFromExecutionPlanned() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        try planStore.replacePlanned([
+            ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600)),
+            ScheduledBlock(title: "午饭", start: s.addingTimeInterval(3600), end: s.addingTimeInterval(5400),
+                           isAnchor: true),
+        ], on: day)
+        // 锚点属性往返存活
+        #expect(try planStore.plannedBlocks(on: day).first { $0.title == "午饭" }?.isAnchor == true)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity())
+        await vm.loadToday()
+        #expect(vm.planned.count == 1)                       // 午饭不进执行列表
+        #expect(vm.planned.first?.title == "写代码")
+    }
+
     // MARK: 「在途」池（M10：LongTask 跨日任务/长线作业）
 
     @Test func planningEnginePoolDefaultIgnoresPool() async throws {

@@ -18,6 +18,7 @@ final class PlanBlock {
     var start: Date = Date.now
     var end: Date = Date.now
     var isFixed: Bool = false
+    var isAnchor: Bool = false
     var category: String = ""
     var kind: BlockKind = BlockKind.planned
     var timingStyle: TimingStyle = TimingStyle.light
@@ -33,6 +34,7 @@ final class PlanBlock {
          start: Date,
          end: Date,
          isFixed: Bool = false,
+         isAnchor: Bool = false,
          category: String = "",
          kind: BlockKind = .planned,
          timingStyle: TimingStyle = .light,
@@ -47,6 +49,7 @@ final class PlanBlock {
         self.start = start
         self.end = end
         self.isFixed = isFixed
+        self.isAnchor = isAnchor
         self.category = category
         self.kind = kind
         self.timingStyle = timingStyle

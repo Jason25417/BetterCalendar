@@ -15,6 +15,7 @@ nonisolated struct DraftSnapshot: Codable {
         var start: Date
         var end: Date
         var isFixed: Bool
+        var isAnchor: Bool = false
         var timingStyleRaw: String
         var priorityRaw: String
         var deadline: Date?
@@ -27,7 +28,7 @@ nonisolated struct DraftSnapshot: Codable {
         }
 
         var editable: EditableBlock {
-            var eb = EditableBlock(title: title, start: start, end: end, isFixed: isFixed,
+            var eb = EditableBlock(title: title, start: start, end: end, isFixed: isFixed, isAnchor: isAnchor,
                                    timingStyle: TimingStyle(rawValue: timingStyleRaw) ?? .light,
                                    priority: BlockPriority(rawValue: priorityRaw) ?? .normal,
                                    deadline: deadline)

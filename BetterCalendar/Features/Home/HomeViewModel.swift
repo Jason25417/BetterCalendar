@@ -17,6 +17,7 @@ struct EditableBlock: Identifiable {
     var start: Date
     var end: Date
     var isFixed: Bool
+    var isAnchor: Bool = false
     var timingStyle: TimingStyle
     var priority: BlockPriority
     var deadline: Date?   // 硬 DDL（≠isFixed）：必须在此之前做完；LLM 解析给出，提醒 due 优先用它
@@ -24,19 +25,20 @@ struct EditableBlock: Identifiable {
 
     init(from b: ScheduledBlock) {
         id = b.id; title = b.title; start = b.start; end = b.end
-        isFixed = b.isFixed; timingStyle = b.timingStyle; priority = b.priority
+        isFixed = b.isFixed; isAnchor = b.isAnchor; timingStyle = b.timingStyle; priority = b.priority
         deadline = b.deadline
     }
     init(title: String, start: Date, end: Date,
-         isFixed: Bool = false, timingStyle: TimingStyle = .light, priority: BlockPriority = .normal,
+         isFixed: Bool = false, isAnchor: Bool = false,
+         timingStyle: TimingStyle = .light, priority: BlockPriority = .normal,
          deadline: Date? = nil) {
         id = UUID(); self.title = title; self.start = start; self.end = end
-        self.isFixed = isFixed; self.timingStyle = timingStyle; self.priority = priority
+        self.isFixed = isFixed; self.isAnchor = isAnchor; self.timingStyle = timingStyle; self.priority = priority
         self.deadline = deadline
     }
     var scheduled: ScheduledBlock {
         ScheduledBlock(id: id, title: title, start: start, end: end,
-                       isFixed: isFixed, timingStyle: timingStyle, priority: priority,
+                       isFixed: isFixed, isAnchor: isAnchor, timingStyle: timingStyle, priority: priority,
                        deadline: deadline)
     }
 }

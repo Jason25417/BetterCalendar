@@ -26,7 +26,7 @@ struct ArrangeDayUseCase {
         let scheduled: [ScheduledBlock] = parsed.blocks.compactMap { pb in
             guard let start = pb.start, let end = pb.end else { return nil }
             return ScheduledBlock(title: pb.title, start: start, end: end,
-                                  isFixed: pb.isFixed, timingStyle: pb.timingStyle,
+                                  isFixed: pb.isFixed, isAnchor: pb.isAnchor, timingStyle: pb.timingStyle,
                                   priority: pb.priority, deadline: pb.deadline)
         }
         let decision = try await planner.arrange(scheduled, pool: pool, now: now)
