@@ -206,7 +206,7 @@ final class HomeViewModel {
             // 现实上下文（0.13.1）：目标日已有日程 + 到期提醒 → 排程避开/纳入考虑
             async let busy = calendarStore.existingEvents(on: targetDay)
             async let due = reminderStore.dueReminders(on: targetDay)
-            let context = ParseContext(busy: await busy, dueReminders: await due)
+            let context = ParseContext(busy: await busy, dueReminders: await due, pool: pool)  // C：池给解析器识别委托
             if !context.isEmpty {
                 DevLog.shared.info("排程", "上下文：已有日程 \(context.busy.count) · 到期提醒 \(context.dueReminders.count)")
             }
@@ -275,7 +275,8 @@ final class HomeViewModel {
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
             for p in pendingLongTasks {
                 longTaskStore?.add(title: p.title, deadline: p.deadline,
-                                   cadenceMinutesPerWeek: p.cadenceMinutesPerWeek)
+                                   cadenceMinutesPerWeek: p.cadenceMinutesPerWeek,
+                                   totalMinutes: p.totalMinutes, unitMinutes: p.unitMinutes)
             }
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）

@@ -474,6 +474,25 @@ struct LogicTests {
         #expect(store.active().isEmpty)
     }
 
+    @Test func longTaskProgressUnitsAndFraction() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let sessions = ExecutionSessionStore(context: container.mainContext)
+        // 量化学习：9 单元 × 40min = 360，已做 120min（=3 单元）
+        let t = store.add(title: "量化学习", totalMinutes: 360, unitMinutes: 40)
+        sessions.record(blockID: nil, title: "量化学习", start: at(2026,7,5,9), end: at(2026,7,5,11),
+                        timingStyle: .light, pomodoroWorkSegments: nil, interruptions: 0)
+        #expect(store.progressText(for: t).contains("已推进 3/9 单元"))
+        #expect(abs((store.progressFraction(for: t) ?? 0) - (120.0/360.0)) < 0.001)
+        // 无总量的任务：只显已投入、无条
+        let t2 = store.add(title: "数据库学习")
+        sessions.record(blockID: nil, title: "数据库学习", start: at(2026,7,5,14), end: at(2026,7,5,15),
+                        timingStyle: .light, pomodoroWorkSegments: nil, interruptions: 0)
+        #expect(store.progressText(for: t2) == "已投入 1 小时")
+        #expect(store.progressFraction(for: t2) == nil)
+    }
+
     @Test func longTaskInvestedMinutesAggregatesSessionsByTitle() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self,

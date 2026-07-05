@@ -46,18 +46,22 @@ final class LongTaskStore {
     /// 入池（幂等）：同名在途项已存在 → 只更新 DDL/节奏（取新值），不重复建。返回实际生效的任务。
     @discardableResult
     func add(title: String, deadline: Date? = nil,
-             cadenceMinutesPerWeek: Int? = nil, note: String = "") -> LongTask {
+             cadenceMinutesPerWeek: Int? = nil, totalMinutes: Int? = nil,
+             unitMinutes: Int? = nil, note: String = "") -> LongTask {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = active().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 }) {
             if let d = deadline { existing.deadline = d }
             if let c = cadenceMinutesPerWeek { existing.cadenceMinutesPerWeek = c }
+            if let tm = totalMinutes { existing.totalMinutes = tm }
+            if let um = unitMinutes { existing.unitMinutes = um }
             existing.modifiedAt = .now
             try? context.save()
             reload()
             return existing
         }
         let task = LongTask(title: t, note: note, deadline: deadline,
-                            cadenceMinutesPerWeek: cadenceMinutesPerWeek)
+                            cadenceMinutesPerWeek: cadenceMinutesPerWeek,
+                            totalMinutes: totalMinutes, unitMinutes: unitMinutes)
         context.insert(task)
         try? context.save()
         reload()
@@ -106,6 +110,20 @@ final class LongTaskStore {
             }
             .compactMap { s in s.end.map { Int($0.timeIntervalSince(s.start) / 60) } }
             .reduce(0, +)
+    }
+
+    /// 进度文案（A，三红线：永远锚定"已"、无总量退时长、无焦虑运算）。
+    func progressText(for task: LongTask) -> String {
+        let invested = investedMinutes(for: task)
+        if let unit = task.unitMinutes, unit > 0, let total = task.totalMinutes, total > 0 {
+            return "已推进 \(invested / unit)/\(max(1, total / unit)) 单元 · 已投入 \(ReviewSummaryText.hm(invested))"
+        }
+        return invested > 0 ? "已投入 \(ReviewSummaryText.hm(invested))" : ""
+    }
+    /// 增长条填充比例（0…1）；无总量返回 nil（无条，只显投入）。
+    func progressFraction(for task: LongTask) -> Double? {
+        guard let total = task.totalMinutes, total > 0 else { return nil }
+        return min(1.0, Double(investedMinutes(for: task)) / Double(total))
     }
 
     /// 复盘用的一行长线推进（今天动过的在途才上榜；没有则 nil——不无中生有）。

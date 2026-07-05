@@ -24,6 +24,8 @@ final class LongTask {
     var note: String = ""
     var deadline: Date?                  // 远期硬截止（可无）
     var cadenceMinutesPerWeek: Int?      // 长线投入节奏，如每周 300 分钟（可无）
+    var totalMinutes: Int?               // 总量（"共9单元40min"→360；"共150小时"→9000）；可无=只显已投入
+    var unitMinutes: Int?                // 单元时长（有则进度按单元数显示，如 3/9）
     var status: LongTaskStatus = LongTaskStatus.active
     var createdAt: Date = Date.now
     var doneAt: Date?
@@ -31,6 +33,7 @@ final class LongTask {
 
     init(id: UUID = UUID(), title: String, note: String = "",
          deadline: Date? = nil, cadenceMinutesPerWeek: Int? = nil,
+         totalMinutes: Int? = nil, unitMinutes: Int? = nil,
          status: LongTaskStatus = .active,
          createdAt: Date = .now, doneAt: Date? = nil, modifiedAt: Date = .now) {
         self.id = id
@@ -38,6 +41,8 @@ final class LongTask {
         self.note = note
         self.deadline = deadline
         self.cadenceMinutesPerWeek = cadenceMinutesPerWeek
+        self.totalMinutes = totalMinutes
+        self.unitMinutes = unitMinutes
         self.status = status
         self.createdAt = createdAt
         self.doneAt = doneAt

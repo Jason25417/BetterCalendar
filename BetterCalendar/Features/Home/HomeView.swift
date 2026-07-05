@@ -378,7 +378,7 @@ struct HomeView: View {
 
     private func ongoingRow(_ task: LongTask, overdue: Bool) -> some View {
         HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(task.title).font(.callout)
                 HStack(spacing: 6) {
                     if let d = task.deadline {
@@ -389,11 +389,21 @@ struct HomeView: View {
                     if let c = task.cadenceMinutesPerWeek {
                         Text("每周约 \(c / 60) 小时").font(.caption2).foregroundStyle(.secondary)
                     }
-                    let invested = container.longTasks.investedMinutes(for: task)
-                    if invested > 0 {
-                        Text("已投入 \(ReviewSummaryText.hm(invested))")
-                            .font(.caption2).foregroundStyle(.green)
+                    // 进度（A，三红线）：单元优先/无单元退时长；永远锚定"已"
+                    let progress = container.longTasks.progressText(for: task)
+                    if !progress.isEmpty {
+                        Text(progress).font(.caption2).foregroundStyle(.green)
                     }
+                }
+                // 增长条（只在有总量时；绿色从零长起、无"还剩"）
+                if let f = container.longTasks.progressFraction(for: task) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.quaternary).frame(height: 3)
+                            Capsule().fill(.green).frame(width: geo.size.width * f, height: 3)
+                        }
+                    }
+                    .frame(height: 3)
                 }
             }
             Spacer()

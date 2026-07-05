@@ -93,6 +93,8 @@ struct ParsedLongTask: Sendable, Identifiable {
     var title: String
     var deadline: Date?
     var cadenceMinutesPerWeek: Int?
+    var totalMinutes: Int?
+    var unitMinutes: Int?
 }
 
 struct ParsedPlan: Sendable {
@@ -137,6 +139,7 @@ struct BusySlot: Sendable {
 struct ParseContext: Sendable {
     var busy: [BusySlot] = []
     var dueReminders: [String] = []
+    var pool: [LongTaskBrief] = []   // 长期任务池（C/L1：识别"今天做N小时长期任务"委托→生成具体块）
     var isEmpty: Bool { busy.isEmpty && dueReminders.isEmpty }
 }
 

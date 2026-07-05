@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18", date: "2026-07", changes: [
+            "长期任务进度：抽屉里显示「已推进 3/9 单元 · 已投入 2h」+ 绿色增长条（只算做了多少、永不显剩余）；总量未知的只显已投入、无条",
+            "修复委托失灵：说「今天分配3小时长期任务、干哪个看你」时，AI 现在会从你的长期任务池里挑具体的排进今天（不再丢掉这条指令）",
+        ]),
         ChangelogEntry(version: "0.17", date: "2026-07", changes: [
             "作息不再被当成任务：午饭/通勤/午休这类锚点照常占日程，但不催你「完成」、不计入完成度",
             "小休息不再单独成块——两个工作块之间留空隙即可；AI 会把过碎的事合并、粗一点排",
