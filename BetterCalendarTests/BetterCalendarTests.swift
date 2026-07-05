@@ -253,10 +253,10 @@ struct LogicTests {
                                           mvpTitle: "写代码",
                                           mvpNote: "今天最稳的一件")
         #expect(text.contains("今天做成 2 件"))
-        #expect(text.contains("计划外"))
+        #expect(!text.contains("计划外"))   // 去对比化：分享面不单标计划外（那件仍在下方清单里被庆祝）
         #expect(text.contains("有效投入 2 小时 30 分"))
         #expect(text.contains("今日最有价值：写代码"))
-        #expect(text.contains("- 读论文"))
+        #expect(text.contains("- 读论文"))   // 计划外那件仍进"做成了什么"清单、平权庆祝
         #expect(!text.contains("读书"))
         #expect(!text.contains("未做"))
     }

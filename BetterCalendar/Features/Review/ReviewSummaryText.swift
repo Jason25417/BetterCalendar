@@ -14,8 +14,8 @@ enum ReviewSummaryText {
                      mvpTitle: String?,
                      mvpNote: String?) -> String {
         var lines: [String] = []
-        let bonus = comparison.bonusCount > 0 ? "（含 \(comparison.bonusCount) 件计划外）" : ""
-        lines.append("今天做成 \(comparison.accomplishedCount) 件\(bonus)")
+        // 去对比化：分享面也只庆祝"做成 N 件"，不单标计划外（那几件已数进 N、在下方清单里）
+        lines.append("今天做成 \(comparison.accomplishedCount) 件")
         lines.append("有效投入 \(hm(comparison.effectiveMinutes))"
                     + (activeDayCount > 0 ? " · 已活跃使用 \(activeDayCount) 天" : ""))
 

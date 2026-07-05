@@ -26,12 +26,11 @@ struct ReviewView: View {
                     mitSection()
                     mvpSection()
                     accomplishedSection(c)
-                    if c.bonusCount > 0 { Text("计划外也算赢——这些是今天的 bonus。").font(.caption).foregroundStyle(.secondary) }
                     if let lp = model.longTaskProgress {
                         Label(lp, systemImage: "tray.full")
                             .font(.caption).foregroundStyle(.purple)
                     }
-                    detailsSection(c)
+                    calibrationSection(c)
                     shareSummaryButton(c)
                     writeTodayButton
                 } else if model.isWorking {
@@ -77,8 +76,8 @@ struct ReviewView: View {
 
     private func summaryCard(_ c: DayComparison) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("今天做成 \(c.accomplishedCount) 件"
-                 + (c.bonusCount > 0 ? "（含 \(c.bonusCount) 件计划外）" : ""))
+            // 去对比化：默认只庆祝"做成 N 件"（计划内外一律平权、不提计划外/bonus，那几件已在清单里被数进 N）
+            Text("今天做成 \(c.accomplishedCount) 件")
                 .font(.title3.bold())
             Text("有效投入 \(Self.hm(c.effectiveMinutes))"
                  + (model.activeDayCount > 0 ? " · 已活跃使用 \(model.activeDayCount) 天" : ""))
@@ -138,11 +137,11 @@ struct ReviewView: View {
     private func accomplishedRow(_ item: ComparedItem) -> some View {
         let isMVP = (model.mvpTitle == item.displayTitle)
         return HStack(spacing: 10) {
-            Image(systemName: item.status == .extra ? "sparkles" : "checkmark.circle.fill")
-                .foregroundStyle(item.status == .extra ? .orange : .green)
+            // 去对比化：一律绿勾——计划外多做的不再用 sparkles/橙色单标（它和"计划"绑定，一标就把对比引回默认面）
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayTitle)
-                Text(Self.phrase(item)).font(.caption).foregroundStyle(.secondary)
+                Text(Self.calmPhrase(item)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if let m = item.actualMinutes { Text(Self.hm(m)).font(.caption).foregroundStyle(.secondary) }
@@ -157,26 +156,46 @@ struct ReviewView: View {
         .background(isMVP ? Color.yellow.opacity(0.12) : Color.clear)
     }
 
-    // MARK: 二级（默认隐藏）：缺口
+    // MARK: 主动打开的「计划校准洞察」（去对比化：完整对比收这里，措辞朝前=帮下次排得更准，不打分）
 
-    @ViewBuilder private func detailsSection(_ c: DayComparison) -> some View {
-        if c.missedCount > 0 {
+    @ViewBuilder private func calibrationSection(_ c: DayComparison) -> some View {
+        // 只在有可校准信息（计划外多做 或 计划里没排上）时出现；纯庆祝的日子不打扰
+        if c.bonusCount > 0 || c.missedCount > 0 {
+            let plannedDone = c.accomplishedCount - c.bonusCount
+            let plannedTotal = plannedDone + c.missedCount
             DisclosureGroup(isExpanded: Binding(
                 get: { model.showDetails }, set: { model.showDetails = $0 })
             ) {
-                ForEach(c.missed) { item in
-                    HStack {
-                        Image(systemName: "circle.dashed").foregroundStyle(.secondary)
-                        Text(item.plannedTitle ?? "")
-                        Spacer()
-                        Text("未做").font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    if plannedTotal > 0 {
+                        Text("计划里的 \(plannedTotal) 件，完成了 \(plannedDone) 件。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    .padding(.vertical, 2)
+                    // 计划外多做的（正向的一半）
+                    ForEach(c.bonus) { item in
+                        HStack {
+                            Image(systemName: "plus.circle").foregroundStyle(.green)
+                            Text(item.displayTitle)
+                            Spacer()
+                            Text("计划外多做的").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    // 计划里今天没排上的（朝前：帮你下次留时间/别排太满，不是评判）
+                    ForEach(c.missed) { item in
+                        HStack {
+                            Image(systemName: "arrow.turn.up.right").foregroundStyle(.secondary)
+                            Text(item.plannedTitle ?? "")
+                            Spacer()
+                            Text("今天没排上").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    Text("这页只帮你看清计划和现实的差，好让下次排得更准——不打分、不扣分。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("没做到的事不扣分——明天从「现在起可行」的部分继续就好。")
-                    .font(.caption).foregroundStyle(.secondary)
             } label: {
-                Text("看看缺口（\(c.missedCount)）").font(.callout).foregroundStyle(.secondary)
+                Text("看看和计划的对照 · 帮下次排得更准").font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -248,6 +267,16 @@ struct ReviewView: View {
         case .over:    return "做得比计划更多"
         case .extra:   return "计划外 · bonus"
         case .missed:  return "未做"
+        }
+    }
+
+    /// 默认复盘面用的中性措辞（去对比化：不提"计划外/比计划更多"这类把对比引回来的词，一律平权庆祝）。
+    static func calmPhrase(_ item: ComparedItem) -> String {
+        switch item.status {
+        case .done:    return item.isContentChange ? "改做：\(item.plannedTitle ?? "")" : "完成"
+        case .partial: return "做了一部分"
+        case .over, .extra: return "完成"
+        case .missed:  return "未做"   // 默认面不会出现 missed
         }
     }
 }
