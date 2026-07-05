@@ -30,6 +30,7 @@ struct HomeView: View {
     let container: AppContainer
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
+    @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
     #if !os(macOS)
     @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
     @State private var showDraftExpanded = false   // iOS 草稿全屏浏览/编辑（小窗太挤）
@@ -85,6 +86,40 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.purple.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
+                // L3 主动建议（唯一主动·顶部一行）：休息日全静音、可"别再提"永久静音、强度可调
+                let _ = l3Tick   // 让"别再提"后重算（静音集存 UserDefaults、非 @Observable）
+                let l3 = container.longTasks.l3Suggestions(
+                    loose: container.looseDays.isLoose(model.targetDay),
+                    intensity: SuggestionSettings.intensity.cap,
+                    muted: SuggestionSettings.mutedTaskIDs)
+                ForEach(l3) { s in
+                    HStack(spacing: 8) {
+                        Image(systemName: "lightbulb").font(.caption).foregroundStyle(.orange)
+                        Text(s.text).font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        if s.kind == .shelve {
+                            Button("先放下") {
+                                if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
+                                    container.longTasks.shelve(t)
+                                }
+                            }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                        } else {
+                            Button("排进今天") {
+                                if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
+                                    model.smartInsertFromLongTask(t)
+                                }
+                            }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                        }
+                        Button { SuggestionSettings.mute(s.id); l3Tick += 1 } label: {
+                            Image(systemName: "xmark").font(.caption2)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
+                    }
+                    .padding(8)
+                    .background(Color.orange.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
                 // 可滚动多行输入 + 底部把手拖拽调高（写长了也能看全，0.16.3）
@@ -156,6 +191,13 @@ struct HomeView: View {
                 }
 
                 ongoingSection
+
+                // 复盘常驻入口：随时决定"这一天到此为止"、看看做成了什么（不只藏在工具栏图标里）
+                NavigationLink(value: HomeRoute.review) {
+                    Label("今日复盘 · 看看做成了什么", systemImage: "checkmark.seal")
+                        .font(.callout).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
 
                 // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
                 if let issue = DevLog.shared.lastIssue {

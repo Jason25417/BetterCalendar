@@ -79,12 +79,15 @@ final class ReviewViewModel {
     func load() async {
         isWorking = true; errorText = nil
         do {
-            let planned = try await calendarStore.read(kind: .planned)
-                .filter { DayContext.isSameLogicalDay($0.start, .now) }
             let actual = try await calendarStore.read(kind: .actual)
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
-            // 当日计划块（真相源 PlanStore 有 isAnchor/priority；日历读回丢了这元数据）
+            // 绿色淡出地基（§5.10 原则6.4）：绿色计划从 PlanStore **真相源**读，不再从日历读——
+            // 这样绿色即使从 Apple 日历常驻淡出，签名功能「计划×实际」对比依然成立。
             let todayPlanned = ((try? planStore?.plannedBlocks(on: .now)) ?? [])
+                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            let planned = todayPlanned.map {
+                CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
+            }
             let anchorTitles = todayPlanned.filter(\.isAnchor).map(\.title)
             comparison = comparer.compare(
                 planned: Self.stripAnchors(planned, anchorTitles: anchorTitles),

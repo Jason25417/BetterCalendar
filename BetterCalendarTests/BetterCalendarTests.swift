@@ -582,6 +582,23 @@ struct LogicTests {
         #expect(store.progressFraction(for: t) == 1.0)               // 条封顶、不越界
     }
 
+    // MARK: L3 主动建议引擎（0.18.14）：触发 + 休息日静音 + 强度 + 静音集
+    @Test func l3SuggestsDeadlineAndRespectsLooseIntensityMute() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, PlanBlock.self,
+                                           configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let paper = store.add(title: "论文", deadline: at(2026,7,7,22))   // 1 天后 DDL
+        let now = at(2026,7,6,10)
+        let s = store.l3Suggestions(now: now, loose: false, intensity: 1, muted: [])
+        #expect(s.count == 1)
+        #expect(s.first?.kind == .deadline)
+        #expect(s.first?.text.contains("论文") == true)
+        #expect(store.l3Suggestions(now: now, loose: true, intensity: 1, muted: []).isEmpty)      // 休息日全静音
+        #expect(store.l3Suggestions(now: now, loose: false, intensity: 0, muted: []).isEmpty)     // 关闭
+        #expect(store.l3Suggestions(now: now, loose: false, intensity: 1, muted: [paper.id]).isEmpty) // 别再提
+    }
+
     @Test func longTaskOverdueQuery() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, configurations: config)

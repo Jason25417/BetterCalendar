@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var backend: CalendarBackend = CalendarSettings.backend
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
+    @State private var pushIntensity: PushIntensity = SuggestionSettings.intensity
     @State private var journalLock: Bool = JournalSettings.privacyLock
     @State private var savedHint: String?
     @State private var testing = false
@@ -88,6 +89,13 @@ struct SettingsView: View {
                     Stepper("最晚工作到 \(windDownHour):00", value: $windDownHour, in: 18...24)
                         .onChange(of: windDownHour) { _, v in WorkHoursSettings.windDownHour = v }
                     Text("软收工：AI 排/重排时尽量别把事排到这个点之后（略超一点点能多做完一件大事则可以）；你明确说的晚间事不受限。当天想早睡/晚睡，直接在排日程里说一句即可。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Picker("主动建议强度", selection: $pushIntensity) {
+                        ForEach(PushIntensity.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .onChange(of: pushIntensity) { _, v in SuggestionSettings.intensity = v }
+                    Text("排日程页顶部偶尔提醒一句临近 DDL / 久放的未来任务（休息日全静音、可「别再提」永久静音某件）。默认温和。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
