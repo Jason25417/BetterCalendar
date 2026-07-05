@@ -8,6 +8,7 @@
 
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -104,10 +105,19 @@ struct JournalEditor: View {
                     }
                 }
             }
-            PhotosPicker(selection: $picked, maxSelectionCount: 5, matching: .images) {
-                Label("加照片", systemImage: "photo.badge.plus")
+            // 加照片：iOS/Mac 都能从照片库选；Mac 额外能"从文件选"+"粘贴图片"（加照片更广更轻）
+            HStack {
+                PhotosPicker(selection: $picked, maxSelectionCount: 5, matching: .images) {
+                    Label("从照片库", systemImage: "photo.badge.plus")
+                }
+                .onChange(of: picked) { _, items in Task { await importPhotos(items) } }
+                #if os(macOS)
+                Button { importFromFiles() } label: { Label("从文件…", systemImage: "folder") }
+                Button { pasteImage() } label: { Label("粘贴图片", systemImage: "doc.on.clipboard") }
+                    .help("剪贴板里是图片时，直接作为照片加进来（截图/网图复制后点这里）")
+                #endif
             }
-            .onChange(of: picked) { _, items in Task { await importPhotos(items) } }
+            .buttonStyle(.bordered).controlSize(.small)
         }
     }
 
@@ -131,6 +141,38 @@ struct JournalEditor: View {
         }
         picked = []; touch()
     }
+
+    #if os(macOS)
+    /// Mac：从本地文件选图片加进来。
+    private func importFromFiles() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        guard panel.runModal() == .OK else { return }
+        var added = false
+        for url in panel.urls {
+            if let data = try? Data(contentsOf: url), let ref = photoStore.save(data) {
+                entry.photoRefs.append(ref); added = true
+            }
+        }
+        if added { touch() }
+    }
+
+    /// Mac：剪贴板里是图片时直接作为照片加入（截图/网图复制后一键贴入）。
+    private func pasteImage() {
+        guard let imgs = NSPasteboard.general.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+              !imgs.isEmpty else { return }
+        var added = false
+        for img in imgs {
+            if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]), let ref = photoStore.save(png) {
+                entry.photoRefs.append(ref); added = true
+            }
+        }
+        if added { touch() }
+    }
+    #endif
     private func loadImage(_ ref: String) -> Image? {
         // 走 PhotoStore.data：本地缓存优先，云端同步来的照片从 DB 取（跨端可见）
         guard let data = photoStore.data(for: ref) else { return nil }

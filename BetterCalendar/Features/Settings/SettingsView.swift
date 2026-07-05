@@ -72,9 +72,20 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            // 进阶设置（渐进披露，§5.9）：新手用不到的都收在这——皮肤/开发者项日后也进此区
-            Section {
-                DisclosureGroup("进阶设置", isExpanded: $showAdvanced) {
+            // 进阶设置（渐进披露，§5.9）：手动折叠（DisclosureGroup 在 macOS Form 里收不回）
+            Section("进阶设置") {
+                Button { withAnimation(.easeInOut(duration: 0.2)) { showAdvanced.toggle() } } label: {
+                    HStack {
+                        Text(showAdvanced ? "收起" : "展开进阶设置")
+                        Spacer()
+                        Image(systemName: showAdvanced ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showAdvanced {
                     Picker("AI 模型", selection: $model) {
                         ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
                     }

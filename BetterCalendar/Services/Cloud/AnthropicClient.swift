@@ -38,7 +38,9 @@ struct AnthropicClient {
 
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = 30
+        // 超时按输出量放宽：长输入（解析 16+ 块、maxTokens 6000）非流式响应会超过 30s → 之前动辄超时回退。
+        // 长请求(≥4000)给 120s、短请求 60s。（日后上流式可再收紧。）
+        req.timeoutInterval = maxTokens >= 4000 ? 120 : 60
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
