@@ -62,7 +62,28 @@ struct HomeView: View {
                 HStack {
                     Text("说说你的一天").font(.headline)
                     Spacer()
+                    let loose = container.looseDays.isLoose(model.targetDay)
+                    Button { container.looseDays.toggle(model.targetDay) } label: {
+                        Label(loose ? "结束松散" : "松散一下",
+                              systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
+                    }
+                    .font(.caption).buttonStyle(.borderless)
+                    .foregroundStyle(loose ? .purple : .secondary)
+                    .help("把这天标为松散：App 退场陪你——不催、不算落后。随时可结束；短时间的小憩直接留白即可，不必标松散")
                     targetDayMenu
+                }
+
+                // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
+                if container.looseDays.isLoose(model.targetDay) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "moon.stars.fill").foregroundStyle(.purple)
+                        Text("松散日 · 已经退场陪你了——不催、不算账。想排还是能排，也可以就好好休息。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.purple.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
                 // 可滚动多行输入 + 底部把手拖拽调高（写长了也能看全，0.16.3）
