@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.4", date: "2026-07", changes: [
+            "会议会前提醒：标了「固定」的日程（会议/外部承诺）会自动挂一个「会前 5 分钟」的系统提醒，帮你收尾手头的事、准备赴会；其它普通日程仍然完全不弹通知",
+        ]),
         ChangelogEntry(version: "0.18.3", date: "2026-07", changes: [
             "要紧事「兑现红利」：执行页顶部显示「今日最要紧：X」，做成了就变成「🎯 最要紧的X做成了」；复盘也给它一个特写。没做成的不催、不留校——红利是可领的奖赏，不是欠的罚单",
             "要紧事软限：标超过 2 件时轻声提示「贵在少、越多越稀释」，但不硬挡（稀缺才是意义）",

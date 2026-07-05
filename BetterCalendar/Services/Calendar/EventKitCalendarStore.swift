@@ -51,17 +51,18 @@ final class EventKitCalendarStore: CalendarStore {
                 if let ev = byKey[k] {
                     let endChanged = abs(ev.endDate.timeIntervalSince(d.end)) >= 30
                     let notesChanged = (ev.notes ?? "") != (d.notes ?? "")
-                    // 三色日历（绿计划/蓝实际/橙预览）**从不弹系统通知**：清掉任何 alarm（含日历「默认提醒时间」偶发套用的）。
-                    let hasAlarms = !(ev.alarms ?? []).isEmpty
-                    if endChanged || notesChanged || hasAlarms {
-                        ev.endDate = d.end; ev.notes = d.notes; ev.alarms = []
+                    // 普通块从不弹通知（alarm=[]）；仅固定块/会议挂会前提醒（⑤）。按期望态调整。
+                    let wantAlarm = d.alarmLeadMinutes != nil
+                    let hasAlarm = !(ev.alarms ?? []).isEmpty
+                    if endChanged || notesChanged || wantAlarm != hasAlarm {
+                        ev.endDate = d.end; ev.notes = d.notes; ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)
                         try store.save(ev, span: .thisEvent, commit: false); changed += 1
                     }
                 } else {
                     let ev = EKEvent(eventStore: store)
                     ev.calendar = cal; ev.title = d.title
                     ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
-                    ev.alarms = []   // 显式无提醒：到点不在手机弹消息（会议会前提醒是 0.19 另做、只挂固定块）
+                    ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)   // 普通块 nil→[]（不弹）；固定块→会前提醒
                     try store.save(ev, span: .thisEvent, commit: false); changed += 1
                 }
             }
@@ -76,6 +77,12 @@ final class EventKitCalendarStore: CalendarStore {
     /// 事件去重键：标题 + 起始分钟（同标题同起始＝同一事件）。
     private static func eventKey(_ title: String, _ start: Date) -> String {
         "\(title)#\(Int(start.timeIntervalSinceReferenceDate / 60))"
+    }
+
+    /// 会前提醒（⑤会议自动化）：lead 分钟前响一次；nil/负 → 无提醒（普通块）。
+    private static func alarms(lead: Int?) -> [EKAlarm] {
+        guard let lead, lead >= 0 else { return [] }
+        return [EKAlarm(relativeOffset: TimeInterval(-lead * 60))]
     }
 
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft] {

@@ -274,8 +274,10 @@ final class HomeViewModel {
     }
 
     func confirm() async {
+        // 固定块=会议/外部承诺 → 挂会前提醒（原则4「仅固定块提醒」；⑤会议自动化）；普通块 nil=不弹
         let drafts = blocks.sorted { $0.start < $1.start }.map {
-            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
+            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned,
+                               alarmLeadMinutes: $0.isFixed ? MeetingSettings.leadMinutes : nil)
         }
         // ★要紧事 与 带硬DDL 的块都进提醒事项；due 优先用 DDL（"必须何时前做完"），否则用开始时间
         var reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {

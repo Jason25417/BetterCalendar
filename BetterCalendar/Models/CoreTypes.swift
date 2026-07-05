@@ -168,4 +168,7 @@ struct CalendarEventDraft: Sendable, Identifiable {
     var end: Date
     var kind: PlanCalendarKind
     var notes: String?
+    /// 会前 N 分钟系统提醒（⑤会议自动化）：仅固定块/会议设它=挂 EKAlarm 提醒收尾当前事；
+    /// nil=无提醒（绿/蓝/橙普通块的默认，原则4「仅固定块提醒」）。
+    var alarmLeadMinutes: Int?
 }
