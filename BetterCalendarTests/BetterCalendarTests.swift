@@ -643,6 +643,37 @@ struct LogicTests {
         #expect(editable.scheduled.deadline == ddl)    // 回转不丢 → 真相源/提醒都拿得到
     }
 
+    // MARK: 带 DDL 的未来任务入池 → 系统提醒（0.18.1，去重不重复）
+
+    @Test func poolDeadlineTaskWritesReminderUnlessAlreadyScheduledAsBlock() {
+        let ddl = at(2026,7,10,23)
+        let pending = [
+            ParsedLongTask(title: "期末论文", deadline: ddl),            // 有 DDL、没排块 → 出提醒
+            ParsedLongTask(title: "学 Swift"),                          // 无 DDL → 不出
+            ParsedLongTask(title: "读论文", deadline: at(2026,7,8,20)),  // 有 DDL 但已排成今天块 → 去重跳过
+        ]
+        let drafts = HomeViewModel.poolReminderDrafts(pending: pending,
+                                                      blockTitles: ["读论文"], leadMinutes: 30)
+        #expect(drafts.count == 1)
+        #expect(drafts.first?.title == "期末论文")
+        #expect(drafts.first?.due == ddl)
+        #expect(drafts.first?.priority == 5)          // 中优先级，同带 DDL 块口径
+        #expect(drafts.first?.leadMinutes == 30)
+    }
+
+    // MARK: 复盘对比跳过锚点（0.18.1，午饭这类不算 missed）
+
+    @Test func reviewStripsAnchorsFromComparison() {
+        let planned = [
+            CalendarEventDraft(title: "写代码", start: at(2026,7,5,9), end: at(2026,7,5,11), kind: .planned),
+            CalendarEventDraft(title: "午饭", start: at(2026,7,5,12), end: at(2026,7,5,13), kind: .planned),
+        ]
+        let stripped = ReviewViewModel.stripAnchors(planned, anchorTitles: ["午饭"])
+        #expect(stripped.count == 1)
+        #expect(stripped.first?.title == "写代码")                       // 锚点被剔、任务保留
+        #expect(ReviewViewModel.stripAnchors(planned, anchorTitles: []).count == 2)   // 无锚点 → 原样
+    }
+
     // MARK: 实际写入「合并不覆盖」（工程债修复：menu bar × 回填 × 双端并发）
 
     @Test func calendarMergeUnionKeepsExistingAndOverridesSameKey() {

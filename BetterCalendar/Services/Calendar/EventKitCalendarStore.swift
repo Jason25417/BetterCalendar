@@ -51,14 +51,17 @@ final class EventKitCalendarStore: CalendarStore {
                 if let ev = byKey[k] {
                     let endChanged = abs(ev.endDate.timeIntervalSince(d.end)) >= 30
                     let notesChanged = (ev.notes ?? "") != (d.notes ?? "")
-                    if endChanged || notesChanged {
-                        ev.endDate = d.end; ev.notes = d.notes
+                    // 三色日历（绿计划/蓝实际/橙预览）**从不弹系统通知**：清掉任何 alarm（含日历「默认提醒时间」偶发套用的）。
+                    let hasAlarms = !(ev.alarms ?? []).isEmpty
+                    if endChanged || notesChanged || hasAlarms {
+                        ev.endDate = d.end; ev.notes = d.notes; ev.alarms = []
                         try store.save(ev, span: .thisEvent, commit: false); changed += 1
                     }
                 } else {
                     let ev = EKEvent(eventStore: store)
                     ev.calendar = cal; ev.title = d.title
                     ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
+                    ev.alarms = []   // 显式无提醒：到点不在手机弹消息（会议会前提醒是 0.19 另做、只挂固定块）
                     try store.save(ev, span: .thisEvent, commit: false); changed += 1
                 }
             }

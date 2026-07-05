@@ -233,6 +233,18 @@ final class HomeViewModel {
         isWorking = false
     }
 
+    /// 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL)。纯函数、可单测。
+    /// 去重：已被排成今天块的（块已自带 DDL 提醒）跳过，避免两条重复提醒。priority 5=中，同带 DDL 块口径。
+    static func poolReminderDrafts(pending: [ParsedLongTask], blockTitles: [String],
+                                   leadMinutes: Int?) -> [ReminderDraft] {
+        pending.compactMap { p in
+            guard let due = p.deadline else { return nil }
+            if blockTitles.contains(where: { TitleMatch.similarity($0, p.title) >= 0.6 }) { return nil }
+            return ReminderDraft(title: p.title, due: due, priority: 5,
+                                 notes: "未来任务截止", leadMinutes: leadMinutes)
+        }
+    }
+
     func refine() async {
         let cmd = refineText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
@@ -253,11 +265,14 @@ final class HomeViewModel {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
         }
         // ★要紧事 与 带硬DDL 的块都进提醒事项；due 优先用 DDL（"必须何时前做完"），否则用开始时间
-        let reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {
+        var reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {
             ReminderDraft(title: $0.title, due: $0.deadline ?? $0.start,
                           priority: $0.priority == .important ? 1 : 5, notes: nil,
                           leadMinutes: ReminderSettings.leadMinutes)
         }
+        // 带 DDL 的未来任务入池 → 也写一条系统提醒(due=DDL)，得到系统级 DDL 提醒（已排成今天块的跳过、不重复）
+        reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),
+                                             leadMinutes: ReminderSettings.leadMinutes)
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {

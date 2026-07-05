@@ -86,6 +86,6 @@ final class AppContainer {
     var reviewModel: ReviewViewModel {
         ReviewViewModel(calendarStore: routingStore, comparer: comparer,
                         arrangeDay: arrangeDay, localStore: reviewStore,
-                        longTasks: longTasks)
+                        longTasks: longTasks, planStore: planStore)
     }
 }

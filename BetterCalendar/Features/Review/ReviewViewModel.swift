@@ -18,6 +18,7 @@ final class ReviewViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let localStore: ReviewLocalStore
     private let longTasks: LongTaskStore?   // 长线推进行（M10-3）；nil=不显示
+    private let planStore: PlanStore?       // 读当日锚点标题（午饭/通勤等），复盘对比跳过它们；nil=不跳
 
     var comparison: DayComparison?
     var showDetails = false        // 完成率/缺口默认隐藏，主动点才看
@@ -38,12 +39,23 @@ final class ReviewViewModel {
 
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
-         longTasks: LongTaskStore? = nil) {
+         longTasks: LongTaskStore? = nil, planStore: PlanStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
         self.localStore = localStore
         self.longTasks = longTasks
+        self.planStore = planStore
+    }
+
+    /// 剥离锚点：午饭/通勤/午休这类作息不是"要完成的任务"，不进对比（否则会算成 missed）。
+    /// 纯函数、可单测：标题与任一当日锚点相似(≥0.6)即剔除，绿蓝两侧都剔。
+    static func stripAnchors(_ drafts: [CalendarEventDraft],
+                            anchorTitles: [String]) -> [CalendarEventDraft] {
+        guard !anchorTitles.isEmpty else { return drafts }
+        return drafts.filter { d in
+            !anchorTitles.contains { TitleMatch.similarity($0, d.title) >= 0.6 }
+        }
     }
 
     // MARK: - 对比
@@ -55,7 +67,12 @@ final class ReviewViewModel {
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
             let actual = try await calendarStore.read(kind: .actual)
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
-            comparison = comparer.compare(planned: planned, actual: actual)
+            // 当日锚点标题（真相源 PlanStore 有 isAnchor；日历读回丢了这元数据）→ 对比两侧都跳过锚点
+            let anchorTitles = ((try? planStore?.plannedBlocks(on: .now)) ?? [])
+                .filter(\.isAnchor).map(\.title)
+            comparison = comparer.compare(
+                planned: Self.stripAnchors(planned, anchorTitles: anchorTitles),
+                actual: Self.stripAnchors(actual, anchorTitles: anchorTitles))
             // 当天做成 ≥1 件 → 计入活跃日（极低门槛）
             if let c = comparison, c.accomplishedCount > 0 { localStore.markActive() }
         } catch {
