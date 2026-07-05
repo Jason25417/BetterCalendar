@@ -190,6 +190,14 @@ struct HomeView: View {
                     }
                     .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
 
+                    // 要紧事软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都要紧=什么都不要紧
+                    let mitCount = model.blocks.filter { $0.priority == .important }.count
+                    if mitCount > 2 {
+                        Label("要紧事贵在少（已标 \(mitCount) 件）——越多越稀释，真正最要紧的留 1–2 件就好",
+                              systemImage: "sparkles")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+
                     HStack {
                         TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
                                   text: $model.refineText)

@@ -52,6 +52,7 @@ final class ExecutionViewModel {
         var end: Date
         var timingStyle: TimingStyle = .light
         var isFixed: Bool = false
+        var priority: BlockPriority = .normal
     }
     struct ActualRecord: Identifiable, Sendable {
         let id = UUID()
@@ -99,7 +100,8 @@ final class ExecutionViewModel {
             planned = p.filter { !$0.isAnchor }
                        .sorted { $0.start < $1.start }
                        .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end,
-                                          timingStyle: $0.timingStyle, isFixed: $0.isFixed) }
+                                          timingStyle: $0.timingStyle, isFixed: $0.isFixed,
+                                          priority: $0.priority) }
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
             var merged = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
                           .map { ActualRecord(plannedID: nil, title: $0.title,
@@ -176,6 +178,11 @@ final class ExecutionViewModel {
     var nextSuggested: PlannedItem? { remaining.first }
 
     var doneCount: Int { planned.filter { isDone($0) }.count }
+
+    /// 今日要紧事（★）——「兑现红利」执行侧：做成了打 🎯、没做成不罚（只是不亮）。
+    var importantItems: [PlannedItem] { planned.filter { $0.priority == .important } }
+    /// 要紧事是否已做成（复用 isDone 的被动信号判定）。
+    func isImportantDone(_ item: PlannedItem) -> Bool { isDone(item) }
 
     /// 当前块已用时长（休息期间冻结、并扣掉休息累计）。实时算，由 UI 的 TimelineView 每秒刷新。
     var currentElapsed: TimeInterval {

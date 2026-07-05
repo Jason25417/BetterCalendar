@@ -23,6 +23,7 @@ struct ReviewView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let c = model.comparison {
                     summaryCard(c)
+                    mitSection()
                     mvpSection()
                     accomplishedSection(c)
                     if c.bonusCount > 0 { Text("计划外也算赢——这些是今天的 bonus。").font(.caption).foregroundStyle(.secondary) }
@@ -87,6 +88,21 @@ struct ReviewView: View {
         .padding()
         .background(Color.green.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // 兑现红利：今日要紧事做成了 → 特写庆祝（🎯）；没做成的不出现（不罚、不留校）
+    @ViewBuilder private func mitSection() -> some View {
+        if !model.mitAccomplished.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(model.mitAccomplished, id: \.self) { title in
+                    Label("最要紧的「\(title)」做成了", systemImage: "target")
+                        .font(.subheadline.weight(.medium)).foregroundStyle(.green)
+                }
+            }
+            .padding(10)
+            .background(Color.green.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
     }
 
     // 今日「最有价值的一件」轻自评（选了才显输入框；可写一句为什么）

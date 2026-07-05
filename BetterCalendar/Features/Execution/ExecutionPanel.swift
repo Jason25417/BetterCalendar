@@ -17,6 +17,7 @@ struct ExecutionPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            mitStrip
             Divider()
             actions
             focusHint
@@ -32,6 +33,23 @@ struct ExecutionPanel: View {
         .frame(width: 280)
         #endif
         .task { await model.loadToday() }
+    }
+
+    // MARK: 今日最要紧（★兑现红利）——做成打 🎯，没做成不罚（只是不亮），至多软限 ≤2 件
+    @ViewBuilder private var mitStrip: some View {
+        if !model.importantItems.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(model.importantItems) { item in
+                    if model.isImportantDone(item) {
+                        Text("🎯 最要紧的「\(item.title)」做成了")
+                            .font(.caption.weight(.medium)).foregroundStyle(.green)
+                    } else {
+                        Label("今日最要紧：\(item.title)", systemImage: "star.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: 头部状态

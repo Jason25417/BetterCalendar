@@ -31,6 +31,8 @@ final class ReviewViewModel {
     var mvpNote = ""
     /// 长线推进行（M10-3，今天动过的在途；nil=今天没动长线，不显示）。
     var longTaskProgress: String?
+    /// 今日做成的要紧事（★兑现红利）——复盘特写"🎯 最要紧的X做成了"；没做成的不进（不罚、不留校）。
+    var mitAccomplished: [String] = []
 
     // 降级回填：补今天 menu bar 没抓到的 / 计划外的
     var backfillText = ""
@@ -58,6 +60,14 @@ final class ReviewViewModel {
         }
     }
 
+    /// 兑现红利：今日要紧事里，被"做成清单"命中的（≥0.6）= 兑现了。纯函数、可单测。
+    /// 只回做成的——没做成的绝不进（不罚、不留校，红利是可领的奖赏非欠的罚单）。
+    static func mitDone(importantTitles: [String], accomplishedTitles: [String]) -> [String] {
+        importantTitles.filter { mit in
+            accomplishedTitles.contains { TitleMatch.similarity($0, mit) >= 0.6 }
+        }
+    }
+
     // MARK: - 对比
 
     func load() async {
@@ -67,12 +77,17 @@ final class ReviewViewModel {
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
             let actual = try await calendarStore.read(kind: .actual)
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
-            // 当日锚点标题（真相源 PlanStore 有 isAnchor；日历读回丢了这元数据）→ 对比两侧都跳过锚点
-            let anchorTitles = ((try? planStore?.plannedBlocks(on: .now)) ?? [])
-                .filter(\.isAnchor).map(\.title)
+            // 当日计划块（真相源 PlanStore 有 isAnchor/priority；日历读回丢了这元数据）
+            let todayPlanned = ((try? planStore?.plannedBlocks(on: .now)) ?? [])
+            let anchorTitles = todayPlanned.filter(\.isAnchor).map(\.title)
             comparison = comparer.compare(
                 planned: Self.stripAnchors(planned, anchorTitles: anchorTitles),
                 actual: Self.stripAnchors(actual, anchorTitles: anchorTitles))
+            // 兑现红利：今日要紧事被"做成清单"命中的 → 复盘特写；没做成的不进
+            let importantTitles = todayPlanned.filter { $0.priority == .important }.map(\.title)
+            mitAccomplished = Self.mitDone(
+                importantTitles: importantTitles,
+                accomplishedTitles: comparison?.accomplished.map(\.displayTitle) ?? [])
             // 当天做成 ≥1 件 → 计入活跃日（极低门槛）
             if let c = comparison, c.accomplishedCount > 0 { localStore.markActive() }
         } catch {

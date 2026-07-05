@@ -709,6 +709,14 @@ struct LogicTests {
         #expect(ReviewViewModel.stripAnchors(planned, anchorTitles: []).count == 2)   // 无锚点 → 原样
     }
 
+    // MARK: 要紧事兑现红利（0.18.3）——只庆祝做成的，没做成的不罚、不留校
+    @Test func reviewMITCashInOnlyCelebratesDone() {
+        let done = ReviewViewModel.mitDone(importantTitles: ["写论文", "复习考试"],
+                                           accomplishedTitles: ["写论文", "健身"])
+        #expect(done == ["写论文"])          // 论文做成→兑现；复习没做成→不进(不罚)
+        #expect(ReviewViewModel.mitDone(importantTitles: [], accomplishedTitles: ["写论文"]).isEmpty)
+    }
+
     // MARK: 实际写入「合并不覆盖」（工程债修复：menu bar × 回填 × 双端并发）
 
     @Test func calendarMergeUnionKeepsExistingAndOverridesSameKey() {
