@@ -26,6 +26,7 @@ final class PlanBlock {
     var deadline: Date?
     var assignedBy: AssignedBy = AssignedBy.selfAssigned
     var labels: [String] = []       // 扩展接口
+    var linkedTaskID: UUID?         // 精确归属：本块属于哪个未来任务(LongTask.id)；nil=不属于池任务（0.18.2）
     var externalEventID: String?
     var completion: CompletionStatus?
 
@@ -42,6 +43,7 @@ final class PlanBlock {
          deadline: Date? = nil,
          assignedBy: AssignedBy = .selfAssigned,
          labels: [String] = [],
+         linkedTaskID: UUID? = nil,
          externalEventID: String? = nil,
          completion: CompletionStatus? = nil) {
         self.id = id
@@ -57,6 +59,7 @@ final class PlanBlock {
         self.deadline = deadline
         self.assignedBy = assignedBy
         self.labels = labels
+        self.linkedTaskID = linkedTaskID
         self.externalEventID = externalEventID
         self.completion = completion
     }

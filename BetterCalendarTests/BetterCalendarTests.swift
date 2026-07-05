@@ -514,6 +514,41 @@ struct LogicTests {
         #expect(store.progressLine(now: at(2026,7,6,12)) == nil)                // 没动的日子不上榜
     }
 
+    // MARK: 0.18.2 精确归属：会话所属块显式归属 → 不靠标题、不串味
+    @Test func investedMinutesPrefersLinkedTaskOverTitle() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, PlanBlock.self,
+                                           configurations: config)
+        let ctx = container.mainContext
+        let store = LongTaskStore(context: ctx)
+        let sessions = ExecutionSessionStore(context: ctx)
+        let paper = store.add(title: "论文")
+        let db = store.add(title: "数据库")                 // 与"论文"不相似 → 两件并存（不触发入池去重）
+        // 块显式归属到「论文」，但块/会话标题写成「数据库」——用来证明"归属优先于标题"
+        let bid = UUID()
+        ctx.insert(PlanBlock(id: bid, title: "数据库", start: at(2026,7,5,9), end: at(2026,7,5,10),
+                             kind: .planned, linkedTaskID: paper.id))
+        try ctx.save()
+        sessions.record(blockID: bid, title: "数据库", start: at(2026,7,5,9), end: at(2026,7,5,10),
+                        timingStyle: .light, pomodoroWorkSegments: nil, interruptions: 0)   // 60m
+        #expect(store.investedMinutes(for: paper) == 60)    // 归属优先：虽标题=数据库，仍精确记给「论文」
+        #expect(store.investedMinutes(for: db) == 0)        // 标题匹配也不串味（块显式属于「论文」）
+    }
+
+    // MARK: 0.18.2 超估算 → 淡掉 N/M 单元、只显已投入 + looksComplete 出邀请
+    @Test func progressDropsFractionWhenOverEstimate() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let sessions = ExecutionSessionStore(context: container.mainContext)
+        let t = store.add(title: "通识作业", totalMinutes: 120, unitMinutes: 60)   // 估 2 单元
+        sessions.record(blockID: nil, title: "通识作业", start: at(2026,7,5,9), end: at(2026,7,5,12),
+                        timingStyle: .light, pomodoroWorkSegments: nil, interruptions: 0)   // 180m > 120
+        #expect(store.looksComplete(for: t) == true)                 // 达/超估算 → 出"看起来做完了？"
+        #expect(store.progressText(for: t) == "已投入 3 小时")        // 淡掉 N/M 单元、只显已投入
+        #expect(store.progressFraction(for: t) == 1.0)               // 条封顶、不越界
+    }
+
     @Test func longTaskOverdueQuery() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, configurations: config)

@@ -100,21 +100,42 @@ final class LongTaskStore {
         (try? context.fetch(FetchDescriptor<ExecutionSession>())) ?? []
     }
 
-    /// 某在途任务的累计投入分钟：按标题相似聚合执行会话（0.7 起自动落库，同库直查）。
+    /// 块 id → 归属未来任务 id（只含已归属的块）。0.18.2 精确归属：让投入统计锚 id、不靠标题漂移。
+    private func blockLinkMap() -> [UUID: UUID] {
+        var map: [UUID: UUID] = [:]
+        for b in (try? context.fetch(FetchDescriptor<PlanBlock>())) ?? [] {
+            if let linked = b.linkedTaskID { map[b.id] = linked }
+        }
+        return map
+    }
+
+    /// 某未来任务的累计投入分钟。**精确优先**：会话所属块显式归属到某任务→只记给它（标题相同也不串味）；
+    /// 未归属的块 → 退回标题相似（0.18.1 前的口径，兼容旧数据）。
     func investedMinutes(for task: LongTask, on day: Date? = nil) -> Int {
-        sessions()
+        let linkMap = blockLinkMap()
+        return sessions()
             .filter { s in
-                guard TitleMatch.similarity(s.title, task.title) >= 0.6 else { return false }
-                if let day { return DayContext.isSameLogicalDay(s.start, day) }
-                return true
+                if let day, !DayContext.isSameLogicalDay(s.start, day) { return false }
+                if let bid = s.blockID, let linked = linkMap[bid] { return linked == task.id }  // 精确
+                return TitleMatch.similarity(s.title, task.title) >= 0.6                          // 兜底
             }
             .compactMap { s in s.end.map { Int($0.timeIntervalSince(s.start) / 60) } }
             .reduce(0, +)
     }
 
+    /// 进度是否已达/超估算（有总量且投入≥总量）——UI 出"看起来做完了？"邀请、并淡掉分数。
+    func looksComplete(for task: LongTask) -> Bool {
+        guard let total = task.totalMinutes, total > 0 else { return false }
+        return investedMinutes(for: task) >= total
+    }
+
     /// 进度文案（A，三红线：永远锚定"已"、无总量退时长、无焦虑运算）。
+    /// 超/达估算（投入≥总量）：淡掉"N/M 单元"分数、只显已投入——估算安静地不再重要，绝不显"你超了"。
     func progressText(for task: LongTask) -> String {
         let invested = investedMinutes(for: task)
+        if let total = task.totalMinutes, total > 0, invested >= total {
+            return "已投入 \(ReviewSummaryText.hm(invested))"
+        }
         if let unit = task.unitMinutes, unit > 0, let total = task.totalMinutes, total > 0 {
             return "已推进 \(invested / unit)/\(max(1, total / unit)) 单元 · 已投入 \(ReviewSummaryText.hm(invested))"
         }

@@ -20,18 +20,19 @@ nonisolated struct DraftSnapshot: Codable {
         var priorityRaw: String
         var deadline: Date?
         var fromPool: Bool
+        var linkedTaskID: UUID? = nil   // 0.18.2；旧快照缺此键 → 解码为 nil，兼容
 
         init(from b: EditableBlock) {
             title = b.title; start = b.start; end = b.end; isFixed = b.isFixed
             timingStyleRaw = b.timingStyle.rawValue; priorityRaw = b.priority.rawValue
-            deadline = b.deadline; fromPool = b.fromPool
+            deadline = b.deadline; fromPool = b.fromPool; linkedTaskID = b.linkedTaskID
         }
 
         var editable: EditableBlock {
             var eb = EditableBlock(title: title, start: start, end: end, isFixed: isFixed, isAnchor: isAnchor,
                                    timingStyle: TimingStyle(rawValue: timingStyleRaw) ?? .light,
                                    priority: BlockPriority(rawValue: priorityRaw) ?? .normal,
-                                   deadline: deadline)
+                                   deadline: deadline, linkedTaskID: linkedTaskID)
             eb.fromPool = fromPool
             return eb
         }

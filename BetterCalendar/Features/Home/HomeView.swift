@@ -113,7 +113,7 @@ struct HomeView: View {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                 }
                 if !model.pendingLongTasks.isEmpty {
-                    Label("识别到长期事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「长期任务」",
+                    Label("识别到未来事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「未来任务」",
                           systemImage: "tray.and.arrow.down")
                         .font(.caption).foregroundStyle(.purple)
                 }
@@ -183,6 +183,7 @@ struct HomeView: View {
                     List {
                         ForEach(model.blocks) { item in
                             EditableRow(block: model.binding(for: item.id),
+                                        poolTasks: container.longTasks.items,
                                         onDelete: { model.delete(id: item.id) })
                         }
                         .onMove { model.move($0, $1) }
@@ -248,6 +249,7 @@ struct HomeView: View {
                     List {
                         ForEach(model.blocks) { item in
                             EditableRow(block: model.binding(for: item.id),
+                                        poolTasks: container.longTasks.items,
                                         onDelete: { model.delete(id: item.id) })
                         }
                         .onMove { model.move($0, $1) }
@@ -362,9 +364,9 @@ struct HomeView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "tray.full").foregroundStyle(.purple)
                     if store.items.isEmpty {
-                        Text("长期任务 · 空").font(.caption).foregroundStyle(.secondary)
+                        Text("未来任务 · 空").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text("长期任务 \(store.items.count) 件"
+                        Text("未来任务 \(store.items.count) 件"
                              + nearestDDLLabel(store.items)).font(.caption)
                     }
                 }
@@ -379,7 +381,15 @@ struct HomeView: View {
     private func ongoingRow(_ task: LongTask, overdue: Bool) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(task.title).font(.callout)
+                HStack(spacing: 6) {
+                    Text(task.title).font(.callout)
+                    // 进度达/超估算 → 标题右边轻声邀请（问句、非断言；点一下才标完成）
+                    if container.longTasks.looksComplete(for: task) {
+                        Button("看起来做完了？") { container.longTasks.complete(task) }
+                            .font(.caption2).buttonStyle(.borderless).foregroundStyle(.green)
+                            .help("投入已达到你估的总量——做成了就点一下（不点也没关系）")
+                    }
+                }
                 HStack(spacing: 6) {
                     if let d = task.deadline {
                         Text((overdue ? "原定 " : "DDL ") + d.formatted(.dateTime.month(.defaultDigits).day()))
@@ -409,7 +419,7 @@ struct HomeView: View {
             Spacer()
             if overdue {
                 // 温和三选（D-d 拍板）：不留红色残留、放下也是体面出口
-                Button("今天排上") { model.addBlockFromLongTask(task.title) }
+                Button("今天排上") { model.addBlockFromLongTask(task.title, linkedTaskID: task.id) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                 Button("推一周") { container.longTasks.pushDeadline(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
@@ -417,7 +427,7 @@ struct HomeView: View {
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
             } else {
                 Menu {
-                    Button("排进今天") { model.addBlockFromLongTask(task.title) }
+                    Button("排进今天") { model.addBlockFromLongTask(task.title, linkedTaskID: task.id) }
                     Button("做成了 🎉") { container.longTasks.complete(task) }
                     Button("推一周") { container.longTasks.pushDeadline(task) }
                     Button("先放下") { container.longTasks.shelve(task) }
@@ -481,7 +491,11 @@ struct HomeView: View {
 /// 单个草稿块的可编辑行。
 struct EditableRow: View {
     @Binding var block: EditableBlock
+    var poolTasks: [LongTask] = []   // 可选归属的未来任务（0.18.2 手动选归属；空=不显归属菜单）
     var onDelete: () -> Void
+
+    /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
+    private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -494,9 +508,25 @@ struct EditableRow: View {
             .buttonStyle(.plain)
             .help("标为今日要紧事")
 
-            if block.fromPool {
-                Image(systemName: "tray.full").font(.caption).foregroundStyle(.purple)
-                    .help("来自「长期任务」的建议——不想今天做直接删掉即可")
+            // 归属：这件属于哪个未来任务——投入会精确记到它名下（自动匹配，可手动改/清）
+            if !poolTasks.isEmpty || block.linkedTaskID != nil {
+                Menu {
+                    Button("无归属") { block.linkedTaskID = nil }
+                    if !poolTasks.isEmpty { Divider() }
+                    ForEach(poolTasks) { t in
+                        Button(t.title) { block.linkedTaskID = t.id }
+                    }
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: block.linkedTaskID != nil ? "tray.full.fill" : "tray")
+                            .foregroundStyle(block.linkedTaskID != nil ? .purple : .secondary)
+                        if let linkedTitle {
+                            Text(linkedTitle).font(.caption2).foregroundStyle(.purple).lineLimit(1)
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("这件属于哪个未来任务——投入会精确记到它名下")
             }
 
             VStack(alignment: .leading, spacing: 4) {

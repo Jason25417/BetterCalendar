@@ -21,25 +21,26 @@ struct EditableBlock: Identifiable {
     var timingStyle: TimingStyle
     var priority: BlockPriority
     var deadline: Date?   // 硬 DDL（≠isFixed）：必须在此之前做完；LLM 解析给出，提醒 due 优先用它
-    var fromPool: Bool = false   // 来自「在途」的建议块（M10-2：UI 标来源，删除零成本）
+    var fromPool: Bool = false   // 来自「未来任务」的建议块（M10-2：UI 标来源，删除零成本）
+    var linkedTaskID: UUID?      // 精确归属：本块属于哪个未来任务（0.18.2：自动匹配 + 草稿行可手动改）
 
     init(from b: ScheduledBlock) {
         id = b.id; title = b.title; start = b.start; end = b.end
         isFixed = b.isFixed; isAnchor = b.isAnchor; timingStyle = b.timingStyle; priority = b.priority
-        deadline = b.deadline
+        deadline = b.deadline; linkedTaskID = b.linkedTaskID
     }
     init(title: String, start: Date, end: Date,
          isFixed: Bool = false, isAnchor: Bool = false,
          timingStyle: TimingStyle = .light, priority: BlockPriority = .normal,
-         deadline: Date? = nil) {
+         deadline: Date? = nil, linkedTaskID: UUID? = nil) {
         id = UUID(); self.title = title; self.start = start; self.end = end
         self.isFixed = isFixed; self.isAnchor = isAnchor; self.timingStyle = timingStyle; self.priority = priority
-        self.deadline = deadline
+        self.deadline = deadline; self.linkedTaskID = linkedTaskID
     }
     var scheduled: ScheduledBlock {
         ScheduledBlock(id: id, title: title, start: start, end: end,
                        isFixed: isFixed, isAnchor: isAnchor, timingStyle: timingStyle, priority: priority,
-                       deadline: deadline)
+                       deadline: deadline, linkedTaskID: linkedTaskID)
     }
 }
 
@@ -220,6 +221,11 @@ final class HomeViewModel {
                 .map { b in
                     var eb = EditableBlock(from: b)
                     eb.fromPool = outcome.decision.poolSuggestedTitles.contains(b.title)
+                    // 精确归属：池建议块一次性按标题匹配到具体未来任务的 id，之后统计锚 id 不再靠标题
+                    if eb.fromPool, eb.linkedTaskID == nil {
+                        eb.linkedTaskID = longTaskStore?.items
+                            .first { TitleMatch.similarity($0.title, b.title) >= 0.6 }?.id
+                    }
                     return eb
                 }
             draftSource = .arranged
@@ -250,9 +256,16 @@ final class HomeViewModel {
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
         isWorking = true; committedCount = nil
         let scheduled = blocks.map(\.scheduled)
+        // 归属按标题留存：LLM 微调重建块时会丢 linkedTaskID，refine 后按标题补回（自动+手动归属都不丢）
+        var linkByTitle: [String: UUID] = [:]
+        for b in blocks where b.linkedTaskID != nil { linkByTitle[b.title] = b.linkedTaskID }
         let result = (try? await refiner.refine(scheduled, command: cmd,
                                                 originalRequest: inputText, now: .now)) ?? scheduled
-        blocks = result.sorted { $0.start < $1.start }.map(EditableBlock.init(from:))
+        blocks = result.sorted { $0.start < $1.start }.map { b in
+            var eb = EditableBlock(from: b)
+            if eb.linkedTaskID == nil, let l = linkByTitle[b.title] { eb.linkedTaskID = l }
+            return eb
+        }
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
         hasUnsavedChanges = true
@@ -361,9 +374,13 @@ final class HomeViewModel {
     }
 
     /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
-    func addBlockFromLongTask(_ title: String) {
+    /// 从未来任务「排进今天」：生成的块精确归属到该任务（linkedTaskID），投入统计锚 id 不靠标题。
+    func addBlockFromLongTask(_ title: String, linkedTaskID: UUID? = nil) {
         let start = blocks.map(\.end).max() ?? Date()
-        blocks.append(EditableBlock(title: title, start: start, end: start.addingTimeInterval(3600)))
+        var eb = EditableBlock(title: title, start: start, end: start.addingTimeInterval(3600),
+                               linkedTaskID: linkedTaskID)
+        eb.fromPool = (linkedTaskID != nil)
+        blocks.append(eb)
         committedCount = nil; markEditedIfLoaded()
         if draftSource == .empty { draftSource = .arranged }   // 空列表加块 = 新草稿
         persistDraft()

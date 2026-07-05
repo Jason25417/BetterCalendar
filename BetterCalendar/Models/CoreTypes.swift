@@ -113,6 +113,7 @@ struct ScheduledBlock: Sendable, Identifiable {
     var timingStyle: TimingStyle = .light
     var priority: BlockPriority = .normal
     var deadline: Date?
+    var linkedTaskID: UUID?      // 精确归属：本块属于哪个未来任务（0.18.2）
 }
 
 /// reflow 排不下（弹性块结束超过逻辑日尾/睡前）时的冲突。
