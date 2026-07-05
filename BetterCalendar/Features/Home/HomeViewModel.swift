@@ -399,14 +399,42 @@ final class HomeViewModel {
 
     /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
     /// 从未来任务「排进今天」：生成的块精确归属到该任务（linkedTaskID），投入统计锚 id 不靠标题。
-    func addBlockFromLongTask(_ title: String, linkedTaskID: UUID? = nil) {
-        let start = blocks.map(\.end).max() ?? Date()
-        var eb = EditableBlock(title: title, start: start, end: start.addingTimeInterval(3600),
-                               linkedTaskID: linkedTaskID)
-        eb.fromPool = (linkedTaskID != nil)
+    /// 找第一个能容下 duration 的空档起点（不与已排块重叠、落在 notBefore 与 windDown 之间）。
+    /// 纯函数、可单测；返回 nil = 收工前排不下。
+    static func firstFreeStart(existing: [(start: Date, end: Date)], duration: TimeInterval,
+                               notBefore: Date, windDown: Date) -> Date? {
+        let sorted = existing.filter { $0.end > notBefore }.sorted { $0.start < $1.start }
+        var cursor = notBefore
+        for b in sorted {
+            if b.start.timeIntervalSince(cursor) >= duration,
+               cursor.addingTimeInterval(duration) <= windDown { return cursor }
+            cursor = max(cursor, b.end)
+        }
+        return cursor.addingTimeInterval(duration) <= windDown ? cursor : nil
+    }
+
+    /// L2「帮我排进今天」：把某未来任务智能插进目标日空档（按单元定长、精确归属），产未保存修改。
+    /// 收工前有空档就插空档；排不下就接末尾（不硬塞、给提示）。
+    func smartInsertFromLongTask(_ task: LongTask) {
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: targetDay)
+        let isToday = cal.isDateInToday(targetDay)
+        let notBefore = isToday ? max(.now, dayStart) : dayStart.addingTimeInterval(9 * 3600)   // 今天从现在/未来日从9点
+        let windDown = dayStart.addingTimeInterval(TimeInterval(WorkHoursSettings.windDownHour) * 3600)
+        let dur = TimeInterval((task.unitMinutes ?? 60) * 60)   // 按单元定长，无单元退 60min
+        let existing = blocks.map { (start: $0.start, end: $0.end) }
+        let fit = Self.firstFreeStart(existing: existing, duration: dur, notBefore: notBefore, windDown: windDown)
+        let start = fit ?? (blocks.map(\.end).max() ?? notBefore)
+        var eb = EditableBlock(title: task.title, start: start, end: start.addingTimeInterval(dur),
+                               linkedTaskID: task.id)
+        eb.fromPool = true
         blocks.append(eb)
+        blocks.sort { $0.start < $1.start }
         committedCount = nil; markEditedIfLoaded()
-        if draftSource == .empty { draftSource = .arranged }   // 空列表加块 = 新草稿
+        if draftSource == .empty { draftSource = .arranged }
+        note = fit != nil
+            ? "已把「\(task.title)」排进空档（\(start.formatted(.dateTime.hour().minute()))）——微调后确认写入。"
+            : "今天收工前空档不够了，先接在末尾——你可以改期或挪到明天。"
         persistDraft()
     }
 

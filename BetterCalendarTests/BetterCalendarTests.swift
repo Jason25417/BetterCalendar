@@ -137,6 +137,20 @@ struct LogicTests {
         WorkHoursSettings.windDownHour = saved       // 恢复，避免污染其它测试
     }
 
+    // MARK: L2「帮我排进今天」空档查找（0.18.13）
+    @Test func firstFreeStartFindsGapBeforeWindDown() {
+        let nine = at(2026,7,6,9), windDown = at(2026,7,6,23)
+        let existing = [(start: at(2026,7,6,9), end: at(2026,7,6,10)),
+                        (start: at(2026,7,6,14), end: at(2026,7,6,15))]
+        // 9–10 后有大空档 → 60min 插到 10:00
+        #expect(HomeViewModel.firstFreeStart(existing: existing, duration: 3600,
+                                             notBefore: nine, windDown: windDown) == at(2026,7,6,10))
+        // 收工前被占满 → 排不下 → nil
+        let packed = [(start: at(2026,7,6,9), end: at(2026,7,6,23))]
+        #expect(HomeViewModel.firstFreeStart(existing: packed, duration: 3600,
+                                             notBefore: nine, windDown: windDown) == nil)
+    }
+
     // MARK: 松散意图识别（0.18.9：LLM 从输入识别"想松散"→标目标日松散）
     @Test func decodePlanReadsLooseIntent() {
         let d = ClaudeScheduleParser.decodePlan("{\"loose\":true,\"blocks\":[],\"longTasks\":[]}")

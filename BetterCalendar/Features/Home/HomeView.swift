@@ -459,7 +459,7 @@ struct HomeView: View {
             Spacer()
             if overdue {
                 // 温和三选（D-d 拍板）：不留红色残留、放下也是体面出口
-                Button("今天排上") { model.addBlockFromLongTask(task.title, linkedTaskID: task.id) }
+                Button("排进今天") { model.smartInsertFromLongTask(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                 Button("推一周") { container.longTasks.pushDeadline(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
@@ -467,7 +467,7 @@ struct HomeView: View {
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
             } else {
                 Menu {
-                    Button("排进今天") { model.addBlockFromLongTask(task.title, linkedTaskID: task.id) }
+                    Button("帮我排进今天（智能插空档）") { model.smartInsertFromLongTask(task) }
                     Button("做成了 🎉") { container.longTasks.complete(task) }
                     Button("推一周") { container.longTasks.pushDeadline(task) }
                     Button("先放下") { container.longTasks.shelve(task) }
