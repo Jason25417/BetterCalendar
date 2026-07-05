@@ -63,6 +63,7 @@ final class HomeViewModel {
     private let notifier: NotificationScheduling
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
     private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
+    private let looseDays: LooseDayStore?        // 松散日：LLM 识别"想松散"→标目标日（§5.12）；nil=不标
 
     var inputText: String = ""
     var refineText: String = ""
@@ -87,7 +88,8 @@ final class HomeViewModel {
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
          planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling,
-         longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil) {
+         longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
+         looseDays: LooseDayStore? = nil) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -98,6 +100,7 @@ final class HomeViewModel {
         self.notifier = notifier
         self.longTaskStore = longTaskStore
         self.draftStore = draftStore
+        self.looseDays = looseDays
         restoreDraftIfAny()
     }
 
@@ -230,6 +233,11 @@ final class HomeViewModel {
                 }
             draftSource = .arranged
             note = outcome.decision.note
+            // LLM 识别到"想松散"的显式意图 → 标目标日松散（解析明说的意愿，非 App 自判；可手动撕）
+            if outcome.isLoose {
+                looseDays?.setLoose(targetDay, true)
+                note = (note.map { $0 + "\n" } ?? "") + "已把这天标为松散——App 退场陪你，不催不算账（想恢复点右上「结束松散」）。"
+            }
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
             hasUnsavedChanges = true
             persistDraft()

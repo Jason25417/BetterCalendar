@@ -127,6 +127,15 @@ struct LogicTests {
         #expect(ClaudeScheduleParser.decodePlan("{\"blocks\":[{\"title\":\"半截") == nil)
     }
 
+    // MARK: 松散意图识别（0.18.9：LLM 从输入识别"想松散"→标目标日松散）
+    @Test func decodePlanReadsLooseIntent() {
+        let d = ClaudeScheduleParser.decodePlan("{\"loose\":true,\"blocks\":[],\"longTasks\":[]}")
+        #expect(d?.loose == true)                 // 明说想松散 → true（无块也带得上来）
+        let d2 = ClaudeScheduleParser.decodePlan(
+            "{\"blocks\":[{\"title\":\"写代码\",\"start\":\"2026-07-06 09:00\",\"end\":\"2026-07-06 10:00\"}]}")
+        #expect(d2?.loose == false)               // 普通排程、没提松散 → false
+    }
+
     @Test func plannerFallsBackToLocalWhenNoKey() async throws {
         let noKey = AnthropicClient(apiKey: { nil }, useCloud: { true })
         let planner = LLMPlanningEngine(client: noKey, fallback: NaivePlanningEngine())

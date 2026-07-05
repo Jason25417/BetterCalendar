@@ -16,6 +16,7 @@ struct ArrangeDayUseCase {
     struct Outcome {
         var decision: PlanDecision
         var longTasks: [ParsedLongTask] = []
+        var isLoose: Bool = false   // 解析到"想松散"的显式意图 → 标目标日松散（§5.12）
     }
 
     /// referenceDate = 解析相对时间的基准日（排哪天就传哪天）；now = 排序用的此刻；
@@ -30,7 +31,7 @@ struct ArrangeDayUseCase {
                                   priority: pb.priority, deadline: pb.deadline)
         }
         let decision = try await planner.arrange(scheduled, pool: pool, now: now)
-        return Outcome(decision: decision, longTasks: parsed.longTasks)
+        return Outcome(decision: decision, longTasks: parsed.longTasks, isLoose: parsed.isLoose)
     }
 
     /// 兼容旧调用（复盘回填等只要决策）。

@@ -14,10 +14,11 @@ struct ClaudeScheduleParser: ScheduleParsing {
 
     /// 宽容解码（0.15.2）：JSONSerialization 手工取值——字段类型不合/多余字段/单块损坏都不废全包，
     /// 坏块跳过并计数。严格 Codable 曾因 LLM 一个字段类型漂移整包报废 → 回退本地桩产垃圾草稿。
-    static func decodePlan(_ json: String) -> (blocks: [ParsedBlock], longTasks: [ParsedLongTask], dropped: Int)? {
+    static func decodePlan(_ json: String) -> (blocks: [ParsedBlock], longTasks: [ParsedLongTask], loose: Bool, dropped: Int)? {
         guard let data = json.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         var dropped = 0
+        let loose = (obj["loose"] as? Bool) ?? ((obj["loose"] as? String).map { $0 == "true" } ?? false)
         var blocks: [ParsedBlock] = []
         for b in (obj["blocks"] as? [[String: Any]]) ?? [] {
             guard let title = b["title"] as? String,
@@ -45,7 +46,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                                             totalMinutes: intOf("totalMinutes"),
                                             unitMinutes: intOf("unitMinutes")))
         }
-        return (blocks, longTasks, dropped)
+        return (blocks, longTasks, loose, dropped)
     }
 
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan {
@@ -68,13 +69,15 @@ struct ClaudeScheduleParser: ScheduleParsing {
             }
             let blocks = decoded.blocks
             let longTasks = decoded.longTasks
-            guard !blocks.isEmpty || !longTasks.isEmpty else {
+            // 纯松散意图（"明天松散一下"）可无块无长期事项 → 不回退，照样把松散标志带上来
+            guard !blocks.isEmpty || !longTasks.isEmpty || decoded.loose else {
                 DevLog.shared.warn("解析", "云端返回 0 块，回退本地")
                 return try await fallback.parse(text, referenceDate: referenceDate, context: context)
             }
             DevLog.shared.info("解析", "云端成功 · \(blocks.count) 块"
-                               + (longTasks.isEmpty ? "" : " · \(longTasks.count) 在途") + " · \(CloudSettings.model)")
-            return ParsedPlan(blocks: blocks, longTasks: longTasks)
+                               + (longTasks.isEmpty ? "" : " · \(longTasks.count) 在途")
+                               + (decoded.loose ? " · 松散" : "") + " · \(CloudSettings.model)")
+            return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: decoded.loose)
         } catch {
             DevLog.shared.warn("解析", "云端失败，回退本地：\(error.localizedDescription)")
             return try await fallback.parse(text, referenceDate: referenceDate, context: context)
@@ -113,8 +116,9 @@ struct ClaudeScheduleParser: ScheduleParsing {
         你把用户用自然语言描述的一天，转成结构化日程。
         现在的真实时间：\(realNow)。**目标日：\(target)**——所有 blocks 一律排在目标日当天（唯一例外：睡前跨过午夜的块延到目标日次日凌晨，日期写次日）。"明早/上午/晚上"等都指目标日的时段，不是真实时间的次日。
         只输出一个 JSON 对象，不要任何解释、不要 markdown 代码围栏。格式：
-        {"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":"YYYY-MM-DD HH:mm 或 null","cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
+        {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":"YYYY-MM-DD HH:mm 或 null","cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
         规则：start/end 用 24 小时制本地时间；**isFixed 只给「与他人约定、时刻不可改」的事**（会议/上课/约诊/班车等）=true；**个人任务**（写作业/写代码/健身/读书/吃饭等）即使提到时间也 isFixed=false（它们时间可被自动 re-flow 调整，标 fixed 会导致排不动）；timingStyle ∈ pomodoro/light/none，默认 light；priority ∈ normal/important（要紧/紧急的事用 important）；deadline 为硬截止时间或 null。**跨过午夜的块（睡前/凌晨的事）start/end 日期用次日**，别写成目标日的 00:xx。**时间块默认互不重叠**；仅当用户明确表示可并行/同时进行（如"这几个任务可以并行""可以同时处理两三个"）时，才允许对应块时间重叠（并行块各自保留完整时长）。**并行块命名**：每块用**自己对应任务**的名字（可加「并行 · 」前缀，如「并行 · Watch Chatbot」），绝不要把所有并行任务名拼进每一个块的标题；并行块**不要因为并行而标 isFixed**（isFixed 仍只看会议类标准）。
+        **松散意图 loose**：**仅当用户明确表达"想松散/放松/休息一下/随便过/不想被安排/今天摆烂"这类整段放松的意愿**时，把顶层 loose 设 true（这是解析用户明说的意愿，不是你替他判断该不该休息）；只是普通排程、或只提到某段小憩，loose 保持 false。loose=true 时仍可照常解析用户提到的块（他也许想松散地排几件）。
         **锚点块 isAnchor**：午饭/晚饭/早饭/通勤/午休/睡觉等作息必需事项设 isAnchor=true——照常排进日程占时间（其它事绕着它排），但它们不是"要完成的任务"。
         **留白与粒度**：**不要生成"小休息/休息"块**，两个工作块之间留出空隙即可（休息干什么无所谓、甚至继续工作）；把无需界定的碎片（拿快递、喝水）并入相邻块或省略；块的粒度 = 用户会"作为一件事去完成"的单位，别切太碎（但会议等固定块不要并进别的块）。
         **番茄钟**：timingStyle 默认 light（轻计时）；**只有**背书/写卷子/啃论文这类"容易劝退的高摩擦"任务才用 pomodoro，其余一律别用。

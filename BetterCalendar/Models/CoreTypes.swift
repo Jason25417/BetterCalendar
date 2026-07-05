@@ -100,6 +100,7 @@ struct ParsedLongTask: Sendable, Identifiable {
 struct ParsedPlan: Sendable {
     var blocks: [ParsedBlock] = []
     var longTasks: [ParsedLongTask] = []   // 长期事项另放（不占当日块）
+    var isLoose: Bool = false              // 用户明说"想松散/休息一下"→标目标日松散（§5.12；解析显式意图非 App 自判）
 }
 
 /// 排程大脑的「已定时」块（已有明确起止）。

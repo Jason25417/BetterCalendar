@@ -31,9 +31,14 @@ final class LooseDayStore {
     func isLoose(_ date: Date = .now) -> Bool { days.contains(DayContext.dayKey(date)) }
 
     /// 贴 / 撕松散标记（同一天再点即撕；可逆姿态切换、不动任何计划数据）。
-    func toggle(_ date: Date = .now) {
+    func toggle(_ date: Date = .now) { setLoose(date, !isLoose(date)) }
+
+    /// 显式置位（LLM 识别到"想松散"→置 true，幂等；再次排程不会翻掉）。
+    func setLoose(_ date: Date = .now, _ loose: Bool) {
         let k = DayContext.dayKey(date)
-        if days.contains(k) { days.remove(k) } else { days.insert(k) }
+        let had = days.contains(k)
+        if loose { days.insert(k) } else { days.remove(k) }
+        guard had != loose else { return }
         defaults.set(Array(days), forKey: key)
         DevLog.shared.info("松散日", "当前松散日 \(days.count) 个")
     }
