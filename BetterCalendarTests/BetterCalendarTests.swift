@@ -127,6 +127,16 @@ struct LogicTests {
         #expect(ClaudeScheduleParser.decodePlan("{\"blocks\":[{\"title\":\"半截") == nil)
     }
 
+    // MARK: 最晚工作时间（0.18.12：收工软限制文案 + 夹取）
+    @Test func workHoursWindDownTextAndClamp() {
+        let saved = WorkHoursSettings.windDownHour
+        WorkHoursSettings.windDownHour = 22
+        #expect(WorkHoursSettings.windDownText == "22:00")
+        WorkHoursSettings.windDownHour = 99          // 越界 → 夹到 24
+        #expect(WorkHoursSettings.windDownHour == 24)
+        WorkHoursSettings.windDownHour = saved       // 恢复，避免污染其它测试
+    }
+
     // MARK: 松散意图识别（0.18.9：LLM 从输入识别"想松散"→标目标日松散）
     @Test func decodePlanReadsLooseIntent() {
         let d = ClaudeScheduleParser.decodePlan("{\"loose\":true,\"blocks\":[],\"longTasks\":[]}")

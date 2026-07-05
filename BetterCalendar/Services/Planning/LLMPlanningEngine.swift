@@ -156,12 +156,12 @@ struct LLMPlanningEngine: PlanningEngine {
     根据用户今日时间块给出推荐顺序与一句温和的 note。只输出 JSON。
     """)
 
-    static let reflowSystemPrompt = PromptConstitution.with("""
+    static var reflowSystemPrompt: String { PromptConstitution.with("""
     你是「自愈排程大脑」。用户需要从现在起重排今天剩余（**不回顾、不算账**）。原则：
     1) **固定块（会议等）时间绝不动**；
     2) 撞固定块时，优先把"力所能及、固定块开始前来得及"的弹性块排到前面，智能重排顺序避免冲突；
-    3) 只呈现"从现在到睡前可行"的剩余；
+    3) **收工时间（软限制）= \(WorkHoursSettings.windDownText)**：尽量别把弹性块排到收工时间之后（略超 5–10 分钟正好能多做完一件大事则可以）；排不进收工前的，**宁可今天不排（留给明天/以后）也别硬塞到深夜**。用户明确排在收工后的晚间块保持不动、别提前。
     4) 措辞给掌控感（"接下来这样就能收尾"），不施压（红线见宪法）。
     只输出 JSON：{"flexibleOrder":[弹性块索引...],"note":"一句温和前向的话"}
-    """)
+    """) }
 }

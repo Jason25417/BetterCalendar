@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var hasKey: Bool = KeychainStore.loadAPIKey() != nil
     @State private var backend: CalendarBackend = CalendarSettings.backend
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
+    @State private var windDownHour: Int = WorkHoursSettings.windDownHour
     @State private var journalLock: Bool = JournalSettings.privacyLock
     @State private var savedHint: String?
     @State private var testing = false
@@ -82,6 +83,11 @@ struct SettingsView: View {
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Stepper("最晚工作到 \(windDownHour):00", value: $windDownHour, in: 18...24)
+                        .onChange(of: windDownHour) { _, v in WorkHoursSettings.windDownHour = v }
+                    Text("软收工：AI 排/重排时尽量别把事排到这个点之后（略超一点点能多做完一件大事则可以）；你明确说的晚间事不受限。当天想早睡/晚睡，直接在排日程里说一句即可。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
