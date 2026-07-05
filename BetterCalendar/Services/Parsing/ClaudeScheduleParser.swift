@@ -109,7 +109,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
             let lines = context.dueReminders.prefix(10).map { "- \($0)" }.joined(separator: "\n")
             contextSection += "\n目标日**到期的提醒事项**（用户可能想安排它们；用户没提且排不下就别硬塞）：\n" + lines
         }
-        return """
+        return PromptConstitution.with("""
         你把用户用自然语言描述的一天，转成结构化日程。
         现在的真实时间：\(realNow)。**目标日：\(target)**——所有 blocks 一律排在目标日当天（唯一例外：睡前跨过午夜的块延到目标日次日凌晨，日期写次日）。"明早/上午/晚上"等都指目标日的时段，不是真实时间的次日。
         只输出一个 JSON 对象，不要任何解释、不要 markdown 代码围栏。格式：
@@ -120,6 +120,6 @@ struct ClaudeScheduleParser: ScheduleParsing {
         **番茄钟**：timingStyle 默认 light（轻计时）；**只有**背书/写卷子/啃论文这类"容易劝退的高摩擦"任务才用 pomodoro，其余一律别用。
         **longTasks（长期事项）**：截止在目标日之后的远期任务（"下周五前交论文"）或多天持续的长线（"这学期学完 X""每周健身三次"）放 longTasks，**不放 blocks**——除非用户明确今天也要做一段（则两边都出：blocks 出今天这段，longTasks 出整件事）。cadenceMinutesPerWeek = 每周投入分钟数（"每天学 1 小时"≈420），没提就 null。没有长期事项时 longTasks 给 []。**总量**：说了"共9单元每单元40min"→ totalMinutes=360、unitMinutes=40；"共150小时"→ totalMinutes=9000、unitMinutes=null；没说就都 null。
         **委托长期任务（重要）**：若用户说"今天做X小时长期任务/安排学习时间/干哪个看你"这类**委托**，你要从下面〔长期任务池〕里挑合适的、按委托时长生成**具体的 blocks**（块名=池中该任务名，别写"长期任务"这种泛称），并把整件事也放 longTasks。〔长期任务池〕：\(poolSection)\(contextSection)
-        """
+        """)
     }
 }

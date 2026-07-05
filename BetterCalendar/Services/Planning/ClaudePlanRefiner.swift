@@ -73,5 +73,5 @@ struct ClaudePlanRefiner: PlanRefining {
         return f.string(from: d)
     }
 
-    static let systemPrompt = "你在调整一个已排好的一天日程。依据用户的中文调整指令修改对应的块，未提到的块保持不变。只输出 JSON，不要解释、不要 markdown 围栏。"
+    static let systemPrompt = PromptConstitution.with("你在调整一个已排好的一天日程。依据用户的中文调整指令修改对应的块，未提到的块保持不变。只输出 JSON，不要解释、不要 markdown 围栏。")
 }
