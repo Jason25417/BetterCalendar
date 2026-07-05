@@ -64,7 +64,7 @@ struct HomeView: View {
                     Text("说说你的一天").font(.headline)
                     Spacer()
                     let loose = container.looseDays.isLoose(model.targetDay)
-                    Button { container.looseDays.toggle(model.targetDay) } label: {
+                    Button { model.toggleLoose() } label: {
                         Label(loose ? "结束松散" : "松散一下",
                               systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
                     }

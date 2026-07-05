@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.10", date: "2026-07", changes: [
+            "松散日静音早晚提醒：把某天标为松散（手动点、或说一句「想松散」），当天的「开始今天 / 今天过得怎么样」通知就不再弹——退场得更彻底（即使昨晚已经排好今早的提醒，也会清掉）",
+        ]),
         ChangelogEntry(version: "0.18.9", date: "2026-07", changes: [
             "松散日更省事：排日程时直接说「明天想松散一点 / 今天不想被安排」，AI 会识别并自动把那天标为松散日（顶部出现退场横幅），不用再手动点右上角——这是识别你明说的意愿，不是 App 替你判断该不该休息",
         ]),

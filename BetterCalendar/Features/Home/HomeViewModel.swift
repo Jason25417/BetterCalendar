@@ -236,6 +236,7 @@ final class HomeViewModel {
             // LLM 识别到"想松散"的显式意图 → 标目标日松散（解析明说的意愿，非 App 自判；可手动撕）
             if outcome.isLoose {
                 looseDays?.setLoose(targetDay, true)
+                notifier.cancelDailyReminders()   // 松散日静音早晚提醒（即使已排的也清掉）
                 note = (note.map { $0 + "\n" } ?? "") + "已把这天标为松散——App 退场陪你，不催不算账（想恢复点右上「结束松散」）。"
             }
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
@@ -327,11 +328,16 @@ final class HomeViewModel {
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
             persistDraft()
-            // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
-            let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
-            await notifier.requestAuthorizationIfNeeded()
-            await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
-                                                  summary: "今天安排了 \(drafts.count) 件，开始吧。")
+            // 松散日：静音早晚提醒（传 nil → 清掉旧的、不排新的）——退场姿态之一，不催不算账
+            if looseDays?.isLoose(targetDay) ?? false {
+                await notifier.scheduleDailyReminders(morning: nil, evening: nil, summary: "")
+            } else {
+                // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
+                let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
+                await notifier.requestAuthorizationIfNeeded()
+                await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
+                                                      summary: "今天安排了 \(drafts.count) 件，开始吧。")
+            }
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
         }
@@ -402,6 +408,12 @@ final class HomeViewModel {
         committedCount = nil; markEditedIfLoaded()
         if draftSource == .empty { draftSource = .arranged }   // 空列表加块 = 新草稿
         persistDraft()
+    }
+
+    /// 手动切松散（右上开关）：标上时顺手静音当日早晚提醒（退场姿态；即使昨晚已排今早的也清掉）。
+    func toggleLoose() {
+        looseDays?.toggle(targetDay)
+        if looseDays?.isLoose(targetDay) ?? false { notifier.cancelDailyReminders() }
     }
 
     func move(_ source: IndexSet, _ destination: Int) {

@@ -13,6 +13,12 @@ protocol NotificationScheduling {
     func requestAuthorizationIfNeeded() async
     /// 排当天早晚两条（先清旧的）。morning/evening 为 nil 或已过则不排。
     func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async
+    /// 取消已排的早晚提醒（松散日静音：标松散时清掉，即使昨晚已排今早的也不响）。同步。
+    func cancelDailyReminders()
+}
+
+extension NotificationScheduling {
+    func cancelDailyReminders() {}   // 默认 no-op（旧 stub/测试兼容）
 }
 
 final class UNNotificationService: NotificationScheduling {
@@ -26,6 +32,10 @@ final class UNNotificationService: NotificationScheduling {
         } catch {
             DevLog.shared.warn("通知", "请求授权失败：\(error.localizedDescription)")
         }
+    }
+
+    func cancelDailyReminders() {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.morningID, Self.eveningID])
     }
 
     func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {
