@@ -64,6 +64,7 @@ final class HomeViewModel {
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
     private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
     private let looseDays: LooseDayStore?        // 松散日：LLM 识别"想松散"→标目标日（§5.12）；nil=不标
+    private let startedDays: StartedDayStore?    // 绿色淡出：开始今天后进实时模式、绿色从日历淡出；nil=不淡出
 
     var inputText: String = ""
     var refineText: String = ""
@@ -89,7 +90,7 @@ final class HomeViewModel {
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
          planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
-         looseDays: LooseDayStore? = nil) {
+         looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -101,6 +102,7 @@ final class HomeViewModel {
         self.longTaskStore = longTaskStore
         self.draftStore = draftStore
         self.looseDays = looseDays
+        self.startedDays = startedDays
         restoreDraftIfAny()
     }
 
@@ -310,10 +312,16 @@ final class HomeViewModel {
             for (day, dayBlocks) in byDay {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
             }
-            try await calendarStore.write(drafts)     // 路由：假/真 日历
-            // 目标日被清空 → write(空)会早退不清绿色事件，显式按日清那天，避免残留与真相源不一致。
+            // 绿色淡出（§5.10 原则6.4）：已开始今天=实时模式 → 计划写日历用**橙色(preview)**、不写绿；绿只留 PlanStore 供复盘。
+            // 未开始 → 照常写绿色(planned)。（真相源 PlanStore 两种情况都存 planned，签名功能对比不受影响。）
+            let realtime = startedDays?.isStarted(targetDay) ?? false
+            let calKind: PlanCalendarKind = realtime ? .preview : .planned
+            let calDrafts = realtime ? drafts.map { var d = $0; d.kind = .preview; return d } : drafts
+            try await calendarStore.write(calDrafts)     // 路由：假/真 日历
+            if realtime { try? await calendarStore.clear(kind: .planned, on: targetDay) }   // 淡出：清掉残留绿色
+            // 目标日被清空 → write(空)会早退不清该色事件，显式按日清那天，避免残留与真相源不一致。
             if (byDay[targetDayStart] ?? []).isEmpty {
-                try await calendarStore.clear(kind: .planned, on: targetDay)
+                try await calendarStore.clear(kind: calKind, on: targetDay)
             }
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
             committedCount = drafts.count
@@ -359,6 +367,9 @@ final class HomeViewModel {
                 note = flex == 0
                     ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
                     : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
+                // 绿色淡出（§5.10 原则6.4）：开始今天=进实时模式 → 绿色从 Apple 日历退场（只留橙+蓝；绿仍在 PlanStore 供复盘）
+                startedDays?.markStarted(targetDay)
+                try? await calendarStore.clear(kind: .planned, on: targetDay)
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
             hasUnsavedChanges = true

@@ -53,7 +53,8 @@ struct HomeView: View {
             notifier: container.notifier,
             longTaskStore: container.longTasks,
             draftStore: container.draftSnapshots,
-            looseDays: container.looseDays))
+            looseDays: container.looseDays,
+            startedDays: container.startedDays))
     }
 
     var body: some View {

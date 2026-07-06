@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.16", date: "2026-07", changes: [
+            "绿色淡出（签名功能收口，原则6.4）：点「开始今天」进入实时模式后，绿色计划从 Apple 日历常驻淡出——只留橙色（从现在起可行）+ 蓝色（已发生），不再让计划当羞辱纪念碑常驻",
+            "绿色计划仍完整保存在内部，晚间复盘的「计划×实际」对比照常成立；「开始今天」之前照常显示绿色计划",
+        ]),
         ChangelogEntry(version: "0.18.15", date: "2026-07", changes: [
             "修复：输入较长时排程容易「云端超时·回退本地」——API 超时从 30 秒放宽到 60–120 秒（长输入给足时间）",
             "修复：设置页「进阶设置」展开后收不回去；顺手把排布理顺",
