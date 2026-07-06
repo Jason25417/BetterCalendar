@@ -36,9 +36,10 @@ enum CloudSettings {
         set { defaults.set(newValue.rawValue, forKey: "cloud.provider") }
     }
 
-    /// 硅基流动模型 ID（自己填，如 Qwen/Qwen3-30B-A3B-Thinking-2507 这类 <200B MoE 推理模型）。
+    /// 硅基流动模型 ID（自己填）。默认用 **Instruct（非推理）** 变体——排日程是结构化抽取、不需要长思考，
+    /// Instruct 更快更省；要更强再换。Thinking 变体会先长篇推理=更慢、对本任务浪费。
     static var siliconflowModel: String {
-        get { defaults.string(forKey: "cloud.sfModel") ?? "Qwen/Qwen3-30B-A3B-Thinking-2507" }
+        get { defaults.string(forKey: "cloud.sfModel") ?? "Qwen/Qwen3-30B-A3B-Instruct-2507" }
         set { defaults.set(newValue, forKey: "cloud.sfModel") }
     }
 

@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.18", date: "2026-07", changes: [
+            "硅基流动默认改用 Instruct（非推理）模型：排日程是结构化抽取、不需长思考，Instruct 更快更省；设置里也说明了优先选 Instruct、别选 Thinking 变体",
+        ]),
         ChangelogEntry(version: "0.18.17", date: "2026-07", changes: [
             "接入硅基流动：设置→服务商 可切「Anthropic（Claude）/ 硅基流动（OpenAI 兼容）」，各自填 API key + 模型 ID + 测试；硅基流动填 <200B MoE 推理模型（默认 Qwen3-30B-A3B-Thinking），通常更快",
             "修排程「回复超长被截断」：长输入（十几件事）时 planning 输出上限 2048→4000，并强制 AI 直接给 JSON、不再输出一堆解释（opus 尤其爱加），不再动辄回退本地",

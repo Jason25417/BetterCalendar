@@ -106,7 +106,7 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         TextField("硅基流动模型 ID", text: $sfModel)
-                        Text("填 SiliconFlow 上的模型 ID，如 Qwen/Qwen3-30B-A3B-Thinking-2507（<200B MoE 推理，应更快）。改完点上方「保存」。")
+                        Text("填 SiliconFlow 的模型 ID。排日程是结构化抽取、不需长思考——**优先选 Instruct（非推理）变体**（如 Qwen/Qwen3-30B-A3B-Instruct-2507），更快更省；Thinking 变体会先长篇推理、反而慢且浪费。改完点上方「保存」。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
