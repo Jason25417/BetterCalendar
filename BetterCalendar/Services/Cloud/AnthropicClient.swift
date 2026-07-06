@@ -48,7 +48,7 @@ struct AnthropicClient {
     private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int) async throws -> String {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = maxTokens >= 4000 ? 120 : 60   // 长输出非流式会久，给足；日后上流式再收紧
+        req.timeoutInterval = maxTokens >= 4000 ? 150 : 60   // 长输出非流式会久，给足；日后上流式再收紧
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
@@ -70,7 +70,7 @@ struct AnthropicClient {
     private func completeOpenAI(key: String, system: String, user: String, maxTokens: Int) async throws -> String {
         var req = URLRequest(url: URL(string: "https://api.siliconflow.cn/v1/chat/completions")!)
         req.httpMethod = "POST"
-        req.timeoutInterval = maxTokens >= 4000 ? 120 : 60
+        req.timeoutInterval = maxTokens >= 4000 ? 150 : 60
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: [

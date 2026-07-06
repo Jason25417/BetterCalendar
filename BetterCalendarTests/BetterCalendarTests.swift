@@ -127,6 +127,19 @@ struct LogicTests {
         #expect(ClaudeScheduleParser.decodePlan("{\"blocks\":[{\"title\":\"半截") == nil)
     }
 
+    // MARK: 日期钉到目标日（0.18.20：杀"明天"漂移/年份幻觉 → 修 menu bar/开始今天"无计划")
+    @Test func clampToDayPinsBlocksToTargetDay() {
+        let ref = at(2026,7,6,0)
+        // LLM 把块错排到 7/7 上午9点 → 钉回 7/6 上午9点、时长保留
+        let (s, e) = ArrangeDayUseCase.clampToDay(start: at(2026,7,7,9), end: at(2026,7,7,11), referenceDate: ref)
+        #expect(Calendar.current.isDate(s, inSameDayAs: at(2026,7,6,0)))
+        #expect(Calendar.current.component(.hour, from: s) == 9)
+        #expect(e.timeIntervalSince(s) == 7200)
+        // 凌晨(<6点)块=睡前跨午夜 → 落次日 7/7
+        let (s2, _) = ArrangeDayUseCase.clampToDay(start: at(2026,7,6,1), end: at(2026,7,6,2), referenceDate: ref)
+        #expect(Calendar.current.isDate(s2, inSameDayAs: at(2026,7,7,0)))
+    }
+
     // MARK: 最晚工作时间（0.18.12：收工软限制文案 + 夹取）
     @Test func workHoursWindDownTextAndClamp() {
         let saved = WorkHoursSettings.windDownHour

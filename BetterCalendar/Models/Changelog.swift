@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.20", date: "2026-07", changes: [
+            "修「确认写入后 menu bar / 开始今天仍说没计划」：根因是 AI 偶尔把块排到了错误日期（把「明天」理解成次日、或幻觉出 2025 年之类），块落到别的日子、今天读回来是空的——现在排完自动把每块钉回目标日那天（凌晨的睡前块落次日），保留时分",
+            "长输入排程超时再放宽（120→150 秒）",
+        ]),
         ChangelogEntry(version: "0.18.19", date: "2026-07", changes: [
             "修排程漏任务/并行没重叠：告诉 AI 并行任务要全部各自成块、重叠在同一时段（不排成前后相接），且提到的每件事都要保留、绝不因为多/并行/排不下而悄悄省略某件",
         ]),
