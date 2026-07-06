@@ -30,7 +30,8 @@ final class MenuBarController: NSObject {
             button.imagePosition = .imageLeading
             button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             button.target = self
-            button.action = #selector(togglePopover)
+            button.action = #selector(statusClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])   // 左键弹执行面板、右键弹菜单
         }
 
         popover.behavior = .transient
@@ -60,6 +61,30 @@ final class MenuBarController: NSObject {
             button.title = ""        // 不计时 / 空档：只显图标
         }
     }
+
+    /// 左键=执行面板；右键=菜单（打开主窗口 / 退出）。
+    @objc private func statusClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+        let open = menu.addItem(withTitle: "打开主窗口", action: #selector(openMain), keyEquivalent: "")
+        open.target = self
+        menu.addItem(.separator())
+        let quit = menu.addItem(withTitle: "退出 BetterCalendar", action: #selector(quitApp), keyEquivalent: "q")
+        quit.target = self
+        if let button = statusItem.button {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
+        }
+    }
+
+    @objc private func openMain() { (NSApp.delegate as? AppDelegate)?.showMainWindow() }
+    @objc private func quitApp() { (NSApp.delegate as? AppDelegate)?.reallyQuit() }
 
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }

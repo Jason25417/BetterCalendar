@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.36", date: "2026-07", changes: [
+            "（macOS）设置 → 进阶 → 「退出时保留在菜单栏后台运行」：打开后 ⌘Q / Dock 右键退出不会真退，收进菜单栏继续跑（计时不断）、Dock 图标消失，防手滑误退。真要退出：菜单栏图标 → 右键 → 退出 BetterCalendar",
+        ]),
         ChangelogEntry(version: "0.18.35", date: "2026-07", changes: [
             "端侧解析流式输出：排今天时 Apple 端侧模型边生成边把日程块一条条冒出来（转圈下方实时显示），最终完整结果不变——不再干等",
         ]),

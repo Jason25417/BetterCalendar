@@ -102,7 +102,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         把用户用自然语言描述的一天转成结构化日程。现在 \(now)。目标日 \(target)——所有块排在目标日当天，start/end 用 "YYYY-MM-DD HH:mm"，睡前跨午夜的块日期写次日。
         - isFixed=true 只给"与他人约定、时刻不可改"的事（会议/上课/约诊/班车）；个人任务（写作业/健身/读书/吃饭）即使有时间也 false。
         - 用户提到的每件事都出一个块、逐一保留不漏。
-        - 默认互不重叠；仅当用户明说可并行时，让对应块重叠在同一时段、各自成块。
+        - 默认互不重叠；仅当用户明确提到并行、重叠、同时等词语时，让对应块重叠在同一时段、各自成块。
         - 作息（吃饭/通勤/午休/睡觉）isAnchor=true。
         - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
         - priority 默认 normal，要紧/紧急用 important。

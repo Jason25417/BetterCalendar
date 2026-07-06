@@ -123,6 +123,14 @@ struct SettingsView: View {
                     Text("打开后「排今天」解析 + 「AI 调整」优先用 Apple 端侧模型（免费/离线/私密），不可用或失败自动回退云端。排序/建议这类文本仍走云端。~3B 偏小、试验中。")
                         .font(.caption).foregroundStyle(.secondary)
 
+                    #if os(macOS)
+                    Toggle("退出时保留在菜单栏后台运行", isOn: Binding(
+                        get: { MenuBarSettings.keepRunningOnQuit },
+                        set: { MenuBarSettings.keepRunningOnQuit = $0 }))
+                    Text("打开后 ⌘Q / Dock 右键退出 不会真退——收进菜单栏继续跑（计时不断），Dock 图标消失、防手滑误退。真要退出：点菜单栏图标 → 右键 → 退出 BetterCalendar。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #endif
+
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
