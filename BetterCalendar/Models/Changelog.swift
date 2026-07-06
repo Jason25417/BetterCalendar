@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.19", date: "2026-07", changes: [
+            "修排程漏任务/并行没重叠：告诉 AI 并行任务要全部各自成块、重叠在同一时段（不排成前后相接），且提到的每件事都要保留、绝不因为多/并行/排不下而悄悄省略某件",
+        ]),
         ChangelogEntry(version: "0.18.18", date: "2026-07", changes: [
             "硅基流动默认改用 Instruct（非推理）模型：排日程是结构化抽取、不需长思考，Instruct 更快更省；设置里也说明了优先选 Instruct、别选 Thinking 变体",
         ]),
