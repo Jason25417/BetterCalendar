@@ -60,10 +60,18 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         let df = DateFormatter(); df.locale = Locale(identifier: "zh_CN"); df.timeZone = .current
         df.dateFormat = "yyyy-MM-dd EEEE"; let target = df.string(from: referenceDate)
         df.dateFormat = "yyyy-MM-dd EEEE HH:mm"; let now = df.string(from: .now)
-        return PromptConstitution.with("""
-        你把用户用自然语言描述的一天转成结构化日程。现在 \(now)。**目标日 \(target)**——所有块排在目标日当天，start/end 用 "YYYY-MM-DD HH:mm"，睡前跨午夜的块日期写次日。
-        规则：isFixed 只给"与他人约定、时刻不可改"的事（会议/上课/约诊/班车）；个人任务（写作业/健身/读书/吃饭）即使有时间也 false。每件事都出一个块、逐一保留不漏。默认互不重叠，仅当用户明说可并行才让对应块重叠在同一时段、各自成块。作息（吃饭/通勤/午休/睡觉）isAnchor=true。timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。priority 默认 normal，要紧/紧急用 important。截止在目标日之后的远期/长线任务放 longTasks、不放 blocks。用户明说"想松散/放松/摆烂"才 loose=true。
-        """)
+        // 端侧小模型：只喂规则，不喂产品哲学/措辞红线（那些对 @Generable 结构化输出是噪声）。
+        return """
+        把用户用自然语言描述的一天转成结构化日程。现在 \(now)。目标日 \(target)——所有块排在目标日当天，start/end 用 "YYYY-MM-DD HH:mm"，睡前跨午夜的块日期写次日。
+        - isFixed=true 只给"与他人约定、时刻不可改"的事（会议/上课/约诊/班车）；个人任务（写作业/健身/读书/吃饭）即使有时间也 false。
+        - 用户提到的每件事都出一个块、逐一保留不漏。
+        - 默认互不重叠；仅当用户明说可并行时，让对应块重叠在同一时段、各自成块。
+        - 作息（吃饭/通勤/午休/睡觉）isAnchor=true。
+        - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
+        - priority 默认 normal，要紧/紧急用 important。
+        - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks。
+        - 用户明说"想松散/放松/摆烂"才 loose=true。
+        """
     }
 }
 

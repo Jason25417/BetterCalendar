@@ -30,9 +30,10 @@ struct FoundationModelsPlanRefiner: PlanRefining {
                 "「\($0.title)」\(Self.fmt($0.start))–\(Self.fmt($0.end))\($0.isFixed ? " 固定" : "")"
             }.joined(separator: "\n")
             let req = originalRequest.trimmingCharacters(in: .whitespacesAndNewlines)
-            let instr = PromptConstitution.with("""
-            你在调整一个已排好的一天日程。按用户的中文指令改对应的块，**未提到的块必须原样保留、一个都不能少**——返回**完整**清单，不是只返回改动的那几块。\(req.isEmpty ? "" : "用户最初需求（仍有效、别违背）：\(req)。")start/end 用 "YYYY-MM-DD HH:mm"。
-            """)
+            // 端侧小模型：只喂规则。
+            let instr = """
+            你在调整一个已排好的一天日程。按用户的中文指令改对应的块。**未提到的块必须原样保留、一个都不能少**——返回**完整**清单，不是只返回改动的那几块。\(req.isEmpty ? "" : "用户最初需求（仍有效、别违背）：\(req)。")start/end 用 "YYYY-MM-DD HH:mm"。
+            """
             let user = "当前日程（每行一个块）：\n\(listing)\n\n调整指令：\(cmd)"
             let session = LanguageModelSession(instructions: instr)
             let out = try await session.respond(to: user, generating: FMRefined.self).content

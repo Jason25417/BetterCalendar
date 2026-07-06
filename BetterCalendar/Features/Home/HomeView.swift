@@ -163,7 +163,10 @@ struct HomeView: View {
                     }
                     .disabled(model.isWorking)
                     .help("开工晚了？按现在的时间把今天重排，固定块不动")
-                    if model.isWorking { ProgressView().controlSize(.small) }
+                    if model.isWorking {
+                        ProgressView().controlSize(.small)
+                        Text("模型思考中…").font(.caption).foregroundStyle(.secondary)
+                    }
                     Spacer()
                 }
 
