@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.24", date: "2026-07", changes: [
+            "根治长输入排程反复失败：查日志发现 AI（尤其 Sonnet）会先用英文「想一大段」再给 JSON，把 token 撑爆导致截断/解码失败。现在改成从 API 层强制直接输出 JSON（Anthropic 预填「{」/ 硅基 json 模式），模型物理上没法再写思考前言——又快又稳",
+        ]),
         ChangelogEntry(version: "0.18.23", date: "2026-07", changes: [
             "本地兜底解析升级：云端排程失败时，本地也能从你的话里抽出真实时长（2小时/半小时/一个半小时/1。5小时/20分钟）和作息锚点（午饭/晚饭等），给一份可用草稿——不再是每句一小时的碎片。（对付超长输入把云端搞挂时的兜底）",
         ]),

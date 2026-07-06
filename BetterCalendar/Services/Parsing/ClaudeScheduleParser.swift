@@ -58,7 +58,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
             // 长日程输出可观（20+ 块 + 长期任务），上限给足（曾因默认 2048 截断 → JSON 报废）
             let raw = try await client.complete(
                 system: Self.systemPrompt(referenceDate: referenceDate, context: context),
-                user: text, maxTokens: 6000)
+                user: text, maxTokens: 6000, jsonMode: true)
             let json = JSONText.extractObject(raw)
             guard let decoded = Self.decodePlan(json) else {
                 DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")
