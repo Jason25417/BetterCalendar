@@ -36,37 +36,46 @@ struct AnthropicClient {
     }
 
     /// 一次问答。返回模型的纯文本。按 provider 走不同端点/格式，上层无感。
-    /// jsonMode=true：**强制模型直接输出 JSON**（Anthropic 预填「{」/ 硅基 response_format），杜绝英文思考前言
-    /// ——否则复杂任务上模型会先"想一大段"把 token 塞满/破坏 JSON（实测 Sonnet 会）。
-    func complete(system: String, user: String, maxTokens: Int = 2048, jsonMode: Bool = false) async throws -> String {
+    /// jsonMode=true：**强制模型直接输出 JSON**，杜绝英文思考前言/前后缀——否则复杂任务上模型会先"想一大段"把 token 塞满/破坏 JSON。
+    /// - Anthropic：靠**结构化输出** `output_config.format`（传 `jsonSchema` 即启用）。**不再用 assistant prefill**
+    ///   ——prefill 在现代模型（Sonnet 4.6 / Opus 4.6+ / Sonnet 5 / Fable 5）上会 HTTP 400，且已被官方废弃。
+    /// - 硅基流动：靠 `response_format: json_object`（不吃 schema）。
+    /// - `jsonSchema` 只对 Anthropic 生效；不传则退化为普通请求（靠 prompt + 上层 extractObject 兜底）。
+    func complete(system: String, user: String, maxTokens: Int = 2048,
+                  jsonMode: Bool = false, jsonSchema: [String: Any]? = nil) async throws -> String {
         guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
         guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
         return provider() == .siliconflow
             ? try await completeOpenAI(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode)
-            : try await completeAnthropic(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode)
+            : try await completeAnthropic(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
     }
 
     // MARK: Anthropic 原生
 
-    private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool) async throws -> String {
+    private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool, jsonSchema: [String: Any]?) async throws -> String {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = maxTokens >= 4000 ? 150 : 60   // 长输出非流式会久，给足；日后上流式再收紧
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        var messages: [[String: Any]] = [["role": "user", "content": user]]
-        if jsonMode { messages.append(["role": "assistant", "content": "{"]) }   // 预填 → 模型只能从 { 续写，写不出前言
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": model(), "max_tokens": maxTokens, "system": system, "messages": messages,
-        ])
+        var body: [String: Any] = [
+            "model": model(), "max_tokens": maxTokens, "system": system,
+            "messages": [["role": "user", "content": user]],
+        ]
+        // 结构化输出：把回复约束成符合 schema 的 JSON（首个 text block 即合法 JSON），物理上写不出前言。
+        // 现代 Anthropic 模型都支持；不支持的模型会失败 → 上层 catch 回退本地。
+        if jsonMode, let schema = jsonSchema {
+            body["output_config"] = ["format": ["type": "json_schema", "schema": schema]]
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let obj = try await send(req, provider: "Anthropic")
         if let stop = obj["stop_reason"] as? String, stop == "max_tokens" {
             throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
         }
         let text = (obj["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
         guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
-        return jsonMode ? "{" + text : text   // 补回预填的「{」
+        return text
     }
 
     // MARK: 硅基流动（OpenAI 兼容 chat/completions）

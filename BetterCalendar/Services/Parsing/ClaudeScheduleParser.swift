@@ -58,7 +58,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
             // 长日程输出可观（20+ 块 + 长期任务），上限给足（曾因默认 2048 截断 → JSON 报废）
             let raw = try await client.complete(
                 system: Self.systemPrompt(referenceDate: referenceDate, context: context),
-                user: text, maxTokens: 6000, jsonMode: true)
+                user: text, maxTokens: 6000, jsonMode: true, jsonSchema: Self.parseSchema)
             let json = JSONText.extractObject(raw)
             guard let decoded = Self.decodePlan(json) else {
                 DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")
@@ -128,4 +128,46 @@ struct ClaudeScheduleParser: ScheduleParsing {
         **委托长期任务（重要）**：若用户说"今天做X小时长期任务/安排学习时间/干哪个看你"这类**委托**，你要从下面〔长期任务池〕里挑合适的、按委托时长生成**具体的 blocks**（块名=池中该任务名，别写"长期任务"这种泛称），并把整件事也放 longTasks。〔长期任务池〕：\(poolSection)\(contextSection)
         """)
     }
+
+    /// 结构化输出 schema（`output_config.format`）—— 对齐 `decodePlan` 读的字段。
+    /// 可空字段用 `["string","null"]` 类型联合；所有字段列入 required（结构化输出要求），Swift 侧仍容错。
+    static let parseSchema: [String: Any] = [
+        "type": "object", "additionalProperties": false,
+        "required": ["loose", "blocks", "longTasks"],
+        "properties": [
+            "loose": ["type": "boolean"],
+            "blocks": [
+                "type": "array",
+                "items": [
+                    "type": "object", "additionalProperties": false,
+                    "required": ["title", "start", "end", "isFixed", "isAnchor", "category", "timingStyle", "priority", "deadline"],
+                    "properties": [
+                        "title": ["type": "string"],
+                        "start": ["type": "string"],
+                        "end": ["type": "string"],
+                        "isFixed": ["type": "boolean"],
+                        "isAnchor": ["type": "boolean"],
+                        "category": ["type": "string"],
+                        "timingStyle": ["type": "string", "enum": ["pomodoro", "light", "none"]],
+                        "priority": ["type": "string", "enum": ["normal", "important"]],
+                        "deadline": ["type": ["string", "null"]],
+                    ],
+                ],
+            ],
+            "longTasks": [
+                "type": "array",
+                "items": [
+                    "type": "object", "additionalProperties": false,
+                    "required": ["title", "deadline", "cadenceMinutesPerWeek", "totalMinutes", "unitMinutes"],
+                    "properties": [
+                        "title": ["type": "string"],
+                        "deadline": ["type": ["string", "null"]],
+                        "cadenceMinutesPerWeek": ["type": ["integer", "null"]],
+                        "totalMinutes": ["type": ["integer", "null"]],
+                        "unitMinutes": ["type": ["integer", "null"]],
+                    ],
+                ],
+            ],
+        ],
+    ]
 }

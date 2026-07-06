@@ -17,11 +17,17 @@ enum LLMProvider: String, CaseIterable, Sendable {
 enum CloudSettings {
     private static let defaults = UserDefaults.standard
 
-    /// 默认 Opus 4.8（最强）；想省钱可在设置里切 Sonnet / Haiku。
-    static let availableModels = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"]
+    /// 默认 Sonnet 5（近 Opus 质量、更便宜、支持结构化输出）；想更强切 Opus 4.8、想更省切 Haiku 4.5。
+    /// ⚠️ 列表内模型都**支持结构化输出**（`output_config.format`）——排程/微调走它强制直出 JSON。
+    /// 已下线的 `claude-sonnet-4-6` 不支持结构化输出（也不支持 prefill），故移除并在 getter 里自动迁移。
+    static let availableModels = ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"]
 
     static var model: String {
-        get { defaults.string(forKey: "cloud.model") ?? "claude-opus-4-8" }
+        get {
+            let stored = defaults.string(forKey: "cloud.model") ?? "claude-sonnet-5"
+            if stored == "claude-sonnet-4-6" { return "claude-sonnet-5" }   // 4.6 不支持结构化输出 → 迁到 5
+            return availableModels.contains(stored) ? stored : "claude-sonnet-5"
+        }
         set { defaults.set(newValue, forKey: "cloud.model") }
     }
 

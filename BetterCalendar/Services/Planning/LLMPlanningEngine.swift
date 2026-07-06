@@ -57,7 +57,8 @@ struct LLMPlanningEngine: PlanningEngine {
             只输出 JSON：{"orderedIndexes":[按推荐顺序的索引数组],"note":"一句话","poolSuggestions":[{"poolIndex":0,"start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm"}]}
             没有建议时 poolSuggestions 给 []。
             """
-            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000, jsonMode: true)
+            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000,
+                                                jsonMode: true, jsonSchema: Self.arrangeSchema)
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(Wire.self, from: data)
@@ -110,7 +111,8 @@ struct LLMPlanningEngine: PlanningEngine {
             给出**弹性块**的推荐执行顺序（只列弹性块索引）+ 一句温和前向的 note。
             只输出 JSON：{"flexibleOrder":[弹性块索引...],"note":"一句话"}
             """
-            let raw = try await client.complete(system: Self.reflowSystemPrompt, user: user, maxTokens: 4000, jsonMode: true)
+            let raw = try await client.complete(system: Self.reflowSystemPrompt, user: user, maxTokens: 4000,
+                                                jsonMode: true, jsonSchema: Self.reflowSchema)
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(ReflowWire.self, from: data)
@@ -164,4 +166,36 @@ struct LLMPlanningEngine: PlanningEngine {
     4) 措辞给掌控感（"接下来这样就能收尾"），不施压（红线见宪法）。
     只输出 JSON：{"flexibleOrder":[弹性块索引...],"note":"一句温和前向的话"}
     """) }
+
+    // MARK: 结构化输出 schema（`output_config.format`）—— 对齐 Wire / ReflowWire
+
+    static let arrangeSchema: [String: Any] = [
+        "type": "object", "additionalProperties": false,
+        "required": ["orderedIndexes", "note", "poolSuggestions"],
+        "properties": [
+            "orderedIndexes": ["type": "array", "items": ["type": "integer"]],
+            "note": ["type": "string"],
+            "poolSuggestions": [
+                "type": "array",
+                "items": [
+                    "type": "object", "additionalProperties": false,
+                    "required": ["poolIndex", "start", "end"],
+                    "properties": [
+                        "poolIndex": ["type": "integer"],
+                        "start": ["type": "string"],
+                        "end": ["type": "string"],
+                    ],
+                ],
+            ],
+        ],
+    ]
+
+    static let reflowSchema: [String: Any] = [
+        "type": "object", "additionalProperties": false,
+        "required": ["flexibleOrder", "note"],
+        "properties": [
+            "flexibleOrder": ["type": "array", "items": ["type": "integer"]],
+            "note": ["type": "string"],
+        ],
+    ]
 }

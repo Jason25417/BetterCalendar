@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.26", date: "2026-07", changes: [
+            "修「AI 调整（微调）失败」+ 顺带根治解析/排程偶发的思考前言：上一版逼模型直出 JSON 用的是「预填一个 {」的老办法，但新一代 Claude 模型（Sonnet 4.6 及以后）已不支持这招、会直接报错（微调因此每次都失败）。现在改用官方的「结构化输出」——从 API 层把回复约束成规定格式的 JSON，模型物理上写不出前言，各家现代模型通用",
+            "默认 Anthropic 模型改为 Claude Sonnet 5（近 Opus 质量、更省、支持结构化输出）；旧的 Sonnet 4.6 已下线并自动帮你迁到 Sonnet 5。想更强可在设置里切 Opus 4.8、想更省切 Haiku 4.5",
+        ]),
         ChangelogEntry(version: "0.18.25", date: "2026-07", changes: [
             "修「确认写入后 menu bar/开始今天仍说没计划」：查日志发现是「绿色淡出」和「日历→真相库反向同步」打架——实时模式下绿色本就淡出为空，反向同步却拿这个空去把刚写的计划抹了。现在实时模式的日子不做反向同步，且绝不用空绿色清空非空真相源",
         ]),

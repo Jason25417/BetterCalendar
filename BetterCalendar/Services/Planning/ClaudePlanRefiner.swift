@@ -43,7 +43,8 @@ struct ClaudePlanRefiner: PlanRefining {
             按指令修改对应块（时间/标题/固定/计时风格/优先级），未提到的块保持不变，且不违背最初需求里的约束（如娱乐时长下限、结束时间等）。
             只输出 JSON：{"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"timingStyle":"light","priority":"normal"}]}
             """
-            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000, jsonMode: true)
+            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000,
+                                                jsonMode: true, jsonSchema: Self.outputSchema)
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(Wire.self, from: data)
@@ -74,4 +75,28 @@ struct ClaudePlanRefiner: PlanRefining {
     }
 
     static let systemPrompt = PromptConstitution.with("你在调整一个已排好的一天日程。依据用户的中文调整指令修改对应的块，未提到的块保持不变。只输出 JSON，不要解释、不要 markdown 围栏。")
+
+    /// 结构化输出 schema（`output_config.format`）：约束模型直出这个形状的 JSON。
+    /// 对齐 `WireBlock`；所有字段列入 required（结构化输出要求），Swift 侧仍按缺省容错。
+    static let outputSchema: [String: Any] = [
+        "type": "object", "additionalProperties": false,
+        "required": ["blocks"],
+        "properties": [
+            "blocks": [
+                "type": "array",
+                "items": [
+                    "type": "object", "additionalProperties": false,
+                    "required": ["title", "start", "end", "isFixed", "timingStyle", "priority"],
+                    "properties": [
+                        "title": ["type": "string"],
+                        "start": ["type": "string"],
+                        "end": ["type": "string"],
+                        "isFixed": ["type": "boolean"],
+                        "timingStyle": ["type": "string", "enum": ["pomodoro", "light", "none"]],
+                        "priority": ["type": "string", "enum": ["normal", "important"]],
+                    ],
+                ],
+            ],
+        ],
+    ]
 }
