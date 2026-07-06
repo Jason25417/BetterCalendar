@@ -10,8 +10,10 @@ import SwiftUI
 struct SettingsView: View {
     @State private var apiKey: String = ""
     @State private var model: String = CloudSettings.model
+    @State private var provider: LLMProvider = CloudSettings.provider
+    @State private var sfModel: String = CloudSettings.siliconflowModel
     @State private var useCloud: Bool = CloudSettings.useCloud
-    @State private var hasKey: Bool = KeychainStore.loadAPIKey() != nil
+    @State private var hasKey: Bool = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount) != nil
     @State private var backend: CalendarBackend = CalendarSettings.backend
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
@@ -24,10 +26,20 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("云端排程大脑（Anthropic API）") {
+            Section("云端排程大脑") {
                 Toggle("启用云端", isOn: $useCloud)
 
-                SecureField(hasKey ? "已存有 key（留空＝不修改）" : "粘贴 Anthropic API key",
+                Picker("服务商", selection: $provider) {
+                    ForEach(LLMProvider.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .onChange(of: provider) { _, p in
+                    CloudSettings.provider = p
+                    hasKey = KeychainStore.loadAPIKey(account: p.keychainAccount) != nil
+                    apiKey = ""; testResult = nil
+                }
+
+                SecureField(hasKey ? "已存有 key（留空＝不修改）"
+                            : (provider == .siliconflow ? "粘贴硅基流动 API key" : "粘贴 Anthropic API key"),
                             text: $apiKey)
 
                 HStack {
@@ -37,7 +49,7 @@ struct SettingsView: View {
                     if testing { ProgressView().controlSize(.small) }
                     if hasKey {
                         Button("清除 key", role: .destructive) {
-                            KeychainStore.deleteAPIKey(); hasKey = false; savedHint = "已清除 key"
+                            KeychainStore.deleteAPIKey(account: provider.keychainAccount); hasKey = false; savedHint = "已清除 key"
                         }
                     }
                     if let hint = savedHint {
@@ -86,11 +98,17 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 if showAdvanced {
-                    Picker("AI 模型", selection: $model) {
-                        ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
+                    if provider == .anthropic {
+                        Picker("AI 模型", selection: $model) {
+                            ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
+                        }
+                        Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。改完点上方「保存」。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        TextField("硅基流动模型 ID", text: $sfModel)
+                        Text("填 SiliconFlow 上的模型 ID，如 Qwen/Qwen3-30B-A3B-Thinking-2507（<200B MoE 推理，应更快）。改完点上方「保存」。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。改完点上方「保存」。")
-                        .font(.caption).foregroundStyle(.secondary)
 
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
@@ -113,18 +131,20 @@ struct SettingsView: View {
         }
         .padding()
         #if os(macOS)
-        .frame(minWidth: 460, minHeight: 420)
+        // 固定尺寸 → Form 内容超出时**内部滚动**（之前 minHeight 让窗口无限长、超屏后无法滚、被截断）
+        .frame(width: 500, height: 560)
         #endif
     }
 
-    /// 测试 API key：输入框有内容测输入框的（未保存也能测），否则测已保存的。
+    /// 测试当前服务商的 key：输入框有内容测输入框的（未保存也能测），否则测已保存的。
     private func testKey() {
-        let candidate = apiKey.isEmpty ? (KeychainStore.loadAPIKey() ?? "") : apiKey
+        let candidate = apiKey.isEmpty ? (KeychainStore.loadAPIKey(account: provider.keychainAccount) ?? "") : apiKey
         guard !candidate.isEmpty else { return }
         testing = true; testResult = nil
-        let m = model
+        let m = provider == .anthropic ? model : sfModel
+        let p = provider
         Task {
-            let r = await AnthropicClient.test(key: candidate, model: m)
+            let r = await AnthropicClient.test(key: candidate, model: m, provider: p)
             switch r {
             case .success(let model): testResult = "✅ key 有效 · \(model) 可用"
             case .failure(let e): testResult = "❌ \(e.message)"
@@ -135,11 +155,13 @@ struct SettingsView: View {
 
     private func save() {
         if !apiKey.isEmpty {
-            KeychainStore.saveAPIKey(apiKey)
+            KeychainStore.saveAPIKey(apiKey, account: provider.keychainAccount)   // 存到当前服务商账户
             hasKey = true
             apiKey = ""
         }
+        CloudSettings.provider = provider
         CloudSettings.model = model
+        CloudSettings.siliconflowModel = sfModel
         CloudSettings.useCloud = useCloud
         CalendarSettings.backend = backend
         ReminderSettings.leadMinutes = leadMinutes

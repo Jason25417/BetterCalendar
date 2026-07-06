@@ -76,7 +76,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
             }
             DevLog.shared.info("解析", "云端成功 · \(blocks.count) 块"
                                + (longTasks.isEmpty ? "" : " · \(longTasks.count) 在途")
-                               + (decoded.loose ? " · 松散" : "") + " · \(CloudSettings.model)")
+                               + (decoded.loose ? " · 松散" : "") + " · \(CloudSettings.activeModel)")
             return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: decoded.loose)
         } catch {
             DevLog.shared.warn("解析", "云端失败，回退本地：\(error.localizedDescription)")

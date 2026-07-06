@@ -10,10 +10,11 @@ import Security
 
 enum KeychainStore {
     private static let service = "com.jason.BetterCalendar"
-    private static let account = "anthropic-api-key"
+    /// 默认账户 = Anthropic（向后兼容旧调用）。硅基流动传 LLMProvider.siliconflow.keychainAccount。
+    static let defaultAccount = "anthropic-api-key"
 
-    static func saveAPIKey(_ key: String) {
-        deleteAPIKey()   // 清旧条目（含早期未开同步的本地条目）
+    static func saveAPIKey(_ key: String, account: String = defaultAccount) {
+        deleteAPIKey(account: account)   // 清旧条目（含早期未开同步的本地条目）
         let add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -26,7 +27,7 @@ enum KeychainStore {
         SecItemAdd(add as CFDictionary, nil)
     }
 
-    static func loadAPIKey() -> String? {
+    static func loadAPIKey(account: String = defaultAccount) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -44,7 +45,7 @@ enum KeychainStore {
         return s
     }
 
-    static func deleteAPIKey() {
+    static func deleteAPIKey(account: String = defaultAccount) {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.17", date: "2026-07", changes: [
+            "接入硅基流动：设置→服务商 可切「Anthropic（Claude）/ 硅基流动（OpenAI 兼容）」，各自填 API key + 模型 ID + 测试；硅基流动填 <200B MoE 推理模型（默认 Qwen3-30B-A3B-Thinking），通常更快",
+            "修排程「回复超长被截断」：长输入（十几件事）时 planning 输出上限 2048→4000，并强制 AI 直接给 JSON、不再输出一堆解释（opus 尤其爱加），不再动辄回退本地",
+            "修设置页展开后超出窗口、无法滚动（改成固定窗口内部滚动）",
+        ]),
         ChangelogEntry(version: "0.18.16", date: "2026-07", changes: [
             "绿色淡出（签名功能收口，原则6.4）：点「开始今天」进入实时模式后，绿色计划从 Apple 日历常驻淡出——只留橙色（从现在起可行）+ 蓝色（已发生），不再让计划当羞辱纪念碑常驻",
             "绿色计划仍完整保存在内部，晚间复盘的「计划×实际」对比照常成立；「开始今天」之前照常显示绿色计划",
