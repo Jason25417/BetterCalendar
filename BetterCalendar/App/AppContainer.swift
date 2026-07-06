@@ -48,7 +48,8 @@ final class AppContainer {
         let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser())
         self.parser = FoundationModelsScheduleParser(fallback: cloudParser)
         self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
-        self.refiner = ClaudePlanRefiner(client: anthropic)
+        // 微调兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude
+        self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
         self.calendarStore = FakeCalendarStore()
         self.routingStore = RoutingCalendarStore(fake: calendarStore, eventKit: EventKitCalendarStore())
         self.reminderStore = FakeReminderStore()

@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.31", date: "2026-07", changes: [
+            "「AI 调整」也接入端侧 FM：微调是纯结构化（改块清单、无文本），最适合端侧——@Generable 直出不截断、免费/私密，且指令强化「返回完整清单、别丢未改的块」，根治云端偶发「只返回 1 块把其余丢了」。开关同「端侧解析（试验）」。排序/reflow 因带「温和前向的一句话」（=生成文本）仍走云端",
+        ]),
         ChangelogEntry(version: "0.18.30", date: "2026-07", changes: [
             "试点：接入 Apple 端侧模型（Foundation Models）做解析——设置 → 进阶 → 打开「端侧解析（试验）」后，「排今天」优先用设备本地模型（免费/离线/私密、@Generable 直出结构），不可用或失败自动回退云端。默认关、试验中；~3B 偏小，细节可能不如云端",
         ]),
