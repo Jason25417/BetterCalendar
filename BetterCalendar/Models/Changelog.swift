@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.23", date: "2026-07", changes: [
+            "本地兜底解析升级：云端排程失败时，本地也能从你的话里抽出真实时长（2小时/半小时/一个半小时/1。5小时/20分钟）和作息锚点（午饭/晚饭等），给一份可用草稿——不再是每句一小时的碎片。（对付超长输入把云端搞挂时的兜底）",
+        ]),
         ChangelogEntry(version: "0.18.22", date: "2026-07", changes: [
             "设置窗口现在可以像主界面一样拖拉调整大小",
             "测试 API 给足 token（原来只给 64、思考模型光推理就撑爆，假性「截断」失败）",

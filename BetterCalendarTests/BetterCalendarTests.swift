@@ -164,6 +164,17 @@ struct LogicTests {
                                              notBefore: nine, windDown: windDown) == nil)
     }
 
+    // MARK: 本地兜底解析抽时长（0.18.23：云端失败时也给可用草稿）
+    @Test func stubExtractsDurations() {
+        #expect(StubScheduleParser.extractMinutes("写两个小时的论文") == 120)
+        #expect(StubScheduleParser.extractMinutes("花半个小时整理房间") == 30)
+        #expect(StubScheduleParser.extractMinutes("1。5个小时的数据库学习") == 90)   // 中文句号当小数
+        #expect(StubScheduleParser.extractMinutes("3个小时的开发") == 180)
+        #expect(StubScheduleParser.extractMinutes("锻炼一个半小时") == 90)
+        #expect(StubScheduleParser.extractMinutes("发呆 20 分钟") == 20)
+        #expect(StubScheduleParser.extractMinutes("没提时长的事") == nil)
+    }
+
     // MARK: JSON 尾逗号修复（0.18.22：治「JSON 解码失败」）
     @Test func extractObjectRepairsTrailingCommas() {
         let out = JSONText.extractObject("```json\n{\"a\":[1,2,],\"b\":3,}\n```")
