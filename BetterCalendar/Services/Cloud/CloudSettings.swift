@@ -36,6 +36,13 @@ enum CloudSettings {
         set { defaults.set(newValue, forKey: "cloud.useCloud") }
     }
 
+    /// 开发期：把云端**原始返回**（stop_reason + 前 2000 字）记进 DevLog，排查「成功返回但解析 0 块 / 截断」。
+    /// 默认开；上架前关或删。
+    static var logRawResponses: Bool {
+        get { defaults.object(forKey: "cloud.logRaw") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "cloud.logRaw") }
+    }
+
     /// 当前服务商（默认 Anthropic）。
     static var provider: LLMProvider {
         get { LLMProvider(rawValue: defaults.string(forKey: "cloud.provider") ?? "") ?? .anthropic }

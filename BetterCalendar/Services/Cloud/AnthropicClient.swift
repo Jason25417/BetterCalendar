@@ -75,10 +75,14 @@ struct AnthropicClient {
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let obj = try await send(req, provider: "Anthropic")
-        if let stop = obj["stop_reason"] as? String, stop == "max_tokens" {
+        let stop = obj["stop_reason"] as? String
+        let text = (obj["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
+        if CloudSettings.logRawResponses {
+            DevLog.shared.info("云端原文", "Anthropic \(model()) stop=\(stop ?? "?") · 返回(前2000)：\(text.prefix(2000))")
+        }
+        if stop == "max_tokens" {
             throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
         }
-        let text = (obj["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
         guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
         return text
     }
@@ -101,11 +105,15 @@ struct AnthropicClient {
         guard let choices = obj["choices"] as? [[String: Any]], let first = choices.first else {
             throw AnthropicError(message: "响应格式异常")
         }
-        if let fr = first["finish_reason"] as? String, fr == "length" {
-            throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
-        }
+        let fr = first["finish_reason"] as? String
         // 推理模型可能把思考放 reasoning_content、答案放 content；只取 content（JSON 在其中，上层 extractObject 再挖）
         let text = ((first["message"] as? [String: Any])?["content"] as? String) ?? ""
+        if CloudSettings.logRawResponses {
+            DevLog.shared.info("云端原文", "硅基 \(model()) finish=\(fr ?? "?") · 返回(前2000)：\(text.prefix(2000))")
+        }
+        if fr == "length" {
+            throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
+        }
         guard !text.isEmpty else { throw AnthropicError(message: "空回复（推理模型可能把内容放在了 reasoning_content）") }
         return text
     }

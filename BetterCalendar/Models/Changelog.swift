@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.28", date: "2026-07", changes: [
+            "加开发期「云端原文」日志：每次云端调用都记下模型的原始返回（stop_reason + 前 2000 字），排查「成功返回但只解析出 0 块 / 被截断」时能直接看到模型到底吐了什么",
+            "精简 + 分层排程 prompt：把冗长规则压紧、分成「块规则 / 松散·长期」两层（全部规则保留），更省输入、也给小模型/端侧模型铺路",
+        ]),
         ChangelogEntry(version: "0.18.27", date: "2026-07", changes: [
             "修「所有 AI 操作极慢 + AI 调整因回复过长失败」：上一版把默认模型换成 Sonnet 5，而它「不指定就默认开自适应思考」——每次都先想一大段，既慢(连测 API key 都要等很久)、思考又吃掉额度把 JSON 挤断。现在对排程/抽取这类结构化任务显式关掉思考，速度恢复、额度全留给结果",
         ]),

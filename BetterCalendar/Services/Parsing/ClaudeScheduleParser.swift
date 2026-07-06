@@ -114,18 +114,24 @@ struct ClaudeScheduleParser: ScheduleParsing {
         }
         return PromptConstitution.with("""
         你把用户用自然语言描述的一天，转成结构化日程。
-        现在的真实时间：\(realNow)。**目标日：\(target)**——所有 blocks 一律排在目标日当天（唯一例外：睡前跨过午夜的块延到目标日次日凌晨，日期写次日）。"明早/上午/晚上"等都指目标日的时段，不是真实时间的次日。
-        只输出一个 JSON 对象，不要任何解释、不要 markdown 代码围栏。格式：
-        {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":"YYYY-MM-DD HH:mm 或 null","cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
-        规则：start/end 用 24 小时制本地时间；**isFixed 只给「与他人约定、时刻不可改」的事**（会议/上课/约诊/班车等）=true；**个人任务**（写作业/写代码/健身/读书/吃饭等）即使提到时间也 isFixed=false（它们时间可被自动 re-flow 调整，标 fixed 会导致排不动）；timingStyle ∈ pomodoro/light/none，默认 light；priority ∈ normal/important（要紧/紧急的事用 important）；deadline 为硬截止时间或 null。**跨过午夜的块（睡前/凌晨的事）start/end 日期用次日**，别写成目标日的 00:xx。**时间块默认互不重叠**；仅当用户明确表示可并行/同时进行（如"这几个任务可以并行""可以同时处理两三个"）时，才允许对应块时间重叠（并行块各自保留完整时长）。**并行 = 重叠在同一时段**：几件并行任务的 start/end 应**大幅重合**（占同一段时间），而不是排成前后相接。**并行任务必须全部各自成块、一个都不能少**——绝不因为它们并行就省略、合并、或漏掉其中任何一个（用户列了 4 件并行开发，就必须出 4 个块）。**并行块命名**：每块用**自己对应任务**的名字（可加「并行 · 」前缀，如「并行 · Watch Chatbot」），绝不要把所有并行任务名拼进每一个块的标题；并行块**不要因为并行而标 isFixed**（isFixed 仍只看会议类标准）。
-        **不得漏任务（重要）**：用户提到的每一件要做的事都要出成一个块（或 longTasks），**逐一保留、数量对得上**，绝不因为多、因为并行、或因为排不下就悄悄省略某件（真排不下的宁可排在收工后、也别丢）。
-        **松散意图 loose**：**仅当用户明确表达"想松散/放松/休息一下/随便过/不想被安排/今天摆烂"这类整段放松的意愿**时，把顶层 loose 设 true（这是解析用户明说的意愿，不是你替他判断该不该休息）；只是普通排程、或只提到某段小憩，loose 保持 false。loose=true 时仍可照常解析用户提到的块（他也许想松散地排几件）。
-        **锚点块 isAnchor**：午饭/晚饭/早饭/通勤/午休/睡觉等作息必需事项设 isAnchor=true——照常排进日程占时间（其它事绕着它排），但它们不是"要完成的任务"。
-        **留白与粒度**：**不要生成"小休息/休息"块**，两个工作块之间留出空隙即可（休息干什么无所谓、甚至继续工作）；把无需界定的碎片（拿快递、喝水）并入相邻块或省略；块的粒度 = 用户会"作为一件事去完成"的单位，别切太碎（但会议等固定块不要并进别的块）。
-        **番茄钟**：timingStyle 默认 light（轻计时）；**只有**背书/写卷子/啃论文这类"容易劝退的高摩擦"任务才用 pomodoro，其余一律别用。
-        **收工时间（软限制，非硬性）**：理想收工 = \(WorkHoursSettings.windDownText)。给没指定时间的事分配时段时，**尽量安排在收工时间之前**；只有当略超 5–10 分钟正好能把一件较大的事做完时才可略过。**用户明确说的晚间/睡前的事**（明说到某个晚点时刻，如"睡前读书到 24:00"）**不受此限**，照他说的排。
-        **longTasks（长期事项）**：截止在目标日之后的远期任务（"下周五前交论文"）或多天持续的长线（"这学期学完 X""每周健身三次"）放 longTasks，**不放 blocks**——除非用户明确今天也要做一段（则两边都出：blocks 出今天这段，longTasks 出整件事）。cadenceMinutesPerWeek = 每周投入分钟数（"每天学 1 小时"≈420），没提就 null。没有长期事项时 longTasks 给 []。**总量**：说了"共9单元每单元40min"→ totalMinutes=360、unitMinutes=40；"共150小时"→ totalMinutes=9000、unitMinutes=null；没说就都 null。
-        **委托长期任务（重要）**：若用户说"今天做X小时长期任务/安排学习时间/干哪个看你"这类**委托**，你要从下面〔长期任务池〕里挑合适的、按委托时长生成**具体的 blocks**（块名=池中该任务名，别写"长期任务"这种泛称），并把整件事也放 longTasks。〔长期任务池〕：\(poolSection)\(contextSection)
+        现在真实时间：\(realNow)。**目标日：\(target)**——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。
+        只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
+        {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
+        start/end 用 24 小时制本地时间。
+
+        【块规则】
+        - isFixed：**只有"与他人约定、时刻不可改"的事**（会议/上课/约诊/班车）=true；个人任务（写作业/写代码/健身/读书/吃饭）即使说了时间也 false（否则 re-flow 调不动）。
+        - **不漏**：用户提到的每件要做的事都出一个块（或 longTasks），逐一保留、数量对得上；真排不下宁可排到收工后，也别省略。
+        - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。
+        - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）。
+        - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
+        - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
+        - 收工时间（软限制）= \(WorkHoursSettings.windDownText)：没指定时间的事尽量排在收工前；只有略超 5–10 分钟正好做完一件大事才可越界。用户明说的晚间/睡前块不受限。
+
+        【松散 / 长期】
+        - loose：**仅当用户明说"想松散/放松/休息一下/摆烂"这类整段放松意愿**时设 true（解析他明说的意愿，不替他判断）；普通排程或只提某段小憩=false。loose=true 仍照常解析块。
+        - longTasks：截止在目标日之后的远期任务（"下周五交论文"）或多天长线（"这学期学完 X""每周健身三次"）放 longTasks、**不放 blocks**——除非用户明说今天也做一段（则两边都出）。cadenceMinutesPerWeek=每周投入分钟（"每天 1h"≈420），没提就 null；说了总量（"共9单元每40min"→total=360,unit=40；"共150小时"→total=9000,unit=null）就填，否则 null。没有长期事项 longTasks 给 []。
+        - 委托：用户说"今天做X小时长期任务/干哪个看你"这类委托，从〔池〕按时长挑合适的生成**具体 blocks**（块名=池中任务名），并把整件事也放 longTasks。〔池〕：\(poolSection)\(contextSection)
         """)
     }
 
