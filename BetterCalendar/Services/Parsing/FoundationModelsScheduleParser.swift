@@ -4,14 +4,25 @@
 //
 //  端侧解析（试点，D1 端侧目标）：Apple Foundation Models（macOS 26+/iOS 26+ 系统内置 ~3B 模型）。
 //  @Generable 直出结构化日程——完全本地、免费、离线、私密、快。
+//  **流式**：streamResponse 边生成边把"部分块"写进 LiveDraft，UI 边出边显示（不影响最终完整结果）。
 //  不可用 / 失败 / 0 块 → 回退云端(fallback)。是 ScheduleParsing 的又一实现，和 ClaudeScheduleParser 平级。
 //
 
 import Foundation
+import Observation
 import FoundationModels
 
+/// 端侧流式解析的「进行中部分块」——FM 边生成边写，排日程页边出边显示。
+@MainActor
+@Observable
+final class LiveDraft {
+    var streaming: [ScheduledBlock] = []
+    func clear() { streaming = [] }
+}
+
 struct FoundationModelsScheduleParser: ScheduleParsing {
-    let fallback: ScheduleParsing   // 端侧关闭/不可用/失败 → 云端
+    let fallback: ScheduleParsing      // 端侧关闭/不可用/失败 → 云端
+    var liveDraft: LiveDraft?          // 流式部分块出口（nil = 不流式，仅最终结果）
 
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan {
         try await parse(text, referenceDate: referenceDate, context: ParseContext())
@@ -29,30 +40,56 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         }
         do {
             let session = LanguageModelSession(instructions: Self.instructions(referenceDate: referenceDate))
-            let plan = try await session.respond(to: text, generating: FMPlan.self).content
-            let blocks: [ParsedBlock] = plan.blocks.compactMap { b in
-                guard let s = DateParsing.parse(b.start), let e = DateParsing.parse(b.end) else { return nil }
-                return ParsedBlock(title: b.title, start: s, end: e,
-                                   durationMinutes: Int(e.timeIntervalSince(s) / 60),
-                                   isFixed: b.isFixed, isAnchor: b.isAnchor, category: "",
-                                   timingStyle: TimingStyle(rawValue: b.timingStyle) ?? .light,
-                                   priority: BlockPriority(rawValue: b.priority) ?? .normal,
-                                   deadline: nil)
+            // 流式：逐个部分快照 → 把已成形的块写进 LiveDraft（UI 边出边显示）
+            var last: FMPlan.PartiallyGenerated?
+            for try await snapshot in session.streamResponse(to: text, generating: FMPlan.self) {
+                let partial = snapshot.content   // FMPlan.PartiallyGenerated
+                last = partial
+                let live = (partial.blocks ?? []).compactMap { Self.scheduled(from: $0) }
+                liveDraft?.streaming = live.sorted { $0.start < $1.start }
             }
-            let longTasks = plan.longTasks.map {
-                ParsedLongTask(title: $0.title, deadline: nil, cadenceMinutesPerWeek: nil,
-                               totalMinutes: nil, unitMinutes: nil)
+            liveDraft?.clear()
+            guard let final = last else {
+                return try await fallback.parse(text, referenceDate: referenceDate, context: context)
             }
-            guard !blocks.isEmpty || !longTasks.isEmpty || plan.loose else {
+            let blocks = (final.blocks ?? []).compactMap { Self.parsed(from: $0) }
+            let longTasks = (final.longTasks ?? []).compactMap { lt -> ParsedLongTask? in
+                guard let t = lt.title, !t.isEmpty else { return nil }
+                return ParsedLongTask(title: t, deadline: nil, cadenceMinutesPerWeek: nil,
+                                      totalMinutes: nil, unitMinutes: nil)
+            }
+            let loose = final.loose ?? false
+            guard !blocks.isEmpty || !longTasks.isEmpty || loose else {
                 DevLog.shared.warn("端侧解析", "Foundation Models 返回 0 块 → 回退云端")
                 return try await fallback.parse(text, referenceDate: referenceDate, context: context)
             }
-            DevLog.shared.info("端侧解析", "Foundation Models 成功 · \(blocks.count) 块（端侧·免费）")
-            return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: plan.loose)
+            DevLog.shared.info("端侧解析", "Foundation Models 成功 · \(blocks.count) 块（端侧·免费·流式）")
+            return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: loose)
         } catch {
+            liveDraft?.clear()
             DevLog.shared.warn("端侧解析", "Foundation Models 失败 → 回退云端：\(error.localizedDescription)")
             return try await fallback.parse(text, referenceDate: referenceDate, context: context)
         }
+    }
+
+    /// 部分块 → ParsedBlock（最终结果用；字段没齐就跳过）。
+    private static func parsed(from b: FMBlock.PartiallyGenerated) -> ParsedBlock? {
+        guard let title = b.title, let ss = b.start, let es = b.end,
+              let s = DateParsing.parse(ss), let e = DateParsing.parse(es) else { return nil }
+        return ParsedBlock(title: title, start: s, end: e,
+                           durationMinutes: Int(e.timeIntervalSince(s) / 60),
+                           isFixed: b.isFixed ?? false, isAnchor: b.isAnchor ?? false, category: "",
+                           timingStyle: TimingStyle(rawValue: b.timingStyle ?? "light") ?? .light,
+                           priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal, deadline: nil)
+    }
+
+    /// 部分块 → ScheduledBlock（流式预览用；要求起止都成形且有效）。
+    private static func scheduled(from b: FMBlock.PartiallyGenerated) -> ScheduledBlock? {
+        guard let title = b.title, !title.isEmpty, let ss = b.start, let es = b.end,
+              let s = DateParsing.parse(ss), let e = DateParsing.parse(es), e > s else { return nil }
+        return ScheduledBlock(title: title, start: s, end: e, isFixed: b.isFixed ?? false,
+                              timingStyle: TimingStyle(rawValue: b.timingStyle ?? "light") ?? .light,
+                              priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal)
     }
 
     /// 端侧模型小（~3B），指令保持精简；结构由 @Generable schema 承担、无需讲 JSON 格式。

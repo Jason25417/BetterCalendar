@@ -170,6 +170,20 @@ struct HomeView: View {
                     Spacer()
                 }
 
+                // 端侧流式：解析中的部分块边生成边显示（FM streamResponse）
+                if model.isWorking, !container.liveDraft.streaming.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(container.liveDraft.streaming) { b in
+                            HStack(spacing: 6) {
+                                Text(b.start.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                Text(b.title).font(.caption)
+                            }
+                        }
+                    }
+                    .padding(.leading, 2)
+                }
+
                 // 防呆：模型偶尔把 note 抽风成「1」这种垃圾 → trim 后太短就不显
                 if let note = model.note,
                    note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {

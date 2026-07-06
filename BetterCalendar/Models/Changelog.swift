@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.35", date: "2026-07", changes: [
+            "端侧解析流式输出：排今天时 Apple 端侧模型边生成边把日程块一条条冒出来（转圈下方实时显示），最终完整结果不变——不再干等",
+        ]),
         ChangelogEntry(version: "0.18.34", date: "2026-07", changes: [
             "草稿块右键可「复制一份 / 删除」",
             "更积极归属未来任务：现在所有日程块都会按标题自动接到对应未来任务名下（不只 AI 建议的那些），投入统计更全",

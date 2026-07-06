@@ -32,6 +32,7 @@ final class AppContainer {
     let draftSnapshots = DraftSnapshotStore()  // 排日程草稿快照（崩溃/重启还原）
     let looseDays = LooseDayStore()            // 松散日标记（退场姿态；iCloud KV，无 schema）
     let startedDays = StartedDayStore()        // 「已开始今天」标记（绿色淡出=实时模式）
+    let liveDraft = LiveDraft()                // 端侧流式解析的「进行中部分块」（边生成边显示）
     let logSync: LogSyncService                // 跨端日志：DevLog→CloudKit→(Mac)容器纯文本
     let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
@@ -46,7 +47,7 @@ final class AppContainer {
         let anthropic = AnthropicClient()
         // 解析兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude → 本地 Stub
         let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser())
-        self.parser = FoundationModelsScheduleParser(fallback: cloudParser)
+        self.parser = FoundationModelsScheduleParser(fallback: cloudParser, liveDraft: liveDraft)
         self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
         // 微调兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
