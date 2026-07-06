@@ -138,8 +138,9 @@ struct SettingsView: View {
         }
         .padding()
         #if os(macOS)
-        // 固定尺寸 → Form 内容超出时**内部滚动**（之前 minHeight 让窗口无限长、超屏后无法滚、被截断）
-        .frame(width: 500, height: 560)
+        // 可调整大小 + 内容超出时 Form 内部滚动：给可缩放范围(min/ideal/max)，窗口就能像主界面一样拖拉
+        .frame(minWidth: 460, idealWidth: 520, maxWidth: 800,
+               minHeight: 420, idealHeight: 600, maxHeight: 1000)
         #endif
     }
 

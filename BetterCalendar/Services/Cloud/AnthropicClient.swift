@@ -25,7 +25,8 @@ struct AnthropicClient {
     static func test(key: String, model: String, provider: LLMProvider) async -> Result<String, AnthropicError> {
         let probe = AnthropicClient(provider: { provider }, apiKey: { key }, model: { model }, useCloud: { true })
         do {
-            _ = try await probe.complete(system: "只回复 ok", user: "ping", maxTokens: 64)
+            // 给足 token：有些"思考"模型光推理就吃掉几十上百 token，64 太小会假性「截断」失败
+            _ = try await probe.complete(system: "只回复 ok", user: "ping", maxTokens: 512)
             return .success(model)
         } catch let e as AnthropicError {
             return .failure(e)

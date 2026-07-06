@@ -164,6 +164,12 @@ struct LogicTests {
                                              notBefore: nine, windDown: windDown) == nil)
     }
 
+    // MARK: JSON 尾逗号修复（0.18.22：治「JSON 解码失败」）
+    @Test func extractObjectRepairsTrailingCommas() {
+        let out = JSONText.extractObject("```json\n{\"a\":[1,2,],\"b\":3,}\n```")
+        #expect((try? JSONSerialization.jsonObject(with: Data(out.utf8))) != nil)   // 围栏去掉+尾逗号修掉→可解析
+    }
+
     // MARK: 松散意图识别（0.18.9：LLM 从输入识别"想松散"→标目标日松散）
     @Test func decodePlanReadsLooseIntent() {
         let d = ClaudeScheduleParser.decodePlan("{\"loose\":true,\"blocks\":[],\"longTasks\":[]}")

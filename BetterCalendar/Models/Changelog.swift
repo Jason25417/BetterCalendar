@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.22", date: "2026-07", changes: [
+            "设置窗口现在可以像主界面一样拖拉调整大小",
+            "测试 API 给足 token（原来只给 64、思考模型光推理就撑爆，假性「截断」失败）",
+            "多修一层 JSON 尾逗号（LLM 偶尔多写个逗号会导致「JSON 解码失败」，现在自动修掉）",
+        ]),
         ChangelogEntry(version: "0.18.21", date: "2026-07", changes: [
             "硅基流动更好填了：把「模型 ID」框从进阶设置挪到主区（选了硅基流动就直接显示、必填），默认给一个几乎必然存在的小 Instruct 先测通连接，再自行换成想要的 MoE",
         ]),

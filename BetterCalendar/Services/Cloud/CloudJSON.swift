@@ -18,6 +18,8 @@ enum JSONText {
         if let a = t.firstIndex(of: "{"), let b = t.lastIndex(of: "}"), a <= b {
             t = String(t[a...b])
         }
+        // 修 LLM 常犯的尾逗号（[1,2,] / {..,}）——JSONSerialization 严格、不容忍，常致「JSON 解码失败」
+        t = t.replacingOccurrences(of: #",(\s*[}\]])"#, with: "$1", options: .regularExpression)
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
