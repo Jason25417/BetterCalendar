@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.33", date: "2026-07", changes: [
+            "草稿编辑更顺手：① 改了某块的开始时间，它自动按时间挪到该在的顺位（带动画）；② 把一块拖到两块之间，自动把它接到「上一个块结束」开始、保持原时长（拖=定位，时间跟着走）",
+        ]),
         ChangelogEntry(version: "0.18.32", date: "2026-07", changes: [
             "端侧 prompt 精简到只剩规则（去掉产品哲学/措辞红线——那些对结构化输出是噪声），端侧模型更专注",
             "「排今天/开始今天」转圈时旁边加一行「模型思考中…」小字",

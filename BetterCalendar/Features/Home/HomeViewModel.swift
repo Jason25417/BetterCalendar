@@ -456,7 +456,26 @@ final class HomeViewModel {
     }
 
     func move(_ source: IndexSet, _ destination: Int) {
-        blocks.move(fromOffsets: source, toOffset: destination); committedCount = nil; markEditedIfLoaded(); persistDraft()
+        let movedIDs = source.map { blocks[$0].id }
+        blocks.move(fromOffsets: source, toOffset: destination)
+        // #6：拖到某位置后按新邻居自动填时间（Jason 定：**保时长**，start=上一个块的结束；
+        // 拖到最顶则 end=下一个块的开始、时长往前推）。允许短暂重叠，后续 reflow 会理。
+        for id in movedIDs {
+            guard let i = blocks.firstIndex(where: { $0.id == id }) else { continue }
+            let dur = max(60, blocks[i].end.timeIntervalSince(blocks[i].start))   // 至少 1 分钟
+            if i > 0 {
+                let s = blocks[i - 1].end
+                blocks[i].start = s
+                blocks[i].end = s.addingTimeInterval(dur)
+            } else if blocks.count > 1 {
+                let e = blocks[1].start
+                blocks[i].end = e
+                blocks[i].start = e.addingTimeInterval(-dur)
+            }
+        }
+        // 填完时间按 start 排序（与 #5 一致：时间决定最终顺序，落到该在的位置）
+        withAnimation { blocks.sort { $0.start < $1.start } }
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
     func delete(id: UUID) {
@@ -471,8 +490,11 @@ final class HomeViewModel {
                    ?? EditableBlock(title: "", start: .now, end: .now) },
             set: { newValue in
                 if let i = self.blocks.firstIndex(where: { $0.id == id }) {
+                    let startChanged = self.blocks[i].start != newValue.start
                     self.blocks[i] = newValue
                     self.markEditedIfLoaded()   // 内联改标题/时间/星标 → 变未确认草稿
+                    // #5：改了开始时间 → 按 start 自动重排（动画滑到该去的位置）；只在 start 变时排，改标题/结束/星标不动位
+                    if startChanged { withAnimation { self.blocks.sort { $0.start < $1.start } } }
                     self.persistDraft()
                 }
             }
