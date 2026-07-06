@@ -117,6 +117,12 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
+                    Toggle("端侧解析（试验 · Apple 端侧模型）", isOn: Binding(
+                        get: { CloudSettings.useOnDeviceParser },
+                        set: { CloudSettings.useOnDeviceParser = $0 }))
+                    Text("打开后「排今天」优先用 Apple 端侧模型解析（免费/离线/私密），不可用或失败自动回退云端。~3B 偏小、细节可能不如云端，试验中。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")

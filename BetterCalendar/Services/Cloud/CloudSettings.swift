@@ -43,6 +43,13 @@ enum CloudSettings {
         set { defaults.set(newValue, forKey: "cloud.logRaw") }
     }
 
+    /// 试点（D1 端侧目标）：解析优先用 **Apple Foundation Models 端侧模型**（免费/离线/私密），
+    /// 不可用/失败/0 块自动回退云端。默认**关**——进阶设置里打开才用（~3B 偏小、试验中）。
+    static var useOnDeviceParser: Bool {
+        get { defaults.object(forKey: "cloud.onDeviceParser") as? Bool ?? false }
+        set { defaults.set(newValue, forKey: "cloud.onDeviceParser") }
+    }
+
     /// 当前服务商（默认 Anthropic）。
     static var provider: LLMProvider {
         get { LLMProvider(rawValue: defaults.string(forKey: "cloud.provider") ?? "") ?? .anthropic }

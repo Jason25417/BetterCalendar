@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.30", date: "2026-07", changes: [
+            "试点：接入 Apple 端侧模型（Foundation Models）做解析——设置 → 进阶 → 打开「端侧解析（试验）」后，「排今天」优先用设备本地模型（免费/离线/私密、@Generable 直出结构），不可用或失败自动回退云端。默认关、试验中；~3B 偏小，细节可能不如云端",
+        ]),
         ChangelogEntry(version: "0.18.29", date: "2026-07", changes: [
             "开发期日志自动镜像到 ~/Downloads/BetterCalendar-logs/（macOS 加 Downloads 读写权限）——不用再手动 copy 日志，命令行/Claude 能直接自动拉取排查",
         ]),
