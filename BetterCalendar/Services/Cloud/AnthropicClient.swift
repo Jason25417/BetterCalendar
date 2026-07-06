@@ -62,6 +62,11 @@ struct AnthropicClient {
         var body: [String: Any] = [
             "model": model(), "max_tokens": maxTokens, "system": system,
             "messages": [["role": "user", "content": user]],
+            // 关掉 extended thinking：排程/抽取是结构化任务，不需要"想一大段"。
+            // 新模型（Sonnet 5 等）**不传 thinking = 默认开自适应思考** → ①每次都先思考=慢(连测 key 都慢)
+            // ②思考 token 算进 max_tokens，把额度吃掉导致 JSON 截断("回复超长")。显式 disabled 恢复速度 + 腾 token 给 JSON。
+            // Opus 4.8 / Sonnet 5 / Haiku 4.5 都接受 disabled；Fable 5 会 400 但不在可选列表。
+            "thinking": ["type": "disabled"],
         ]
         // 结构化输出：把回复约束成符合 schema 的 JSON（首个 text block 即合法 JSON），物理上写不出前言。
         // 现代 Anthropic 模型都支持；不支持的模型会失败 → 上层 catch 回退本地。

@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.27", date: "2026-07", changes: [
+            "修「所有 AI 操作极慢 + AI 调整因回复过长失败」：上一版把默认模型换成 Sonnet 5，而它「不指定就默认开自适应思考」——每次都先想一大段，既慢(连测 API key 都要等很久)、思考又吃掉额度把 JSON 挤断。现在对排程/抽取这类结构化任务显式关掉思考，速度恢复、额度全留给结果",
+        ]),
         ChangelogEntry(version: "0.18.26", date: "2026-07", changes: [
             "修「AI 调整（微调）失败」+ 顺带根治解析/排程偶发的思考前言：上一版逼模型直出 JSON 用的是「预填一个 {」的老办法，但新一代 Claude 模型（Sonnet 4.6 及以后）已不支持这招、会直接报错（微调因此每次都失败）。现在改用官方的「结构化输出」——从 API 层把回复约束成规定格式的 JSON，模型物理上写不出前言，各家现代模型通用",
             "默认 Anthropic 模型改为 Claude Sonnet 5（近 Opus 质量、更省、支持结构化输出）；旧的 Sonnet 4.6 已下线并自动帮你迁到 Sonnet 5。想更强可在设置里切 Opus 4.8、想更省切 Haiku 4.5",
