@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.25", date: "2026-07", changes: [
+            "修「确认写入后 menu bar/开始今天仍说没计划」：查日志发现是「绿色淡出」和「日历→真相库反向同步」打架——实时模式下绿色本就淡出为空，反向同步却拿这个空去把刚写的计划抹了。现在实时模式的日子不做反向同步，且绝不用空绿色清空非空真相源",
+        ]),
         ChangelogEntry(version: "0.18.24", date: "2026-07", changes: [
             "根治长输入排程反复失败：查日志发现 AI（尤其 Sonnet）会先用英文「想一大段」再给 JSON，把 token 撑爆导致截断/解码失败。现在改成从 API 层强制直接输出 JSON（Anthropic 预填「{」/ 硅基 json 模式），模型物理上没法再写思考前言——又快又稳",
         ]),

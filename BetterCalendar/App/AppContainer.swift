@@ -63,7 +63,8 @@ final class AppContainer {
         self.reviewStore = ReviewLocalStore()
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
-        self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore)
+        self.calendarSync = CalendarSyncService(calendarStore: routingStore, planStore: planStore,
+                                                startedDays: startedDays)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
         #if os(iOS)
         self.liveActivity = ActivityKitLiveActivity()   // iOS：灵动岛 + 锁屏实时模块
