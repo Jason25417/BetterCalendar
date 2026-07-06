@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.37", date: "2026-07", changes: [
+            "修 App Store 上传告警 ITMS-90863：弱链接 FoundationModels——缺符号的 Mac（如不支持 Apple Intelligence）也能正常加载，端侧 AI 用不了就自动回退云端、不崩",
+            "右键草稿块的「复制一份」改叫「复制」",
+            "修一处端侧解析 prompt 被误输入污染（并行规则那句还原）",
+        ]),
         ChangelogEntry(version: "0.18.36", date: "2026-07", changes: [
             "（macOS）设置 → 进阶 → 「退出时保留在菜单栏后台运行」：打开后 ⌘Q / Dock 右键退出不会真退，收进菜单栏继续跑（计时不断）、Dock 图标消失，防手滑误退。真要退出：菜单栏图标 → 右键 → 退出 BetterCalendar",
         ]),

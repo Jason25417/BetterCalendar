@@ -277,7 +277,7 @@ struct HomeView: View {
                                             poolTasks: container.longTasks.items,
                                             onDelete: { model.delete(id: item.id) })
                                 .contextMenu {
-                                    Button { model.duplicate(id: item.id) } label: { Label("复制一份", systemImage: "plus.square.on.square") }
+                                    Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
                                     Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
                                 }
                             }
@@ -358,7 +358,7 @@ struct HomeView: View {
                                         poolTasks: container.longTasks.items,
                                         onDelete: { model.delete(id: item.id) })
                             .contextMenu {
-                                Button { model.duplicate(id: item.id) } label: { Label("复制一份", systemImage: "plus.square.on.square") }
+                                Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
                                 Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
                             }
                         }
