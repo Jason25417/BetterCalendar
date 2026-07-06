@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.34", date: "2026-07", changes: [
+            "草稿块右键可「复制一份 / 删除」",
+            "更积极归属未来任务：现在所有日程块都会按标题自动接到对应未来任务名下（不只 AI 建议的那些），投入统计更全",
+            "防呆：排程模型偶尔把「小反馈」抽成「1」这种垃圾字，现在太短就不显示",
+        ]),
         ChangelogEntry(version: "0.18.33", date: "2026-07", changes: [
             "草稿编辑更顺手：① 改了某块的开始时间，它自动按时间挪到该在的顺位（带动画）；② 把一块拖到两块之间，自动把它接到「上一个块结束」开始、保持原时长（拖=定位，时间跟着走）",
         ]),

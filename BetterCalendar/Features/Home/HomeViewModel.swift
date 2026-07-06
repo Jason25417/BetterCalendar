@@ -226,8 +226,9 @@ final class HomeViewModel {
                 .map { b in
                     var eb = EditableBlock(from: b)
                     eb.fromPool = outcome.decision.poolSuggestedTitles.contains(b.title)
-                    // 精确归属：池建议块一次性按标题匹配到具体未来任务的 id，之后统计锚 id 不再靠标题
-                    if eb.fromPool, eb.linkedTaskID == nil {
+                    // 精确归属：**所有**块都按标题匹配未来任务并归属（不只池建议块）——归属更积极，
+                    // 用户说的「学习量化」也会自动接到池里的「量化学习」名下（投入统计精确、改名不丢）。
+                    if eb.linkedTaskID == nil {
                         eb.linkedTaskID = longTaskStore?.items
                             .first { TitleMatch.similarity($0.title, b.title) >= 0.6 }?.id
                     }
@@ -480,6 +481,14 @@ final class HomeViewModel {
 
     func delete(id: UUID) {
         blocks.removeAll { $0.id == id }
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
+    }
+
+    /// 复制某块，插在其后（右键菜单用）。新块自带新 id，归属/时间沿用原块。
+    func duplicate(id: UUID) {
+        guard let i = blocks.firstIndex(where: { $0.id == id }) else { return }
+        var copy = blocks[i]; copy.id = UUID()
+        blocks.insert(copy, at: i + 1)
         committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 

@@ -170,7 +170,9 @@ struct HomeView: View {
                     Spacer()
                 }
 
-                if let note = model.note {
+                // 防呆：模型偶尔把 note 抽风成「1」这种垃圾 → trim 后太短就不显
+                if let note = model.note,
+                   note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                 }
                 if !model.pendingLongTasks.isEmpty {
@@ -260,6 +262,10 @@ struct HomeView: View {
                                 EditableRow(block: model.binding(for: item.id),
                                             poolTasks: container.longTasks.items,
                                             onDelete: { model.delete(id: item.id) })
+                                .contextMenu {
+                                    Button { model.duplicate(id: item.id) } label: { Label("复制一份", systemImage: "plus.square.on.square") }
+                                    Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
+                                }
                             }
                             .onMove { model.move($0, $1) }
                         }
@@ -337,6 +343,10 @@ struct HomeView: View {
                             EditableRow(block: model.binding(for: item.id),
                                         poolTasks: container.longTasks.items,
                                         onDelete: { model.delete(id: item.id) })
+                            .contextMenu {
+                                Button { model.duplicate(id: item.id) } label: { Label("复制一份", systemImage: "plus.square.on.square") }
+                                Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
+                            }
                         }
                         .onMove { model.move($0, $1) }
                     }
