@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.38", date: "2026-07", changes: [
+            "（macOS）修设置页排版：0.18.22 为追「窗口可缩放」把设置窗口改成弹性尺寸，反而让内容超出后无法滚动、被截断——「进阶设置」展开像点不开、页面滑不动。现在回退到固定尺寸 + 内部滚动，并换成分组卡片样式，排版更清爽",
+            "（macOS）菜单栏执行面板底部的「退出」按钮现在总是真退出（此前开了「保留在菜单栏」时它会被拦成隐藏）",
+        ]),
         ChangelogEntry(version: "0.18.37", date: "2026-07", changes: [
             "修 App Store 上传告警 ITMS-90863：弱链接 FoundationModels——缺符号的 Mac（如不支持 Apple Intelligence）也能正常加载，端侧 AI 用不了就自动回退云端、不崩",
             "右键草稿块的「复制一份」改叫「复制」",

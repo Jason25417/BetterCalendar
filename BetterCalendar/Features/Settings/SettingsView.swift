@@ -150,11 +150,11 @@ struct SettingsView: View {
                 }
             }
         }
-        .padding()
+        .formStyle(.grouped)   // System-Settings 风格分组卡片（修「排版不好看」）
         #if os(macOS)
-        // 可调整大小 + 内容超出时 Form 内部滚动：给可缩放范围(min/ideal/max)，窗口就能像主界面一样拖拉
-        .frame(minWidth: 460, idealWidth: 520, maxWidth: 800,
-               minHeight: 420, idealHeight: 600, maxHeight: 1000)
+        // macOS `Settings` 场景的窗口不随内容长高、也不给用户缩放 → **固定尺寸**让 Form 内容超出时**内部滚动**。
+        // 别再改成 min/ideal/max 弹性尺寸追「可缩放」：那会让窗口撑到内容高、超屏后无法滚被截断（0.18.22 踩过、0.18.38 回退）。
+        .frame(width: 520, height: 600)
         #endif
     }
 
