@@ -86,20 +86,30 @@ final class LogSyncService {
         dumpToFiles()
     }
 
-    /// （macOS）全部设备日志 → 容器纯文本，命令行可读：
-    /// ~/Library/Containers/com.jason.BetterCalendar/Data/Library/Application Support/BetterCalendar/SyncedLogs/
+    /// （macOS）全部设备日志 → 纯文本，命令行可读。写两处：
+    /// ① 容器 Application Support/BetterCalendar/SyncedLogs/（沙盒内，受 TCC 保护、外部进程读不到）
+    /// ② **`~/Downloads/BetterCalendar-logs/`**（需 downloads.read-write entitlement）——Claude/命令行直接可读，
+    ///    **自动化拉取日志**：不用再手动 copy 到 Downloads（0.18.29）。
     private func dumpToFiles() {
         #if os(macOS)
         guard dumpEnabled else { return }
-        guard let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask).first else { return }
-        let dir = base.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true)
+        let logs = fetchAll()
+        let fm = FileManager.default
+        if let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            writeLogs(logs, to: base.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true))
+        }
+        if let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+            writeLogs(logs, to: dl.appendingPathComponent("BetterCalendar-logs", isDirectory: true))
+        }
+        #endif
+    }
+
+    private func writeLogs(_ logs: [DeviceLog], to dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for log in fetchAll() {
+        for log in logs {
             let safeName = log.deviceName.replacingOccurrences(of: "/", with: "-")
             let url = dir.appendingPathComponent("\(safeName)-\(log.dayKey).log")
             try? log.text.write(to: url, atomically: true, encoding: .utf8)
         }
-        #endif
     }
 }
