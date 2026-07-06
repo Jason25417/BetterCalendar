@@ -61,7 +61,17 @@ struct SettingsView: View {
                         .foregroundStyle(result.hasPrefix("✅") ? .green : .red)
                 }
 
-                Text("key 存系统 Keychain，不进 git。在 console.anthropic.com 创建。")
+                // 硅基流动必须填模型 ID（没有能通用的默认）→ 放主区、别埋进阶设置
+                if provider == .siliconflow {
+                    TextField("模型 ID（如 Qwen/Qwen2.5-7B-Instruct）", text: $sfModel)
+                        .onChange(of: sfModel) { _, v in CloudSettings.siliconflowModel = v }
+                    Text("必填 SiliconFlow 上真实存在的模型 ID。先用 Qwen/Qwen2.5-7B-Instruct 测通，再换成想要的 <200B MoE Instruct。填完点「保存」再「测试」。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Text(provider == .siliconflow
+                     ? "key 存系统 Keychain，不进 git。在 siliconflow.cn 创建 + 看模型列表。"
+                     : "key 存系统 Keychain，不进 git。在 console.anthropic.com 创建。")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -98,15 +108,12 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
 
                 if showAdvanced {
+                    // 硅基流动模型 ID 已挪到上方主区（必填、别埋这里）；进阶只留 Anthropic 模型
                     if provider == .anthropic {
                         Picker("AI 模型", selection: $model) {
                             ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
                         }
                         Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。改完点上方「保存」。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        TextField("硅基流动模型 ID", text: $sfModel)
-                        Text("填 SiliconFlow 的模型 ID。排日程是结构化抽取、不需长思考——**优先选 Instruct（非推理）变体**（如 Qwen/Qwen3-30B-A3B-Instruct-2507），更快更省；Thinking 变体会先长篇推理、反而慢且浪费。改完点上方「保存」。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 

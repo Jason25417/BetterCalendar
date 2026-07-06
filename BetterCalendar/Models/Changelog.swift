@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.18.21", date: "2026-07", changes: [
+            "硅基流动更好填了：把「模型 ID」框从进阶设置挪到主区（选了硅基流动就直接显示、必填），默认给一个几乎必然存在的小 Instruct 先测通连接，再自行换成想要的 MoE",
+        ]),
         ChangelogEntry(version: "0.18.20", date: "2026-07", changes: [
             "修「确认写入后 menu bar / 开始今天仍说没计划」：根因是 AI 偶尔把块排到了错误日期（把「明天」理解成次日、或幻觉出 2025 年之类），块落到别的日子、今天读回来是空的——现在排完自动把每块钉回目标日那天（凌晨的睡前块落次日），保留时分",
             "长输入排程超时再放宽（120→150 秒）",
