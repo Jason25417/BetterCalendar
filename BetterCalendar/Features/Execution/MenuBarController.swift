@@ -83,8 +83,8 @@ final class MenuBarController: NSObject {
         }
     }
 
-    @objc private func openMain() { (NSApp.delegate as? AppDelegate)?.showMainWindow() }
-    @objc private func quitApp() { (NSApp.delegate as? AppDelegate)?.reallyQuit() }
+    @objc private func openMain() { AppLifecycle.shared?.showMainWindow() }
+    @objc private func quitApp() { AppLifecycle.shared?.reallyQuit() }
 
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }

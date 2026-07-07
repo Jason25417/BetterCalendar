@@ -10,10 +10,10 @@ import Foundation
 
 @MainActor
 final class RescheduleService {
-    private let planStore: PlanStore
+    private let planStore: PlanReading   // 只读角色：reflow 只产预览/草稿，永不写计划真相
     private let planner: PlanningEngine
 
-    init(planStore: PlanStore, planner: PlanningEngine) {
+    init(planStore: PlanReading, planner: PlanningEngine) {
         self.planStore = planStore
         self.planner = planner
     }

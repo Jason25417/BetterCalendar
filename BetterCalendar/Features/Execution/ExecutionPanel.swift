@@ -255,7 +255,7 @@ struct ExecutionPanel: View {
             Spacer()
             #if os(macOS)
             // 走 reallyQuit：菜单栏面板里明确的「退出」，即使开了「保留在菜单栏」也应真退（否则被 applicationShouldTerminate 拦成隐藏）
-            Button { (NSApp.delegate as? AppDelegate)?.reallyQuit() } label: {
+            Button { AppLifecycle.shared?.reallyQuit() } label: {
                 Label("退出", systemImage: "power")
             }
             .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)

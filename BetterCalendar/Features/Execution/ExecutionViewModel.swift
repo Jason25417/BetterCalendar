@@ -18,7 +18,7 @@ import WidgetKit
 final class ExecutionViewModel {
     private let calendarStore: CalendarStore
     private let reschedule: RescheduleService
-    private let planStore: PlanStore
+    private let planStore: PlanReading   // 只读角色：执行层永不写计划真相（它写的是蓝色实际）
     private let reminderStore: ReminderStore
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
@@ -79,7 +79,7 @@ final class ExecutionViewModel {
     }
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
-         planStore: PlanStore, reminderStore: ReminderStore,
+         planStore: PlanReading, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule

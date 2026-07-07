@@ -11,17 +11,17 @@
 #if os(macOS)
 import AppKit
 
-enum MenuBarSettings {
-    /// 退出（⌘Q / Dock 右键退出）时不真退、收进菜单栏后台继续跑（计时不断）。默认关，进阶设置里开。
-    static var keepRunningOnQuit: Bool {
-        get { UserDefaults.standard.bool(forKey: "menubar.keepRunningOnQuit") }
-        set { UserDefaults.standard.set(newValue, forKey: "menubar.keepRunningOnQuit") }
-    }
-}
+// MenuBarSettings 已挪到 Services/Platform/AppLifecycle.swift（架构修缮 2026-07-08：
+// SettingsView 引用它曾构成 Features→App 反向依赖）。
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, AppLifecycleControlling {
     /// 由菜单栏「退出 BetterCalendar」置 true → 真退出（绕过下面的拦截）。
     var reallyQuitting = false
+
+    /// 启动即挂到生命周期缝：Features 通过 AppLifecycle.shared 调「打开主窗口/真退出」，不直摸本类。
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppLifecycle.shared = self
+    }
 
     /// 关掉最后一个窗口不终止 App → 常驻 menu bar。
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }

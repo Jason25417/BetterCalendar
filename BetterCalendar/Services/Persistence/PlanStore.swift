@@ -10,8 +10,23 @@
 import Foundation
 import SwiftData
 
+// MARK: - 权限协议（架构修缮 2026-07-08：数据库课 GRANT 的类型系统等价物）
+// 「谁能写计划」从文档约定升级为编译器保证：只读方拿 PlanReading，调不到 replacePlanned——违规连编译都过不了。
+
+/// 只读角色（GRANT SELECT）：执行页 / 复盘页 / reflow / 投影 都只拿这个。
 @MainActor
-final class PlanStore {
+protocol PlanReading: AnyObject {
+    func plannedBlocks(on day: Date) throws -> [ScheduledBlock]
+}
+
+/// 写角色（GRANT UPDATE）：全 App 只有 HomeViewModel（确认写入）持有。
+@MainActor
+protocol PlanWriting: AnyObject {
+    func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws
+}
+
+@MainActor
+final class PlanStore: PlanReading, PlanWriting {
     private let context: ModelContext
 
     init(context: ModelContext? = nil) {

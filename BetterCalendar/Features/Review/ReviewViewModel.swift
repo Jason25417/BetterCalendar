@@ -18,7 +18,7 @@ final class ReviewViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let localStore: ReviewLocalStore
     private let longTasks: LongTaskStore?   // 长线推进行（M10-3）；nil=不显示
-    private let planStore: PlanStore?       // 读当日锚点标题（午饭/通勤等），复盘对比跳过它们；nil=不跳
+    private let planStore: PlanReading?     // 只读角色：复盘只看计划，永不写（读锚点标题跳过对比；nil=不跳）
     private let looseDays: LooseDayStore?    // 松散日 → 复盘转"休息肯定"（§5.12）；nil=不转
 
     /// 今天是否松散日 → 复盘转肯定（不显对比/完成率，措辞赋义）。
@@ -45,7 +45,7 @@ final class ReviewViewModel {
 
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
-         longTasks: LongTaskStore? = nil, planStore: PlanStore? = nil,
+         longTasks: LongTaskStore? = nil, planStore: PlanReading? = nil,
          looseDays: LooseDayStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer

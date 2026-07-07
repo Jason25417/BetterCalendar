@@ -15,11 +15,11 @@ import EventKit   // 仅启动对账前查权限用（避免冷启动弹权限�
 
 @MainActor
 final class ProjectionService {
-    private let planStore: PlanStore
+    private let planStore: PlanReading   // 只读角色：投影只读真相、只写画面（这就是它可随时安全重跑的原因）
     private let calendarStore: CalendarStore
     private let startedDays: StartedDayStore?
 
-    init(planStore: PlanStore, calendarStore: CalendarStore, startedDays: StartedDayStore? = nil) {
+    init(planStore: PlanReading, calendarStore: CalendarStore, startedDays: StartedDayStore? = nil) {
         self.planStore = planStore
         self.calendarStore = calendarStore
         self.startedDays = startedDays
