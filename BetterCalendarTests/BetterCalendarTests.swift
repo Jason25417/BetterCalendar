@@ -1274,6 +1274,24 @@ struct LogicTests {
         #expect(afternoon?.status == .done)
     }
 
+    /// 重做=延长完成时间（Jason 定 2026-07-08）：同一块的多段实际聚合成一条，不显示"又完成一件"。
+    @Test func comparerAggregatesRedoSegmentsIntoOneItem() {
+        let id = UUID()
+        let planned = [CalendarEventDraft(title: "写代码", start: at(2026,7,9,9), end: at(2026,7,9,10),
+                                          kind: .planned, blockID: id)]
+        // 做了 30 分钟 → 切走 → 傍晚重做 35 分钟：两段实际、同一个章
+        let actual = [
+            CalendarEventDraft(title: "写代码", start: at(2026,7,9,9), end: at(2026,7,9,9,30),
+                               kind: .actual, blockID: id),
+            CalendarEventDraft(title: "写代码", start: at(2026,7,9,18), end: at(2026,7,9,18,35),
+                               kind: .actual, blockID: id),
+        ]
+        let c = OverlapTitleComparer().compare(planned: planned, actual: actual)
+        #expect(c.items.count == 1)                      // 聚合成一条，不出现 extra/bonus
+        #expect(c.items.first?.status == .done)          // 30+35=65 分钟 / 计划 60 → done
+        #expect(c.items.first?.actualMinutes == 65)      // 完成时间=各段之和
+    }
+
     /// 投影失败后的旧日历不倒灌：日历与指纹一致（没人手改）而真相更新了 → 重画，不回流。
     @Test func reconcileDiffRepaintsWhenCalendarUntouched() {
         let id = UUID()

@@ -91,6 +91,7 @@ final class AppContainer {
         self.logSync = LogSyncService()
         logSync.start()
         reconcile.start()
+        ExecutionBridge.shared = execution   // Focus Filter 联动直达口（§5.7）
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。

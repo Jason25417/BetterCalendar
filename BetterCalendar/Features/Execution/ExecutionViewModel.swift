@@ -429,6 +429,23 @@ final class ExecutionViewModel {
         liveActivity.end()
     }
 
+    /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；
+    /// 退出 → 只结束**我们开的**休息（focusBreakActive 标记）——用户手动开的休息不被误关。
+    private var focusBreakActive = false
+    func focusAutoBreak(_ enable: Bool) async {
+        if enable {
+            guard !isOnBreak else { return }   // 已在休息（用户手动开的）：不接管、退出时也不动它
+            await toggleBreak()
+            focusBreakActive = true
+            DevLog.shared.info("专注联动", "进入专注 → 自动休息")
+        } else {
+            guard focusBreakActive else { return }
+            focusBreakActive = false
+            if isOnBreak { await toggleBreak() }
+            DevLog.shared.info("专注联动", "退出专注 → 自动回来")
+        }
+    }
+
     /// 单按钮 toggle：开始休息 ⇄ 结束休息。休息=暂停（保留当前块），结束后回来继续同一件。
     func toggleBreak() async {
         if isOnBreak {

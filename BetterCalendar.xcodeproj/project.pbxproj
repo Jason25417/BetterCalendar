@@ -389,7 +389,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -422,7 +422,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -583,7 +583,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				OTHER_LDFLAGS = "-weak_framework FoundationModels";
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -626,7 +626,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				OTHER_LDFLAGS = "-weak_framework FoundationModels";
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -652,7 +652,7 @@
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -673,7 +673,7 @@
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -692,7 +692,7 @@
 				CURRENT_PROJECT_VERSION = 56;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -711,7 +711,7 @@
 				CURRENT_PROJECT_VERSION = 56;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.20.3;
+				MARKETING_VERSION = 0.20.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
