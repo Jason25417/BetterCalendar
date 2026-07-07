@@ -220,6 +220,7 @@ final class HomeViewModel {
             }
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
             hasUnsavedChanges = true
+            PlaceholderSettings.recordArrangeSuccess()   // 排今天成功计数（教程满 10 次自动毕业换小提示）
             persistDraft()
         } catch {
             errorText = "排程失败：\(error.localizedDescription)"

@@ -131,7 +131,8 @@ struct HomeView: View {
                         .scrollContentBackground(.hidden)
                         .padding(6)
                     if model.inputText.isEmpty {
-                        Text("例：明早9点写代码两小时，11点开会，下午健身")
+                        // 预设文本三阶段（0.20.3）：教程示例 → 排满 10 次自动毕业 → 小提示/轻问候（设置可调回）
+                        Text(PlaceholderSettings.currentText())
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 11).padding(.vertical, 14)
                             .allowsHitTesting(false)
@@ -662,6 +663,7 @@ struct EditableRow: View {
             }
             .buttonStyle(.plain)
             .help("标为今日要紧事")
+            .disabled(block.isAnchor)   // 锚点不是任务，谈不上要紧
 
             VStack(alignment: .leading, spacing: 4) {
                 TextField("标题", text: $block.title)
@@ -728,6 +730,9 @@ struct EditableRow: View {
                 .font(.caption)
             }
         }
+        // 生活锚点淡显（0.20.3，§5.10 块三角色）：占位不是任务——可看可改时间，但视觉退后一步
+        .opacity(block.isAnchor ? 0.55 : 1)
+        .help(block.isAnchor ? "生活锚点（午饭/通勤这类）：占时间、塑造节奏，但不是要完成的任务" : "")
     }
 
     static func styleLabel(_ s: TimingStyle) -> String {

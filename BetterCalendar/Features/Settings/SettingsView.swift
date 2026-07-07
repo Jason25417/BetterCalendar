@@ -121,6 +121,14 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 
+                    Picker("输入框预设文本", selection: Binding(
+                        get: { PlaceholderSettings.mode },
+                        set: { PlaceholderSettings.mode = $0 })) {
+                        ForEach(PlaceholderMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Text("教程示例在「排今天」用满 10 次后自动换成小提示（这里随时可换回/换轻问候）。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Picker("皮肤", selection: Binding(
                         get: { ThemeSettings.current.id },
                         set: { id in if let t = ThemeSettings.all.first(where: { $0.id == id }) { ThemeSettings.current = t } })) {
