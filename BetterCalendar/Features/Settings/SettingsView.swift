@@ -14,7 +14,6 @@ struct SettingsView: View {
     @State private var sfModel: String = CloudSettings.siliconflowModel
     @State private var useCloud: Bool = CloudSettings.useCloud
     @State private var hasKey: Bool = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount) != nil
-    @State private var backend: CalendarBackend = CalendarSettings.backend
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
     @State private var pushIntensity: PushIntensity = SuggestionSettings.intensity
@@ -75,17 +74,8 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("日历后端") {
-                Picker("写入到", selection: $backend) {
-                    Text("假日历（预览，不碰系统）").tag(CalendarBackend.fake)
-                    Text("真 Apple 日历（Dev 专用）").tag(CalendarBackend.eventKit)
-                }
-                .pickerStyle(.inline)
-                .onChange(of: backend) { _, newValue in CalendarSettings.backend = newValue }
-
-                Text("可随时切换、即时生效。真模式首次写会请求日历权限，写进「BetterCalendar · 计划 (Dev)」日历（绿色），可整本删、不污染你别的日历。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            // 「日历后端」选择已退役（2026-07-07 Jason 定）：一律写真 Apple 日历（Dev 专用日历）；
+            // 假日历仅存于单测/预览页，不再暴露给用户。
 
             Section("日记") {
                 Toggle("隐私锁（Face ID / Touch ID / 密码）", isOn: $journalLock)
@@ -185,7 +175,6 @@ struct SettingsView: View {
         CloudSettings.model = model
         CloudSettings.siliconflowModel = sfModel
         CloudSettings.useCloud = useCloud
-        CalendarSettings.backend = backend
         ReminderSettings.leadMinutes = leadMinutes
         savedHint = "已保存"
     }

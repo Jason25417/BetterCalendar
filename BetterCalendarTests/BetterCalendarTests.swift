@@ -1182,6 +1182,36 @@ struct LogicTests {
         #expect(try await cal.read(kind: .preview).count == 1)  // 整日转橙
     }
 
+    /// 微调防呆：命令没提到 固定/星/计时 时，模型批量翻转这些属性会被恢复原值（端侧全番茄钟抽风的根治）。
+    @Test func refineGuardBlocksUnaskedFlagFlips() {
+        let a = ScheduledBlock(title: "写代码", start: at(2026,7,8,9), end: at(2026,7,8,11),
+                               isFixed: false, timingStyle: .light, priority: .normal)
+        let b = ScheduledBlock(title: "健身", start: at(2026,7,8,15), end: at(2026,7,8,16),
+                               isFixed: false, timingStyle: .light, priority: .normal)
+        // 模型抽风：只让挪时间，却把两块全改成 固定+★+番茄钟
+        var ra = a; ra.start = at(2026,7,8,10); ra.end = at(2026,7,8,12)
+        ra.isFixed = true; ra.priority = .important; ra.timingStyle = .pomodoro
+        var rb = b; rb.isFixed = true; rb.priority = .important; rb.timingStyle = .pomodoro
+        let guarded = HomeViewModel.guardRefineFlags(original: [a, b], refined: [ra, rb],
+                                                     command: "把写代码挪到10点")
+        #expect(guarded.first?.start == at(2026,7,8,10))          // 让改的（时间）保留
+        #expect(guarded.allSatisfy { !$0.isFixed })               // 没让改的全部还原
+        #expect(guarded.allSatisfy { $0.priority == .normal })
+        #expect(guarded.allSatisfy { $0.timingStyle == .light })
+        // 明说了「番茄」→ timingStyle 允许改，固定/★ 仍还原
+        let allowed = HomeViewModel.guardRefineFlags(original: [a], refined: [ra], command: "写代码改成番茄钟")
+        #expect(allowed.first?.timingStyle == .pomodoro)
+        #expect(allowed.first?.isFixed == false)
+    }
+
+    /// 时间重锚：编辑器把时间改到 0–3:59 → 自动落目标日的次日日历日（同一逻辑日，不窜到列表顶）。
+    @Test func anchoredMovesWeeHoursToNextCalendarDay() {
+        let label = at(2026, 7, 8, 0)
+        #expect(HomeViewModel.anchored(at(2026, 7, 1, 0, 30), toLogicalDayOf: label) == at(2026, 7, 9, 0, 30))
+        #expect(HomeViewModel.anchored(at(2026, 7, 1, 21, 0), toLogicalDayOf: label) == at(2026, 7, 8, 21, 0))
+        #expect(HomeViewModel.anchored(at(2026, 7, 8, 5, 0), toLogicalDayOf: label) == at(2026, 7, 8, 5, 0))
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

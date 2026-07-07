@@ -43,6 +43,9 @@ final class AppContainer {
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
 
     init() {
+        // 假日历退役（2026-07-07 Jason 定）：设置页不再提供切换、一律写真 Apple 日历。
+        // Fake 仅供单测/预览页；老设备存的 fake 选项在此收敛（tests 不建 AppContainer、不受影响）。
+        CalendarSettings.backend = .eventKit
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
         // 解析兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude → 本地 Stub

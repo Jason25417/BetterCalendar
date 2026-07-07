@@ -276,6 +276,7 @@ struct HomeView: View {
                             ForEach(model.blocks) { item in
                                 EditableRow(block: model.binding(for: item.id),
                                             poolTasks: container.longTasks.items,
+                                            referenceDay: model.targetDay,
                                             onDelete: { model.delete(id: item.id) })
                                 .contextMenu {
                                     Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
@@ -296,9 +297,11 @@ struct HomeView: View {
                     }
 
                     if !model.blocks.isEmpty {
-                        HStack {
+                        HStack(alignment: .bottom) {
+                            // 多行输入（2026-07-07 Jason 报：只显 1 行还不能滚）——长指令自动长高到 4 行
                             TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
-                                      text: $model.refineText)
+                                      text: $model.refineText, axis: .vertical)
+                                .lineLimit(1...4)
                                 .textFieldStyle(.roundedBorder)
                                 .onSubmit { Task { await model.refine() } }
                             Button { Task { await model.refine() } } label: {
@@ -357,6 +360,7 @@ struct HomeView: View {
                         ForEach(model.blocks) { item in
                             EditableRow(block: model.binding(for: item.id),
                                         poolTasks: container.longTasks.items,
+                                        referenceDay: model.targetDay,
                                         onDelete: { model.delete(id: item.id) })
                             .contextMenu {
                                 Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
@@ -604,7 +608,13 @@ struct HomeView: View {
 struct EditableRow: View {
     @Binding var block: EditableBlock
     var poolTasks: [LongTask] = []   // 可选归属的未来任务（0.18.2 手动选归属；空=不显归属菜单）
+    var referenceDay: Date?          // 目标日：块不在这天（跨午夜落次日凌晨）→ 显「次日」徽章；nil=不显
     var onDelete: () -> Void
+
+    private var isNextDay: Bool {
+        guard let ref = referenceDay else { return false }
+        return !Calendar.current.isDate(block.start, inSameDayAs: ref)
+    }
 
     /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
     private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
@@ -628,6 +638,13 @@ struct EditableRow: View {
                     Text("–").foregroundStyle(.secondary)
                     DatePicker("", selection: $block.end, displayedComponents: .hourAndMinute)
                         .labelsHidden()
+                    if isNextDay {
+                        Text("次日")
+                            .font(.caption2).foregroundStyle(.indigo)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
+                            .help("跨午夜：属同一逻辑日，日历上落在次日凌晨（改时间到 0–4 点会自动归次日）")
+                    }
                     Toggle("固定", isOn: $block.isFixed)
                         .toggleStyle(.button).controlSize(.small)
                     Menu {

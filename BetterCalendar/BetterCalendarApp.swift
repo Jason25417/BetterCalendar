@@ -50,6 +50,8 @@ struct BetterCalendarApp: App {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { handlePendingAppIntent() }
             }
+            // 启动对账：今天…+7 天按真相源投影一遍（无章存量事件补章、漂移自愈）。幂等、无变更时零写入。
+            .task { await container.projection.projectUpcomingWindow() }
             .userActivity(BetterCalendarHandoff.activityType, isActive: true) { activity in
                 BetterCalendarHandoff.configure(activity,
                                                 router: container.router,

@@ -11,6 +11,7 @@
 //
 
 import Foundation
+import EventKit   // 仅启动对账前查权限用（避免冷启动弹权限框），不在此直接读写事件
 
 @MainActor
 final class ProjectionService {
@@ -44,6 +45,22 @@ final class ProjectionService {
             // 非实时日不碰橙色：橙色的另一位作者是执行层的「全天连续 reflow 预览」，归它管
         }
         DevLog.shared.info("投影", "\(Self.dayStr(label)) → \(drafts.count) 块（\(startedDays?.isStarted(label) ?? false ? "实时→橙" : "绿")）")
+    }
+
+    /// 启动对账（存量补章/自愈，2026-07-07 Jason 报"老事件没补章"后加）：
+    /// 把 逻辑今天…+N-1 天 逐日投影一遍——无章存量事件被认领补章、任何漂移被真相源纠正。
+    /// **过去的日子不动**（不审计历史；老历史事件无章无害——只有会被再投影的日子才需要章）。
+    /// 只在 真日历后端 且 已授权 时跑：不让冷启动弹权限框（权限首次确认写入时才请求）。
+    func projectUpcomingWindow(days: Int = 8) async {
+        guard CalendarSettings.backend == .eventKit,
+              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+        for offset in 0..<days {
+            do { try await project(label: DayContext.logicalDay(offset: offset)) }
+            catch {
+                DevLog.shared.warn("投影", "启动对账 +\(offset) 天失败：\(error.localizedDescription)")
+            }
+        }
+        DevLog.shared.info("投影", "启动对账完成：今天…+\(days - 1) 天已按真相源对齐/补章")
     }
 
     private static func dayStr(_ d: Date) -> String {

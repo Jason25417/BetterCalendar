@@ -270,6 +270,30 @@ final class HomeViewModel {
         }
     }
 
+    /// 微调防呆（端侧小模型爱过度概化：一次微调把所有块都改成 固定/★/番茄钟）：
+    /// 命令里没提到相关词，就把 isFixed / priority / timingStyle 恢复为原值（按 id 配对、标题兜底）。
+    /// 纯函数、可单测；新增块（原稿里没有的）不动。
+    static func guardRefineFlags(original: [ScheduledBlock], refined: [ScheduledBlock],
+                                 command: String) -> [ScheduledBlock] {
+        let fixedWords = ["固定", "锁", "不能动", "雷打不动", "fix"]
+        let priorityWords = ["星", "要紧", "重要", "优先"]
+        let timingWords = ["番茄", "计时", "轻计", "不计"]
+        let allowFixed = fixedWords.contains { command.localizedCaseInsensitiveContains($0) }
+        let allowPriority = priorityWords.contains { command.localizedCaseInsensitiveContains($0) }
+        let allowTiming = timingWords.contains { command.localizedCaseInsensitiveContains($0) }
+        if allowFixed && allowPriority && allowTiming { return refined }
+        return refined.map { r in
+            guard let o = original.first(where: { $0.id == r.id })
+                    ?? original.first(where: { TitleMatch.similarity($0.title, r.title) >= 0.6 })
+            else { return r }
+            var nb = r
+            if !allowFixed { nb.isFixed = o.isFixed }
+            if !allowPriority { nb.priority = o.priority }
+            if !allowTiming { nb.timingStyle = o.timingStyle }
+            return nb
+        }
+    }
+
     func refine() async {
         let cmd = refineText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
@@ -278,8 +302,10 @@ final class HomeViewModel {
         // 归属按标题留存：LLM 微调重建块时会丢 linkedTaskID，refine 后按标题补回（自动+手动归属都不丢）
         var linkByTitle: [String: UUID] = [:]
         for b in blocks where b.linkedTaskID != nil { linkByTitle[b.title] = b.linkedTaskID }
-        let result = (try? await refiner.refine(scheduled, command: cmd,
-                                                originalRequest: inputText, now: .now)) ?? scheduled
+        let raw = (try? await refiner.refine(scheduled, command: cmd,
+                                             originalRequest: inputText, now: .now)) ?? scheduled
+        // 防呆：没让改的属性不许批量翻转（端侧模型抽风：全固定/全★/全番茄——2026-07-07 Jason 实测）
+        let result = Self.guardRefineFlags(original: scheduled, refined: raw, command: cmd)
         blocks = result.sorted { $0.start < $1.start }.map { b in
             var eb = EditableBlock(from: b)
             if eb.linkedTaskID == nil, let l = linkByTitle[b.title] { eb.linkedTaskID = l }
@@ -383,19 +409,25 @@ final class HomeViewModel {
         await startToday(resolution: r)
     }
 
-    /// 改目标日时，把已有草稿的日期平移到新日（保留时分），而不是丢弃草稿。
-    /// 凌晨时分（0–4 点）的块属于该逻辑日的**次日日历日**（跨午夜块跟着逻辑日走，平移后归属不变）。
-    func shiftDraftsToDay(_ day: Date) {
-        guard !blocks.isEmpty else { return }
+    /// 把时刻重锚到 day 所在日历日的逻辑日：时分不变；凌晨时分（0–4 点）落**次日**日历日
+    /// （跨午夜段属同一逻辑日）。切目标日平移和行内时间编辑共用——编辑器只改时分不改日期，
+    /// 把 0:30 留在当天会归到前一逻辑日、还排到列表最上面（2026-07-07 Jason 报）。纯函数、可单测。
+    static func anchored(_ time: Date, toLogicalDayOf day: Date) -> Date {
         let cal = Calendar.current
         let label = cal.startOfDay(for: day)
-        func onDay(_ time: Date) -> Date {
-            let t = cal.dateComponents([.hour, .minute], from: time)
-            let base = (t.hour ?? 0) < DayContext.dayBoundaryHour
-                ? (cal.date(byAdding: .day, value: 1, to: label) ?? label) : label
-            return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: base) ?? time
-        }
-        blocks = blocks.map { var b = $0; b.start = onDay(b.start); b.end = onDay(b.end); return b }
+        let t = cal.dateComponents([.hour, .minute], from: time)
+        let base = (t.hour ?? 0) < DayContext.dayBoundaryHour
+            ? (cal.date(byAdding: .day, value: 1, to: label) ?? label) : label
+        return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: base) ?? time
+    }
+
+    /// 改目标日时，把已有草稿的日期平移到新日（保留时分），而不是丢弃草稿。
+    func shiftDraftsToDay(_ day: Date) {
+        guard !blocks.isEmpty else { return }
+        blocks = blocks.map { var b = $0
+            b.start = Self.anchored(b.start, toLogicalDayOf: day)
+            b.end = Self.anchored(b.end, toLogicalDayOf: day)
+            return b }
         persistDraft()
     }
 
@@ -501,7 +533,13 @@ final class HomeViewModel {
             set: { newValue in
                 if let i = self.blocks.firstIndex(where: { $0.id == id }) {
                     let startChanged = self.blocks[i].start != newValue.start
-                    self.blocks[i] = newValue
+                    // 时间编辑器只改时分不改日期 → 重锚到目标日的逻辑日：
+                    // 0–3:59 自动落次日日历日（跨午夜块），不再把 0:30 当"今天凌晨"排到最上面
+                    var nv = newValue
+                    nv.start = Self.anchored(nv.start, toLogicalDayOf: self.targetDay)
+                    nv.end = Self.anchored(nv.end, toLogicalDayOf: self.targetDay)
+                    if nv.end < nv.start { nv.end = nv.start.addingTimeInterval(30 * 60) }   // 防倒挂
+                    self.blocks[i] = nv
                     self.markEditedIfLoaded()   // 内联改标题/时间/星标 → 变未确认草稿
                     // #5：改了开始时间 → 按 start 自动重排（动画滑到该去的位置）；只在 start 变时排，改标题/结束/星标不动位
                     if startChanged { withAnimation { self.blocks.sort { $0.start < $1.start } } }
