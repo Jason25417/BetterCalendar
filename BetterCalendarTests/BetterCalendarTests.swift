@@ -346,10 +346,10 @@ struct LogicTests {
     }
 
     @Test func dayContextDefaultTargetDay() {
-        // 目标日用日历日（与可点标签一致）：晚上 → 明天，白天/凌晨 → 日历今天
+        // 目标日按逻辑日（重构 2026-07-07）：晚上 → 明天，白天 → 今天，凌晨(0–4) → 逻辑今天=日历昨天
         #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 22, 0)) == startOfDay(2026, 7, 1))
         #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 15, 0)) == startOfDay(2026, 6, 30))
-        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 1, 0)) == startOfDay(2026, 6, 30))
+        #expect(DayContext.defaultTargetDay(at(2026, 6, 30, 1, 0)) == startOfDay(2026, 6, 29))
     }
 
     @Test func dayContextSameLogicalDayAcrossMidnight() {
@@ -960,13 +960,15 @@ struct LogicTests {
             func requestAuthorizationIfNeeded() async {}
             func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {}
         }
+        let fakeCalendar = FakeCalendarStore()
         return HomeViewModel(
             arrangeDay: ArrangeDayUseCase(parser: StubScheduleParser(), planner: NaivePlanningEngine()),
             refiner: NoRefine(),
-            calendarStore: FakeCalendarStore(),
+            calendarStore: fakeCalendar,
             reminderStore: FakeReminderStore(),
             exporter: ICSExporter(),
             planStore: planStore,
+            projection: ProjectionService(planStore: planStore, calendarStore: fakeCalendar),
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             notifier: NoNotify(),
             draftStore: draftStore)
@@ -1021,6 +1023,106 @@ struct LogicTests {
         let w2 = PomodoroTimer.phase(elapsed: 31 * 60)      // 31 分钟 → 第二轮工作
         #expect(w2.kind == .work)
         #expect(w2.elapsedInPhase == 1 * 60)
+    }
+
+    // MARK: PlanStore 单一真相源重构（2026-07-07：逻辑日归桶 / 盖章 / 单向投影）
+
+    /// 逻辑日归桶：凌晨 0:30 的「睡前看书」归前一逻辑日——当天读回包含它、次日不含（根治"少几项"）。
+    @Test func planStoreBucketsByLogicalDay() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let label = at(2026, 7, 7, 0)   // 逻辑日标签 7/7 = [7/7 4:00, 7/8 4:00)
+        try store.replacePlanned([
+            ScheduledBlock(title: "写代码", start: at(2026, 7, 7, 21), end: at(2026, 7, 7, 23)),
+            ScheduledBlock(title: "睡前看书", start: at(2026, 7, 8, 0, 30), end: at(2026, 7, 8, 1)),
+        ], on: label)
+        let day = try store.plannedBlocks(on: label)
+        #expect(day.count == 2)
+        #expect(day.map(\.title).contains("睡前看书"))     // 跨午夜块在当天桶里
+        #expect(try store.plannedBlocks(on: at(2026, 7, 8, 0)).isEmpty)   // 次日桶不含它
+
+        // 覆盖写清空当天（含跨午夜块）、不碰别天
+        try store.replacePlanned([ScheduledBlock(title: "明天的事", start: at(2026, 7, 8, 9),
+                                                 end: at(2026, 7, 8, 10))], on: at(2026, 7, 8, 0))
+        try store.replacePlanned([], on: label)
+        #expect(try store.plannedBlocks(on: label).isEmpty)
+        #expect(try store.plannedBlocks(on: at(2026, 7, 8, 0)).count == 1)
+    }
+
+    /// 投影：常规日 → 绿色带章；实时模式（开始今天）→ 绿清空、整日转橙。
+    @Test func projectionPaintsGreenThenFadesToOrangeWhenStarted() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let fake = FakeCalendarStore()
+        let started = StartedDayStore(persisted: false)
+        let projection = ProjectionService(planStore: store, calendarStore: fake, startedDays: started)
+        let label = at(2026, 7, 7, 0)
+        let block = ScheduledBlock(title: "写代码", start: at(2026, 7, 7, 9), end: at(2026, 7, 7, 11))
+        try store.replacePlanned([block], on: label)
+
+        try await projection.project(label: label)
+        let green = try await fake.read(kind: .planned)
+        #expect(green.count == 1)
+        #expect(green.first?.blockID == block.id)          // 盖了章
+
+        started.markStarted(label)
+        try await projection.project(label: label)
+        #expect(try await fake.read(kind: .planned).isEmpty)          // 绿淡出
+        let orange = try await fake.read(kind: .preview)
+        #expect(orange.count == 1)                                    // 整日转橙
+        #expect(orange.first?.blockID == block.id)                    // 同一章「换幕布」
+    }
+
+    /// apply 权威对齐按半开窗口归属：只动窗口内该 kind，邻日/别色不受伤。
+    @Test func fakeCalendarApplyRespectsWindowAndKind() async throws {
+        let fake = FakeCalendarStore()
+        try await fake.write([
+            CalendarEventDraft(title: "今天绿", start: at(2026, 7, 7, 9), end: at(2026, 7, 7, 10), kind: .planned),
+            CalendarEventDraft(title: "明天绿", start: at(2026, 7, 8, 9), end: at(2026, 7, 8, 10), kind: .planned),
+        ])
+        try await fake.apply([], kind: .planned, window: DayContext.logicalWindow(forLabel: at(2026, 7, 7, 0)))
+        let left = try await fake.read(kind: .planned)
+        #expect(left.count == 1)
+        #expect(left.first?.title == "明天绿")   // 7/7 窗口清了，7/8 保留
+    }
+
+    /// 事件 URL 章：写入/解析往返一致；外部 URL 不误认。
+    @Test func eventStampURLRoundTrips() {
+        let id = UUID()
+        let url = EventKitCalendarStore.stampURL(id)
+        #expect(EventKitCalendarStore.blockID(from: url) == id)
+        #expect(EventKitCalendarStore.blockID(from: URL(string: "https://example.com/block/\(id.uuidString)")) == nil)
+        #expect(EventKitCalendarStore.blockID(from: nil) == nil)
+    }
+
+    /// union 合并不丢章：addition 无章时保留 existing 的章。
+    @Test func calendarMergeUnionKeepsBlockID() {
+        let id = UUID()
+        let e = CalendarEventDraft(title: "写代码", start: at(2026, 7, 4, 9), end: at(2026, 7, 4, 10),
+                                   kind: .actual, blockID: id)
+        let a = CalendarEventDraft(title: "写代码", start: at(2026, 7, 4, 9), end: at(2026, 7, 4, 10, 30),
+                                   kind: .actual)
+        let merged = CalendarMerge.union(existing: [e], additions: [a], kind: .actual)
+        #expect(merged.count == 1)
+        #expect(merged.first?.blockID == id)               // 章保住
+        #expect(merged.first?.end == at(2026, 7, 4, 10, 30))   // 内容用 addition 的
+    }
+
+    /// 切目标日平移草稿：凌晨块（0–4 点）落到新逻辑日的**次日日历日**，归属跟着逻辑日走。
+    @Test func homeShiftDraftsKeepsCrossMidnightAttribution() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let vm = Self.makeHomeVM(planStore: PlanStore(context: container.mainContext))
+        vm.blocks = [
+            EditableBlock(title: "写代码", start: at(2026, 7, 7, 21), end: at(2026, 7, 7, 22)),
+            EditableBlock(title: "睡前看书", start: at(2026, 7, 8, 0, 30), end: at(2026, 7, 8, 1)),
+        ]
+        vm.shiftDraftsToDay(at(2026, 7, 9, 0))
+        #expect(vm.blocks[0].start == at(2026, 7, 9, 21))          // 白天块落目标日
+        #expect(vm.blocks[1].start == at(2026, 7, 10, 0, 30))      // 凌晨块落目标日次日（同一逻辑日）
+        #expect(DayContext.logicalStartOfDay(vm.blocks[1].start) == at(2026, 7, 9, 0))
     }
 
     // MARK: M9/R1 日记

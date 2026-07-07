@@ -83,10 +83,11 @@ final class ReviewViewModel {
                 .filter { DayContext.isSameLogicalDay($0.start, .now) }
             // 绿色淡出地基（§5.10 原则6.4）：绿色计划从 PlanStore **真相源**读，不再从日历读——
             // 这样绿色即使从 Apple 日历常驻淡出，签名功能「计划×实际」对比依然成立。
-            let todayPlanned = ((try? planStore?.plannedBlocks(on: .now)) ?? [])
-                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            // 传**逻辑日标签**（凌晨 1 点复盘=复盘昨晚这一天）：计划与实际两侧同一逻辑日窗口，完成度不错位。
+            let todayPlanned = (try? planStore?.plannedBlocks(on: DayContext.logicalStartOfDay(.now))) ?? []
             let planned = todayPlanned.map {
-                CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
+                CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned,
+                                   blockID: $0.id)
             }
             let anchorTitles = todayPlanned.filter(\.isAnchor).map(\.title)
             comparison = comparer.compare(
@@ -140,7 +141,8 @@ final class ReviewViewModel {
         guard !backfillBlocks.isEmpty else { return }
         isWorking = true; errorText = nil
         let newDrafts = backfillBlocks.sorted { $0.start < $1.start }.map {
-            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual)
+            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual,
+                               blockID: $0.id)   // 回填的实际也盖章（草稿块 id）
         }
         do {
             let existing = try await calendarStore.read(kind: .actual)

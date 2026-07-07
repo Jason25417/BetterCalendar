@@ -34,12 +34,23 @@ enum DayContext {
         logicalStartOfDay(a) == logicalStartOfDay(b)
     }
 
-    /// 智能默认排哪天（**用日历日**，与可点标签的今天/明天一致、直觉）：
-    /// 晚上(≥18) → 日历明天；白天/凌晨 → 日历今天。
-    /// 注：凌晨 4 点日界线只用于 streak/复盘的「今天」判断（isSameLogicalDay），不用于「排哪天」。
+    /// 某逻辑日（label = 该日零点，logicalStartOfDay 的返回值）的时间窗：[label 4:00, 次日 4:00)。
+    /// 块/事件归属 = start 落在窗内（半开区间）。投影/日历谓词用；PlanStore 归桶用 logicalStartOfDay 等值即可。
+    static func logicalWindow(forLabel label: Date) -> DateInterval {
+        let base = cal.startOfDay(for: label)
+        let start = cal.date(byAdding: .hour, value: dayBoundaryHour, to: base) ?? base
+        let nextBase = cal.date(byAdding: .day, value: 1, to: base) ?? base
+        let end = cal.date(byAdding: .hour, value: dayBoundaryHour, to: nextBase) ?? start
+        return DateInterval(start: start, end: end)
+    }
+
+    /// 智能默认排哪天（重构后按**逻辑日**，用户以逻辑日生活）：
+    /// 晚上(≥18) → 明天；白天 → 今天；凌晨(0–4) → **逻辑今天**（=日历昨天，心智上的"今天"还没翻篇——
+    /// 此时排"现在到3点"落在逻辑今天的桶里，与所选目标日一致；说"明天9点开会"解析仍会落到日历今天=逻辑明天的桶）。
     static func defaultTargetDay(_ now: Date = .now) -> Date {
-        let today = cal.startOfDay(for: now)
         let hour = cal.component(.hour, from: now)
+        if hour < dayBoundaryHour { return logicalStartOfDay(now) }
+        let today = cal.startOfDay(for: now)
         return hour >= eveningStartHour ? (cal.date(byAdding: .day, value: 1, to: today) ?? today) : today
     }
 
@@ -49,11 +60,12 @@ enum DayContext {
         return nextDayStart.addingTimeInterval(TimeInterval(dayBoundaryHour * 3600))
     }
 
-    /// 日历今天偏移 offset 天的那天零点（offset=-1 昨天 / 0 今天 / 1 明天 / 2 后天）。
-    /// 用日历日（正常午夜日界），给「选哪天排」的标签用——直觉、不受 4 点逻辑日影响。
-    static func calendarDay(offset: Int, from now: Date = .now) -> Date {
-        let today = cal.startOfDay(for: now)
-        return cal.date(byAdding: .day, value: offset, to: today) ?? today
+    /// 逻辑今天偏移 offset 天的标签（offset=-1 昨天 / 0 今天 / 1 明天 / 2 后天）。
+    /// 「选哪天排」的今天/明天标签用它：白天与日历日一致；凌晨 0–4 点「今天」=逻辑今天（日历昨天），
+    /// 与 defaultTargetDay / PlanStore 逻辑日归桶对齐（用户以逻辑日生活）。
+    static func logicalDay(offset: Int, from now: Date = .now) -> Date {
+        let base = logicalStartOfDay(now)
+        return cal.date(byAdding: .day, value: offset, to: base) ?? base
     }
 
     /// 逻辑日的稳定字符串键（yyyy-MM-dd），用于 streak 等按天去重。

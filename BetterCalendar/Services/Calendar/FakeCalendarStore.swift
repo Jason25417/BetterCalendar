@@ -31,6 +31,12 @@ final class FakeCalendarStore: CalendarStore {
         captured.removeAll { $0.kind == kind && Calendar.current.isDate($0.start, inSameDayAs: day) }
     }
 
+    /// 权威对齐（投影用）：窗口内该 kind 替换为 drafts（空=清空窗口）。归属按 start ∈ [lo, hi)。
+    func apply(_ drafts: [CalendarEventDraft], kind: PlanCalendarKind, window: DateInterval) async throws {
+        captured.removeAll { $0.kind == kind && $0.start >= window.start && $0.start < window.end }
+        captured.append(contentsOf: drafts)
+    }
+
     func clear() {
         captured.removeAll()
     }

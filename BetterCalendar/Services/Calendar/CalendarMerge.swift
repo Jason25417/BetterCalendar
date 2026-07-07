@@ -17,16 +17,19 @@ enum CalendarMerge {
 
     /// existing（日历读回）∪ additions（本次要写）→ 去重后的完整写入集。
     /// kind 统一为目标日历（读回的 kind 已是目标，additions 若 kind 不同也强制归一）。
+    /// blockID 章不丢：addition 覆盖同键时，addition 无章则保留 existing 的章。
     static func union(existing: [CalendarEventDraft], additions: [CalendarEventDraft],
                       kind: PlanCalendarKind) -> [CalendarEventDraft] {
         var byKey: [String: CalendarEventDraft] = [:]
         for e in existing {
             byKey[eventKey(e.title, e.start)] = CalendarEventDraft(
-                title: e.title, start: e.start, end: e.end, kind: kind, notes: e.notes)
+                title: e.title, start: e.start, end: e.end, kind: kind, notes: e.notes, blockID: e.blockID)
         }
         for a in additions {
-            byKey[eventKey(a.title, a.start)] = CalendarEventDraft(
-                title: a.title, start: a.start, end: a.end, kind: kind, notes: a.notes)
+            let k = eventKey(a.title, a.start)
+            byKey[k] = CalendarEventDraft(
+                title: a.title, start: a.start, end: a.end, kind: kind, notes: a.notes,
+                blockID: a.blockID ?? byKey[k]?.blockID)
         }
         return byKey.values.sorted { $0.start < $1.start }
     }

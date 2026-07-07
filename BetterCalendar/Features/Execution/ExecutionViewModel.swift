@@ -47,7 +47,7 @@ final class ExecutionViewModel {
     var lastError: String?
 
     struct PlannedItem: Identifiable, Sendable {
-        let id = UUID()
+        var id = UUID()   // = PlanStore 块 id（loadToday 传入）：蓝色实际盖同一章，计划×实际按 ID 可配对
         var title: String
         var start: Date
         var end: Date
@@ -100,12 +100,13 @@ final class ExecutionViewModel {
             // 锚点块（午饭/通勤等）不进执行列表：占日程但不是"要完成的任务"，menu bar 不催你完成（0.17）
             planned = p.filter { !$0.isAnchor }
                        .sorted { $0.start < $1.start }
-                       .map { PlannedItem(title: $0.title, start: $0.start, end: $0.end,
+                       .map { PlannedItem(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                           timingStyle: $0.timingStyle, isFixed: $0.isFixed,
                                           priority: $0.priority) }
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
+            // plannedID 从事件章读回（盖过章的实际=对应计划块的实际，跨设备也认得）
             var merged = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
-                          .map { ActualRecord(plannedID: nil, title: $0.title,
+                          .map { ActualRecord(plannedID: $0.blockID, title: $0.title,
                                               start: $0.start, end: $0.end) }
             let collectedCount = merged.count
 
@@ -405,8 +406,11 @@ final class ExecutionViewModel {
     /// 把 done 写进蓝色「实际」日历——**合并不覆盖**（工程债修复 2026-07-04）：
     /// 先读日历已有实际、与 done 做 union 再写，别处产生的实际（复盘回填/另一台设备）不会被删。
     private func flushActuals() async {
+        // 盖章：做的是计划块 → 盖计划块的 id（同一 UUID「换幕布」：橙随下次预览消失、蓝带同章出现）；
+        // 计划外 bonus → 盖记录自己的 id（新章）。
         let drafts = done.map {
-            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual)
+            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual,
+                               blockID: $0.plannedID ?? $0.id)
         }
         guard !drafts.isEmpty else { return }
         do {
@@ -435,7 +439,7 @@ final class ExecutionViewModel {
             // ① 正在做的：从现在起 → 预测结束（计划时长 − 已投入），让橙色「当前时刻」就是这件事
             if let a = active, let p = planned.first(where: { $0.id == a.plannedID }) {
                 let remain = max(60, p.end.timeIntervalSince(p.start) - currentElapsed)
-                preview.append(ScheduledBlock(title: a.title, start: now0,
+                preview.append(ScheduledBlock(id: p.id, title: a.title, start: now0,
                                               end: now0.addingTimeInterval(remain)))
             }
             // ② 之后接着排剩余（排除已做 + 前台正在做 + 后台并行），从①的预测结束起
@@ -449,7 +453,8 @@ final class ExecutionViewModel {
                 try await calendarStore.clear(kind: .preview)
             } else {
                 try await calendarStore.write(preview.map {
-                    CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .preview)
+                    CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .preview,
+                                       blockID: $0.id)   // 橙也盖章：挪时间只改不删建
                 })
             }
             publishWidgetSnapshot()   // 每次动作后的重排点 = 小组件刷新点

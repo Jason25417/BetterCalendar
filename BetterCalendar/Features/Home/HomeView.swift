@@ -49,6 +49,7 @@ struct HomeView: View {
             reminderStore: container.routingReminder,
             exporter: container.exporter,
             planStore: container.planStore,
+            projection: container.projection,
             reschedule: container.reschedule,
             notifier: container.notifier,
             longTaskStore: container.longTasks,
@@ -552,14 +553,15 @@ struct HomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改
+    // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改。
+    // 用**逻辑日**（凌晨 0–4 点「今天」=心智上的今天=日历昨天），与 PlanStore 归桶/defaultTargetDay 一致。
     private var targetDayMenu: some View {
         Menu {
-            Button("今天") { model.targetDay = DayContext.calendarDay(offset: 0) }
-            Button("明天") { model.targetDay = DayContext.calendarDay(offset: 1) }
-            Button("后天") { model.targetDay = DayContext.calendarDay(offset: 2) }
+            Button("今天") { model.targetDay = DayContext.logicalDay(offset: 0) }
+            Button("明天") { model.targetDay = DayContext.logicalDay(offset: 1) }
+            Button("后天") { model.targetDay = DayContext.logicalDay(offset: 2) }
             Divider()
-            Button("昨天（不建议）") { model.targetDay = DayContext.calendarDay(offset: -1) }
+            Button("昨天（不建议）") { model.targetDay = DayContext.logicalDay(offset: -1) }
         } label: {
             Label("为 \(Self.dayLabel(model.targetDay)) 安排", systemImage: "calendar")
                 .font(.caption)

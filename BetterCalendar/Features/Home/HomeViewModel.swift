@@ -48,17 +48,18 @@ struct EditableBlock: Identifiable {
 enum DraftSource: String {
     case empty       // 什么都没有
     case arranged    // 刚「排今天」出的新草稿，还没确认——切日走平移、不被自动加载覆盖
-    case loaded      // 从真相源加载的已确认计划——切日即切内容；编辑防抖自动回写（0.15）
+    case loaded      // 从真相源加载的已确认计划——切日即切内容；编辑只标未保存，「确认写入」才落库（0.16 文件模型）
 }
 
 @Observable
 final class HomeViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let refiner: PlanRefining
-    private let calendarStore: CalendarStore
+    private let calendarStore: CalendarStore   // 只读用（排程上下文 busy）；写计划一律走 projection
     private let reminderStore: ReminderStore
     private let exporter: ICSExporting
     private let planStore: PlanStore
+    private let projection: ProjectionService  // PlanStore→日历 单向投影（先写真相源、再投影）
     private let reschedule: RescheduleService
     private let notifier: NotificationScheduling
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
@@ -88,7 +89,8 @@ final class HomeViewModel {
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
-         planStore: PlanStore, reschedule: RescheduleService, notifier: NotificationScheduling,
+         planStore: PlanStore, projection: ProjectionService, reschedule: RescheduleService,
+         notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
          looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil) {
         self.arrangeDay = arrangeDay
@@ -97,6 +99,7 @@ final class HomeViewModel {
         self.reminderStore = reminderStore
         self.exporter = exporter
         self.planStore = planStore
+        self.projection = projection
         self.reschedule = reschedule
         self.notifier = notifier
         self.longTaskStore = longTaskStore
@@ -169,8 +172,8 @@ final class HomeViewModel {
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
 
-    /// 从真相源读**所选目标日**的已确认计划 → 可编辑列表。
-    /// 加载后的编辑**自动保存**（0.15：防抖回写真相源+日历，不再要求二次确认）。
+    /// 从真相源读**所选目标日**（逻辑日）的已确认计划 → 可编辑列表。
+    /// 加载后的编辑只标未保存（0.16 文件模型），「确认写入」才落库+投影。
     /// 不显示完成状态——完成态归执行/复盘页，排日程页保持纯规划面。
     func loadConfirmedPlan() {
         let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
@@ -286,11 +289,6 @@ final class HomeViewModel {
     }
 
     func confirm() async {
-        // 固定块=会议/外部承诺 → 挂会前提醒（原则4「仅固定块提醒」；⑤会议自动化）；普通块 nil=不弹
-        let drafts = blocks.sorted { $0.start < $1.start }.map {
-            CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned,
-                               alarmLeadMinutes: $0.isFixed ? MeetingSettings.leadMinutes : nil)
-        }
         // ★要紧事 与 带硬DDL 的块都进提醒事项；due 优先用 DDL（"必须何时前做完"），否则用开始时间
         var reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {
             ReminderDraft(title: $0.title, due: $0.deadline ?? $0.start,
@@ -303,29 +301,19 @@ final class HomeViewModel {
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {
-            // 真相源：计划块（带 isFixed/priority）写 SwiftData，reflow 才有元数据可读。
-            // 按日历日分组逐日 replace——草稿跨日（如排到次日凌晨）时不残留/不误删别天的块。
-            let cal = Calendar.current
-            let targetDayStart = cal.startOfDay(for: targetDay)
-            var byDay = Dictionary(grouping: sorted) { cal.startOfDay(for: $0.start) }
+            // 单一真相源（重构 P2）：先写 PlanStore，再由投影层画日历——本方法不再直接写日历。
+            // 按**逻辑日**分组逐日 replace：跨午夜块（睡前看书 00:30）随前一逻辑日走，不再被拆到次日。
+            let targetLabel = Calendar.current.startOfDay(for: targetDay)
+            var byLabel = Dictionary(grouping: sorted) { DayContext.logicalStartOfDay($0.start) }
             // 删光最后一件也要能保存：目标日即使无块也纳入 replace（清空真相源那天）。
-            if byDay[targetDayStart] == nil { byDay[targetDayStart] = [] }
-            for (day, dayBlocks) in byDay {
-                try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: day)
-            }
-            // 绿色淡出（§5.10 原则6.4）：已开始今天=实时模式 → 计划写日历用**橙色(preview)**、不写绿；绿只留 PlanStore 供复盘。
-            // 未开始 → 照常写绿色(planned)。（真相源 PlanStore 两种情况都存 planned，签名功能对比不受影响。）
-            let realtime = startedDays?.isStarted(targetDay) ?? false
-            let calKind: PlanCalendarKind = realtime ? .preview : .planned
-            let calDrafts = realtime ? drafts.map { var d = $0; d.kind = .preview; return d } : drafts
-            try await calendarStore.write(calDrafts)     // 路由：假/真 日历
-            if realtime { try? await calendarStore.clear(kind: .planned, on: targetDay) }   // 淡出：清掉残留绿色
-            // 目标日被清空 → write(空)会早退不清该色事件，显式按日清那天，避免残留与真相源不一致。
-            if (byDay[targetDayStart] ?? []).isEmpty {
-                try await calendarStore.clear(kind: calKind, on: targetDay)
+            if byLabel[targetLabel] == nil { byLabel[targetLabel] = [] }
+            for (label, dayBlocks) in byLabel {
+                try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
+                // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
+                try await projection.project(label: label)
             }
             try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
-            committedCount = drafts.count
+            committedCount = sorted.count
             committedToReal = (CalendarSettings.backend == .eventKit)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
@@ -345,7 +333,7 @@ final class HomeViewModel {
                 let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
                 await notifier.requestAuthorizationIfNeeded()
                 await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
-                                                      summary: "今天安排了 \(drafts.count) 件，开始吧。")
+                                                      summary: "今天安排了 \(sorted.count) 件，开始吧。")
             }
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
@@ -368,9 +356,9 @@ final class HomeViewModel {
                 note = flex == 0
                     ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
                     : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
-                // 绿色淡出（§5.10 原则6.4）：开始今天=进实时模式 → 绿色从 Apple 日历退场（只留橙+蓝；绿仍在 PlanStore 供复盘）
+                // 绿色淡出（§5.10 原则6.4）：开始今天=进实时模式 → 重投影（绿从日历退场、整日计划转橙；绿仍在 PlanStore 供复盘）
                 startedDays?.markStarted(targetDay)
-                try? await calendarStore.clear(kind: .planned, on: targetDay)
+                try? await projection.project(label: Calendar.current.startOfDay(for: targetDay))
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
             hasUnsavedChanges = true
@@ -387,12 +375,16 @@ final class HomeViewModel {
     }
 
     /// 改目标日时，把已有草稿的日期平移到新日（保留时分），而不是丢弃草稿。
+    /// 凌晨时分（0–4 点）的块属于该逻辑日的**次日日历日**（跨午夜块跟着逻辑日走，平移后归属不变）。
     func shiftDraftsToDay(_ day: Date) {
         guard !blocks.isEmpty else { return }
         let cal = Calendar.current
+        let label = cal.startOfDay(for: day)
         func onDay(_ time: Date) -> Date {
             let t = cal.dateComponents([.hour, .minute], from: time)
-            return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: day) ?? time
+            let base = (t.hour ?? 0) < DayContext.dayBoundaryHour
+                ? (cal.date(byAdding: .day, value: 1, to: label) ?? label) : label
+            return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: base) ?? time
         }
         blocks = blocks.map { var b = $0; b.start = onDay(b.start); b.end = onDay(b.end); return b }
         persistDraft()

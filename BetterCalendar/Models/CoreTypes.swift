@@ -172,4 +172,7 @@ struct CalendarEventDraft: Sendable, Identifiable {
     /// 会前 N 分钟系统提醒（⑤会议自动化）：仅固定块/会议设它=挂 EKAlarm 提醒收尾当前事；
     /// nil=无提醒（绿/蓝/橙普通块的默认，原则4「仅固定块提醒」）。
     var alarmLeadMinutes: Int?
+    /// 事件对应的计划块 id（重构 P1「稳定身份」）：写进事件 URL（bettercalendar://block/UUID），
+    /// 随 iCloud 日历同步到所有设备——匹配一律按它，不再按标题模糊匹配。nil=无主（旧事件/外部事件）。
+    var blockID: UUID?
 }

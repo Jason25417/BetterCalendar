@@ -18,11 +18,13 @@ final class PlanStore {
         self.context = context ?? SharedModelContainer.shared.mainContext
     }
 
-    /// 读回某天（**日历日**，非逻辑日——day 可能是 0 点，逻辑日会错配到前一天）的「计划」块。
+    /// 读回某**逻辑日**的「计划」块（重构 2026-07-07：跨午夜块归前一逻辑日，"睡前看书 00:30"不再被拆到次日）。
+    /// day = 逻辑日标签（该日零点，或当日 ≥4 点的任意时刻）。⚠️ 凌晨 0–4 点的**时刻**须先
+    /// DayContext.logicalStartOfDay 转标签再传（0 点标签会被 startOfDay 原样当作那一天）。
     func plannedBlocks(on day: Date) throws -> [ScheduledBlock] {
-        let cal = Calendar.current
+        let label = Calendar.current.startOfDay(for: day)
         let result = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && cal.isDate($0.start, inSameDayAs: day) }
+            .filter { $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
             .map { ScheduledBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                   isFixed: $0.isFixed, isAnchor: $0.isAnchor, timingStyle: $0.timingStyle,
@@ -31,11 +33,11 @@ final class PlanStore {
         return result
     }
 
-    /// 覆盖写某天（日历日）的「计划」块（确认 / 晨间再排即替换当天）。
+    /// 覆盖写某**逻辑日**的「计划」块（确认 / 晨间再排即替换当天）。day 语义同 plannedBlocks。
     func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws {
-        let cal = Calendar.current
+        let label = Calendar.current.startOfDay(for: day)
         let stale = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && cal.isDate($0.start, inSameDayAs: day) }
+            .filter { $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
         for old in stale { context.delete(old) }
         for b in blocks {
             context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
