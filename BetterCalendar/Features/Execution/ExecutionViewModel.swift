@@ -111,9 +111,12 @@ final class ExecutionViewModel {
             let collectedCount = merged.count
 
             // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒打勾 → 自动并入实际
+            // 覆盖判定按 ID 优先（无章记录才退标题相似），同名块不互相顶掉
             let completed = await reminderStore.completedTitles()
             let now = Date.now
-            for item in planned where !merged.contains(where: { TitleMatch.similarity($0.title, item.title) >= 0.6 }) {
+            for item in planned where !merged.contains(where: {
+                $0.plannedID == item.id
+                    || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
                 let meetingHappened = item.isFixed && item.end < now
                 let reminderChecked = completed.contains { TitleMatch.similarity($0, item.title) >= 0.6 }
                 if meetingHappened || reminderChecked {
@@ -155,8 +158,11 @@ final class ExecutionViewModel {
 
     // MARK: - 派生状态（给 UI）
 
+    /// 完成判定按 **ID 优先**（重构：实际记录带 plannedID 章，跨设备也认得）；
+    /// 只有**无章**记录（老数据/手写日历事件）才退回标题相似——同名两块不再互相污染、不再误标完成。
     func isDone(_ item: PlannedItem) -> Bool {
-        done.contains { TitleMatch.similarity($0.title, item.title) >= 0.6 }
+        done.contains { $0.plannedID == item.id
+            || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }
     }
 
     /// 某块是否正在后台并行进行。
@@ -442,12 +448,19 @@ final class ExecutionViewModel {
                 preview.append(ScheduledBlock(id: p.id, title: a.title, start: now0,
                                               end: now0.addingTimeInterval(remain)))
             }
-            // ② 之后接着排剩余（排除已做 + 前台正在做 + 后台并行），从①的预测结束起
-            var excluded = done.map(\.title)
-            if let a = active { excluded.append(a.title) }
-            excluded.append(contentsOf: background.map(\.title))
+            // ② 之后接着排剩余（排除已做 + 前台正在做 + 后台并行），从①的预测结束起。
+            // 排除按 ID 优先（有章记录）；无章老记录才走标题兜底——同名两块做完一块另一块不消失。
+            var excludeIDs = Set(done.compactMap(\.plannedID))
+            var excludeTitles = done.filter { $0.plannedID == nil }.map(\.title)
+            if let a = active {
+                if let pid = a.plannedID { excludeIDs.insert(pid) } else { excludeTitles.append(a.title) }
+            }
+            for run in background {
+                if let pid = run.plannedID { excludeIDs.insert(pid) } else { excludeTitles.append(run.title) }
+            }
             let restFrom = preview.last?.end ?? now0
-            preview += try await reschedule.continuousReflow(excludeTitles: excluded, now: restFrom)
+            preview += try await reschedule.continuousReflow(excludeIDs: excludeIDs,
+                                                             excludeTitles: excludeTitles, now: restFrom)
 
             if preview.isEmpty {
                 try await calendarStore.clear(kind: .preview)

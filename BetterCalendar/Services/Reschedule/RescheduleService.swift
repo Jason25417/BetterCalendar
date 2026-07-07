@@ -62,11 +62,14 @@ final class RescheduleService {
         }
     }
 
-    /// 全天连续：剩余（标题未在 excludeTitles 里＝既非已完成、也非正在做）从此刻 reflow → 橙色预览块。
-    func continuousReflow(excludeTitles: [String], now: Date = .now) async throws -> [ScheduledBlock] {
+    /// 全天连续：剩余（既非已完成、也非正在做/并行中）从此刻 reflow → 橙色预览块。
+    /// 排除按 **ID 优先**（重构：完成/进行中的记录带块 id）；excludeTitles 只兜无章老记录（标题相似 ≥0.6）。
+    func continuousReflow(excludeIDs: Set<UUID> = [], excludeTitles: [String] = [],
+                          now: Date = .now) async throws -> [ScheduledBlock] {
         let all = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(now))
         let remaining = all.filter { b in
-            !excludeTitles.contains { TitleMatch.similarity($0, b.title) >= 0.6 }
+            !excludeIDs.contains(b.id)
+                && !excludeTitles.contains { TitleMatch.similarity($0, b.title) >= 0.6 }
         }
         guard !remaining.isEmpty else { return [] }
         return try await planner.reflow(remaining, from: now, now: now).orderedBlocks

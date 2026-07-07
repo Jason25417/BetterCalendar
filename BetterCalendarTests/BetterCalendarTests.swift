@@ -1125,6 +1125,28 @@ struct LogicTests {
         #expect(DayContext.logicalStartOfDay(vm.blocks[1].start) == at(2026, 7, 9, 0))
     }
 
+    /// 完成判定按 ID：同名两块做完一件，另一件不被连坐标完成、仍在「换一件」列表（menu bar 误标完成的根治）。
+    @Test func executionSameTitleBlocksDoNotCrossContaminate() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        try planStore.replacePlanned([
+            ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600)),
+            ScheduledBlock(title: "写代码", start: s.addingTimeInterval(7200), end: s.addingTimeInterval(10800)),
+        ], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity())
+        await vm.loadToday()
+        _ = await vm.markDone(titleLike: "写代码")   // 完成其中一件（记录带该块 plannedID）
+        #expect(vm.doneCount == 1)                   // 旧标题匹配会把两件都标完成
+        #expect(vm.remaining.count == 1)             // 另一件仍在「换一件/同时做」列表
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {
