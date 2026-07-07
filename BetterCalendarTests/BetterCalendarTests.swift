@@ -1324,6 +1324,14 @@ struct LogicTests {
         #expect(JSONText.completeArrayObjects(in: #"{"loo"#).isEmpty)
     }
 
+    /// 番茄提前休息的周键：ISO 周、周一零点起新周（定死不设置，Jason 2026-07-08）。
+    @Test func pomodoroWeekKeyResetsMondayMidnight() {
+        // 2026-07-12 是周日、07-13 是周一
+        #expect(PomodoroDiscipline.weekKey(at(2026, 7, 12, 23, 59)) != PomodoroDiscipline.weekKey(at(2026, 7, 13, 0, 0)))
+        #expect(PomodoroDiscipline.weekKey(at(2026, 7, 13, 0, 0)) == PomodoroDiscipline.weekKey(at(2026, 7, 19, 23, 59)))
+        #expect(PomodoroDiscipline.weekKey(at(2026, 7, 7, 10, 0)) == PomodoroDiscipline.weekKey(at(2026, 7, 12, 10, 0)))
+    }
+
     // MARK: 0.20 执行运行态快照（重启/清后台恢复）
 
     /// 同逻辑日可恢复、跨逻辑日不恢复；Codable 往返不丢字段。

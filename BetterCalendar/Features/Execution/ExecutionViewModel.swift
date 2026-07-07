@@ -324,12 +324,18 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
-    /// 番茄工作段满 →「继续计时」：转成不计时式往上记（§5.10 到点行为，运行态非属性）。
+    /// 番茄段满/休息段中 →「继续计时」：转成往上记的计时（§5.10 到点行为，运行态非属性）。
     /// 从**净专注时长**起（总时长扣掉番茄休息段，与投入口径一致）；退出番茄段循环、从此不再打断。
     /// 只改运行态 active.timingStyle（块存的 PlanBlock.timingStyle 不动）。
+    /// 0.20.5：休息段中也可切（段间=可改窗口）——当前这段还没结算的休息也要扣掉。
     func continueUntimed() {
         guard var a = active else { return }
-        let netWork = max(0, currentElapsed - pomoRestAccumulated)
+        var restTotal = pomoRestAccumulated
+        if pomoIsRest, let seg = pomoSegStart {
+            let endRef = isOnBreak ? (breakStart ?? .now) : .now
+            restTotal += max(0, endRef.timeIntervalSince(seg))
+        }
+        let netWork = max(0, currentElapsed - restTotal)
         a.timingStyle = .light        // 往上记显时长（不再有番茄段/提示）
         a.start = Date.now.addingTimeInterval(-(netWork + a.pausedTotal))   // 让 currentElapsed 续到净专注
         active = a

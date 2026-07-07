@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var useCloud: Bool = CloudSettings.useCloud
     @State private var hasKey: Bool = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount) != nil
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
+    @State private var pomoLimit: Int = PomodoroDiscipline.weeklyEarlyEndLimit
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
     @State private var pushIntensity: PushIntensity = SuggestionSettings.intensity
     @State private var journalLock: Bool = JournalSettings.privacyLock
@@ -120,6 +121,15 @@ struct SettingsView: View {
                     Text("打开后 ⌘Q / Dock 右键退出 不会真退——收进菜单栏继续跑（计时不断），Dock 图标消失、防手滑误退。真要退出：点菜单栏图标 → 右键 → 退出 BetterCalendar。")
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
+
+                    Stepper(value: $pomoLimit, in: 0...7) {
+                        Text("番茄「提前休息」每周上限：" + (pomoLimit == 0 ? "不限" : "\(pomoLimit) 次"))
+                    }
+                    .onChange(of: pomoLimit) { _, v in PomodoroDiscipline.weeklyEarlyEndLimit = v }
+                    Text(pomoLimit >= 3
+                         ? "设到 \(pomoLimit) 次了——预先承诺贵在少，多了就不太像约束了，要不要再想想？（每周一零点重置）"
+                         : "给自己的可选约束：设了上限后，番茄工作段中的「提前休息」每周只能用这么多次（默认不限；每周一零点重置）。")
+                        .font(.caption).foregroundStyle(.secondary)
 
                     Picker("输入框预设文本", selection: Binding(
                         get: { PlaceholderSettings.mode },

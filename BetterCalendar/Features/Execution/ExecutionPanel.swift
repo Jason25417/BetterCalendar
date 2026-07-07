@@ -13,6 +13,7 @@ import AppKit
 
 struct ExecutionPanel: View {
     @Bindable var model: ExecutionViewModel
+    @State private var earlyBreakConfirming = false   // 「提前休息」的小摩擦确认（0.20.5）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -103,9 +104,15 @@ struct ExecutionPanel: View {
                                 .help("先休息一小段，再来一段专注")
                         }
                     } else {
+                        // 休息段满：回到专注 / 转轻计时（段间=可改计时方式的窗口，工作段中锁定——Jason 定 2026-07-08）
                         Text("休息好了，回到专注？").font(.callout).foregroundStyle(.green)
-                        Button("回到专注") { model.confirmPomodoroNext() }
-                            .buttonStyle(.borderedProminent).controlSize(.small)
+                        HStack(spacing: 8) {
+                            Button("回到专注") { model.confirmPomodoroNext() }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                            Button("继续计时") { model.continueUntimed() }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .help("不再来一段——转成往上记的计时（净专注续走）")
+                        }
                     }
                 }
             } else {
@@ -114,9 +121,38 @@ struct ExecutionPanel: View {
                           systemImage: isWork ? "timer" : "cup.and.saucer")
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(isWork ? .blue : .green)
-                    Button(isWork ? "提前休息" : "提前结束") { model.confirmPomodoroNext() }
-                        .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
-                        .help(isWork ? "不必等满，现在就去休息" : "不必等满，现在就回到专注")
+                    if isWork {
+                        // 工作段中逃生口：小摩擦确认 + 自设周上限（预先承诺，默认不限；用完=温和禁用）
+                        let remaining = PomodoroDiscipline.remaining()
+                        if remaining == 0 {
+                            Text("本周自设的提前休息次数已用完")
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .help("这是你在 设置→进阶 给自己设的约束，随时可调")
+                        } else {
+                            Button(remaining.map { "提前休息（本周还可 \($0) 次）" } ?? "提前休息") {
+                                earlyBreakConfirming = true
+                            }
+                            .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+                            .help("不必等满，现在就去休息")
+                            .confirmationDialog(
+                                "这段还剩 \(Self.hms(phase.remaining))，现在就休息？",
+                                isPresented: $earlyBreakConfirming, titleVisibility: .visible
+                            ) {
+                                Button(remaining.map { "休息（之后本周还可 \($0 - 1) 次）" } ?? "休息") {
+                                    PomodoroDiscipline.consume()
+                                    model.confirmPomodoroNext()
+                                }
+                                Button("继续专注", role: .cancel) {}
+                            }
+                        }
+                    } else {
+                        Button("提前结束") { model.confirmPomodoroNext() }
+                            .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+                            .help("不必等满，现在就回到专注")
+                        Button("继续计时") { model.continueUntimed() }
+                            .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+                            .help("休息段中改主意——转成往上记的计时（净专注续走）")
+                    }
                 }
             }
         } else if model.activeStyle == TimingStyle.none {
