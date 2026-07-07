@@ -142,10 +142,17 @@ final class ExecutionViewModel {
         }
     }
 
-    /// 启动恢复：同逻辑日 → 原样接上（start 不变，已用时长自然续算）；跨逻辑日 → 丢弃快照。
+    /// 三选恢复（0.22.1，Jason 设计）：同逻辑日的快照不再静默接上，挂起弹窗问——
+    /// 继续（把离开的时间也算上）/ 直接继续（离开时间不算）/ 重新开始（当作没做过）。
+    enum RunRestoreChoice { case continueWithGap, continueWithoutGap, discard }
+
+    /// 待用户三选的退出前运行态（非 nil → 执行面板弹恢复对话框）。
+    var pendingRunRestore: RunStateSnapshot?
+
+    /// 启动检查：同逻辑日 → 挂起三选；跨逻辑日 → 丢弃快照（昨天的事不接续）。
     private func restoreRunStateIfNeeded() {
         guard persistsRunState else { return }
-        guard active == nil, background.isEmpty,
+        guard active == nil, background.isEmpty, pendingRunRestore == nil,
               let data = UserDefaults.standard.data(forKey: Self.runStateKey),
               let snap = try? JSONDecoder().decode(RunStateSnapshot.self, from: data) else { return }
         guard RunStateSnapshot.isRestorable(snap) else {
@@ -153,6 +160,35 @@ final class ExecutionViewModel {
             DevLog.shared.info("执行", "跨逻辑日的旧计时快照已丢弃（昨天的事不接续）")
             return
         }
+        pendingRunRestore = snap
+        DevLog.shared.info("执行", "发现退出前的运行态：\(snap.active?.title ?? snap.background.first?.title ?? "")（等你选怎么继续）")
+    }
+
+    /// 用户对恢复对话框的选择。
+    func resolveRunRestore(_ choice: RunRestoreChoice) {
+        guard let snap = pendingRunRestore else { return }
+        pendingRunRestore = nil
+        switch choice {
+        case .discard:
+            UserDefaults.standard.removeObject(forKey: Self.runStateKey)
+            DevLog.shared.info("执行", "按选择丢弃退出前的运行态（当作没做过）")
+        case .continueWithGap, .continueWithoutGap:
+            applyRunState(snap)
+            if choice == .continueWithoutGap {
+                // 离开的时间不算投入：整段空档按"休息"扣除（计时/番茄段/休息起点一并平移）
+                let gap = max(0, Date.now.timeIntervalSince(snap.savedAt))
+                active?.pausedTotal += gap
+                for i in background.indices { background[i].pausedTotal += gap }
+                if let seg = pomoSegStart { pomoSegStart = seg.addingTimeInterval(gap) }
+                if let bs = breakStart { breakStart = bs.addingTimeInterval(gap) }
+            }
+            persistRunState()
+            if active != nil, let s = liveSnapshot() { liveActivity.start(s) }
+            DevLog.shared.info("执行", "恢复运行态：\(active?.title ?? "")（\(choice == .continueWithGap ? "含离开时间" : "不含离开时间")）· 并行 \(background.count)")
+        }
+    }
+
+    private func applyRunState(_ snap: RunStateSnapshot) {
         if let a = snap.active {
             active = ActiveBlock(plannedID: a.plannedID, title: a.title, start: a.start,
                                  pausedTotal: a.pausedTotal,
@@ -168,8 +204,6 @@ final class ExecutionViewModel {
         pomoRestAccumulated = snap.pomoRestAccumulated
         pomoTargetSegments = snap.pomoTargetSegments
         breakCount = snap.breakCount
-        if active != nil, let s = liveSnapshot() { liveActivity.start(s) }
-        DevLog.shared.info("执行", "恢复运行态：\(active?.title ?? "")（同逻辑日，计时接上）· 并行 \(background.count)")
     }
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,

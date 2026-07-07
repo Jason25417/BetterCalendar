@@ -34,6 +34,32 @@ struct ExecutionPanel: View {
         .frame(width: 280)
         #endif
         .task { await model.loadToday() }
+        // 三选恢复（0.22.1）：退出/闪退/清后台前有任务在进行 → 问怎么接（关闭=直接继续、离开时间不算）
+        .confirmationDialog(
+            "退出时「\(model.pendingRunRestore?.active?.title ?? model.pendingRunRestore?.background.first?.title ?? "任务")」正在进行，想继续吗？",
+            isPresented: Binding(get: { model.pendingRunRestore != nil },
+                                 set: { if !$0 { model.resolveRunRestore(.continueWithoutGap) } }),
+            titleVisibility: .visible
+        ) {
+            Button("继续（离开的 \(Self.gapText(model.pendingRunRestore)) 也算上）") {
+                model.resolveRunRestore(.continueWithGap)
+            }
+            Button("直接继续（离开的时间不算）") {
+                model.resolveRunRestore(.continueWithoutGap)
+            }
+            Button("重新开始（当作没做过）", role: .destructive) {
+                model.resolveRunRestore(.discard)
+            }
+        } message: {
+            Text("同一逻辑日内的计时可以接上；并行任务与番茄段状态会一并恢复。")
+        }
+    }
+
+    /// 离开时长的口语描述（恢复对话框用）。
+    static func gapText(_ snap: ExecutionViewModel.RunStateSnapshot?) -> String {
+        guard let saved = snap?.savedAt else { return "时间" }
+        let m = max(1, Int(Date.now.timeIntervalSince(saved) / 60))
+        return m >= 60 ? "\(m / 60) 小时 \(m % 60) 分钟" : "\(m) 分钟"
     }
 
     // MARK: 今日最要紧（★兑现红利）——做成打 🎯，没做成不罚（只是不亮），至多软限 ≤2 件
