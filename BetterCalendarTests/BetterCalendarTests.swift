@@ -1324,6 +1324,34 @@ struct LogicTests {
         #expect(JSONText.completeArrayObjects(in: #"{"loo"#).isEmpty)
     }
 
+    /// 计时方式实时改（0.21）：番茄工作段中锁定；转番茄带目标段数、做满自动转轻计时续走。
+    @Test func executionTimingChangeRespectsPomodoroLockAndTarget() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(byAdding: .hour, value: 10, to: day)!
+        try planStore.replacePlanned([ScheduledBlock(title: "写代码", start: s,
+                                                     end: s.addingTimeInterval(3600))], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        await vm.startBlock(vm.planned[0])           // 轻计时开始
+        await vm.waitForPreview()                    // 等游离预览 Task 落地（防撞已析构内存库）
+        #expect(vm.canChangeTimingNow)               // 非番茄：随时可改
+        vm.changeTiming(to: .pomodoro, pomodoroSegments: 1)   // 转番茄，目标 1 段
+        #expect(vm.activeStyle == .pomodoro)
+        #expect(!vm.canChangeTimingNow)              // 工作段进行中：锁定
+        vm.changeTiming(to: TimingStyle.none)        // 锁定期改动无效
+        #expect(vm.activeStyle == .pomodoro)
+        vm.confirmPomodoroNext()                     // 完成第 1 段 = 做满目标 → 自动转轻计时续走
+        #expect(vm.activeStyle == .light)
+        #expect(vm.pomodoroPhase == nil)             // 已退出段循环
+    }
+
     /// 番茄提前休息的周键：ISO 周、周一零点起新周（定死不设置，Jason 2026-07-08）。
     @Test func pomodoroWeekKeyResetsMondayMidnight() {
         // 2026-07-12 是周日、07-13 是周一

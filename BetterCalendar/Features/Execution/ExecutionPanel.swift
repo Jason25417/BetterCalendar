@@ -68,7 +68,34 @@ struct ExecutionPanel: View {
             }
         } else if let a = model.active {
             Text("正在做").font(.caption).foregroundStyle(.secondary)
-            Text(a.title).font(.headline)
+            // 事件名即按钮（0.21，Jason 设计）：点开=剩余事项一步切换 + 已完成再来一段——收编「换一件」入口
+            Menu {
+                if !model.remaining.isEmpty {
+                    Section("换一件（这件的投入会保留）") {
+                        ForEach(model.remaining) { item in
+                            Button(item.title) { Task { await model.startBlock(item) } }
+                        }
+                    }
+                }
+                let redoable = model.planned.filter { model.isDone($0) && $0.id != a.plannedID }
+                if !redoable.isEmpty {
+                    Section("已完成 · 再来一段") {
+                        ForEach(redoable) { item in
+                            Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
+                        }
+                    }
+                }
+                if model.remaining.isEmpty && redoable.isEmpty {
+                    Text("没有其它可切换的事")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(a.title).font(.headline)
+                    Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("点击切换到别的事（当前投入自动保留）；已完成的可再来一段（复盘里合并计时）")
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 activeTiming
             }
@@ -176,7 +203,8 @@ struct ExecutionPanel: View {
                 Label("完成「\(a.title)」", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack { switchMenu; alsoMenu; breakButton }
+            // 「换一件」退役（0.21）：事件名按钮已收编；空位给「计时」切换菜单
+            HStack { timingMenu; alsoMenu; breakButton }
         } else if let s = model.selected {
             Button { Task { await model.startSelected() } } label: {
                 Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
@@ -192,6 +220,28 @@ struct ExecutionPanel: View {
             }
             HStack { switchMenu; alsoMenu; breakButton }
         }
+    }
+
+    /// 实时改当前块计时方式（0.21）：番茄工作段中锁定（预先承诺）、段满/休息中开放；
+    /// 转番茄可选段数（做满自动转轻计时续走）；只改运行态，块存的风格不动。
+    private var timingMenu: some View {
+        Menu {
+            Button("轻计时") { model.changeTiming(to: .light) }
+            Button("不计时") { model.changeTiming(to: TimingStyle.none) }
+            Menu("🍅 番茄钟") {
+                Button("1 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
+                Button("2 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
+                Button("3 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
+                Button("不限段") { model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
+            }
+        } label: {
+            Label("计时", systemImage: "stopwatch")
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(!model.canChangeTimingNow)
+        .help(model.canChangeTimingNow
+              ? "改当前这件的计时方式（转番茄可选做几段，做满自动转轻计时）"
+              : "番茄工作段进行中锁定——段满或休息时可改（你选的约束）")
     }
 
     private var switchMenu: some View {

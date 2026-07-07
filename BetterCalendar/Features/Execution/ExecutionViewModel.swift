@@ -41,6 +41,7 @@ final class ExecutionViewModel {
     private var pomoSegStart: Date?   // 番茄钟当前段开始时刻（nil = 非番茄）
     private var pomoIsRest = false    // 当前番茄段是否休息段
     private var pomoWorkSegmentsDone = 0   // 本次会话完成的番茄工作段数（落 ExecutionSession）
+    private var pomoTargetSegments: Int?   // 自设目标段数（0.21 转番茄时选）：做满自动转轻计时续走；nil=不限
     private var pomoRestAccumulated: TimeInterval = 0   // 本次番茄休息段累计时长（「继续计时」算净专注=总时长-番茄休息）
     private var breakCount = 0             // 本次会话中途休息次数（落 ExecutionSession）
 
@@ -98,6 +99,7 @@ final class ExecutionViewModel {
         var pomoIsRest = false
         var pomoWorkSegmentsDone = 0
         var pomoRestAccumulated: TimeInterval = 0
+        var pomoTargetSegments: Int?   // 0.21 自设目标段数（Optional：老快照缺此键照常解码）
         var breakCount = 0
         var savedAt = Date()
 
@@ -132,6 +134,7 @@ final class ExecutionViewModel {
         snap.pomoIsRest = pomoIsRest
         snap.pomoWorkSegmentsDone = pomoWorkSegmentsDone
         snap.pomoRestAccumulated = pomoRestAccumulated
+        snap.pomoTargetSegments = pomoTargetSegments
         snap.breakCount = breakCount
         snap.savedAt = .now
         if let data = try? JSONEncoder().encode(snap) {
@@ -163,6 +166,7 @@ final class ExecutionViewModel {
         pomoIsRest = snap.pomoIsRest
         pomoWorkSegmentsDone = snap.pomoWorkSegmentsDone
         pomoRestAccumulated = snap.pomoRestAccumulated
+        pomoTargetSegments = snap.pomoTargetSegments
         breakCount = snap.breakCount
         if active != nil, let s = liveSnapshot() { liveActivity.start(s) }
         DevLog.shared.info("执行", "恢复运行态：\(active?.title ?? "")（同逻辑日，计时接上）· 并行 \(background.count)")
@@ -311,15 +315,52 @@ final class ExecutionViewModel {
 
     /// 番茄钟段满后点「确定」/ 段中途「提前结束本段」，切下一段（工作 ⇄ 休息）。
     /// 0.17：不必等段满——用户可随时提前结束当前段（继续软化番茄的刚性）。
+    /// 0.21：做满自设目标段数 → 温和落地：自动转轻计时续走（不是戛然而止）。
     func confirmPomodoroNext() {
         // 离开休息段(回到工作) → 累计这段休息时长，供「继续计时」算净专注（总时长扣掉番茄休息）
         if pomoIsRest, let seg = pomoSegStart {
             let endRef = isOnBreak ? (breakStart ?? .now) : .now
             pomoRestAccumulated += max(0, endRef.timeIntervalSince(seg))
         }
-        if !pomoIsRest { pomoWorkSegmentsDone += 1 }   // 工作段→休息 = 完成一个工作段
+        if !pomoIsRest {
+            pomoWorkSegmentsDone += 1   // 工作段→休息 = 完成一个工作段
+            if let target = pomoTargetSegments, pomoWorkSegmentsDone >= target {
+                DevLog.shared.info("番茄", "做满自设的 \(target) 段 🎉 → 转轻计时续走")
+                continueUntimed()
+                return
+            }
+        }
         pomoIsRest.toggle()
         pomoSegStart = .now
+        persistRunState()
+        if let s = liveSnapshot() { liveActivity.update(s) }
+    }
+
+    /// 实时改当前块的计时方式（0.21，Jason 拍板）：番茄**工作段进行中锁定**（预先承诺，工作段中不可逃）、
+    /// 段满/休息中开放；非番茄随时可改。只改运行态（块存的 PlanBlock.timingStyle 不动）。
+    var canChangeTimingNow: Bool {
+        guard active != nil else { return false }
+        guard let phase = pomodoroPhase else { return true }
+        return phase.kind == .rest || phase.pendingConfirm
+    }
+
+    /// 转番茄可带目标段数（1/2/3；nil=不限），做满自动转轻计时续走。
+    func changeTiming(to style: TimingStyle, pomodoroSegments: Int? = nil) {
+        guard active != nil, canChangeTimingNow else { return }
+        switch style {
+        case .pomodoro:
+            active?.timingStyle = .pomodoro
+            pomoSegStart = .now      // 从现在起第一段专注
+            pomoIsRest = false
+            pomoTargetSegments = pomodoroSegments
+            DevLog.shared.info("执行", "转番茄钟（\(pomodoroSegments.map { "\($0) 段" } ?? "不限段")）")
+        case .light, .none:
+            if active?.timingStyle == .pomodoro {
+                continueUntimed()    // 净专注折算 + 退出段循环（落到 .light）
+            }
+            active?.timingStyle = style
+            DevLog.shared.info("执行", "转\(style == .light ? "轻计时" : "不计时")")
+        }
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
@@ -340,6 +381,7 @@ final class ExecutionViewModel {
         a.start = Date.now.addingTimeInterval(-(netWork + a.pausedTotal))   // 让 currentElapsed 续到净专注
         active = a
         pomoSegStart = nil
+        pomoTargetSegments = nil
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
@@ -376,6 +418,7 @@ final class ExecutionViewModel {
         pomoIsRest = false
         pomoWorkSegmentsDone = 0
         pomoRestAccumulated = 0
+        pomoTargetSegments = nil
         breakCount = 0
         persistRunState()
         refreshPreview()
@@ -557,9 +600,14 @@ final class ExecutionViewModel {
     // MARK: - 橙色预览（全天连续 re-flow）
 
     /// 完成 / 开始某块后，把剩余从此刻重排、写橙色预览。后台跑，不挡按钮。
+    /// Task 记在手里（非游离）：单测能 await 它落地——游离 Task 活过测试作用域撞已析构内存库会崩 host（踩过）。
+    private var previewTask: Task<Void, Never>?
     private func refreshPreview() {
-        Task { await updatePreview() }
+        previewTask = Task { await updatePreview() }
     }
+
+    /// 等最近一次预览刷新落地（单测用；正常运行无人等它、照旧不挡按钮）。
+    func waitForPreview() async { await previewTask?.value }
 
     /// 剩余（既非已完成、也非正在做）从此刻 reflow → 橙色预览（当前时刻右侧）；无剩余则清空橙色（日终消失）。
     private func updatePreview() async {
