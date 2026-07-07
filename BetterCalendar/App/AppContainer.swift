@@ -49,8 +49,9 @@ final class AppContainer {
         CalendarSettings.backend = .eventKit
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
-        // 解析兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude → 本地 Stub
-        let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser())
+        // 解析兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude → 本地 Stub；两级都接流式冒块（0.20.1 云端也流式）
+        let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: StubScheduleParser(),
+                                               liveDraft: liveDraft)
         self.parser = FoundationModelsScheduleParser(fallback: cloudParser, liveDraft: liveDraft)
         self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
         // 微调兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude

@@ -110,6 +110,72 @@ struct AnthropicClient {
         return text
     }
 
+    // MARK: Anthropic 流式（SSE，0.20.1）
+
+    /// 流式版一次问答（仅 Anthropic；硅基流动自动退回非流式）：每收到一段文本 delta 就把
+    /// **累计全文**回调给 onPartial（供边生成边冒块），最终返回完整文本。
+    /// 附带收益：SSE 持续有包，60s 空闲超时即可（非流式长输出要给 150s 干等）。
+    func completeStreaming(system: String, user: String, maxTokens: Int = 2048,
+                           jsonSchema: [String: Any]? = nil,
+                           onPartial: (String) -> Void) async throws -> String {
+        guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
+        guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
+        guard provider() == .anthropic else {
+            return try await completeOpenAI(key: key, system: system, user: user,
+                                            maxTokens: maxTokens, jsonMode: true, jsonSchema: jsonSchema)
+        }
+        var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60   // 空闲超时：流式包不断，60s 收不到任何字节才算挂
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(key, forHTTPHeaderField: "x-api-key")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        var body: [String: Any] = [
+            "model": model(), "max_tokens": maxTokens, "system": system, "stream": true,
+            "messages": [["role": "user", "content": user]],
+            "thinking": ["type": "disabled"],   // 同非流式：结构化任务不要思考（慢+吃额度）
+        ]
+        if let schema = jsonSchema {
+            body["output_config"] = ["format": ["type": "json_schema", "schema": schema]]
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw AnthropicError(message: "无 HTTP 响应") }
+        guard http.statusCode == 200 else {
+            var detail = ""
+            for try await line in bytes.lines { detail += line; if detail.count > 300 { break } }
+            throw AnthropicError(message: "Anthropic HTTP \(http.statusCode)：\(detail.prefix(300))")
+        }
+        var text = ""
+        var stop: String?
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: "),
+                  let obj = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(6).utf8)) as? [String: Any],
+                  let type = obj["type"] as? String else { continue }
+            switch type {
+            case "content_block_delta":
+                if let t = (obj["delta"] as? [String: Any])?["text"] as? String {
+                    text += t
+                    onPartial(text)
+                }
+            case "message_delta":
+                stop = (obj["delta"] as? [String: Any])?["stop_reason"] as? String
+            default:
+                break
+            }
+        }
+        if CloudSettings.logRawResponses {
+            DevLog.shared.info("云端原文", "Anthropic(流式) \(model()) stop=\(stop ?? "?") · 返回(前2000)：\(text.prefix(2000))")
+        }
+        if stop == "max_tokens" {
+            DevLog.shared.warn("云端原文", "截断@\(maxTokens)·头500：\(text.prefix(500)) ⋯⋯尾500：\(text.suffix(500))")
+            throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
+        }
+        guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
+        return text
+    }
+
     // MARK: 硅基流动（OpenAI 兼容 chat/completions）
 
     private func completeOpenAI(key: String, system: String, user: String, maxTokens: Int,

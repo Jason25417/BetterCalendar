@@ -1261,6 +1261,24 @@ struct LogicTests {
         #expect(plan.needsRepaint)         // 真相赢 → 重画
     }
 
+    // MARK: 0.20.1 云端流式（部分 JSON 抽完整块）
+
+    /// 部分 JSON 抽块：只取完整闭合的对象；标题里的引号/花括号不骗过扫描；截半的对象不取。
+    @Test func streamingPartialJSONExtractsOnlyCompleteBlocks() {
+        // 生成中途：第 1 块完整（标题含转义引号和花括号）、第 2 块被截半
+        let partial = #"{"blocks":[{"title":"写\"接口{v2}\"文档","start":"2026-07-09 09:00","end":"2026-07-09 10:00"},{"title":"健身","start":"2026-07-0"#
+        let objs = JSONText.completeArrayObjects(in: partial)
+        #expect(objs.count == 1)
+        let live = ClaudeScheduleParser.liveBlocks(fromPartial: partial)
+        #expect(live.count == 1)
+        #expect(live.first?.title == #"写"接口{v2}"文档"#)
+        // 数组闭合后继续出现别的字段 → 不再误取
+        let done = #"{"blocks":[{"title":"A","start":"2026-07-09 09:00","end":"2026-07-09 10:00"}],"longTasks":[{"title":"X"}]}"#
+        #expect(JSONText.completeArrayObjects(in: done).count == 1)
+        // 还没出现 blocks 数组 → 空
+        #expect(JSONText.completeArrayObjects(in: #"{"loo"#).isEmpty)
+    }
+
     // MARK: 0.20 执行运行态快照（重启/清后台恢复）
 
     /// 同逻辑日可恢复、跨逻辑日不恢复；Codable 往返不丢字段。

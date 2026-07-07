@@ -11,6 +11,7 @@ import Foundation
 struct ClaudeScheduleParser: ScheduleParsing {
     let client: AnthropicClient
     let fallback: ScheduleParsing
+    var liveDraft: LiveDraft?   // 云端流式（0.20.1）：边生成边把完整块冒进草稿区（同端侧 FM 那条管子）；nil=非流式
 
     /// 宽容解码（0.15.2）：JSONSerialization 手工取值——字段类型不合/多余字段/单块损坏都不废全包，
     /// 坏块跳过并计数。严格 Codable 曾因 LLM 一个字段类型漂移整包报废 → 回退本地桩产垃圾草稿。
@@ -53,13 +54,43 @@ struct ClaudeScheduleParser: ScheduleParsing {
         try await parse(text, referenceDate: referenceDate, context: ParseContext())
     }
 
+    /// 流式部分文本 → 已完整闭合的块（喂 LiveDraft 边生成边显示）。纯函数、可单测。
+    static func liveBlocks(fromPartial partial: String) -> [ScheduledBlock] {
+        let objects = JSONText.completeArrayObjects(in: partial, arrayKey: "\"blocks\"")
+        guard !objects.isEmpty else { return [] }
+        // 拼回 {"blocks":[…]} 复用宽容解码（单块损坏跳过、字段漂移不废全包）
+        guard let decoded = Self.decodePlan("{\"blocks\":[\(objects.joined(separator: ","))]}") else { return [] }
+        return decoded.blocks.compactMap { pb in
+            guard let s = pb.start, let e = pb.end else { return nil }
+            return ScheduledBlock(title: pb.title, start: s, end: e, isFixed: pb.isFixed,
+                                  isAnchor: pb.isAnchor, timingStyle: pb.timingStyle,
+                                  priority: pb.priority, deadline: pb.deadline)
+        }
+    }
+
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
         do {
             // 长日程输出可观（20+ 块 + 长期任务），上限给足（2048→6000→10000：6000 仍见截断，2026-07-07 日志实锤；
             // 若加了预算还截断=模型在循环复读，看「云端原文」截断样本的尾 500 字即知）
-            let raw = try await client.complete(
-                system: Self.systemPrompt(referenceDate: referenceDate, context: context),
-                user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema)
+            let system = Self.systemPrompt(referenceDate: referenceDate, context: context)
+            let raw: String
+            if let live = liveDraft {
+                // 云端流式：SSE 边收边把已闭合的块冒进草稿区（0.20.1，同端侧 FM 的体验）
+                var lastCount = 0
+                raw = try await client.completeStreaming(
+                    system: system, user: text, maxTokens: 10000, jsonSchema: Self.parseSchema) { partial in
+                    guard partial.hasSuffix("}") || partial.last == "," else { return }   // 只在可能新闭合时重扫
+                    let blocks = Self.liveBlocks(fromPartial: partial)
+                    if blocks.count != lastCount {
+                        lastCount = blocks.count
+                        live.streaming = blocks.sorted { $0.start < $1.start }
+                    }
+                }
+                live.clear()   // 最终结果即将替换草稿，收掉流式暂显
+            } else {
+                raw = try await client.complete(
+                    system: system, user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema)
+            }
             let json = JSONText.extractObject(raw)
             guard let decoded = Self.decodePlan(json) else {
                 DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")
@@ -80,6 +111,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                                + (decoded.loose ? " · 松散" : "") + " · \(CloudSettings.activeModel)")
             return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: decoded.loose)
         } catch {
+            liveDraft?.clear()   // 失败也别留流式残影
             DevLog.shared.warn("解析", "云端失败，回退本地：\(error.localizedDescription)")
             return try await fallback.parse(text, referenceDate: referenceDate, context: context)
         }

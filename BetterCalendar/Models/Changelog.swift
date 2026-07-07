@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.20.1", date: "2026-07", changes: [
+            "云端解析也流式了：用云端模型「排今天」时，日程块边生成边一条条冒出来（和端侧体验一致），不再干等一整段",
+            "流式顺带把云端超时收紧：只要模型在持续输出就不会误判超时；真断流 60 秒即报，不再干等 150 秒",
+        ]),
         ChangelogEntry(version: "0.20.0", date: "2026-07", changes: [
             "双向同步上线：在 Apple 日历里挪动/改名绿色计划块，会自动同步回 App（按事件身份精确对账，和老版本的模糊匹配完全不同）；App 里的修改照旧即时投影到日历",
             "日历里删除计划块会先温和询问「要同步移除吗」，可选「记住我的选择」不再问；策略随时在 设置→进阶 里改（每次询问/直接移除/保留画回）",
