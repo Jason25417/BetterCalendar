@@ -951,7 +951,9 @@ struct LogicTests {
     }
 
     private static func makeHomeVM(planStore: PlanStore,
-                                   draftStore: DraftSnapshotStore? = nil) -> HomeViewModel {
+                                   draftStore: DraftSnapshotStore? = nil,
+                                   startedDays: StartedDayStore? = nil,
+                                   calendar: FakeCalendarStore = FakeCalendarStore()) -> HomeViewModel {
         struct NoRefine: PlanRefining {
             func refine(_ blocks: [ScheduledBlock], command: String,
                         originalRequest: String, now: Date) async throws -> [ScheduledBlock] { blocks }
@@ -960,18 +962,19 @@ struct LogicTests {
             func requestAuthorizationIfNeeded() async {}
             func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {}
         }
-        let fakeCalendar = FakeCalendarStore()
         return HomeViewModel(
             arrangeDay: ArrangeDayUseCase(parser: StubScheduleParser(), planner: NaivePlanningEngine()),
             refiner: NoRefine(),
-            calendarStore: fakeCalendar,
+            calendarStore: calendar,
             reminderStore: FakeReminderStore(),
             exporter: ICSExporter(),
             planStore: planStore,
-            projection: ProjectionService(planStore: planStore, calendarStore: fakeCalendar),
+            projection: ProjectionService(planStore: planStore, calendarStore: calendar,
+                                          startedDays: startedDays),
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             notifier: NoNotify(),
-            draftStore: draftStore)
+            draftStore: draftStore,
+            startedDays: startedDays)
     }
 
     // MARK: M5 尾巴（排不下冲突 / 解法 / 通知时间）
@@ -1145,6 +1148,38 @@ struct LogicTests {
         _ = await vm.markDone(titleLike: "写代码")   // 完成其中一件（记录带该块 plannedID）
         #expect(vm.doneCount == 1)                   // 旧标题匹配会把两件都标完成
         #expect(vm.remaining.count == 1)             // 另一件仍在「换一件/同时做」列表
+    }
+
+    /// 「开始今天」只出草稿（日历不动、未进实时模式）；「确认写入」才 markStarted + 绿淡出转橙（Jason 定 2026-07-07）。
+    /// 放弃修改则取消进入实时模式。
+    @Test func startTodayDraftOnlyConfirmEntersRealtime() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let started = StartedDayStore(persisted: false)
+        let cal = FakeCalendarStore()
+        let vm = Self.makeHomeVM(planStore: store, startedDays: started, calendar: cal)
+        let label = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(byAdding: .hour, value: 10, to: label)!
+        try store.replacePlanned([ScheduledBlock(title: "写代码", start: s,
+                                                 end: s.addingTimeInterval(3600))], on: label)
+        vm.targetDay = label
+
+        await vm.startToday()
+        #expect(!vm.blocks.isEmpty)               // 出了 reflow 草稿
+        #expect(!started.isStarted(label))        // 但还没进实时模式（日历不动）
+
+        // 放弃修改 → 取消开始（绿色保持）
+        vm.discardDraft()
+        await vm.confirm()
+        #expect(!started.isStarted(label))
+
+        // 再来一次：开始今天 → 确认写入 = 正式进实时模式，绿淡出、整日转橙
+        await vm.startToday()
+        await vm.confirm()
+        #expect(started.isStarted(label))
+        #expect(try await cal.read(kind: .planned).isEmpty)     // 绿已淡出
+        #expect(try await cal.read(kind: .preview).count == 1)  // 整日转橙
     }
 
     // MARK: M9/R1 日记

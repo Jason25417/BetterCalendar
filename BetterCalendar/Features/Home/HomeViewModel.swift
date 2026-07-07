@@ -84,6 +84,9 @@ final class HomeViewModel {
     var reflowConflict: ReflowConflict?
     /// 未保存修改（0.16 文件模型，D-f）：任何编辑/新草稿置真；「确认写入」=保存清零。
     private(set) var hasUnsavedChanges = false
+    /// 「开始今天」产出的草稿待确认（Jason 定 2026-07-07）：开始今天只出草稿、日历**不动**；
+    /// 「确认写入」时才正式进实时模式（标记已开始 → 投影绿淡出、整日转橙）。放弃修改即取消。
+    private var pendingRealtimeStart = false
     /// 上次退出时留下的未保存修改（D-g：不自动还原，顶部小字邀请「恢复/丢弃」）。
     private(set) var pendingRestore: DraftSnapshot?
 
@@ -166,6 +169,7 @@ final class HomeViewModel {
         note = nil
         draftSource = .empty
         hasUnsavedChanges = false
+        pendingRealtimeStart = false   // 放弃「开始今天」草稿 = 不进实时模式，绿色保持
         loadConfirmedPlan()
         persistDraft()
     }
@@ -301,6 +305,11 @@ final class HomeViewModel {
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {
+            // 「开始今天」草稿的确认 = 正式进实时模式（开始今天只出草稿、日历不动；确认才淡出转橙）
+            if pendingRealtimeStart {
+                startedDays?.markStarted(targetDay)
+                pendingRealtimeStart = false
+            }
             // 单一真相源（重构 P2）：先写 PlanStore，再由投影层画日历——本方法不再直接写日历。
             // 按**逻辑日**分组逐日 replace：跨午夜块（睡前看书 00:30）随前一逻辑日走，不再被拆到次日。
             let targetLabel = Calendar.current.startOfDay(for: targetDay)
@@ -356,9 +365,9 @@ final class HomeViewModel {
                 note = flex == 0
                     ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
                     : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
-                // 绿色淡出（§5.10 原则6.4）：开始今天=进实时模式 → 重投影（绿从日历退场、整日计划转橙；绿仍在 PlanStore 供复盘）
-                startedDays?.markStarted(targetDay)
-                try? await projection.project(label: Calendar.current.startOfDay(for: targetDay))
+                // 绿色淡出（§5.10 原则6.4，Jason 改 2026-07-07）：开始今天**只出草稿、日历不动**——
+                // reflow 结果是待确认草稿，「确认写入」时才 markStarted + 投影（绿淡出、整日转橙）。
+                pendingRealtimeStart = true
             }
             reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
             hasUnsavedChanges = true
