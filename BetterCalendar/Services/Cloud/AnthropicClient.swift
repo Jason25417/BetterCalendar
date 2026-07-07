@@ -21,17 +21,37 @@ struct AnthropicClient {
     var model: () -> String = { CloudSettings.activeModel }
     var useCloud: () -> Bool = { CloudSettings.useCloud }
 
-    /// 连通性测试（设置页「测试」按钮）：最小请求验证 key + 模型可用。成功返回模型名。
+    /// 连通性测试（设置页「测试」按钮）：验证 key + 模型可用，**顺带探测结构化输出支持**
+    /// （0.20，Jason 提：格式保证=约束解码，模型支不支持 schema 直接决定抽风率——测试时就该知道）。
+    /// 成功返回展示文案（模型名 + 结构化输出支持情况）。
     static func test(key: String, model: String, provider: LLMProvider) async -> Result<String, AnthropicError> {
         let probe = AnthropicClient(provider: { provider }, apiKey: { key }, model: { model }, useCloud: { true })
         do {
             // 给足 token：有些"思考"模型光推理就吃掉几十上百 token，64 太小会假性「截断」失败
             _ = try await probe.complete(system: "只回复 ok", user: "ping", maxTokens: 512)
-            return .success(model)
         } catch let e as AnthropicError {
             return .failure(e)
         } catch {
             return .failure(AnthropicError(message: error.localizedDescription))
+        }
+        // 第二发：带最小 schema 探测约束解码（json_schema/output_config）。失败≠key 无效，只是格式保证降档。
+        let pingSchema: [String: Any] = ["type": "object",
+                                         "properties": ["ok": ["type": "boolean"]],
+                                         "required": ["ok"],
+                                         "additionalProperties": false]
+        do {
+            if provider == .siliconflow {
+                // 直调内部方法关掉自动降级——否则降级成功会误报"支持"
+                _ = try await probe.completeOpenAI(key: key, system: "返回 {\"ok\":true}", user: "ping",
+                                                   maxTokens: 512, jsonMode: true,
+                                                   jsonSchema: pingSchema, allowSchemaDowngrade: false)
+            } else {
+                _ = try await probe.complete(system: "返回 {\"ok\":true}", user: "ping",
+                                             maxTokens: 512, jsonMode: true, jsonSchema: pingSchema)
+            }
+            return .success("\(model) 可用 · 支持结构化输出")
+        } catch {
+            return .success("\(model) 可用 · ⚠️ 不支持结构化输出（将降级弱 JSON 模式，格式抽风率更高）")
         }
     }
 

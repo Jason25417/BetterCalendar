@@ -40,9 +40,14 @@ final class ProjectionService {
             try await calendarStore.apply([], kind: .planned, window: window)
             try await calendarStore.apply(drafts.map { var d = $0; d.kind = .preview; return d },
                                           kind: .preview, window: window)
+            ProjectionFingerprints.set(label, [:])   // 实时日绿色为空：清指纹（该日不参与对账）
         } else {
             try await calendarStore.apply(drafts, kind: .planned, window: window)
             // 非实时日不碰橙色：橙色的另一位作者是执行层的「全天连续 reflow 预览」，归它管
+            // 指纹：记下这次成功写下的画面（0.20 对账用它分辨"自己写的"vs"用户手改的"）
+            ProjectionFingerprints.set(label, Dictionary(uniqueKeysWithValues: blocks.map {
+                ($0.id.uuidString, ProjectionFingerprints.tuple(start: $0.start, end: $0.end, title: $0.title))
+            }))
         }
         DevLog.shared.info("投影", "\(Self.dayStr(label)) → \(drafts.count) 块（\(startedDays?.isStarted(label) ?? false ? "实时→橙" : "绿")）")
     }

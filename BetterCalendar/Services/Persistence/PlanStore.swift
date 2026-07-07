@@ -19,10 +19,14 @@ protocol PlanReading: AnyObject {
     func plannedBlocks(on day: Date) throws -> [ScheduledBlock]
 }
 
-/// 写角色（GRANT UPDATE）：全 App 只有 HomeViewModel（确认写入）持有。
+/// 写角色（GRANT UPDATE）：持有者=HomeViewModel（确认写入）+ ReconcileService（0.20 双向同步回流）。
 @MainActor
 protocol PlanWriting: AnyObject {
     func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws
+    /// 按 ID 就地更新单块的 时间/标题（对账回流：日历手改 → 真相源；逻辑日归桶随 start 自动跟走）。
+    func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws
+    /// 按 ID 删除若干块（对账回流：日历删除经用户确认后 → 真相源）。
+    func deletePlanned(ids: [UUID]) throws
 }
 
 @MainActor
@@ -62,6 +66,26 @@ final class PlanStore: PlanReading, PlanWriting {
         }
         try context.save()
         DevLog.shared.info("PlanStore", "写入 \(blocks.count) 计划块 @ \(Self.dayStr(day))")
+    }
+
+    /// 按 ID 就地更新（0.20 对账回流）：只动 时间/标题（固定/★/计时方式日历没有对应概念、保持库值）。
+    func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws {
+        guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
+            .first(where: { $0.id == id && $0.kind == .planned }) else { return }
+        block.start = start; block.end = end; block.title = title
+        try context.save()
+        DevLog.shared.info("PlanStore", "对账回流更新「\(title)」→ \(Self.dayStr(start))")
+    }
+
+    /// 按 ID 删除（0.20 对账回流：日历删除经用户确认后落库）。
+    func deletePlanned(ids: [UUID]) throws {
+        guard !ids.isEmpty else { return }
+        let idSet = Set(ids)
+        let victims = try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { $0.kind == .planned && idSet.contains($0.id) }
+        for v in victims { context.delete(v) }
+        try context.save()
+        DevLog.shared.info("PlanStore", "对账回流删除 \(victims.count) 块")
     }
 
     private static func dayStr(_ d: Date) -> String {

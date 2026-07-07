@@ -501,7 +501,7 @@ struct LogicTests {
             calendarStore: FakeCalendarStore(),
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             planStore: planStore, reminderStore: FakeReminderStore(),
-            liveActivity: NoLiveActivity())
+            liveActivity: NoLiveActivity(), persistsRunState: false)
         await vm.loadToday()
         #expect(vm.planned.count == 1)                       // 午饭不进执行列表
         #expect(vm.planned.first?.title == "写代码")
@@ -662,7 +662,7 @@ struct LogicTests {
             calendarStore: FakeCalendarStore(),
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             planStore: planStore, reminderStore: FakeReminderStore(),
-            liveActivity: NoLiveActivity())
+            liveActivity: NoLiveActivity(), persistsRunState: false)
         await vm.loadToday()
         #expect(vm.doneCount == 0)
         let hit = await vm.markDone(titleLike: "写代码")
@@ -1148,7 +1148,7 @@ struct LogicTests {
             calendarStore: FakeCalendarStore(),
             reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             planStore: planStore, reminderStore: FakeReminderStore(),
-            liveActivity: NoLiveActivity())
+            liveActivity: NoLiveActivity(), persistsRunState: false)
         await vm.loadToday()
         _ = await vm.markDone(titleLike: "写代码")   // 完成其中一件（记录带该块 plannedID）
         #expect(vm.doneCount == 1)                   // 旧标题匹配会把两件都标完成
@@ -1215,6 +1215,71 @@ struct LogicTests {
         #expect(HomeViewModel.anchored(at(2026, 7, 1, 0, 30), toLogicalDayOf: label) == at(2026, 7, 9, 0, 30))
         #expect(HomeViewModel.anchored(at(2026, 7, 1, 21, 0), toLogicalDayOf: label) == at(2026, 7, 8, 21, 0))
         #expect(HomeViewModel.anchored(at(2026, 7, 8, 5, 0), toLogicalDayOf: label) == at(2026, 7, 8, 5, 0))
+    }
+
+    // MARK: 0.20 双向同步（ReconcileService.diff 纯函数）
+
+    /// 对账 diff：手改回流 / 自写跳过 / 删除识别 / 缺投影补画 各走各路。
+    @Test func reconcileDiffSeparatesUserEditsFromSelfWrites() {
+        let idA = UUID(), idB = UUID(), idC = UUID(), idD = UUID()
+        let truth = [
+            ScheduledBlock(id: idA, title: "写代码", start: at(2026,7,9,9), end: at(2026,7,9,11)),
+            ScheduledBlock(id: idB, title: "健身", start: at(2026,7,9,15), end: at(2026,7,9,16)),
+            ScheduledBlock(id: idC, title: "读书", start: at(2026,7,9,21), end: at(2026,7,9,22)),
+            ScheduledBlock(id: idD, title: "新块没投影过", start: at(2026,7,9,19), end: at(2026,7,9,20)),
+        ]
+        func tup(_ b: ScheduledBlock) -> String {
+            ProjectionFingerprints.tuple(start: b.start, end: b.end, title: b.title)
+        }
+        // 指纹 = 上次投影写下的样子（A/B/C 都投影过；D 没有）
+        let fp = [idA.uuidString: tup(truth[0]), idB.uuidString: tup(truth[1]), idC.uuidString: tup(truth[2])]
+        // 日历现状：A 被用户挪到 10 点（≠指纹=手改）；B 原样（=指纹）；C 消失（被删）；D 本来就没有
+        let events = [
+            CalendarEventDraft(title: "写代码", start: at(2026,7,9,10), end: at(2026,7,9,12),
+                               kind: .planned, blockID: idA),
+            CalendarEventDraft(title: "健身", start: at(2026,7,9,15), end: at(2026,7,9,16),
+                               kind: .planned, blockID: idB),
+        ]
+        let plan = ReconcileService.diff(truth: truth, events: events, fingerprint: fp)
+        #expect(plan.updates == [ReconcileService.Update(id: idA, start: at(2026,7,9,10),
+                                                         end: at(2026,7,9,12), title: "写代码")])
+        #expect(plan.deletions == [ReconcileService.Deletion(id: idC, title: "读书")])   // 只有 C 是删除
+        #expect(plan.needsRepaint)   // D 缺投影 → 补画，而不是当删除
+    }
+
+    /// 投影失败后的旧日历不倒灌：日历与指纹一致（没人手改）而真相更新了 → 重画，不回流。
+    @Test func reconcileDiffRepaintsWhenCalendarUntouched() {
+        let id = UUID()
+        let old = ScheduledBlock(id: id, title: "写代码", start: at(2026,7,9,9), end: at(2026,7,9,10))
+        var updated = old; updated.start = at(2026,7,9,14); updated.end = at(2026,7,9,15)
+        let fp = [id.uuidString: ProjectionFingerprints.tuple(start: old.start, end: old.end, title: old.title)]
+        let events = [CalendarEventDraft(title: old.title, start: old.start, end: old.end,
+                                         kind: .planned, blockID: id)]
+        let plan = ReconcileService.diff(truth: [updated], events: events, fingerprint: fp)
+        #expect(plan.updates.isEmpty)      // 绝不把旧日历倒灌回真相
+        #expect(plan.deletions.isEmpty)
+        #expect(plan.needsRepaint)         // 真相赢 → 重画
+    }
+
+    // MARK: 0.20 执行运行态快照（重启/清后台恢复）
+
+    /// 同逻辑日可恢复、跨逻辑日不恢复；Codable 往返不丢字段。
+    @Test func executionRunStateRestorableOnlySameLogicalDay() throws {
+        var snap = ExecutionViewModel.RunStateSnapshot()
+        snap.active = .init(plannedID: UUID(), title: "写代码", start: at(2026,7,9,9),
+                            pausedTotal: 120, timingStyleRaw: "pomodoro")
+        snap.pomoWorkSegmentsDone = 3
+        let data = try JSONEncoder().encode(snap)
+        let back = try JSONDecoder().decode(ExecutionViewModel.RunStateSnapshot.self, from: data)
+        #expect(back.active?.title == "写代码")
+        #expect(back.active?.pausedTotal == 120)
+        #expect(back.pomoWorkSegmentsDone == 3)
+        // 同逻辑日（当晚 23 点 / 次日凌晨 1 点）可恢复；次日白天不可
+        #expect(ExecutionViewModel.RunStateSnapshot.isRestorable(back, now: at(2026,7,9,23)))
+        #expect(ExecutionViewModel.RunStateSnapshot.isRestorable(back, now: at(2026,7,10,1)))
+        #expect(!ExecutionViewModel.RunStateSnapshot.isRestorable(back, now: at(2026,7,10,9)))
+        // 空快照（没有进行中的事）不恢复
+        #expect(!ExecutionViewModel.RunStateSnapshot.isRestorable(.init(), now: at(2026,7,9,23)))
     }
 
     // MARK: M9/R1 日记

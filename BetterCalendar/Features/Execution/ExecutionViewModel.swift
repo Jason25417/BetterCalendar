@@ -22,6 +22,7 @@ final class ExecutionViewModel {
     private let reminderStore: ReminderStore
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
+    private let persistsRunState: Bool                // 运行态快照开关（测试关：test host 与真 App 共享 UserDefaults，别互相污染）
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -78,21 +79,113 @@ final class ExecutionViewModel {
         var pausedTotal: TimeInterval = 0
     }
 
+    // MARK: - 运行态快照（0.20，Jason 定 2026-07-08：重启/iOS 清后台不丢计时；同逻辑日才恢复）
+
+    /// 进行中的计时状态整份快照（Codable，存 UserDefaults——每台设备自己的计时自己记，不跨端）。
+    struct RunStateSnapshot: Codable {
+        struct ActiveSnap: Codable {
+            var plannedID: UUID?; var title: String; var start: Date
+            var pausedTotal: TimeInterval; var timingStyleRaw: String
+        }
+        struct RunSnap: Codable {
+            var plannedID: UUID?; var title: String; var start: Date; var pausedTotal: TimeInterval
+        }
+        var active: ActiveSnap?
+        var background: [RunSnap] = []
+        var isOnBreak = false
+        var breakStart: Date?
+        var pomoSegStart: Date?
+        var pomoIsRest = false
+        var pomoWorkSegmentsDone = 0
+        var pomoRestAccumulated: TimeInterval = 0
+        var breakCount = 0
+        var savedAt = Date()
+
+        /// 是否可恢复：锚定时刻（进行中块的开始，退而求其次存盘时刻）与现在同一逻辑日才接上；
+        /// 跨逻辑日=昨天的计时，不恢复（纯函数、可单测）。
+        static func isRestorable(_ snap: RunStateSnapshot, now: Date = .now) -> Bool {
+            guard snap.active != nil || !snap.background.isEmpty else { return false }
+            let anchor = snap.active?.start ?? snap.background.first?.start ?? snap.savedAt
+            return DayContext.isSameLogicalDay(anchor, now)
+        }
+    }
+
+    private static let runStateKey = "execution.runState"
+
+    /// 每次运行态变化整份落盘（几百字节 JSON）；空档且无并行 → 清掉。
+    private func persistRunState() {
+        guard persistsRunState else { return }
+        guard active != nil || !background.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: Self.runStateKey)
+            return
+        }
+        var snap = RunStateSnapshot()
+        if let a = active {
+            snap.active = .init(plannedID: a.plannedID, title: a.title, start: a.start,
+                                pausedTotal: a.pausedTotal, timingStyleRaw: a.timingStyle.rawValue)
+        }
+        snap.background = background.map { .init(plannedID: $0.plannedID, title: $0.title,
+                                                 start: $0.start, pausedTotal: $0.pausedTotal) }
+        snap.isOnBreak = isOnBreak
+        snap.breakStart = breakStart
+        snap.pomoSegStart = pomoSegStart
+        snap.pomoIsRest = pomoIsRest
+        snap.pomoWorkSegmentsDone = pomoWorkSegmentsDone
+        snap.pomoRestAccumulated = pomoRestAccumulated
+        snap.breakCount = breakCount
+        snap.savedAt = .now
+        if let data = try? JSONEncoder().encode(snap) {
+            UserDefaults.standard.set(data, forKey: Self.runStateKey)
+        }
+    }
+
+    /// 启动恢复：同逻辑日 → 原样接上（start 不变，已用时长自然续算）；跨逻辑日 → 丢弃快照。
+    private func restoreRunStateIfNeeded() {
+        guard persistsRunState else { return }
+        guard active == nil, background.isEmpty,
+              let data = UserDefaults.standard.data(forKey: Self.runStateKey),
+              let snap = try? JSONDecoder().decode(RunStateSnapshot.self, from: data) else { return }
+        guard RunStateSnapshot.isRestorable(snap) else {
+            UserDefaults.standard.removeObject(forKey: Self.runStateKey)
+            DevLog.shared.info("执行", "跨逻辑日的旧计时快照已丢弃（昨天的事不接续）")
+            return
+        }
+        if let a = snap.active {
+            active = ActiveBlock(plannedID: a.plannedID, title: a.title, start: a.start,
+                                 pausedTotal: a.pausedTotal,
+                                 timingStyle: TimingStyle(rawValue: a.timingStyleRaw) ?? .light)
+        }
+        background = snap.background.map { BackgroundRun(plannedID: $0.plannedID, title: $0.title,
+                                                         start: $0.start, pausedTotal: $0.pausedTotal) }
+        isOnBreak = snap.isOnBreak
+        breakStart = snap.breakStart
+        pomoSegStart = snap.pomoSegStart
+        pomoIsRest = snap.pomoIsRest
+        pomoWorkSegmentsDone = snap.pomoWorkSegmentsDone
+        pomoRestAccumulated = snap.pomoRestAccumulated
+        breakCount = snap.breakCount
+        if active != nil, let s = liveSnapshot() { liveActivity.start(s) }
+        DevLog.shared.info("执行", "恢复运行态：\(active?.title ?? "")（同逻辑日，计时接上）· 并行 \(background.count)")
+    }
+
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
          planStore: PlanReading, reminderStore: ReminderStore,
-         liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil) {
+         liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
+         persistsRunState: Bool = true) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
         self.reminderStore = reminderStore
         self.liveActivity = liveActivity
         self.sessionStore = sessionStore
+        self.persistsRunState = persistsRunState
     }
 
     // MARK: - 读取今日
 
     /// 重建今日状态：计划从**真相库**读（带 timingStyle 等元数据），实际从日历读。
     func loadToday() async {
+        restoreRunStateIfNeeded()   // 0.20：重启/清后台后，同逻辑日的计时原样接上
         do {
             // 计划块从 PlanStore（带 isFixed/timingStyle），不从日历（日历丢元数据）
             let p = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(.now))
@@ -227,6 +320,7 @@ final class ExecutionViewModel {
         if !pomoIsRest { pomoWorkSegmentsDone += 1 }   // 工作段→休息 = 完成一个工作段
         pomoIsRest.toggle()
         pomoSegStart = .now
+        persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
@@ -240,6 +334,7 @@ final class ExecutionViewModel {
         a.start = Date.now.addingTimeInterval(-(netWork + a.pausedTotal))   // 让 currentElapsed 续到净专注
         active = a
         pomoSegStart = nil
+        persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
@@ -276,6 +371,7 @@ final class ExecutionViewModel {
         pomoWorkSegmentsDone = 0
         pomoRestAccumulated = 0
         breakCount = 0
+        persistRunState()
         refreshPreview()
         if let s = liveSnapshot() { liveActivity.start(s) }
     }
@@ -286,6 +382,7 @@ final class ExecutionViewModel {
         active = nil
         pomoSegStart = nil
         selected = item
+        persistRunState()
         refreshPreview()
         liveActivity.end()
     }
@@ -301,6 +398,7 @@ final class ExecutionViewModel {
         guard item.id != active?.plannedID,
               !isRunningInBackground(item) else { return }
         background.append(BackgroundRun(plannedID: item.id, title: item.title, start: .now))
+        persistRunState()
         refreshPreview()   // 从橙色预览里剔除它（正在做，不该再出现在"从现在起"）
     }
 
@@ -316,6 +414,7 @@ final class ExecutionViewModel {
                              start: run.start, end: .now,
                              timingStyle: TimingStyle.none,
                              pomodoroWorkSegments: nil, interruptions: 0)
+        persistRunState()
         await flushActuals()
         refreshPreview()
     }
@@ -325,6 +424,7 @@ final class ExecutionViewModel {
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
+        persistRunState()
         refreshPreview()
         liveActivity.end()
     }
@@ -347,6 +447,7 @@ final class ExecutionViewModel {
             breakStart = .now
             if active != nil { breakCount += 1 }   // 中途休息计入会话 interruptions
         }
+        persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
 

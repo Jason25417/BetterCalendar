@@ -121,6 +121,14 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 
+                    Picker("日历里删除计划块时", selection: Binding(
+                        get: { ReconcileSettings.deletionPolicy },
+                        set: { ReconcileSettings.deletionPolicy = $0 })) {
+                        ForEach(ReconcileDeletionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Text("双向同步（0.20）：在 Apple 日历里挪/改绿色计划块会自动同步回 App；删除则按此策略处理。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
@@ -158,7 +166,7 @@ struct SettingsView: View {
         Task {
             let r = await AnthropicClient.test(key: candidate, model: m, provider: p)
             switch r {
-            case .success(let model): testResult = "✅ key 有效 · \(model) 可用"
+            case .success(let detail): testResult = "✅ key 有效 · \(detail)"
             case .failure(let e): testResult = "❌ \(e.message)"
             }
             testing = false

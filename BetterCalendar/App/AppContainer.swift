@@ -38,6 +38,7 @@ final class AppContainer {
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
     let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿/橙计划事件的地方
+    let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
@@ -70,9 +71,12 @@ final class AppContainer {
         self.reviewStore = ReviewLocalStore()
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
-        // 反向同步 CalendarSyncService 已删（重构 P1）：日历=只读投影，PlanStore 不再被任何人覆盖
         self.projection = ProjectionService(planStore: planStore, calendarStore: routingStore,
                                             startedDays: startedDays)
+        // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
+        self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
+                                          calendarStore: routingStore, projection: projection,
+                                          startedDays: startedDays)
         self.reschedule = RescheduleService(planStore: planStore, planner: planner)
         #if os(iOS)
         self.liveActivity = ActivityKitLiveActivity()   // iOS：灵动岛 + 锁屏实时模块
@@ -85,6 +89,7 @@ final class AppContainer {
                                             sessionStore: ExecutionSessionStore())
         self.logSync = LogSyncService()
         logSync.start()
+        reconcile.start()
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。

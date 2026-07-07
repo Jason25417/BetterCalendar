@@ -415,6 +415,29 @@ struct HomeView: View {
                 container.router.scheduleRequest = nil   // 消费掉
             }
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
+            // 0.20 双向同步：日历里移除了计划块 → 中性询问（挂起到主窗口，不发通知）。关闭=本次保留、不记住。
+            .confirmationDialog(
+                "日历里移除了 \(container.reconcile.pendingDeletions.count) 件计划，要同步吗？",
+                isPresented: Binding(get: { !container.reconcile.pendingDeletions.isEmpty },
+                                     set: { if !$0 { container.reconcile.resolveDeletions(delete: false, remember: false) } }),
+                titleVisibility: .visible
+            ) {
+                Button("同步移除", role: .destructive) {
+                    container.reconcile.resolveDeletions(delete: true, remember: false)
+                }
+                Button("移除，并记住（以后都移除）", role: .destructive) {
+                    container.reconcile.resolveDeletions(delete: true, remember: true)
+                }
+                Button("保留（画回日历）") {
+                    container.reconcile.resolveDeletions(delete: false, remember: false)
+                }
+                Button("保留，并记住（以后都保留）") {
+                    container.reconcile.resolveDeletions(delete: false, remember: true)
+                }
+            } message: {
+                Text(container.reconcile.pendingDeletions.map(\.title).joined(separator: "、")
+                     + "\n（可随时在 设置→进阶 里改这个策略）")
+            }
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
             .onChange(of: model.targetDay) { _, newDay in
                 if model.hasUnsavedChanges {
