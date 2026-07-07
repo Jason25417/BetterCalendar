@@ -121,6 +121,14 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 
+                    Picker("皮肤", selection: Binding(
+                        get: { ThemeSettings.current.id },
+                        set: { id in if let t = ThemeSettings.all.first(where: { $0.id == id }) { ThemeSettings.current = t } })) {
+                        ForEach(ThemeSettings.all) { Text($0.name).tag($0.id) }
+                    }
+                    Text("皮肤系统接口已就绪（§5.9）：新皮肤设计定稿后会出现在这里，选择后随视图迁移逐步生效。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Picker("日历里删除计划块时", selection: Binding(
                         get: { ReconcileSettings.deletionPolicy },
                         set: { ReconcileSettings.deletionPolicy = $0 })) {

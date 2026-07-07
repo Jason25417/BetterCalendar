@@ -21,6 +21,27 @@ struct BetterCalendarApp: App {
 
     var body: some Scene {
         WindowGroup {
+            themedRoot()
+        }
+        .modelContainer(SharedModelContainer.shared)
+
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(\.appTheme, ThemeSettings.current)
+        }
+        #endif
+    }
+
+    /// 根视图 + 皮肤注入（§5.9 接口：换主题=换这里注入的令牌组，视图逐步迁移消费）。
+    @ViewBuilder
+    private func themedRoot() -> some View {
+        mainTabs()
+            .environment(\.appTheme, ThemeSettings.current)
+    }
+
+    @ViewBuilder
+    private func mainTabs() -> some View {
             TabView(selection: Binding(get: { container.router.selectedTab },
                                        set: { container.router.selectedTab = $0 })) {
                 HomeView(container: container)
@@ -61,14 +82,6 @@ struct BetterCalendarApp: App {
             .onContinueUserActivity(BetterCalendarHandoff.activityType) { activity in
                 continueFromHandoff(activity)
             }
-        }
-        .modelContainer(SharedModelContainer.shared)
-
-        #if os(macOS)
-        Settings {
-            SettingsView()
-        }
-        #endif
     }
 
     @MainActor
