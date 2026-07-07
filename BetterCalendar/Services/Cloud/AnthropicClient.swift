@@ -39,14 +39,15 @@ struct AnthropicClient {
     /// jsonMode=true：**强制模型直接输出 JSON**，杜绝英文思考前言/前后缀——否则复杂任务上模型会先"想一大段"把 token 塞满/破坏 JSON。
     /// - Anthropic：靠**结构化输出** `output_config.format`（传 `jsonSchema` 即启用）。**不再用 assistant prefill**
     ///   ——prefill 在现代模型（Sonnet 4.6 / Opus 4.6+ / Sonnet 5 / Fable 5）上会 HTTP 400，且已被官方废弃。
-    /// - 硅基流动：靠 `response_format: json_object`（不吃 schema）。
-    /// - `jsonSchema` 只对 Anthropic 生效；不传则退化为普通请求（靠 prompt + 上层 extractObject 兜底）。
+    /// - 硅基流动：优先 `response_format: json_schema`（API 参考已支持，schema 级约束解码，2026-07-08 核实）；
+    ///   模型不支持时自动降级 `json_object`（弱保证，只保证合法 JSON）。
+    /// - 不传 `jsonSchema` 则退化为普通请求（靠 prompt + 上层 extractObject 兜底）。
     func complete(system: String, user: String, maxTokens: Int = 2048,
                   jsonMode: Bool = false, jsonSchema: [String: Any]? = nil) async throws -> String {
         guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
         guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
         return provider() == .siliconflow
-            ? try await completeOpenAI(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode)
+            ? try await completeOpenAI(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
             : try await completeAnthropic(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
     }
 
@@ -91,7 +92,9 @@ struct AnthropicClient {
 
     // MARK: 硅基流动（OpenAI 兼容 chat/completions）
 
-    private func completeOpenAI(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool) async throws -> String {
+    private func completeOpenAI(key: String, system: String, user: String, maxTokens: Int,
+                                jsonMode: Bool, jsonSchema: [String: Any]? = nil,
+                                allowSchemaDowngrade: Bool = true) async throws -> String {
         var req = URLRequest(url: URL(string: "https://api.siliconflow.cn/v1/chat/completions")!)
         req.httpMethod = "POST"
         req.timeoutInterval = maxTokens >= 4000 ? 150 : 60
@@ -101,9 +104,25 @@ struct AnthropicClient {
             "model": model(), "max_tokens": maxTokens,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
-        if jsonMode { body["response_format"] = ["type": "json_object"] }   // 强制 JSON（多数 OpenAI 兼容模型支持）
+        // 强制 JSON：有 schema 走 json_schema（约束解码，格式=解码器性质，与 Anthropic 同级保证）；
+        // 无 schema 或已降级 → json_object（弱保证）。
+        if let schema = jsonSchema {
+            body["response_format"] = ["type": "json_schema",
+                                       "json_schema": ["name": "output", "schema": schema]]
+        } else if jsonMode {
+            body["response_format"] = ["type": "json_object"]
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let obj = try await send(req, provider: "硅基流动")
+        let obj: [String: Any]
+        do {
+            obj = try await send(req, provider: "硅基流动")
+        } catch let e as AnthropicError
+            where jsonSchema != nil && allowSchemaDowngrade && e.message.contains("HTTP 4") {
+            // 只在 4xx（所选模型不吃 json_schema）时降级 json_object 重试一次（可见不静默）；超时/5xx 照常抛
+            DevLog.shared.warn("云端", "硅基 \(model()) 不支持 json_schema，降级 json_object 重试：\(e.message.prefix(120))")
+            return try await completeOpenAI(key: key, system: system, user: user, maxTokens: maxTokens,
+                                            jsonMode: true, jsonSchema: nil, allowSchemaDowngrade: false)
+        }
         guard let choices = obj["choices"] as? [[String: Any]], let first = choices.first else {
             throw AnthropicError(message: "响应格式异常")
         }
