@@ -428,6 +428,10 @@ struct HomeView: View {
                 container.router.scheduleRequest = nil   // 消费掉
             }
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
+            // 双向同步回流后即时刷新（0.22.2）：日历手改进了真相源 → 干净视图跟着变；有未保存修改不打扰
+            .onReceive(NotificationCenter.default.publisher(for: ReconcileService.planChangedExternally)) { _ in
+                if !model.hasUnsavedChanges { model.loadConfirmedPlan() }
+            }
             // 0.20 双向同步：日历里的 删除/新建 → 一个中性对话框合并询问（挂起到主窗口，不发通知）。
             // 关闭 = 本次保留现状、不记住。具体是哪几件列在正文里。
             .confirmationDialog(

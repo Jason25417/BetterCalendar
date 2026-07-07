@@ -80,9 +80,13 @@ struct ClaudeScheduleParser: ScheduleParsing {
             if let live = liveDraft {
                 // 云端流式：SSE 边收边把已闭合的块冒进草稿区（0.20.1，同端侧 FM 的体验）
                 var lastCount = 0
+                var scannedLength = 0
                 raw = try await client.completeStreaming(
                     system: system, user: text, maxTokens: 10000, jsonSchema: Self.parseSchema) { partial in
-                    guard partial.hasSuffix("}") || partial.last == "," else { return }   // 只在可能新闭合时重扫
+                    // 新增文本里出现过 "}" 才重扫（0.22.2 修：原按"结尾是}"判断——SSE 分片很少恰好以 } 结尾，扫描几乎不触发=流式看不见）
+                    let newPart = partial.dropFirst(scannedLength)
+                    scannedLength = partial.count
+                    guard newPart.contains("}") else { return }
                     let blocks = Self.liveBlocks(fromPartial: partial)
                     if blocks.count != lastCount {
                         lastCount = blocks.count

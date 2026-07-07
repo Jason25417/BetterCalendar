@@ -43,9 +43,9 @@ final class RescheduleService {
                 guard !b.isFixed, b.title == title else { return [b] }
                 let mid = b.start.addingTimeInterval(b.end.timeIntervalSince(b.start) / 2)
                 return [ScheduledBlock(title: "\(b.title)(上)", start: b.start, end: mid,
-                                       timingStyle: b.timingStyle, priority: b.priority),
+                                       timingStyle: b.timingStyle, priority: b.priority, labels: b.labels),
                         ScheduledBlock(title: "\(b.title)(下)", start: mid, end: b.end,
-                                       timingStyle: b.timingStyle, priority: b.priority)]
+                                       timingStyle: b.timingStyle, priority: b.priority, labels: b.labels)]
             }
         case .compress:
             let deadline = DayContext.endOfPlannableDay(from)

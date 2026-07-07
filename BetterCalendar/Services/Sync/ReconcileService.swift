@@ -120,6 +120,9 @@ final class ReconcileService {
     private(set) var pendingAdditions: [PendingAddition] = []
     var hasPendingChanges: Bool { !pendingDeletions.isEmpty || !pendingAdditions.isEmpty }
 
+    /// 对账把日历手改回流进真相后发出（排日程页借此即时刷新，不用等重新进页）。
+    static let planChangedExternally = Notification.Name("bc.planChangedExternally")
+
     init(planReader: PlanReading, planWriter: PlanWriting, calendarStore: CalendarStore,
          projection: ProjectionService, startedDays: StartedDayStore? = nil) {
         self.planReader = planReader
@@ -182,6 +185,10 @@ final class ReconcileService {
             touchedLabels.insert(Calendar.current.startOfDay(for: label))
             touchedLabels.insert(DayContext.logicalStartOfDay(u.start))   // 拖去别的日子 → 新桶也要重投影
             DevLog.shared.info("对账", "日历手改回流：「\(u.title)」")
+        }
+        // 回流改了真相 → 通知界面刷新（排日程页无未保存修改时重新加载，0.22.2 Jason 报"改了不实时"）
+        if !plan.updates.isEmpty {
+            NotificationCenter.default.post(name: Self.planChangedExternally, object: nil)
         }
         if !plan.deletions.isEmpty {
             switch ReconcileSettings.deletionPolicy {

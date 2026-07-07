@@ -1339,6 +1339,28 @@ struct LogicTests {
         #expect(lc.start == at(2026,7,10,13))                                    // 下一块接在槽（3h）后
     }
 
+    /// 防线：确认过的并行计划经「开始今天」reflow（PlanStore→morningReflow→layOut）绑定不散、标签不丢。
+    /// （Jason 报"开始今天并行消失"——若此测试绿，则现象=老确认数据没标签，需 0.22 重新确认。）
+    @Test func morningReflowPreservesParallelBinding() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let g = ScheduledBlock.parallelPrefix + "P1"
+        let label = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(byAdding: .hour, value: 9, to: label)!
+        try store.replacePlanned([
+            ScheduledBlock(title: "A", start: s, end: s.addingTimeInterval(3 * 3600), labels: [g]),
+            ScheduledBlock(title: "B", start: s, end: s.addingTimeInterval(3600), labels: [g]),
+            ScheduledBlock(title: "C", start: s.addingTimeInterval(4 * 3600), end: s.addingTimeInterval(5 * 3600)),
+        ], on: label)
+        let svc = RescheduleService(planStore: store, planner: NaivePlanningEngine())
+        let decision = try await svc.morningReflow(day: label, now: .now)
+        let a = decision.orderedBlocks.first { $0.title == "A" }
+        let b = decision.orderedBlocks.first { $0.title == "B" }
+        #expect(a?.start == b?.start)                       // 同组同起点（绑定没散）
+        #expect(a?.parallelGroup == g && b?.parallelGroup == g)   // 标签存活
+    }
+
     /// labels 全链路存活：PlanStore 往返 + 解析 parallel 字段 → parallel: 标签。
     @Test func parallelLabelsSurviveStoreAndParse() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
