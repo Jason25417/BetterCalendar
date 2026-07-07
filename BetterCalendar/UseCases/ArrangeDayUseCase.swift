@@ -29,7 +29,7 @@ struct ArrangeDayUseCase {
             let (s, e) = Self.clampToDay(start: start, end: end, referenceDate: referenceDate)
             return ScheduledBlock(title: pb.title, start: s, end: e,
                                   isFixed: pb.isFixed, isAnchor: pb.isAnchor, timingStyle: pb.timingStyle,
-                                  priority: pb.priority, deadline: pb.deadline)
+                                  priority: pb.priority, deadline: pb.deadline, labels: pb.labels)
         }
         let decision = try await planner.arrange(scheduled, pool: pool, now: now)
         return Outcome(decision: decision, longTasks: parsed.longTasks, isLoose: parsed.isLoose)

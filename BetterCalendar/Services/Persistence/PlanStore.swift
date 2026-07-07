@@ -49,7 +49,8 @@ final class PlanStore: PlanReading, PlanWriting {
             .sorted { $0.start < $1.start }
             .map { ScheduledBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                   isFixed: $0.isFixed, isAnchor: $0.isAnchor, timingStyle: $0.timingStyle,
-                                  priority: $0.priority, deadline: $0.deadline, linkedTaskID: $0.linkedTaskID) }
+                                  priority: $0.priority, deadline: $0.deadline, linkedTaskID: $0.linkedTaskID,
+                                  labels: $0.labels) }
         DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(Self.dayStr(day))")
         return result
     }
@@ -64,7 +65,7 @@ final class PlanStore: PlanReading, PlanWriting {
             context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
                                      isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
                                      timingStyle: b.timingStyle, priority: b.priority,
-                                     deadline: b.deadline, linkedTaskID: b.linkedTaskID))
+                                     deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID))
         }
         try context.save()
         DevLog.shared.info("PlanStore", "写入 \(blocks.count) 计划块 @ \(Self.dayStr(day))")
@@ -86,7 +87,7 @@ final class PlanStore: PlanReading, PlanWriting {
             context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
                                      isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
                                      timingStyle: b.timingStyle, priority: b.priority,
-                                     deadline: b.deadline, linkedTaskID: b.linkedTaskID))
+                                     deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID))
         }
         try context.save()
         DevLog.shared.info("PlanStore", "对账回流新增 \(blocks.count) 块（日历新建）")

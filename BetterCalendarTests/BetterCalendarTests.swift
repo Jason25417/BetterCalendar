@@ -1324,6 +1324,40 @@ struct LogicTests {
         #expect(JSONText.completeArrayObjects(in: #"{"loo"#).isEmpty)
     }
 
+    // MARK: 0.22 并行标签（同组=同时段，reflow 绑定）
+
+    /// reflow 布局同组绑定：同 parallel 组的块同一起点、各自时长；槽长=组内最长；后续块接在槽后。
+    @Test func reflowLayoutBindsParallelGroup() {
+        let g = ScheduledBlock.parallelPrefix + "P1"
+        let a = ScheduledBlock(title: "A", start: at(2026,7,10,9), end: at(2026,7,10,12), labels: [g])   // 3h
+        let b = ScheduledBlock(title: "B", start: at(2026,7,10,9), end: at(2026,7,10,10), labels: [g])   // 1h
+        let c = ScheduledBlock(title: "C", start: at(2026,7,10,13), end: at(2026,7,10,14))               // 无组 1h
+        let laid = ReflowLayout.layOut(flexible: [a, b, c], fixed: [], from: at(2026,7,10,10))
+        let la = laid.first { $0.title == "A" }!, lb = laid.first { $0.title == "B" }!, lc = laid.first { $0.title == "C" }!
+        #expect(la.start == at(2026,7,10,10) && lb.start == at(2026,7,10,10))   // 同组同起点
+        #expect(la.end == at(2026,7,10,13) && lb.end == at(2026,7,10,11))       // 各自保时长
+        #expect(lc.start == at(2026,7,10,13))                                    // 下一块接在槽（3h）后
+    }
+
+    /// labels 全链路存活：PlanStore 往返 + 解析 parallel 字段 → parallel: 标签。
+    @Test func parallelLabelsSurviveStoreAndParse() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let store = PlanStore(context: container.mainContext)
+        let g = ScheduledBlock.parallelPrefix + "洗衣组"
+        let label = at(2026, 7, 10, 0)
+        try store.replacePlanned([ScheduledBlock(title: "洗衣服", start: at(2026,7,10,9),
+                                                 end: at(2026,7,10,10), labels: [g])], on: label)
+        #expect(try store.plannedBlocks(on: label).first?.parallelGroup == g)   // 落库往返不丢
+
+        let json = #"{"loose":false,"longTasks":[],"blocks":[{"title":"A","start":"2026-07-10 09:00","end":"2026-07-10 10:00","parallel":"P1"},{"title":"B","start":"2026-07-10 09:00","end":"2026-07-10 11:00","parallel":"P1"},{"title":"C","start":"2026-07-10 11:00","end":"2026-07-10 12:00","parallel":null}]}"#
+        let decoded = ClaudeScheduleParser.decodePlan(json)
+        #expect(decoded?.blocks.count == 3)
+        #expect(decoded?.blocks[0].labels == [ScheduledBlock.parallelPrefix + "P1"])
+        #expect(decoded?.blocks[1].labels == [ScheduledBlock.parallelPrefix + "P1"])
+        #expect(decoded?.blocks[2].labels == [])
+    }
+
     /// 计时方式实时改（0.21）：番茄工作段中锁定；转番茄带目标段数、做满自动转轻计时续走。
     @Test func executionTimingChangeRespectsPomodoroLockAndTarget() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)

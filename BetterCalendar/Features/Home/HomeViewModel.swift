@@ -276,9 +276,13 @@ final class HomeViewModel {
                                              originalRequest: inputText, now: .now)) ?? scheduled
         // 防呆：没让改的属性不许批量翻转（端侧模型抽风：全固定/全★/全番茄——2026-07-07 Jason 实测）
         let result = Self.guardRefineFlags(original: scheduled, refined: raw, command: cmd)
+        // 并行组按标题留存（0.22）：LLM 微调重建块会丢 labels，按标题补回（同 linkedTaskID 的做法）
+        var labelsByTitle: [String: [String]] = [:]
+        for b in blocks where !b.labels.isEmpty { labelsByTitle[b.title] = b.labels }
         blocks = result.sorted { $0.start < $1.start }.map { b in
             var eb = EditableBlock(from: b)
             if eb.linkedTaskID == nil, let l = linkByTitle[b.title] { eb.linkedTaskID = l }
+            if eb.labels.isEmpty, let ls = labelsByTitle[b.title] { eb.labels = ls }
             return eb
         }
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
@@ -484,6 +488,46 @@ final class HomeViewModel {
 
     func delete(id: UUID) {
         blocks.removeAll { $0.id == id }
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
+    }
+
+    // MARK: - 并行组（0.22：同组=同时段，reflow 绑定；手动建/解组）
+
+    /// 某块的并行伙伴标题（徽章 hover 用）。
+    func parallelPeerTitles(of id: UUID) -> [String] {
+        guard let b = blocks.first(where: { $0.id == id }), let g = b.parallelGroup else { return [] }
+        return blocks.filter { $0.id != id && $0.parallelGroup == g }.map(\.title)
+    }
+
+    /// 把两块设为并行（入对方组/建新组），并把时间对齐到较早者（同组=同时段）；
+    /// 若两者已同组 → 解除 other 的并行（组只剩一人时顺带清空）。
+    func toggleParallel(_ id: UUID, with otherID: UUID) {
+        guard let i = blocks.firstIndex(where: { $0.id == id }),
+              let j = blocks.firstIndex(where: { $0.id == otherID }) else { return }
+        let mine = blocks[i].parallelGroup
+        let theirs = blocks[j].parallelGroup
+        if let g = mine, g == theirs {
+            // 已同组 → 把 other 摘出去；组只剩自己则自己也清
+            blocks[j].labels.removeAll { $0.hasPrefix(EditableBlock.parallelPrefix) }
+            if blocks.filter({ $0.parallelGroup == g }).count < 2 {
+                blocks[i].labels.removeAll { $0.hasPrefix(EditableBlock.parallelPrefix) }
+            }
+        } else {
+            let group = theirs ?? mine ?? (EditableBlock.parallelPrefix + String(UUID().uuidString.prefix(8)))
+            for k in [i, j] {
+                blocks[k].labels.removeAll { $0.hasPrefix(EditableBlock.parallelPrefix) }
+                blocks[k].labels.append(group)
+            }
+            // 同组=同时段：对齐到组内最早起点（各自保时长）
+            if let earliest = blocks.filter({ $0.parallelGroup == group }).map(\.start).min() {
+                for k in blocks.indices where blocks[k].parallelGroup == group {
+                    let dur = blocks[k].end.timeIntervalSince(blocks[k].start)
+                    blocks[k].start = earliest
+                    blocks[k].end = earliest.addingTimeInterval(dur)
+                }
+            }
+        }
+        withAnimation { blocks.sort { $0.start < $1.start } }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 

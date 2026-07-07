@@ -21,11 +21,13 @@ nonisolated struct DraftSnapshot: Codable {
         var deadline: Date?
         var fromPool: Bool
         var linkedTaskID: UUID? = nil   // 0.18.2；旧快照缺此键 → 解码为 nil，兼容
+        var labels: [String]? = nil     // 0.22 并行组等扩展标签；旧快照缺此键 → nil，兼容
 
         init(from b: EditableBlock) {
             title = b.title; start = b.start; end = b.end; isFixed = b.isFixed
             timingStyleRaw = b.timingStyle.rawValue; priorityRaw = b.priority.rawValue
             deadline = b.deadline; fromPool = b.fromPool; linkedTaskID = b.linkedTaskID
+            labels = b.labels.isEmpty ? nil : b.labels
         }
 
         var editable: EditableBlock {
@@ -34,6 +36,7 @@ nonisolated struct DraftSnapshot: Codable {
                                    priority: BlockPriority(rawValue: priorityRaw) ?? .normal,
                                    deadline: deadline, linkedTaskID: linkedTaskID)
             eb.fromPool = fromPool
+            eb.labels = labels ?? []
             return eb
         }
     }

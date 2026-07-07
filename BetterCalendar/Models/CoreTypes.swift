@@ -85,6 +85,7 @@ struct ParsedBlock: Sendable, Identifiable {
     var timingStyle: TimingStyle = .light
     var priority: BlockPriority = .normal
     var deadline: Date?
+    var labels: [String] = []    // 0.22：并行组 "parallel:<组名>" 等扩展标签
 }
 
 /// 解析出的「在途」长期事项提案（M10）：远期 DDL 任务 / 长线作业，确认写入时入池。
@@ -115,6 +116,13 @@ struct ScheduledBlock: Sendable, Identifiable {
     var priority: BlockPriority = .normal
     var deadline: Date?
     var linkedTaskID: UUID?      // 精确归属：本块属于哪个未来任务（0.18.2）
+    var labels: [String] = []    // 扩展标签（0.22 首用：并行组 "parallel:<组名>"，同组=同时段、reflow 绑定）
+}
+
+extension ScheduledBlock {
+    static let parallelPrefix = "parallel:"
+    /// 所属并行组标签（nil=不并行）。同组块 reflow/重排时作为整体同起点铺开。
+    var parallelGroup: String? { labels.first { $0.hasPrefix(Self.parallelPrefix) } }
 }
 
 /// reflow 排不下（弹性块结束超过逻辑日尾/睡前）时的冲突。

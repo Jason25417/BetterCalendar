@@ -25,6 +25,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
             guard let title = b["title"] as? String,
                   let start = DateParsing.parse(b["start"] as? String),
                   let end = DateParsing.parse(b["end"] as? String) else { dropped += 1; continue }
+            // 并行组（0.22）：同组同名 parallel 值 → labels "parallel:<组名>"（reflow 同组绑定）
+            let parallel = (b["parallel"] as? String)?.trimmingCharacters(in: .whitespaces)
             blocks.append(ParsedBlock(
                 title: title, start: start, end: end,
                 durationMinutes: Int(end.timeIntervalSince(start) / 60),
@@ -33,7 +35,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 category: b["category"] as? String ?? "",
                 timingStyle: TimingStyle(rawValue: b["timingStyle"] as? String ?? "light") ?? .light,
                 priority: BlockPriority(rawValue: b["priority"] as? String ?? "normal") ?? .normal,
-                deadline: DateParsing.parse(b["deadline"] as? String)))
+                deadline: DateParsing.parse(b["deadline"] as? String),
+                labels: (parallel?.isEmpty == false) ? [ScheduledBlock.parallelPrefix + parallel!] : []))
         }
         var longTasks: [ParsedLongTask] = []
         for t in (obj["longTasks"] as? [[String: Any]]) ?? [] {
@@ -156,7 +159,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
         【块规则】
         - isFixed：**只有"与他人约定、时刻不可改"的事**（会议/上课/约诊/班车）=true；个人任务（写作业/写代码/健身/读书/吃饭）即使说了时间也 false（否则 re-flow 调不动）。
         - **不漏**：用户提到的每件要做的事都出一个块（或 longTasks），逐一保留、数量对得上；真排不下宁可排到收工后，也别省略。
-        - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。
+        - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。并行的块给**同一个 parallel 组名**（如 "P1"；第二组用 "P2"）；不并行的块 parallel=null——这个组名让重排时同组保持同时段。
         - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）。
         - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
         - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
@@ -180,7 +183,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 "type": "array",
                 "items": [
                     "type": "object", "additionalProperties": false,
-                    "required": ["title", "start", "end", "isFixed", "isAnchor", "category", "timingStyle", "priority", "deadline"],
+                    "required": ["title", "start", "end", "isFixed", "isAnchor", "category", "timingStyle", "priority", "deadline", "parallel"],
                     "properties": [
                         "title": ["type": "string"],
                         "start": ["type": "string"],
@@ -191,6 +194,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                         "timingStyle": ["type": "string", "enum": ["pomodoro", "light", "none"]],
                         "priority": ["type": "string", "enum": ["normal", "important"]],
                         "deadline": ["type": ["string", "null"]],
+                        "parallel": ["type": ["string", "null"]],
                     ],
                 ],
             ],

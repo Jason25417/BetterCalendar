@@ -278,6 +278,12 @@ struct HomeView: View {
                                 EditableRow(block: model.binding(for: item.id),
                                             poolTasks: container.longTasks.items,
                                             referenceDay: model.targetDay,
+                                            parallelCandidates: model.blocks
+                                                .filter { $0.id != item.id && !$0.isAnchor }
+                                                .map { ($0.id, $0.title,
+                                                        $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
+                                            parallelPeers: model.parallelPeerTitles(of: item.id),
+                                            onToggleParallel: { model.toggleParallel(item.id, with: $0) },
                                             onDelete: { model.delete(id: item.id) })
                                 .contextMenu {
                                     Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
@@ -362,6 +368,12 @@ struct HomeView: View {
                             EditableRow(block: model.binding(for: item.id),
                                         poolTasks: container.longTasks.items,
                                         referenceDay: model.targetDay,
+                                        parallelCandidates: model.blocks
+                                            .filter { $0.id != item.id && !$0.isAnchor }
+                                            .map { ($0.id, $0.title,
+                                                    $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
+                                        parallelPeers: model.parallelPeerTitles(of: item.id),
+                                        onToggleParallel: { model.toggleParallel(item.id, with: $0) },
                                         onDelete: { model.delete(id: item.id) })
                             .contextMenu {
                                 Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
@@ -638,6 +650,10 @@ struct EditableRow: View {
     @Binding var block: EditableBlock
     var poolTasks: [LongTask] = []   // 可选归属的未来任务（0.18.2 手动选归属；空=不显归属菜单）
     var referenceDay: Date?          // 目标日：块不在这天（跨午夜落次日凌晨）→ 显「次日」徽章；nil=不显
+    /// 并行组（0.22）：可结组的其它块（id/标题/是否已同组）+ 伙伴标题（徽章 hover）；空=不显链条菜单
+    var parallelCandidates: [(id: UUID, title: String, inGroup: Bool)] = []
+    var parallelPeers: [String] = []
+    var onToggleParallel: ((UUID) -> Void)? = nil
     var onDelete: () -> Void
 
     private var isNextDay: Bool {
@@ -702,6 +718,24 @@ struct EditableRow: View {
                             .help("硬截止（DDL）：必须在此之前完成——会写进提醒事项、按它提前提醒")
                     }
                     Spacer()
+                    // 并行组（0.22）：链条菜单——选一块结组（同组=同时段、reflow 绑定）；再选已同组的=解除
+                    if let onToggleParallel, !parallelCandidates.isEmpty || block.parallelGroup != nil {
+                        Menu {
+                            ForEach(parallelCandidates, id: \.id) { c in
+                                Button(c.inGroup ? "✓ \(c.title)（点击解除）" : c.title) {
+                                    onToggleParallel(c.id)
+                                }
+                            }
+                            if parallelCandidates.isEmpty { Text("没有可结组的块") }
+                        } label: {
+                            Image(systemName: block.parallelGroup != nil ? "link.circle.fill" : "link")
+                                .foregroundStyle(block.parallelGroup != nil ? .teal : .secondary)
+                        }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help(block.parallelGroup != nil
+                              ? "与「\(parallelPeers.joined(separator: "、"))」并行（同时段，重排时绑定）"
+                              : "与别的块并行（同时段进行，重排时保持绑定）")
+                    }
                     // 归属未来任务：放右侧空位（不破坏左侧标题对齐）；投入精确记到它名下
                     if !poolTasks.isEmpty || block.linkedTaskID != nil {
                         Menu {

@@ -76,11 +76,13 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
     private static func parsed(from b: FMBlock.PartiallyGenerated) -> ParsedBlock? {
         guard let title = b.title, let ss = b.start, let es = b.end,
               let s = DateParsing.parse(ss), let e = DateParsing.parse(es) else { return nil }
+        let parallel = (b.parallel ?? "").trimmingCharacters(in: .whitespaces)
         return ParsedBlock(title: title, start: s, end: e,
                            durationMinutes: Int(e.timeIntervalSince(s) / 60),
                            isFixed: b.isFixed ?? false, isAnchor: b.isAnchor ?? false, category: "",
                            timingStyle: TimingStyle(rawValue: b.timingStyle ?? "light") ?? .light,
-                           priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal, deadline: nil)
+                           priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal, deadline: nil,
+                           labels: parallel.isEmpty ? [] : [ScheduledBlock.parallelPrefix + parallel])
     }
 
     /// 部分块 → ScheduledBlock（流式预览用；要求起止都成形且有效）。
@@ -102,7 +104,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         把用户用自然语言描述的一天转成结构化日程。现在 \(now)。目标日 \(target)——所有块排在目标日当天，start/end 用 "YYYY-MM-DD HH:mm"，睡前跨午夜的块日期写次日。
         - isFixed=true 只给"与他人约定、时刻不可改"的事（会议/上课/约诊/班车）；个人任务（写作业/健身/读书/吃饭）即使有时间也 false。
         - 用户提到的每件事都出一个块、逐一保留不漏。
-        - 默认互不重叠；仅当用户明说可并行时，让对应块重叠在同一时段、各自成块。
+        - 默认互不重叠；仅当用户明说可并行时，让对应块重叠在同一时段、各自成块，并给同一个 parallel 组名（如 P1）；不并行的块 parallel 留空。
         - 作息（吃饭/通勤/午休/睡觉）isAnchor=true。
         - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
         - priority 默认 normal，要紧/紧急用 important。
@@ -140,6 +142,8 @@ struct FMBlock {
     var timingStyle: String
     @Guide(description: "优先级，只能取 normal / important，默认 normal")
     var priority: String
+    @Guide(description: "并行组名：用户明说同时进行的几件事给同一个组名（如 P1）；不并行留空字符串")
+    var parallel: String
 }
 
 @Generable

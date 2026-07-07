@@ -21,11 +21,12 @@ struct EditableBlock: Identifiable {
     var deadline: Date?   // 硬 DDL（≠isFixed）：必须在此之前做完；LLM 解析给出，提醒 due 优先用它
     var fromPool: Bool = false   // 来自「未来任务」的建议块（M10-2：UI 标来源，删除零成本）
     var linkedTaskID: UUID?      // 精确归属：本块属于哪个未来任务（0.18.2：自动匹配 + 草稿行可手动改）
+    var labels: [String] = []    // 扩展标签（0.22：并行组 "parallel:<组名>"）
 
     init(from b: ScheduledBlock) {
         id = b.id; title = b.title; start = b.start; end = b.end
         isFixed = b.isFixed; isAnchor = b.isAnchor; timingStyle = b.timingStyle; priority = b.priority
-        deadline = b.deadline; linkedTaskID = b.linkedTaskID
+        deadline = b.deadline; linkedTaskID = b.linkedTaskID; labels = b.labels
     }
     init(title: String, start: Date, end: Date,
          isFixed: Bool = false, isAnchor: Bool = false,
@@ -38,6 +39,9 @@ struct EditableBlock: Identifiable {
     var scheduled: ScheduledBlock {
         ScheduledBlock(id: id, title: title, start: start, end: end,
                        isFixed: isFixed, isAnchor: isAnchor, timingStyle: timingStyle, priority: priority,
-                       deadline: deadline, linkedTaskID: linkedTaskID)
+                       deadline: deadline, linkedTaskID: linkedTaskID, labels: labels)
     }
+
+    static let parallelPrefix = ScheduledBlock.parallelPrefix
+    var parallelGroup: String? { labels.first { $0.hasPrefix(Self.parallelPrefix) } }
 }
