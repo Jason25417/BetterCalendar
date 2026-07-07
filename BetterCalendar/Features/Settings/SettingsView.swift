@@ -126,7 +126,12 @@ struct SettingsView: View {
                         set: { ReconcileSettings.deletionPolicy = $0 })) {
                         ForEach(ReconcileDeletionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
-                    Text("双向同步（0.20）：在 Apple 日历里挪/改绿色计划块会自动同步回 App；删除则按此策略处理。")
+                    Picker("日历里新建日程时", selection: Binding(
+                        get: { ReconcileSettings.additionPolicy },
+                        set: { ReconcileSettings.additionPolicy = $0 })) {
+                        ForEach(ReconcileAdditionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    Text("双向同步（0.20）：在 Apple 日历里挪/改绿色计划块会自动同步回 App；删除/新建按上面两条策略处理。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)

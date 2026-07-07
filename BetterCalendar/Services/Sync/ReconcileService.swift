@@ -35,10 +35,29 @@ enum ReconcileDeletionPolicy: String, CaseIterable {
     }
 }
 
+/// 日历里**新建**日程（无章事件）的处置策略（0.20.2，Jason 提：新建也询问、与删除弹窗合并）。
+enum ReconcileAdditionPolicy: String, CaseIterable {
+    case ask = "ask"               // 每次询问（默认）
+    case alwaysAdd = "alwaysAdd"   // 以后都自动加进计划
+    case ignore = "ignore"         // 以后都忽略（下次投影清除——日历不是新建入口）
+
+    var label: String {
+        switch self {
+        case .ask: return "每次询问"
+        case .alwaysAdd: return "自动加进计划"
+        case .ignore: return "忽略（投影时清除）"
+        }
+    }
+}
+
 enum ReconcileSettings {
     static var deletionPolicy: ReconcileDeletionPolicy {
         get { ReconcileDeletionPolicy(rawValue: UserDefaults.standard.string(forKey: "reconcile.deletionPolicy") ?? "") ?? .ask }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "reconcile.deletionPolicy") }
+    }
+    static var additionPolicy: ReconcileAdditionPolicy {
+        get { ReconcileAdditionPolicy(rawValue: UserDefaults.standard.string(forKey: "reconcile.additionPolicy") ?? "") ?? .ask }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "reconcile.additionPolicy") }
     }
 }
 
@@ -79,6 +98,15 @@ final class ReconcileService {
         let title: String
         let label: Date    // 所属逻辑日标签
     }
+    /// 待用户确认的日历新建（无章事件 → 问要不要加进计划；与删除同一个对话框，不跳两次）。
+    struct PendingAddition: Identifiable {
+        var id: String { key }
+        let key: String    // 标题+起始分钟 去重键
+        let title: String
+        let start: Date
+        let end: Date
+        let label: Date
+    }
 
     private let planReader: PlanReading
     private let planWriter: PlanWriting      // 显式授权：对账是 confirm 之外唯一的计划写者（权限表在案）
@@ -89,6 +117,8 @@ final class ReconcileService {
     private var debounce: Task<Void, Never>?
 
     private(set) var pendingDeletions: [PendingDeletion] = []
+    private(set) var pendingAdditions: [PendingAddition] = []
+    var hasPendingChanges: Bool { !pendingDeletions.isEmpty || !pendingAdditions.isEmpty }
 
     init(planReader: PlanReading, planWriter: PlanWriting, calendarStore: CalendarStore,
          projection: ProjectionService, startedDays: StartedDayStore? = nil) {
@@ -119,13 +149,24 @@ final class ReconcileService {
 
     /// 对账 逻辑今天…+7 天（与启动对账同窗）；实时模式（已开始）的日子跳过（橙色归执行层）。
     func reconcileWindow() async {
-        guard CalendarSettings.backend == .eventKit else { return }
+        guard CalendarSettings.backend == .eventKit,
+              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         let events = (try? await calendarStore.read(kind: .planned)) ?? []
         for offset in 0..<8 {
             let label = DayContext.logicalDay(offset: offset)
             if startedDays?.isStarted(label) ?? false { continue }
             await reconcile(label: label, allGreenEvents: events)
         }
+    }
+
+    /// 启动同步（App 打开时调，取代直接投影）：先对账（把日历里攒的手改/新建/删除都识别出来），
+    /// 再投影补章自愈——**跳过有待确认新建的日子**（先投影会把用户新建的事件当无主清掉，问都没问）。
+    func startupSync() async {
+        guard CalendarSettings.backend == .eventKit,
+              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+        await reconcileWindow()
+        let skip = Set(pendingAdditions.map { Calendar.current.startOfDay(for: $0.label) })
+        await projection.projectUpcomingWindow(skipping: skip)
     }
 
     private func reconcile(label: Date, allGreenEvents: [CalendarEventDraft]) async {
@@ -157,26 +198,64 @@ final class ReconcileService {
                 }
             }
         }
+        // 日历里新建的无章事件（0.20.2）：按策略 加进计划 / 忽略清除 / 询问（挂起，暂不重画防误清）
+        if !plan.additions.isEmpty {
+            switch ReconcileSettings.additionPolicy {
+            case .alwaysAdd:
+                try? planWriter.insertPlanned(plan.additions.map {
+                    ScheduledBlock(title: $0.title, start: $0.start, end: $0.end)
+                })
+                touchedLabels.insert(Calendar.current.startOfDay(for: label))   // 投影认领盖章
+                DevLog.shared.info("对账", "日历新建 \(plan.additions.count) 件已加进计划（策略=自动添加）")
+            case .ignore:
+                touchedLabels.insert(Calendar.current.startOfDay(for: label))   // 重画=清除无主事件
+            case .ask:
+                for e in plan.additions {
+                    let key = "\(e.title)#\(Int(e.start.timeIntervalSinceReferenceDate / 60))"
+                    if !pendingAdditions.contains(where: { $0.key == key }) {
+                        pendingAdditions.append(PendingAddition(key: key, title: e.title,
+                                                                start: e.start, end: e.end, label: label))
+                    }
+                }
+            }
+        }
         if plan.needsRepaint { touchedLabels.insert(Calendar.current.startOfDay(for: label)) }
-        for l in touchedLabels { try? await projection.project(label: l) }
+        // 有待确认新建的日子先不重画：重画会把用户新建的事件当无主清掉（问都没问）
+        let holdLabels = Set(pendingAdditions.map { Calendar.current.startOfDay(for: $0.label) })
+        for l in touchedLabels where !holdLabels.contains(l) { try? await projection.project(label: l) }
     }
 
-    /// 用户对删除对话框的选择。remember=记住（写进设置，以后不再问）。
+    /// 用户对「日历改动」对话框的选择（删除+新建合并结算，0.20.2）。
+    /// sync=true：删除照删、新建入库；sync=false：保留现状（删的画回、新建的清除）。
+    /// remember=记住：只对**本批出现过的类别**写设置（没出现的类别不动）。
     /// **同步入口**：快照并清空挂起必须在按钮动作里立即发生——对话框 dismiss 回调会紧跟着触发
     /// "无选择=保留一次"的兜底，异步清空会造成二次结算。
-    func resolveDeletions(delete: Bool, remember: Bool) {
-        let items = pendingDeletions
+    func resolveChanges(sync: Bool, remember: Bool) {
+        let dels = pendingDeletions
+        let adds = pendingAdditions
         pendingDeletions = []
-        guard !items.isEmpty else { return }
-        if remember { ReconcileSettings.deletionPolicy = delete ? .alwaysDelete : .neverDelete }
+        pendingAdditions = []
+        guard !dels.isEmpty || !adds.isEmpty else { return }
+        if remember {
+            if !dels.isEmpty { ReconcileSettings.deletionPolicy = sync ? .alwaysDelete : .neverDelete }
+            if !adds.isEmpty { ReconcileSettings.additionPolicy = sync ? .alwaysAdd : .ignore }
+        }
         Task { [weak self] in
             guard let self else { return }
-            if delete { try? self.planWriter.deletePlanned(ids: items.map(\.id)) }
-            // 删=投影清掉残留；留=投影画回。两条路都收敛到真相源。
-            for label in Set(items.map { Calendar.current.startOfDay(for: $0.label) }) {
-                try? await self.projection.project(label: label)
+            if sync {
+                if !dels.isEmpty { try? self.planWriter.deletePlanned(ids: dels.map(\.id)) }
+                if !adds.isEmpty {
+                    try? self.planWriter.insertPlanned(adds.map {
+                        ScheduledBlock(title: $0.title, start: $0.start, end: $0.end)
+                    })
+                }
             }
-            DevLog.shared.info("对账", delete ? "已同步移除 \(items.count) 块" : "已保留 \(items.count) 块（画回日历）")
+            // 同步/保留 两条路都以真相源重画收敛：删的清残留或画回；新建的被认领盖章或清除。
+            let labels = Set((dels.map(\.label) + adds.map(\.label)).map { Calendar.current.startOfDay(for: $0) })
+            for label in labels { try? await self.projection.project(label: label) }
+            DevLog.shared.info("对账", sync
+                ? "已同步日历改动：移除 \(dels.count) · 新增 \(adds.count)"
+                : "已保留现状：画回 \(dels.count) · 清除新建 \(adds.count)")
         }
     }
 
@@ -187,7 +266,8 @@ final class ReconcileService {
     struct DiffPlan {
         var updates: [Update] = []
         var deletions: [Deletion] = []
-        var needsRepaint = false   // 有无主事件/缺投影 → 让投影按真相源重画
+        var additions: [CalendarEventDraft] = []   // 日历里新建的无章事件 → 按策略 加/清/问（0.20.2）
+        var needsRepaint = false   // 带章但真相没有/缺投影 → 让投影按真相源重画
     }
 
     /// 真相 × 日历事件 × 指纹 → 行动清单。
@@ -195,13 +275,13 @@ final class ReconcileService {
     /// - 事件在、与真相不同：与指纹一致=没人动过日历（是真相变了没投影）→ 重画；
     ///   与指纹不同 = 用户手改 → 回流（时间+标题）。
     /// - 事件不在：指纹里有 = 我们写过、被用户删了 → 删除候选；指纹里没有 = 从没投影过 → 重画。
-    /// - 无章/不认识的事件 → 重画（投影会清掉；日历不是新建入口）。
+    /// - 无章事件 = 用户在日历里新建 → additions（按策略处理，不再直接当垃圾重画清掉）。
     static func diff(truth: [ScheduledBlock], events: [CalendarEventDraft],
                      fingerprint: [String: String]) -> DiffPlan {
         var plan = DiffPlan()
         var byID: [UUID: CalendarEventDraft] = [:]
         for e in events {
-            if let bid = e.blockID { byID[bid] = e } else { plan.needsRepaint = true }
+            if let bid = e.blockID { byID[bid] = e } else { plan.additions.append(e) }
         }
         let truthIDs = Set(truth.map(\.id))
         if byID.keys.contains(where: { !truthIDs.contains($0) }) { plan.needsRepaint = true }

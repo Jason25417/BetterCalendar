@@ -56,16 +56,20 @@ final class ProjectionService {
     /// 把 逻辑今天…+N-1 天 逐日投影一遍——无章存量事件被认领补章、任何漂移被真相源纠正。
     /// **过去的日子不动**（不审计历史；老历史事件无章无害——只有会被再投影的日子才需要章）。
     /// 只在 真日历后端 且 已授权 时跑：不让冷启动弹权限框（权限首次确认写入时才请求）。
-    func projectUpcomingWindow(days: Int = 8) async {
+    /// skipping：有待确认「日历新建」的日子先不投影（投影会把无主新建事件清掉，问都没问——0.20.2）。
+    func projectUpcomingWindow(days: Int = 8, skipping: Set<Date> = []) async {
         guard CalendarSettings.backend == .eventKit,
               EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         for offset in 0..<days {
-            do { try await project(label: DayContext.logicalDay(offset: offset)) }
+            let label = DayContext.logicalDay(offset: offset)
+            if skipping.contains(Calendar.current.startOfDay(for: label)) { continue }
+            do { try await project(label: label) }
             catch {
                 DevLog.shared.warn("投影", "启动对账 +\(offset) 天失败：\(error.localizedDescription)")
             }
         }
-        DevLog.shared.info("投影", "启动对账完成：今天…+\(days - 1) 天已按真相源对齐/补章")
+        DevLog.shared.info("投影", "启动对账完成：今天…+\(days - 1) 天已按真相源对齐/补章"
+                           + (skipping.isEmpty ? "" : "（\(skipping.count) 天有待确认新建，暂缓）"))
     }
 
     private static func dayStr(_ d: Date) -> String {

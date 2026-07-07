@@ -25,6 +25,8 @@ protocol PlanWriting: AnyObject {
     func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws
     /// 按 ID 就地更新单块的 时间/标题（对账回流：日历手改 → 真相源；逻辑日归桶随 start 自动跟走）。
     func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws
+    /// 追加若干块（对账回流：日历里新建的日程经确认后入库；逻辑日归桶随 start 自动落位）。
+    func insertPlanned(_ blocks: [ScheduledBlock]) throws
     /// 按 ID 删除若干块（对账回流：日历删除经用户确认后 → 真相源）。
     func deletePlanned(ids: [UUID]) throws
 }
@@ -75,6 +77,19 @@ final class PlanStore: PlanReading, PlanWriting {
         block.start = start; block.end = end; block.title = title
         try context.save()
         DevLog.shared.info("PlanStore", "对账回流更新「\(title)」→ \(Self.dayStr(start))")
+    }
+
+    /// 追加块（0.20.2 对账回流：日历新建经确认后入库，默认弹性/轻计时/普通优先级）。
+    func insertPlanned(_ blocks: [ScheduledBlock]) throws {
+        guard !blocks.isEmpty else { return }
+        for b in blocks {
+            context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
+                                     isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
+                                     timingStyle: b.timingStyle, priority: b.priority,
+                                     deadline: b.deadline, linkedTaskID: b.linkedTaskID))
+        }
+        try context.save()
+        DevLog.shared.info("PlanStore", "对账回流新增 \(blocks.count) 块（日历新建）")
     }
 
     /// 按 ID 删除（0.20 对账回流：日历删除经用户确认后落库）。

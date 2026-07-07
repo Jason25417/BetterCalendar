@@ -20,7 +20,19 @@ struct OverlapTitleComparer: PlanComparing {
         var pool = actual                       // 尚未匹配的实际块
         var items: [ComparedItem] = []
 
+        // ① 按章精确配对（0.20.2）：计划块与"为它记的实际"带同一 UUID（执行层盖的章）——
+        //    同名两块不混、改名不丢。先把 ID 能对上的全配掉，剩下的才进启发式。
+        var unmatched: [CalendarEventDraft] = []
         for p in planned.sorted(by: { $0.start < $1.start }) {
+            if let bid = p.blockID, let i = pool.firstIndex(where: { $0.blockID == bid }) {
+                items.append(matchedItem(planned: p, actual: pool.remove(at: i)))
+            } else {
+                unmatched.append(p)
+            }
+        }
+
+        // ② 启发式兜底（无章老数据 / 标题相近的内容变更）：原贪心逻辑不变
+        for p in unmatched {
             let pMin = minutes(p)
             var bestIdx: Int?
             var bestScore = 0.0
@@ -30,14 +42,7 @@ struct OverlapTitleComparer: PlanComparing {
             }
 
             if let i = bestIdx, bestScore >= matchThreshold {
-                let a = pool.remove(at: i)
-                let aMin = minutes(a)
-                let ratio = pMin > 0 ? Double(aMin) / Double(pMin) : 1
-                let status: CompletionStatus =
-                    ratio < doneLow ? .partial : (ratio > doneHigh ? .over : .done)
-                items.append(ComparedItem(status: status, plannedTitle: p.title,
-                                          actualTitle: a.title, plannedMinutes: pMin,
-                                          actualMinutes: aMin, anchor: a.start))
+                items.append(matchedItem(planned: p, actual: pool.remove(at: i)))
             } else {
                 items.append(ComparedItem(status: .missed, plannedTitle: p.title,
                                           actualTitle: nil, plannedMinutes: pMin,
@@ -52,6 +57,18 @@ struct OverlapTitleComparer: PlanComparing {
 
         items.sort { $0.anchor < $1.anchor }
         return DayComparison(items: items)
+    }
+
+    /// 配上对后的归类（ID 配对与启发式共用）：按 实际/计划 时长比 → partial/done/over。
+    private func matchedItem(planned p: CalendarEventDraft, actual a: CalendarEventDraft) -> ComparedItem {
+        let pMin = minutes(p)
+        let aMin = minutes(a)
+        let ratio = pMin > 0 ? Double(aMin) / Double(pMin) : 1
+        let status: CompletionStatus =
+            ratio < doneLow ? .partial : (ratio > doneHigh ? .over : .done)
+        return ComparedItem(status: status, plannedTitle: p.title,
+                            actualTitle: a.title, plannedMinutes: pMin,
+                            actualMinutes: aMin, anchor: a.start)
     }
 
     private func score(_ p: CalendarEventDraft, _ a: CalendarEventDraft) -> Double {

@@ -1245,6 +1245,33 @@ struct LogicTests {
                                                          end: at(2026,7,9,12), title: "写代码")])
         #expect(plan.deletions == [ReconcileService.Deletion(id: idC, title: "读书")])   // 只有 C 是删除
         #expect(plan.needsRepaint)   // D 缺投影 → 补画，而不是当删除
+        #expect(plan.additions.isEmpty)
+
+        // 日历里用户新建的无章事件 → additions（询问/按策略），不再直接当垃圾清掉（0.20.2）
+        let withNew = events + [CalendarEventDraft(title: "临时冒出来的事", start: at(2026,7,9,18),
+                                                   end: at(2026,7,9,19), kind: .planned)]
+        let plan2 = ReconcileService.diff(truth: truth, events: withNew, fingerprint: fp)
+        #expect(plan2.additions.count == 1)
+        #expect(plan2.additions.first?.title == "临时冒出来的事")
+    }
+
+    /// 复盘对比按 ID 精确配对：同名两块只有被执行的那块算 done，另一块如实 missed（不再连坐）。
+    @Test func comparerMatchesByBlockIDFirst() {
+        let idA = UUID(), idB = UUID()
+        let planned = [
+            CalendarEventDraft(title: "写代码", start: at(2026,7,9,9), end: at(2026,7,9,10),
+                               kind: .planned, blockID: idA),
+            CalendarEventDraft(title: "写代码", start: at(2026,7,9,14), end: at(2026,7,9,15),
+                               kind: .planned, blockID: idB),
+        ]
+        // 只做了下午那段（实际块带 B 的章）；旧启发式会把它配给上午那块（先到先得）
+        let actual = [CalendarEventDraft(title: "写代码", start: at(2026,7,9,14), end: at(2026,7,9,15),
+                                         kind: .actual, blockID: idB)]
+        let c = OverlapTitleComparer().compare(planned: planned, actual: actual)
+        let morning = c.items.first { $0.anchor == at(2026,7,9,9) }
+        let afternoon = c.items.first { $0.anchor == at(2026,7,9,14) }
+        #expect(morning?.status == .missed)
+        #expect(afternoon?.status == .done)
     }
 
     /// 投影失败后的旧日历不倒灌：日历与指纹一致（没人手改）而真相更新了 → 重画，不回流。
