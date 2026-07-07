@@ -616,6 +616,11 @@ struct EditableRow: View {
         return !Calendar.current.isDate(block.start, inSameDayAs: ref)
     }
 
+    /// 开始在当天、结束跨过午夜（如 23:30–01:00）→ 显「至次日」（Jason 2026-07-08 报：只标开始在次日的不够）。
+    private var crossesMidnight: Bool {
+        !isNextDay && !Calendar.current.isDate(block.end, inSameDayAs: block.start)
+    }
+
     /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
     private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
 
@@ -644,6 +649,12 @@ struct EditableRow: View {
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
                             .help("跨午夜：属同一逻辑日，日历上落在次日凌晨（改时间到 0–4 点会自动归次日）")
+                    } else if crossesMidnight {
+                        Text("至次日")
+                            .font(.caption2).foregroundStyle(.indigo)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
+                            .help("结束时间跨过午夜（如 23:30–01:00）：仍属同一逻辑日")
                     }
                     Toggle("固定", isOn: $block.isFixed)
                         .toggleStyle(.button).controlSize(.small)

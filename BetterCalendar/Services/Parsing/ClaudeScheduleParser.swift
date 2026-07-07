@@ -55,10 +55,11 @@ struct ClaudeScheduleParser: ScheduleParsing {
 
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
         do {
-            // 长日程输出可观（20+ 块 + 长期任务），上限给足（曾因默认 2048 截断 → JSON 报废）
+            // 长日程输出可观（20+ 块 + 长期任务），上限给足（2048→6000→10000：6000 仍见截断，2026-07-07 日志实锤；
+            // 若加了预算还截断=模型在循环复读，看「云端原文」截断样本的尾 500 字即知）
             let raw = try await client.complete(
                 system: Self.systemPrompt(referenceDate: referenceDate, context: context),
-                user: text, maxTokens: 6000, jsonMode: true, jsonSchema: Self.parseSchema)
+                user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema)
             let json = JSONText.extractObject(raw)
             guard let decoded = Self.decodePlan(json) else {
                 DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")

@@ -81,6 +81,8 @@ struct AnthropicClient {
             DevLog.shared.info("云端原文", "Anthropic \(model()) stop=\(stop ?? "?") · 返回(前2000)：\(text.prefix(2000))")
         }
         if stop == "max_tokens" {
+            // 截断样本记 WARNING（跨端同步，INFO 不跨端）——看头尾各 500 字就能判断是"真长"还是模型循环复读
+            DevLog.shared.warn("云端原文", "截断@\(maxTokens)·头500：\(text.prefix(500)) ⋯⋯尾500：\(text.suffix(500))")
             throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
         }
         guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
