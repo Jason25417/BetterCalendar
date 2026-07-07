@@ -567,7 +567,7 @@ struct HomeView: View {
             Divider()
             Button("昨天（不建议）") { model.targetDay = DayContext.logicalDay(offset: -1) }
         } label: {
-            Label("为 \(Self.dayLabel(model.targetDay)) 安排", systemImage: "calendar")
+            Label("为 \(Self.relativeDayWord(model.targetDay)) 安排", systemImage: "calendar")
                 .font(.caption)
         }
         .menuStyle(.borderlessButton)
@@ -579,9 +579,10 @@ struct HomeView: View {
     }
 
     /// 目标日的口语词（按钮文案随所选日变）：今天/明天/后天/昨天，再远显日期。
+    /// 以**逻辑今天**为基准（凌晨 0–4 点"今天"=日历昨天）——否则凌晨会把逻辑今天叫成"昨天"（2026-07-08 Jason 报）。
     static func relativeDayWord(_ d: Date, from now: Date = .now) -> String {
         let cal = Calendar.current
-        let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
+        let days = cal.dateComponents([.day], from: DayContext.logicalStartOfDay(now),
                                       to: cal.startOfDay(for: d)).day ?? 0
         switch days {
         case 0: return "今天"

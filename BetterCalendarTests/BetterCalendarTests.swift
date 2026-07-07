@@ -468,13 +468,18 @@ struct LogicTests {
 
     @Test func relativeDayWordFollowsTargetDay() {
         let cal = Calendar.current
-        let now = Date.now
+        // 钉死白天时刻（原来用 Date.now：凌晨跑测试会因逻辑日基准挂掉）
+        let now = at(2026, 7, 8, 15, 0)
         func day(_ offset: Int) -> Date { cal.date(byAdding: .day, value: offset, to: now)! }
         #expect(HomeView.relativeDayWord(day(0), from: now) == "今天")
         #expect(HomeView.relativeDayWord(day(1), from: now) == "明天")
         #expect(HomeView.relativeDayWord(day(2), from: now) == "后天")
         #expect(HomeView.relativeDayWord(day(-1), from: now) == "昨天")
         #expect(HomeView.relativeDayWord(day(5), from: now) != "今天")   // 远日显日期
+        // 凌晨 0–4 点：逻辑今天 = 日历昨天（凌晨 1 点看 7/7 = "今天"、7/8 = "明天"）
+        let lateNight = at(2026, 7, 8, 1, 0)
+        #expect(HomeView.relativeDayWord(at(2026, 7, 7, 0), from: lateNight) == "今天")
+        #expect(HomeView.relativeDayWord(at(2026, 7, 8, 0), from: lateNight) == "明天")
     }
 
     // MARK: 锚点块（午饭/通勤：占日程但不计完成度、不进执行列表）
