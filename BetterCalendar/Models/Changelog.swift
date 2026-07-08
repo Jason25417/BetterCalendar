@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.24.4", date: "2026-07", changes: [
+            "（开发期）试验台修「跑不动、0/460 全灰」死锁：端侧模型偶发循环生成直到上下文爆、干等无进度——现在每次运行加 120 秒看门狗（超时判失败、矩阵继续），端侧连续超时 2 次自动熔断跳过剩余端侧，不再拖死整个矩阵",
+            "端侧解析跨午夜提示改简（上一版为治\"排成中午\"加的长句疑似诱发循环生成）",
+        ]),
         ChangelogEntry(version: "0.24.3", date: "2026-07", changes: [
             "（开发期）试验台：点「中止」也会把已跑完的部分落盘成报告（文件头标注中止进度）——几十分钟的多轮数据不再因为中途停下而蒸发",
         ]),

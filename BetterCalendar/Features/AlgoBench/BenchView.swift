@@ -115,18 +115,38 @@ final class BenchViewModel {
             let total = todo.reduce(0) { $0 + self.runs(for: $1.capability).count } * n
             self.progressTotal = total
             self.progressDone = 0
+            let fmIDs: Set<String> = [BenchVariantID.parseFM, BenchVariantID.refineFM,
+                                      BenchVariantID.refineFMGuard]
+            var fmTimeouts = 0   // 端侧熔断：连续超时 2 次 → 本轮剩余端侧全跳过（别拖死矩阵）
             for c in todo {
                 for run in self.runs(for: c.capability) {
                     var attempts: [BenchCaseResult] = []
                     for i in 1...n {
                         if Task.isCancelled { break }
                         self.progress = "\(c.id) × \(run.label)" + (n > 1 ? "（第 \(i)/\(n) 轮）" : "") + "…"
-                        let r = await self.runner.run(c, variant: run.variant,
-                                                      graceMinutes: run.grace ?? WorkHoursSettings.graceMinutes,
-                                                      model: run.model)
+                        let r: BenchCaseResult
+                        if fmTimeouts >= 2, fmIDs.contains(run.variant.id) {
+                            r = BenchCaseResult(output: BenchOutput(), checks: [],
+                                                skippedReason: "端侧连续超时已熔断（重启 App / 查 Apple Intelligence 后再试）")
+                        } else {
+                            let runner = self.runner
+                            let grace = run.grace ?? WorkHoursSettings.graceMinutes
+                            do {
+                                r = try await BenchRunner.withWatchdog(seconds: 120) {
+                                    await runner.run(c, variant: run.variant,
+                                                     graceMinutes: grace, model: run.model)
+                                }
+                            } catch {
+                                r = BenchCaseResult(
+                                    output: BenchOutput(latencyMS: 120_000, decodeOK: false,
+                                                        errorText: "看门狗超时（120s）——模型疑似循环生成，本次判失败"),
+                                    checks: [])
+                                if fmIDs.contains(run.variant.id) { fmTimeouts += 1 }
+                            }
+                        }
                         attempts.append(r)
                         self.progressDone += 1
-                        // 跳过的格子（没 key/开关没开）重复毫无意义，跑一次即止
+                        // 跳过的格子（没 key/开关没开/已熔断）重复毫无意义，跑一次即止
                         if r.skippedReason != nil { self.progressDone += n - i; break }
                     }
                     self.results[c.id, default: [:]][run.id] = attempts

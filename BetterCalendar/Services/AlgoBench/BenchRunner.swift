@@ -41,6 +41,24 @@ final class BenchRunner {
         return result
     }
 
+    /// 看门狗：单次运行最长 seconds 秒——端侧模型可能循环生成直到 context 爆
+    /// （2026-07-09 实锤：P1×FM 挂死整个矩阵，0/460 干等）。超时=本次判失败，矩阵继续。
+    static func withWatchdog<T: Sendable>(seconds: TimeInterval,
+                                          _ op: @escaping @Sendable () async -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { await op() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw AnthropicError(message: "看门狗超时（\(Int(seconds))s）")
+            }
+            guard let first = try await group.next() else {
+                throw AnthropicError(message: "看门狗异常")
+            }
+            group.cancelAll()
+            return first
+        }
+    }
+
     private func cloudClient(_ model: String?) -> AnthropicClient {
         guard let model, !model.isEmpty else { return client }
         return AnthropicClient(model: { model })
