@@ -21,6 +21,7 @@ enum BenchVariantID {
     static let parseFM = "parse.fm"
     static let parseCloud = "parse.cloud"
     static let refineFM = "refine.fm"
+    static let refineFMGuard = "refine.fm.guard"
     static let refineCloud = "refine.cloud"
     static let refineCloudGuard = "refine.cloud.guard"
     static let reflowNaiveV1 = "reflow.naive.v1"
@@ -36,7 +37,9 @@ enum BenchVariants {
         BenchVariant(id: BenchVariantID.parseCloud, capability: .parse,
                      name: "云端解析", detail: "ClaudeScheduleParser（服务商/模型=当前设置，无本地回退）", frozen: false),
         BenchVariant(id: BenchVariantID.refineFM, capability: .refine,
-                     name: "端侧 FM 微调", detail: "FoundationModelsPlanRefiner（裸输出，无防呆）", frozen: false),
+                     name: "端侧 FM 微调（裸）", detail: "FoundationModelsPlanRefiner 裸输出——量端侧模型本身", frozen: false),
+        BenchVariant(id: BenchVariantID.refineFMGuard, capability: .refine,
+                     name: "端侧 FM 微调+防呆", detail: "FM + 防呆三连（= 现行线上端侧组合）", frozen: false),
         BenchVariant(id: BenchVariantID.refineCloud, capability: .refine,
                      name: "云端微调（裸）", detail: "ClaudePlanRefiner 裸输出——量模型本身的服从性", frozen: false),
         BenchVariant(id: BenchVariantID.refineCloudGuard, capability: .refine,

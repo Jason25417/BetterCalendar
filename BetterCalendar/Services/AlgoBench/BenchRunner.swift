@@ -143,7 +143,8 @@ final class BenchRunner {
         if let reason = gate(variant) { return Self.skipped(reason) }
         let input = specs.compactMap { $0.materialize(on: referenceDay) }
         guard input.count == specs.count else { return Self.skipped("用例块时间无效") }
-        let refiner: PlanRefining = (variant.id == BenchVariantID.refineFM)
+        let isFM = variant.id == BenchVariantID.refineFM || variant.id == BenchVariantID.refineFMGuard
+        let refiner: PlanRefining = isFM
             ? FoundationModelsPlanRefiner(fallback: BenchFailFastRefiner())
             : ClaudePlanRefiner(client: cloudClient(model))
 
@@ -154,7 +155,7 @@ final class BenchRunner {
         do {
             var refined = try await refiner.refine(input, command: command,
                                                    originalRequest: c.originalRequest ?? "", now: now)
-            if variant.id == BenchVariantID.refineCloudGuard {
+            if variant.id == BenchVariantID.refineCloudGuard || variant.id == BenchVariantID.refineFMGuard {
                 // = 现行线上组合（0.23.1 起防呆三连）：部分返回并回 + 标志防翻 + 固定块时间还原
                 refined = HomeViewModel.mergePartialRefine(original: input, refined: refined, command: command)
                 refined = HomeViewModel.guardRefineFlags(original: input, refined: refined, command: command)
@@ -283,7 +284,7 @@ final class BenchRunner {
     /// 变体运行前置条件（开关/key）；nil = 可跑。
     private func gate(_ variant: BenchVariant) -> String? {
         switch variant.id {
-        case BenchVariantID.parseFM, BenchVariantID.refineFM:
+        case BenchVariantID.parseFM, BenchVariantID.refineFM, BenchVariantID.refineFMGuard:
             return CloudSettings.useOnDeviceParser ? nil : "端侧开关未开（设置→进阶）"
         case BenchVariantID.parseCloud, BenchVariantID.refineCloud, BenchVariantID.refineCloudGuard,
              BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2:

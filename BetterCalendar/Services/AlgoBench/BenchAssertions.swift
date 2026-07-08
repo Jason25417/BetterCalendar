@@ -55,7 +55,8 @@ enum BenchAssertions {
             }
             let got = hit.map { hmText(e.kind == .hasBlockStart ? $0.start : $0.end) }
                 .joined(separator: "/")
-            return check(ok, ok ? "命中 \(e.hm ?? "")" : "期望 \(e.hm ?? "")，实得 \(got)")
+            // detail 带日期（2026-07-08 矩阵实测：模型把块放错了"天"，只显 HH:mm 会出现"期望实得相同却红"）
+            return check(ok, ok ? "命中 \(hmText(want))" : "期望 \(hmText(want))，实得 \(got)")
 
         case .noBlock:
             let hit = matches(e.title, in: blocks)
@@ -185,10 +186,11 @@ enum BenchAssertions {
         return BenchTime.date(hm: hm, dayOffset: e.dayOffset ?? 0, on: context.referenceDay)
     }
 
+    /// 带日期的时刻文案（M-d HH:mm）：跨午夜/错日的失败必须能看出"差在哪一天"。
     private static func hmText(_ d: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm"
+        f.dateFormat = "M-d HH:mm"
         return f.string(from: d)
     }
 }
