@@ -15,7 +15,12 @@ final class AppRouter {
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。
     var journalRequest: Date?
 
-    /// 通知 deep-link 请求（点早通知→开始今天 / 点晚通知→复盘）；HomeView 消费后清空。
-    enum ScheduleRequest: Equatable { case arrangeToday(String?), startToday, review }
+    /// 通知 deep-link 请求（点晚通知→复盘 等）；HomeView 消费后清空。
+    /// （.startToday 已退役 0.23 A：早通知改走 primeNextStart——打开今天并把第一件设为待开始。）
+    enum ScheduleRequest: Equatable { case arrangeToday(String?), review }
     var scheduleRequest: ScheduleRequest?
+
+    /// 早通知 deep-link（0.23 A）：打开执行界面、把下一件设为「待开始」（**不自动开始计时**——
+    /// 点通知可能是误触，开始必须是明确动作）。BetterCalendarApp 消费后清空。
+    var primeNextStart = false
 }

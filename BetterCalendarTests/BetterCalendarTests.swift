@@ -33,8 +33,8 @@ struct LogicTests {
 
     @Test func appIntentRequestQueuesAndConsumesOnce() {
         _ = AppIntentRequest.consume()
-        AppIntentRequest.enqueue(.startToday)
-        #expect(AppIntentRequest.consume() == .startToday)
+        AppIntentRequest.enqueue(.openToday)
+        #expect(AppIntentRequest.consume() == .openToday)
         #expect(AppIntentRequest.consume() == nil)
     }
 
@@ -976,7 +976,6 @@ struct LogicTests {
             planStore: planStore,
             projection: ProjectionService(planStore: planStore, calendarStore: calendar,
                                           startedDays: startedDays),
-            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
             notifier: NoNotify(),
             draftStore: draftStore,
             startedDays: startedDays)
@@ -990,22 +989,6 @@ struct LogicTests {
         let laid = ReflowLayout.layOut(flexible: [huge], fixed: [], from: now)
         let conflict = ReflowLayout.conflict(in: laid, now: now)
         #expect(conflict?.blockTitle == "超长")   // 超过次日 4 点日界线 → 冲突
-    }
-
-    @Test func reflowResolutionSkipRemovesBlock() {
-        let blocks = [
-            ScheduledBlock(title: "A", start: at(2026,6,30,9), end: at(2026,6,30,10)),
-            ScheduledBlock(title: "B", start: at(2026,6,30,10), end: at(2026,6,30,11)),
-        ]
-        let result = RescheduleService.apply(.skip("B"), to: blocks, from: at(2026,6,30,9))
-        #expect(result.map(\.title) == ["A"])
-    }
-
-    @Test func reflowResolutionSplitMakesTwoHalves() {
-        let blocks = [ScheduledBlock(title: "长", start: at(2026,6,30,9), end: at(2026,6,30,11))] // 2h
-        let result = RescheduleService.apply(.split("长"), to: blocks, from: at(2026,6,30,9))
-        #expect(result.count == 2)
-        #expect(result.allSatisfy { $0.end.timeIntervalSince($0.start) == 3600 })   // 各 1h
     }
 
     @Test func reminderTimesFromFirstAndLastBlock() {
@@ -1155,36 +1138,43 @@ struct LogicTests {
         #expect(vm.remaining.count == 1)             // 另一件仍在「换一件/同时做」列表
     }
 
-    /// 「开始今天」只出草稿（日历不动、未进实时模式）；「确认写入」才 markStarted + 绿淡出转橙（Jason 定 2026-07-07）。
-    /// 放弃修改则取消进入实时模式。
-    @Test func startTodayDraftOnlyConfirmEntersRealtime() async throws {
+    /// 实时模式合并（0.23 A）：某逻辑日**第一次真正开始一件事**即进实时模式——
+    /// markStarted + 绿色淡出；完成动作不触发；同日第二次开始幂等。
+    @Test func firstStartOfDayEntersLiveModeAndFadesGreen() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
         let cal = FakeCalendarStore()
-        let vm = Self.makeHomeVM(planStore: store, startedDays: started, calendar: cal)
-        let label = DayContext.logicalStartOfDay(.now)
+        let projection = ProjectionService(planStore: store, calendarStore: cal, startedDays: started)
+        let label = DayContext.logicalDay(offset: 0)
         let s = Calendar.current.date(byAdding: .hour, value: 10, to: label)!
         try store.replacePlanned([ScheduledBlock(title: "写代码", start: s,
                                                  end: s.addingTimeInterval(3600))], on: label)
-        vm.targetDay = label
+        try await projection.project(label: label)
+        #expect(try await cal.read(kind: .planned).count == 1)   // 未开始：绿在
 
-        await vm.startToday()
-        #expect(!vm.blocks.isEmpty)               // 出了 reflow 草稿
-        #expect(!started.isStarted(label))        // 但还没进实时模式（日历不动）
-
-        // 放弃修改 → 取消开始（绿色保持）
-        vm.discardDraft()
-        await vm.confirm()
+        let vm = ExecutionViewModel(calendarStore: cal,
+                                    reschedule: RescheduleService(planStore: store,
+                                                                  planner: NaivePlanningEngine()),
+                                    planStore: store, reminderStore: FakeReminderStore(),
+                                    liveActivity: NoLiveActivity(), persistsRunState: false,
+                                    startedDays: started, projection: projection)
+        await vm.loadToday()
         #expect(!started.isStarted(label))
 
-        // 再来一次：开始今天 → 确认写入 = 正式进实时模式，绿淡出、整日转橙
-        await vm.startToday()
-        await vm.confirm()
+        // 第一次开始 → 进实时模式：标记 + 绿淡出
+        guard let first = vm.planned.first else { Issue.record("没有今日计划块"); return }
+        await vm.startBlock(first)
+        await vm.waitForPreview()
         #expect(started.isStarted(label))
-        #expect(try await cal.read(kind: .planned).isEmpty)     // 绿已淡出
-        #expect(try await cal.read(kind: .preview).count == 1)  // 整日转橙
+        #expect(try await cal.read(kind: .planned).isEmpty)      // 绿已淡出
+        #expect(try await !cal.read(kind: .preview).isEmpty)     // 橙在（从现在起）
+
+        // 幂等：完成再开始不重复标记、不出错
+        await vm.completeCurrent()
+        await vm.waitForPreview()
+        #expect(started.isStarted(label))
     }
 
     /// 微调防呆：命令没提到 固定/星/计时 时，模型批量翻转这些属性会被恢复原值（端侧全番茄钟抽风的根治）。
@@ -1339,9 +1329,9 @@ struct LogicTests {
         #expect(lc.start == at(2026,7,10,13))                                    // 下一块接在槽（3h）后
     }
 
-    /// 防线：确认过的并行计划经「开始今天」reflow（PlanStore→morningReflow→layOut）绑定不散、标签不丢。
-    /// （Jason 报"开始今天并行消失"——若此测试绿，则现象=老确认数据没标签，需 0.22 重新确认。）
-    @Test func morningReflowPreservesParallelBinding() async throws {
+    /// 防线：确认过的并行计划经全天连续 reflow（PlanStore→continuousReflow→layOut）绑定不散、标签不丢。
+    /// （0.23 A：morningReflow 已退役，这条防线改守连续 reflow——它现在是唯一重排路径。）
+    @Test func continuousReflowPreservesParallelBinding() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
@@ -1354,9 +1344,9 @@ struct LogicTests {
             ScheduledBlock(title: "C", start: s.addingTimeInterval(4 * 3600), end: s.addingTimeInterval(5 * 3600)),
         ], on: label)
         let svc = RescheduleService(planStore: store, planner: NaivePlanningEngine())
-        let decision = try await svc.morningReflow(day: label, now: .now)
-        let a = decision.orderedBlocks.first { $0.title == "A" }
-        let b = decision.orderedBlocks.first { $0.title == "B" }
+        let laid = try await svc.continuousReflow(now: s)
+        let a = laid.first { $0.title == "A" }
+        let b = laid.first { $0.title == "B" }
         #expect(a?.start == b?.start)                       // 同组同起点（绑定没散）
         #expect(a?.parallelGroup == g && b?.parallelGroup == g)   // 标签存活
     }

@@ -88,7 +88,8 @@ final class AppContainer {
         self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule,
                                             planStore: planStore, reminderStore: routingReminder,
                                             liveActivity: liveActivity,
-                                            sessionStore: ExecutionSessionStore())
+                                            sessionStore: ExecutionSessionStore(),
+                                            startedDays: startedDays, projection: projection)
         self.bench = BenchRunner(client: anthropic)
         self.logSync = LogSyncService()
         logSync.start()

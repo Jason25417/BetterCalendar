@@ -22,8 +22,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                 didReceive response: UNNotificationResponse) async {
         switch response.notification.request.identifier {
         case "bc.reminder.morning":
+            // 0.23 A：开始今天已退役——早通知改为打开执行界面、第一件「待开始」（不自动计时）
             router.selectedTab = .schedule
-            router.scheduleRequest = .startToday
+            router.primeNextStart = true
         case "bc.reminder.evening":
             router.selectedTab = .schedule
             router.scheduleRequest = .review

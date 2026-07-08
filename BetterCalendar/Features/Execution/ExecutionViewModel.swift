@@ -23,6 +23,8 @@ final class ExecutionViewModel {
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
     private let persistsRunState: Bool                // 运行态快照开关（测试关：test host 与真 App 共享 UserDefaults，别互相污染）
+    private let startedDays: StartedDayStore?         // 实时模式标记（0.23 A：首次开始一件事=进实时模式）；nil=不标
+    private let projection: ProjectionService?        // 进实时模式时重投影该日（绿淡出）；nil=不投
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -209,7 +211,8 @@ final class ExecutionViewModel {
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
          planStore: PlanReading, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
-         persistsRunState: Bool = true) {
+         persistsRunState: Bool = true,
+         startedDays: StartedDayStore? = nil, projection: ProjectionService? = nil) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
@@ -217,6 +220,8 @@ final class ExecutionViewModel {
         self.liveActivity = liveActivity
         self.sessionStore = sessionStore
         self.persistsRunState = persistsRunState
+        self.startedDays = startedDays
+        self.projection = projection
     }
 
     // MARK: - 读取今日
@@ -455,7 +460,7 @@ final class ExecutionViewModel {
         pomoTargetSegments = nil
         breakCount = 0
         persistRunState()
-        refreshPreview()
+        refreshPreview(enteringLiveMode: true)
         if let s = liveSnapshot() { liveActivity.start(s) }
     }
 
@@ -476,13 +481,22 @@ final class ExecutionViewModel {
         await startBlock(s)
     }
 
+    /// 早通知 deep-link（0.23 A）：把下一件设为「待开始」，等用户点「开始任务」。
+    /// **绝不自动开始计时**——点通知可能是误触，开始必须是明确动作。
+    func primeNextForStart() async {
+        if !loaded { await loadToday() }
+        guard active == nil, selected == nil, let next = nextSuggested else { return }
+        selected = next
+        persistRunState()
+    }
+
     /// 同时开始另一件（后台并行）：不动前台正在计时的块，这件在后台自己按墙钟跑。
     func startAlso(_ item: PlannedItem) {
         guard item.id != active?.plannedID,
               !isRunningInBackground(item) else { return }
         background.append(BackgroundRun(plannedID: item.id, title: item.title, start: .now))
         persistRunState()
-        refreshPreview()   // 从橙色预览里剔除它（正在做，不该再出现在"从现在起"）
+        refreshPreview(enteringLiveMode: true)   // 从橙色预览里剔除它（正在做，不该再出现在"从现在起"）
     }
 
     /// 完成一件后台并行任务 → 记 [start, now] 进蓝色实际 → 移出后台。
@@ -635,9 +649,26 @@ final class ExecutionViewModel {
 
     /// 完成 / 开始某块后，把剩余从此刻重排、写橙色预览。后台跑，不挡按钮。
     /// Task 记在手里（非游离）：单测能 await 它落地——游离 Task 活过测试作用域撞已析构内存库会崩 host（踩过）。
+    /// enteringLiveMode：真正**开始**一件事的动作传 true——某逻辑日第一次开始即进实时模式（0.23 A）。
+    /// 串在同一个 Task 里保证时序：先淡绿（project），再铺"从现在起"的橙（updatePreview）。
     private var previewTask: Task<Void, Never>?
-    private func refreshPreview() {
-        previewTask = Task { await updatePreview() }
+    private func refreshPreview(enteringLiveMode: Bool = false) {
+        previewTask = Task {
+            if enteringLiveMode { await enterLiveModeIfNeeded() }
+            await updatePreview()
+        }
+    }
+
+    /// 实时模式合并（0.23 A，SPEC §11 ①）：「开始今天」按钮已退役——开始工作这个动作本身就是信号。
+    /// 某逻辑日第一次 startBlock/startAlso 时：标记已开始（iCloud KV 两端同步）→ 重投影该日（绿淡出）。
+    /// 单向无损：PlanStore 一动不动，复盘基线完整；误开始也只是幕布切换。
+    private func enterLiveModeIfNeeded() async {
+        guard let startedDays else { return }
+        let label = DayContext.logicalDay(offset: 0)
+        guard !startedDays.isStarted(label) else { return }
+        startedDays.markStarted(label)
+        do { try await projection?.project(label: label) }
+        catch { DevLog.shared.warn("投影", "进实时模式投影失败：\(error.localizedDescription)") }
     }
 
     /// 等最近一次预览刷新落地（单测用；正常运行无人等它、照旧不挡按钮）。

@@ -13,7 +13,7 @@ enum AppIntentRequest: String, Sendable {
     case openSchedule
     case openToday
     case openJournal
-    case startToday
+    // startToday 已退役（0.23 A）：老快捷指令若还发它，rawValue 解析失败 → consume() 返回 nil，安全忽略
     case startFocus
     case completeCurrent
     case markDone      // 带 payload=任务标题：按标题标完成（Claude Code 完成信号入口）

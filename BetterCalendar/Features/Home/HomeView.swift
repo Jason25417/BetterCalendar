@@ -52,7 +52,6 @@ struct HomeView: View {
             exporter: container.exporter,
             planStore: container.planStore,
             projection: container.projection,
-            reschedule: container.reschedule,
             notifier: container.notifier,
             longTaskStore: container.longTasks,
             draftStore: container.draftSnapshots,
@@ -162,11 +161,6 @@ struct HomeView: View {
                         Label("排\(Self.relativeDayWord(model.targetDay))", systemImage: "wand.and.stars")
                     }
                     .disabled(model.isWorking)
-                    Button { Task { await model.startToday() } } label: {
-                        Label("开始今天", systemImage: "sunrise")
-                    }
-                    .disabled(model.isWorking)
-                    .help("开工晚了？按现在的时间把今天重排，固定块不动")
                     if model.isWorking {
                         ProgressView().controlSize(.small)
                         Text("模型思考中…").font(.caption).foregroundStyle(.secondary)
@@ -428,7 +422,6 @@ struct HomeView: View {
                         model.inputText = text
                         Task { await model.arrange() }
                     }
-                case .startToday: Task { await model.startToday() }
                 case .review: navPath = [.review]
                 }
                 container.router.scheduleRequest = nil   // 消费掉
@@ -472,19 +465,6 @@ struct HomeView: View {
                 } else {
                     model.loadConfirmedPlan()        // 已保存视图：切目标日 = 加载那天的计划
                 }
-            }
-            .confirmationDialog(
-                "「\(model.reflowConflict?.blockTitle ?? "")」今天排不下了，怎么办？",
-                isPresented: Binding(get: { model.reflowConflict != nil },
-                                     set: { if !$0 { model.reflowConflict = nil } }),
-                presenting: model.reflowConflict
-            ) { conflict in
-                Button("压缩，全塞进今天") { Task { await model.resolveConflict(.compress) } }
-                Button("跳过「\(conflict.blockTitle)」") {
-                    Task { await model.resolveConflict(.skip(conflict.blockTitle)) }
-                }
-                Button("拆成两段塞空隙") { Task { await model.resolveConflict(.split(conflict.blockTitle)) } }
-                Button("就这样吧", role: .cancel) { model.reflowConflict = nil }
             }
             .safeAreaInset(edge: .bottom) {
                 NavigationLink {

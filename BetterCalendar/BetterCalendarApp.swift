@@ -70,12 +70,17 @@ struct BetterCalendarApp: App {
             .onAppear {
                 if menuBar == nil { menuBar = MenuBarController(model: container.execution) }
                 handlePendingAppIntent()
+                consumePrimeNextStart()
             }
             #else
-            .onAppear { handlePendingAppIntent() }
+            .onAppear { handlePendingAppIntent(); consumePrimeNextStart() }
             #endif
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { handlePendingAppIntent() }
+                if phase == .active { handlePendingAppIntent(); consumePrimeNextStart() }
+            }
+            // 早通知 deep-link（0.23 A）：打开执行界面 + 第一件「待开始」（不自动计时）
+            .onChange(of: container.router.primeNextStart) { _, want in
+                if want { consumePrimeNextStart() }
             }
             // 启动同步（0.20.2）：先对账（识别日历里攒的手改/新建/删除）再投影补章自愈；
             // 有待确认新建的日子暂缓投影（防止问都没问就清掉用户新建的事件）。幂等、无变更时零写入。
@@ -104,9 +109,6 @@ struct BetterCalendarApp: App {
             selectTodayTab()
         case .openJournal:
             container.router.selectedTab = .journal
-        case .startToday:
-            container.router.selectedTab = .schedule
-            container.router.scheduleRequest = .startToday
         case .startFocus:
             selectTodayTab()
             startNextFromIntent()
@@ -137,6 +139,15 @@ struct BetterCalendarApp: App {
             container.router.selectedTab = .journal
             container.router.journalRequest = .now
         }
+    }
+
+    @MainActor
+    private func consumePrimeNextStart() {
+        guard container.router.primeNextStart else { return }
+        container.router.primeNextStart = false
+        selectTodayTab()
+        let execution = container.execution
+        Task { await execution.primeNextForStart() }
     }
 
     @MainActor

@@ -29,7 +29,6 @@ final class HomeViewModel {
     private let exporter: ICSExporting
     private let planStore: PlanStore           // ⚠️ 全 App 唯一的写者（PlanWriting）：只有「确认写入」落库
     private let projection: ProjectionService  // PlanStore→日历 单向投影（先写真相源、再投影）
-    private let reschedule: RescheduleService
     private let notifier: NotificationScheduling
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
     private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
@@ -49,19 +48,14 @@ final class HomeViewModel {
     var committedToReal: Bool = false
     /// 解析识别到、待确认入池的长期事项（确认写入时入「在途」）。
     var pendingLongTasks: [ParsedLongTask] = []
-    /// 晨间 reflow「排不下」时的冲突（非 nil → 弹压缩/跳过/分割）。
-    var reflowConflict: ReflowConflict?
     /// 未保存修改（0.16 文件模型，D-f）：任何编辑/新草稿置真；「确认写入」=保存清零。
     private(set) var hasUnsavedChanges = false
-    /// 「开始今天」产出的草稿待确认（Jason 定 2026-07-07）：开始今天只出草稿、日历**不动**；
-    /// 「确认写入」时才正式进实时模式（标记已开始 → 投影绿淡出、整日转橙）。放弃修改即取消。
-    private var pendingRealtimeStart = false
     /// 上次退出时留下的未保存修改（D-g：不自动还原，顶部小字邀请「恢复/丢弃」）。
     private(set) var pendingRestore: DraftSnapshot?
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
-         planStore: PlanStore, projection: ProjectionService, reschedule: RescheduleService,
+         planStore: PlanStore, projection: ProjectionService,
          notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
          looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil) {
@@ -72,7 +66,6 @@ final class HomeViewModel {
         self.exporter = exporter
         self.planStore = planStore
         self.projection = projection
-        self.reschedule = reschedule
         self.notifier = notifier
         self.longTaskStore = longTaskStore
         self.draftStore = draftStore
@@ -138,7 +131,6 @@ final class HomeViewModel {
         note = nil
         draftSource = .empty
         hasUnsavedChanges = false
-        pendingRealtimeStart = false   // 放弃「开始今天」草稿 = 不进实时模式，绿色保持
         loadConfirmedPlan()
         persistDraft()
     }
@@ -305,11 +297,6 @@ final class HomeViewModel {
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil
         do {
-            // 「开始今天」草稿的确认 = 正式进实时模式（开始今天只出草稿、日历不动；确认才淡出转橙）
-            if pendingRealtimeStart {
-                startedDays?.markStarted(targetDay)
-                pendingRealtimeStart = false
-            }
             // 单一真相源（重构 P2）：先写 PlanStore，再由投影层画日历——本方法不再直接写日历。
             // 按**逻辑日**分组逐日 replace：跨午夜块（睡前看书 00:30）随前一逻辑日走，不再被拆到次日。
             let targetLabel = Calendar.current.startOfDay(for: targetDay)
@@ -350,38 +337,9 @@ final class HomeViewModel {
         isWorking = false
     }
 
-    /// 晨间「开始今天」：从此刻 reflow 今日计划（开工晚了整体平移、固定块锚住）→ 可编辑预览草稿。
-    /// 微调后用「确认写入」回写绿色 + 真相源（方案 A：晨间定稿即绿色基线）。
-    func startToday(resolution: ReflowResolution? = nil) async {
-        isWorking = true; errorText = nil; committedCount = nil
-        do {
-            let decision = try await reschedule.morningReflow(day: targetDay, now: .now, resolution: resolution)
-            if decision.orderedBlocks.isEmpty {
-                note = "这天还没有「确认写入」的计划可重排——先说一句、确认写入，再开始今天。"
-            } else {
-                blocks = decision.orderedBlocks.map(EditableBlock.init(from:))
-                draftSource = .arranged   // reflow 结果也是待确认草稿
-                let flex = decision.orderedBlocks.filter { !$0.isFixed }.count
-                note = flex == 0
-                    ? "这些都是固定块、reflow 不会挪动（任务别标「固定」就能被重排）。"
-                    : "已把 \(flex) 件弹性事项从现在起重排好；微调后「确认写入」即可。"
-                // 绿色淡出（§5.10 原则6.4，Jason 改 2026-07-07）：开始今天**只出草稿、日历不动**——
-                // reflow 结果是待确认草稿，「确认写入」时才 markStarted + 投影（绿淡出、整日转橙）。
-                pendingRealtimeStart = true
-            }
-            reflowConflict = decision.conflict   // 仍排不下 → 再弹；nil → 收起
-            hasUnsavedChanges = true
-            persistDraft()
-        } catch {
-            errorText = "重排失败：\(error.localizedDescription)"
-        }
-        isWorking = false
-    }
-
-    /// 用户对「排不下」的选择 → 带解法重排。
-    func resolveConflict(_ r: ReflowResolution) async {
-        await startToday(resolution: r)
-    }
+    // 「开始今天/晨间 reflow」已退役（0.23 A，SPEC §11 ①）：某逻辑日第一次真正开始一件事
+    // （menu bar / 今天 tab 的 startBlock/startAlso）即进实时模式，重排由全天连续 reflow 后台完成；
+    // 「塞不下」三选弹窗随之消失（产品债清偿——弹窗=羞辱，违 §3.3）。
 
     /// 把时刻重锚到 day 所在日历日的逻辑日：时分不变；凌晨时分（0–4 点）落**次日**日历日
     /// （跨午夜段属同一逻辑日）。切目标日平移和行内时间编辑共用——编辑器只改时分不改日期，

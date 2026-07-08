@@ -62,16 +62,8 @@ struct OpenJournalIntent: AppIntent {
     }
 }
 
-struct StartTodayIntent: AppIntent {
-    static var title: LocalizedStringResource = "开始今天"
-    static var description = IntentDescription("记录今天的实际开工时间，并按现在重排剩余日程。")
-    static var openAppWhenRun = true
-
-    func perform() async throws -> some IntentResult {
-        AppIntentRequest.enqueue(.startToday)
-        return .result()
-    }
-}
+// StartTodayIntent 已退役（0.23 A，SPEC §11 ①）：首次开始任一事项即进实时模式，
+// 「开始专注」（StartFocusIntent）语义完全覆盖，不需要两个入口。
 
 struct StartFocusIntent: AppIntent {
     static var title: LocalizedStringResource = "开始专注"
@@ -136,16 +128,6 @@ struct BetterCalendarShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "排今天",
             systemImageName: "calendar.badge.plus"
-        )
-
-        AppShortcut(
-            intent: StartTodayIntent(),
-            phrases: [
-                "在 \(.applicationName) 开始今天",
-                "用 \(.applicationName) 开始今天"
-            ],
-            shortTitle: "开始今天",
-            systemImageName: "sunrise"
         )
 
         AppShortcut(

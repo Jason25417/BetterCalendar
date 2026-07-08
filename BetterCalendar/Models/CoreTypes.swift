@@ -131,12 +131,8 @@ struct ReflowConflict: Sendable {
     var overflowMinutes: Int
 }
 
-/// 撞固定块 / 排不下时，用户选的解法（LLM 兜底之后才问用户）。
-enum ReflowResolution: Sendable {
-    case compress        // 压缩弹性块、塞进今天
-    case skip(String)    // 跳过某块（今天不做）
-    case split(String)   // 把某块拆两段塞空隙
-}
+// ReflowResolution（压缩/跳过/分割三选）已退役（0.23 A）：「排不下」弹窗=羞辱（违 §3.3），
+// 溢出语义改为候补——不弹、不标、留在 menu bar 列表可见可选（SPEC §11 ②）。
 
 /// 目标日已被占用的时段（已有日历事件；排程避开它们）。
 struct BusySlot: Sendable {
