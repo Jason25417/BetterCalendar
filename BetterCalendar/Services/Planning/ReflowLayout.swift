@@ -53,12 +53,5 @@ enum ReflowLayout {
         return result.sorted { $0.start < $1.start }
     }
 
-    /// 检测排不下：弹性块结束超过逻辑日尾界 → 取溢出最多的那块作冲突。
-    static func conflict(in blocks: [ScheduledBlock], now: Date) -> ReflowConflict? {
-        let deadline = DayContext.endOfPlannableDay(now)
-        guard let over = blocks.filter({ !$0.isFixed && $0.end > deadline })
-            .max(by: { $0.end < $1.end }) else { return nil }
-        return ReflowConflict(blockTitle: over.title,
-                              overflowMinutes: Int(over.end.timeIntervalSince(deadline) / 60))
-    }
+    // conflict 检测已退役（0.23 B）：溢出语义改为候补（ReflowLayoutV2.layOut 直接产出 deferred）。
 }

@@ -21,4 +21,22 @@ enum WorkHoursSettings {
 
     /// prompt 用的收工时间文案（"23:00"）。
     static var windDownText: String { String(format: "%02d:00", windDownHour) }
+
+    // MARK: 收工线硬执法（0.23 B，SPEC §11 ②：候补方案毕业）
+
+    /// 收工线宽限（分钟）——**算法内部参数，不进设置页**（2026-07-08 拍板：两个旋钮控一条边界违原则6；
+    /// 用户契约只有收工线本身）。定值依据：试验台 F 组用例 10min 全绿；后续实验可在试验台调后再改此值。
+    static let graceMinutes = 10
+
+    /// 收工线时刻：锚到 reference 所在**逻辑日**（hour=24 → 次日零点）。
+    static func windDownDate(for reference: Date) -> Date {
+        DayContext.logicalStartOfDay(reference).addingTimeInterval(TimeInterval(windDownHour) * 3600)
+    }
+
+    /// 生效收工线：还没到线 → 用线；**已过线仍在开工 = 用户自己选择的加班**（原则7：软件不夺权），
+    /// 此时退回逻辑日尾（凌晨 4 点）作为绝对上限——别把加班者的剩余日程全轰进候补。
+    static func effectiveWindDown(from: Date) -> Date {
+        let line = windDownDate(for: from)
+        return from < line ? line : DayContext.endOfPlannableDay(from)
+    }
 }

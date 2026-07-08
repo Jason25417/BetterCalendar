@@ -1051,14 +1051,29 @@ struct LogicTests {
             startedDays: startedDays)
     }
 
-    // MARK: M5 尾巴（排不下冲突 / 解法 / 通知时间）
+    // MARK: 收工线 / 候补（0.23 B：溢出冲突弹窗退役，语义=候补）
 
-    @Test func reflowConflictWhenOverflowsDayEnd() {
-        let now = at(2026,6,30,10)
-        let huge = ScheduledBlock(title: "超长", start: at(2026,6,30,10), end: at(2026,7,1,16)) // ~30h
-        let laid = ReflowLayout.layOut(flexible: [huge], fixed: [], from: now)
-        let conflict = ReflowLayout.conflict(in: laid, now: now)
-        #expect(conflict?.blockTitle == "超长")   // 超过次日 4 点日界线 → 冲突
+    /// 生效收工线：线前开工用收工线；**过线仍开工=用户自选的加班** → 退回逻辑日尾 4 点（原则7 不夺权）。
+    @Test func effectiveWindDownFallsBackAfterLine() {
+        WorkHoursSettings.windDownHour = 23
+        let before = at(2026,6,30,20)
+        #expect(WorkHoursSettings.effectiveWindDown(from: before) == at(2026,6,30,23))
+        let overtime = at(2026,6,30,23,30)   // 已过线
+        #expect(WorkHoursSettings.effectiveWindDown(from: overtime) == at(2026,7,1,4))   // 逻辑日尾
+        let smallHours = at(2026,7,1,0,30)   // 凌晨加班（逻辑 6/30）
+        #expect(WorkHoursSettings.effectiveWindDown(from: smallHours) == at(2026,7,1,4))
+    }
+
+    /// 引擎级候补：本地 reflow 放不进收工线的块进 deferred（不再铺到深夜、不再产冲突弹窗）。
+    @Test func naiveReflowDefersOverflowToStandby() async throws {
+        WorkHoursSettings.windDownHour = 23
+        let from = at(2026,6,30,21)
+        let vip = ScheduledBlock(title: "要紧收尾", start: at(2026,6,30,21), end: at(2026,6,30,23),
+                                 priority: .important)
+        let chores = ScheduledBlock(title: "整理桌面", start: at(2026,6,30,21,30), end: at(2026,6,30,23,0))
+        let decision = try await NaivePlanningEngine().reflow([vip, chores], from: from, now: from)
+        #expect(decision.orderedBlocks.map(\.title) == ["要紧收尾"])   // ★ 照排
+        #expect(decision.deferred.map(\.title) == ["整理桌面"])        // 放不下 → 候补
     }
 
     @Test func reminderTimesFromFirstAndLastBlock() {

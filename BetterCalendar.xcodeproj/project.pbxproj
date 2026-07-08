@@ -584,7 +584,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.22.3;
-				OTHER_LDFLAGS = "-weak_framework FoundationModels";
+				OTHER_LDFLAGS = (
+					"-weak_framework",
+					FoundationModels,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -627,7 +630,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 0.22.3;
-				OTHER_LDFLAGS = "-weak_framework FoundationModels";
+				OTHER_LDFLAGS = (
+					"-weak_framework",
+					FoundationModels,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

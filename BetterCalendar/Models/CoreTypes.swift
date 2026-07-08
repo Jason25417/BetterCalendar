@@ -125,12 +125,6 @@ extension ScheduledBlock {
     var parallelGroup: String? { labels.first { $0.hasPrefix(Self.parallelPrefix) } }
 }
 
-/// reflow 排不下（弹性块结束超过逻辑日尾/睡前）时的冲突。
-struct ReflowConflict: Sendable {
-    var blockTitle: String
-    var overflowMinutes: Int
-}
-
 // ReflowResolution（压缩/跳过/分割三选）已退役（0.23 A）：「排不下」弹窗=羞辱（违 §3.3），
 // 溢出语义改为候补——不弹、不标、留在 menu bar 列表可见可选（SPEC §11 ②）。
 
@@ -156,11 +150,13 @@ struct LongTaskBrief: Sendable {
     var cadenceMinutesPerWeek: Int?
 }
 
-/// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）+（reflow 时）排不下的冲突。
+/// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）+（reflow 时）候补。
 struct PlanDecision: Sendable {
     var orderedBlocks: [ScheduledBlock] = []
     var note: String?
-    var conflict: ReflowConflict?
+    /// 候补（0.23 B，SPEC §11 ②）：放不进收工线的弹性块——不铺时间、不画橙，
+    /// 温和地留在 menu bar 列表可见可选；★与用户自排的晚间块永不进此。
+    var deferred: [ScheduledBlock] = []
     /// 来自「在途」的建议块标题（M10-2：UI 标来源、删除零成本）。
     var poolSuggestedTitles: [String] = []
 }

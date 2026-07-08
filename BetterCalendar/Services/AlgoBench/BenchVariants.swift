@@ -42,13 +42,13 @@ enum BenchVariants {
         BenchVariant(id: BenchVariantID.refineCloudGuard, capability: .refine,
                      name: "云端微调+防呆", detail: "ClaudePlanRefiner + guardRefineFlags（= 现行线上组合）", frozen: false),
         BenchVariant(id: BenchVariantID.reflowNaiveV1, capability: .reflow,
-                     name: "本地 V1（现行）", detail: "原顺序 + ReflowLayout；收工线不执法、铺到深夜", frozen: true),
+                     name: "本地 V1（旧现行 @0.22.x）", detail: "原顺序 + ReflowLayout；收工线不执法、铺到深夜（冻结快照）", frozen: true),
         BenchVariant(id: BenchVariantID.reflowLLMV1, capability: .reflow,
-                     name: "LLM V1（现行 @0.22.2）", detail: "LLM 只定序（无 deferred 通道）+ ReflowLayout", frozen: true),
+                     name: "LLM V1（旧现行 @0.22.2）", detail: "LLM 只定序（无 deferred 通道）+ ReflowLayout（冻结快照）", frozen: true),
         BenchVariant(id: BenchVariantID.reflowNaiveV2, capability: .reflow,
-                     name: "本地 V2 候补（候选）", detail: "原顺序 + 收工线硬执法 → 放不下进候补", frozen: false),
+                     name: "本地 V2 候补（0.23 毕业=现行）", detail: "原顺序 + 收工线硬执法 → 放不下进候补", frozen: false),
         BenchVariant(id: BenchVariantID.reflowLLMV2, capability: .reflow,
-                     name: "LLM V2 候补（候选）", detail: "LLM 定序 + deferred 通道 + 本地收工线执法（双层）", frozen: false),
+                     name: "LLM V2 候补（0.23 毕业=现行）", detail: "LLM 定序 + deferred 通道 + 本地收工线执法（双层）", frozen: false),
     ]
 
     static func of(_ capability: BenchCapability) -> [BenchVariant] {
