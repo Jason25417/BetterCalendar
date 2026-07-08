@@ -1311,6 +1311,40 @@ struct LogicTests {
         #expect(vm.remaining.count == 1)             // 另一件仍在「换一件/同时做」列表
     }
 
+    /// 计划外「+ 新事项…」（0.25，点子 #1）：临时事项直接开始 = bonus——不进 planned、
+    /// 完成即记蓝色实际、复盘里无匹配计划（extra）；同时做的进后台。
+    @Test func adHocBonusStartsWithoutTouchingPlan() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        try planStore.replacePlanned([ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600))], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        #expect(vm.planned.count == 1)
+
+        // 前台开始一件计划外的事（每次动作后 await 预览 Task 落地——游离 Task 会崩宿主）
+        await vm.startAdHoc(title: "突然要回封邮件", timingStyle: .light)
+        await vm.waitForPreview()
+        #expect(vm.active?.title == "突然要回封邮件")
+        #expect(vm.planned.count == 1)                                   // 没写进计划
+        #expect(try planStore.plannedBlocks(on: day).count == 1)         // 真相源没多块
+        await vm.completeCurrent()
+        await vm.waitForPreview()
+        #expect(vm.done.contains { $0.title == "突然要回封邮件" })         // 完成记蓝色实际（bonus）
+
+        // 同时做一件计划外的事 → 进后台
+        vm.startAlsoAdHoc(title: "顺手洗个衣服")
+        await vm.waitForPreview()
+        #expect(vm.background.contains { $0.title == "顺手洗个衣服" })
+        #expect(try planStore.plannedBlocks(on: day).count == 1)         // 仍不写计划
+    }
+
     /// 实时模式合并（0.23 A）：某逻辑日**第一次真正开始一件事**即进实时模式——
     /// markStarted + 绿色淡出；完成动作不触发；同日第二次开始幂等。
     @Test func firstStartOfDayEntersLiveModeAndFadesGreen() async throws {

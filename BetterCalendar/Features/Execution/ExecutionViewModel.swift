@@ -464,6 +464,27 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.start(s) }
     }
 
+    /// 计划外临时事项直接开始（menu bar「+ 新事项…」，SPEC §11 ① 连带、点子 #1，2026-07-09 过审）：
+    /// **不写 PlanStore**（写计划只有 确认写入 + 对账回流 两个入口，menu bar 不当第三写者）——
+    /// 它是 §3.5 的 bonus：计划外块 id 不在 planned 里，完成即记蓝色实际，复盘里无匹配计划 = 计划外高亮（算赢）。
+    /// 默认轻计时；开始即进实时模式（同 startBlock）。
+    func startAdHoc(title: String, timingStyle: TimingStyle = .light) async {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let item = PlannedItem(id: UUID(), title: name, start: .now,
+                               end: Date.now.addingTimeInterval(3600), timingStyle: timingStyle)
+        await startBlock(item)   // 复用前台开始：id 是新 UUID、不在 planned → 天然 bonus
+    }
+
+    /// 同时做一件计划外的事（后台并行 bonus）。
+    func startAlsoAdHoc(title: String) {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let item = PlannedItem(id: UUID(), title: name, start: .now,
+                               end: Date.now.addingTimeInterval(3600))
+        startAlso(item)
+    }
+
     /// 换一件：结束当前 → 把目标设为「待开始」（**不立即开始**）；要再点「开始任务」才计时。
     func switchTo(_ item: PlannedItem) async {
         await recordActiveIfAny()

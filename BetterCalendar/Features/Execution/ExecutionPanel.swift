@@ -15,11 +15,19 @@ struct ExecutionPanel: View {
     @Bindable var model: ExecutionViewModel
     @State private var earlyBreakConfirming = false   // 「提前休息」的小摩擦确认（0.20.5）
 
+    // 计划外「+ 新事项…」输入态（0.25，点子 #1 过审）：临时冒出的事当场开始 = bonus，不写计划
+    enum AdHocKind { case foreground, parallel }
+    @State private var adHocKind: AdHocKind? = nil
+    @State private var adHocTitle = ""
+    @State private var adHocStyle: TimingStyle = .light
+    @FocusState private var adHocFocused: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             mitStrip
             Divider()
+            adHocInput
             actions
             focusHint
             backgroundSection
@@ -79,6 +87,59 @@ struct ExecutionPanel: View {
         }
     }
 
+    // MARK: 计划外「+ 新事项…」（0.25，点子 #1 过审）——临时冒出的事当场开始，算 bonus 不写计划
+
+    @ViewBuilder private var adHocInput: some View {
+        if let kind = adHocKind {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(kind == .parallel ? "同时做一件新事（后台并行）" : "开始一件新事")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("要做的事…", text: $adHocTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($adHocFocused)
+                    .onSubmit { commitAdHoc(kind) }   // 回车即开始（两步走完，低地板）
+                HStack(spacing: 8) {
+                    if kind == .foreground {
+                        Menu("计时：\(Self.styleLabel(adHocStyle))") {   // 可选步（高天花板）
+                            Button("轻计时") { adHocStyle = .light }
+                            Button("不计时") { adHocStyle = TimingStyle.none }
+                            Button("🍅 番茄钟") { adHocStyle = .pomodoro }
+                        }
+                        .font(.caption).fixedSize()
+                    }
+                    Spacer()
+                    Button("取消") { resetAdHoc() }.font(.caption).buttonStyle(.plain)
+                    Button(kind == .parallel ? "同时开始" : "开始新事项") { commitAdHoc(kind) }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .disabled(adHocTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(8)
+            .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func openAdHoc(_ kind: AdHocKind) {
+        adHocKind = kind; adHocTitle = ""; adHocStyle = .light
+        DispatchQueue.main.async { adHocFocused = true }
+    }
+
+    private func commitAdHoc(_ kind: AdHocKind) {
+        let t = adHocTitle
+        guard !t.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        switch kind {
+        case .foreground: Task { await model.startAdHoc(title: t, timingStyle: adHocStyle) }
+        case .parallel: model.startAlsoAdHoc(title: t)
+        }
+        resetAdHoc()
+    }
+
+    private func resetAdHoc() { adHocKind = nil; adHocTitle = ""; adHocStyle = .light }
+
+    static func styleLabel(_ s: TimingStyle) -> String {
+        switch s { case .pomodoro: "🍅番茄"; case .light: "轻计时"; case .none: "不计时" }
+    }
+
     // MARK: 头部状态
 
     @ViewBuilder private var header: some View {
@@ -111,9 +172,8 @@ struct ExecutionPanel: View {
                         }
                     }
                 }
-                if model.remaining.isEmpty && redoable.isEmpty {
-                    Text("没有其它可切换的事")
-                }
+                Divider()
+                Button { openAdHoc(.foreground) } label: { Label("新事项…", systemImage: "plus") }
             } label: {
                 HStack(spacing: 4) {
                     Text(a.title).font(.headline)
@@ -279,11 +339,13 @@ struct ExecutionPanel: View {
                     Button(item.title) { Task { await model.switchTo(item) } }
                 }
             }
+            Divider()
+            Button { openAdHoc(.foreground) } label: { Label("新事项…", systemImage: "plus") }
         } label: {
             Label("换一件", systemImage: "arrow.triangle.swap")
         }
         .menuStyle(.borderlessButton)
-        .disabled(model.remaining.isEmpty)
+        // 0.25：即使没有待做的事也不禁用——「+ 新事项…」是空档时临时起意的入口
     }
 
     /// 同时做另一件（后台并行，不打断前台计时）。
@@ -296,11 +358,12 @@ struct ExecutionPanel: View {
                     Button(item.title) { model.startAlso(item) }
                 }
             }
+            Divider()
+            Button { openAdHoc(.parallel) } label: { Label("新事项…", systemImage: "plus") }
         } label: {
             Label("同时做", systemImage: "plus.circle")
         }
         .menuStyle(.borderlessButton)
-        .disabled(model.remaining.isEmpty)
     }
 
     private var breakButton: some View {
