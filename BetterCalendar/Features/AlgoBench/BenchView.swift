@@ -134,20 +134,23 @@ final class BenchViewModel {
                 }
                 if Task.isCancelled { break }
             }
-            self.progress = Task.isCancelled ? "已中止" : "完成（\(self.progressDone) 次运行）"
+            self.progress = Task.isCancelled ? "已中止（部分报告已落盘）" : "完成（\(self.progressDone) 次运行）"
             self.running = false
-            if !Task.isCancelled { self.autoSaveReport() }
+            self.autoSaveReport(partial: Task.isCancelled)   // 中止也落盘：几十分钟的部分数据不该蒸发
         }
     }
 
     /// 跑完自动把跑分 markdown 落盘到日志目录（Jason 要求：Claude 可直接读，无需手动贴）。
-    private func autoSaveReport() {
+    /// partial=true（中止）：文件头标注"部分"，数据照存。
+    private func autoSaveReport(partial: Bool = false) {
         guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         else { return }
         let dir = downloads.appendingPathComponent("BetterCalendar-logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("algo-bench-最新跑分.md")
-        try? exportMarkdown().data(using: .utf8)?.write(to: url, options: .atomic)
+        var md = exportMarkdown()
+        if partial { md = "> ⚠️ 部分报告：中止于 \(progressDone)/\(progressTotal) 次运行。\n\n" + md }
+        try? md.data(using: .utf8)?.write(to: url, options: .atomic)
         DevLog.shared.info("试验台", "跑分已落盘 \(url.lastPathComponent)（BetterCalendar-logs）")
     }
 

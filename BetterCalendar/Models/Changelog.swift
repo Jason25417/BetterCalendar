@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.24.3", date: "2026-07", changes: [
+            "（开发期）试验台：点「中止」也会把已跑完的部分落盘成报告（文件头标注中止进度）——几十分钟的多轮数据不再因为中途停下而蒸发",
+        ]),
         ChangelogEntry(version: "0.24.2", date: "2026-07", changes: [
             "（开发期）试验台「跑 N 轮」上线（×1/2/3/5/10）：每格重复跑看稳定性——灯色升级为 绿=全过/橙=部分过（不稳！）/红=全挂，每轮一个小点、明细自动展示失败样例；跑分导出按多轮通过率统计",
             "端侧解析补一条跨午夜规则：\"晚上10点到12点半\"不再被排成中午（矩阵 P1 病例的对症修补）",
