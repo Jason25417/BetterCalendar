@@ -56,6 +56,11 @@ nonisolated struct DraftSnapshot: Codable {
     var dirty: Bool? = nil   // 0.16：是否含未保存修改（optional 兼容旧快照）
 }
 
+/// 按日草稿本文件（0.23 C，SPEC §11 ③）：每个目标日一页，键 = "yyyy-MM-dd"（该日 startOfDay）。
+nonisolated struct DraftSnapshotFile: Codable {
+    var days: [String: DraftSnapshot] = [:]
+}
+
 @MainActor
 final class DraftSnapshotStore {
     private let fileURL: URL
@@ -69,17 +74,59 @@ final class DraftSnapshotStore {
         fileURL = base.appendingPathComponent("draft-snapshot.json")
     }
 
-    func save(_ snapshot: DraftSnapshot) {
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+    // MARK: 按日 API（0.23 C：切目标日=切草稿本；旧的单页 API 已退役）
+
+    func save(_ snapshot: DraftSnapshot, day: Date) {
+        var file = loadFile()
+        file.days[Self.dayKey(day)] = snapshot
+        prune(&file)
+        persist(file)
+    }
+
+    func load(day: Date) -> DraftSnapshot? {
+        loadFile().days[Self.dayKey(day)]
+    }
+
+    func clear(day: Date) {
+        var file = loadFile()
+        file.days.removeValue(forKey: Self.dayKey(day))
+        persist(file)
+    }
+
+    func clearAll() {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    // MARK: 内部
+
+    /// 读整本；旧格式（单份 DraftSnapshot）自动迁移到它自己的 targetDay 页下——零迁移债。
+    private func loadFile() -> DraftSnapshotFile {
+        guard let data = try? Data(contentsOf: fileURL) else { return DraftSnapshotFile() }
+        if let file = try? JSONDecoder().decode(DraftSnapshotFile.self, from: data),
+           !file.days.isEmpty || (try? JSONDecoder().decode(DraftSnapshot.self, from: data)) == nil {
+            return file
+        }
+        if let legacy = try? JSONDecoder().decode(DraftSnapshot.self, from: data) {
+            return DraftSnapshotFile(days: [Self.dayKey(legacy.targetDay): legacy])
+        }
+        return DraftSnapshotFile()
+    }
+
+    private func persist(_ file: DraftSnapshotFile) {
+        guard let data = try? JSONEncoder().encode(file) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
-    func load() -> DraftSnapshot? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? JSONDecoder().decode(DraftSnapshot.self, from: data)
+    /// 过期清理：过去日子的草稿页没有意义（那天已经过完），只留 逻辑今天 及以后。
+    private func prune(_ file: inout DraftSnapshotFile) {
+        let today = Self.dayKey(DayContext.logicalDay(offset: 0))
+        file.days = file.days.filter { $0.key >= today }   // yyyy-MM-dd 字典序 = 时间序
     }
 
-    func clear() {
-        try? FileManager.default.removeItem(at: fileURL)
+    static func dayKey(_ day: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Calendar.current.startOfDay(for: day))
     }
 }

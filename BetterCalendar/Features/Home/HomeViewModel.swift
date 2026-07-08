@@ -77,6 +77,7 @@ final class HomeViewModel {
     // MARK: - 草稿快照（崩溃/重启还原；Jason 定 2026-07-04）
 
     /// 每次草稿变更即整份落盘（几 KB JSON，无感）；HomeView 对 inputText 变化也会调它。
+    /// 0.23 C：按日落盘——每个目标日一页草稿本（SPEC §11 ③）。
     func persistDraft() {
         guard let draftStore else { return }
         draftStore.save(DraftSnapshot(
@@ -89,14 +90,14 @@ final class HomeViewModel {
                                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
             },
             savedAt: .now,
-            dirty: hasUnsavedChanges))
+            dirty: hasUnsavedChanges), day: targetDay)
     }
 
-    /// 启动检查（0.16，D-g）：**永远先显示已保存态**；上次退出时若留有未保存修改，
+    /// 启动检查（0.16，D-g）：**永远先显示已保存态**；上次退出时若这一页留有未保存修改，
     /// 只存入 pendingRestore——顶部一行小字邀请「恢复/丢弃」，点了恢复才应用。
-    /// （取代旧的自动还原：消灭「过期快照盖住已保存计划」整类问题，新鲜度检查随之删除。）
+    /// 0.23 C：只查启动目标日那一页；别的日子的草稿等切过去时静默还原（切日=换页，页本来就在）。
     private func restoreDraftIfAny() {
-        guard let snap = draftStore?.load() else { return }
+        guard let snap = draftStore?.load(day: targetDay) else { return }
         inputText = snap.inputText
         let wasDirty = snap.dirty ?? (snap.draftSourceRaw == DraftSource.arranged.rawValue)
         if wasDirty, !snap.blocks.isEmpty {
@@ -104,11 +105,10 @@ final class HomeViewModel {
         }
     }
 
-    /// 用户点「恢复」：应用上次未保存的修改。
+    /// 用户点「恢复」：应用上次未保存的修改（快照即当前目标日这一页，无需再跳日）。
     func applyPendingRestore() {
         guard let snap = pendingRestore else { return }
         blocks = snap.blocks.map(\.editable)
-        targetDay = snap.targetDay
         draftSource = DraftSource(rawValue: snap.draftSourceRaw) ?? .arranged
         pendingLongTasks = snap.pendingLongTasks.map {
             ParsedLongTask(title: $0.title, deadline: $0.deadline,
@@ -353,13 +353,49 @@ final class HomeViewModel {
         return cal.date(bySettingHour: t.hour ?? 0, minute: t.minute ?? 0, second: 0, of: base) ?? time
     }
 
-    /// 改目标日时，把已有草稿的日期平移到新日（保留时分），而不是丢弃草稿。
-    func shiftDraftsToDay(_ day: Date) {
-        guard !blocks.isEmpty else { return }
-        blocks = blocks.map { var b = $0
-            b.start = Self.anchored(b.start, toLogicalDayOf: day)
-            b.end = Self.anchored(b.end, toLogicalDayOf: day)
-            return b }
+    /// 0.23 C（SPEC §11 ③）：切目标日 = 切草稿本。旧的「未保存修改自动平移跟人走」已退役——
+    /// 聪明但意外（只想看看明天，今天的草稿却跟着搬家）；换页符合"每天一页纸"的心智模型。
+    /// 该日有未保存草稿页 → 静默还原那一页；否则加载该日已确认计划。
+    private var suppressNextDayChangeReload = false
+    func targetDayDidChange() {
+        if suppressNextDayChangeReload { suppressNextDayChangeReload = false; return }
+        note = nil
+        committedCount = nil
+        if let snap = draftStore?.load(day: targetDay),
+           snap.dirty ?? false, !snap.blocks.isEmpty {
+            blocks = snap.blocks.map(\.editable)
+            inputText = snap.inputText
+            draftSource = DraftSource(rawValue: snap.draftSourceRaw) ?? .arranged
+            pendingLongTasks = snap.pendingLongTasks.map {
+                ParsedLongTask(title: $0.title, deadline: $0.deadline,
+                               cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+            }
+            hasUnsavedChanges = true
+        } else {
+            inputText = draftStore?.load(day: targetDay)?.inputText ?? ""
+            pendingLongTasks = []
+            hasUnsavedChanges = false
+            blocks = []
+            draftSource = .empty
+            loadConfirmedPlan()
+        }
+    }
+
+    /// 显式「整体挪到某天」（0.23 C：取代退役的自动平移，同时服务"昨晚没排完想推明天"的真实需求）：
+    /// 当前草稿重锚到 day（保留时分、凌晨块归次日）、旧页清空、切到新页。用户明确下的指令——主权动作。
+    func moveDraft(to day: Date) {
+        guard !blocks.isEmpty else { targetDay = day; return }
+        let moved = blocks.map { b in
+            var nb = b
+            nb.start = Self.anchored(b.start, toLogicalDayOf: day)
+            nb.end = Self.anchored(b.end, toLogicalDayOf: day)
+            return nb
+        }
+        draftStore?.clear(day: targetDay)   // 内容带走，旧页撕掉
+        suppressNextDayChangeReload = true  // 切日回调别用新页的旧内容盖掉带来的草稿
+        targetDay = day
+        blocks = moved
+        hasUnsavedChanges = true
         persistDraft()
     }
 

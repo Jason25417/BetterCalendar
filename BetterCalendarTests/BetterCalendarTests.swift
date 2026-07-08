@@ -464,6 +464,76 @@ struct LogicTests {
         #expect(vm3.pendingRestore == nil)
     }
 
+    /// 按日草稿本（0.23 C）：每天一页互不串页；旧单页格式自动迁移；过去页自动清理。
+    @Test func draftStoreKeepsPagesPerDayAndMigratesLegacy() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bc-draftday-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = DraftSnapshotStore(directory: tmp)
+        let today = DayContext.logicalDay(offset: 0)
+        let tomorrow = DayContext.logicalDay(offset: 1)
+
+        store.save(DraftSnapshot(inputText: "今页", targetDay: today, dirty: true), day: today)
+        store.save(DraftSnapshot(inputText: "明页", targetDay: tomorrow, dirty: true), day: tomorrow)
+        #expect(store.load(day: today)?.inputText == "今页")
+        #expect(store.load(day: tomorrow)?.inputText == "明页")     // 互不串页
+
+        // 过去页保存时被清理（草稿只对今天及以后有意义）
+        let yesterday = DayContext.logicalDay(offset: -1)
+        store.save(DraftSnapshot(inputText: "昨页", targetDay: yesterday, dirty: true), day: yesterday)
+        store.save(DraftSnapshot(inputText: "今页2", targetDay: today, dirty: true), day: today)
+        #expect(store.load(day: yesterday) == nil)
+        #expect(store.load(day: today)?.inputText == "今页2")
+
+        // 旧格式（单份 DraftSnapshot JSON）→ 读时迁移到它的 targetDay 页
+        let legacyDir = tmp.appendingPathComponent("legacy", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+        let legacy = DraftSnapshot(inputText: "旧格式", targetDay: tomorrow, dirty: true)
+        try JSONEncoder().encode(legacy).write(to: legacyDir.appendingPathComponent("draft-snapshot.json"))
+        let migrated = DraftSnapshotStore(directory: legacyDir)
+        #expect(migrated.load(day: tomorrow)?.inputText == "旧格式")
+    }
+
+    /// 切目标日=换页（0.23 C）：那天有脏草稿→静默还原那页；干净日→加载已确认计划；切回来草稿还在。
+    @Test func switchingTargetDaySwapsDraftPages() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bc-draftswitch-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let store = DraftSnapshotStore(directory: tmp)
+        let vm = Self.makeHomeVM(planStore: planStore, draftStore: store)
+        let today = DayContext.logicalDay(offset: 0)
+        let tomorrow = DayContext.logicalDay(offset: 1)
+
+        // 明天页已确认过一份计划（真相源）
+        let t9 = Calendar.current.date(byAdding: .hour, value: 9, to: tomorrow)!
+        try planStore.replacePlanned([ScheduledBlock(title: "晨会", start: t9,
+                                                     end: t9.addingTimeInterval(1800))], on: tomorrow)
+
+        // 今天页写一份脏草稿
+        vm.targetDay = today
+        vm.targetDayDidChange()
+        vm.inputText = "今天想干的事"
+        vm.blocks = [EditableBlock(title: "写代码", start: t9, end: t9.addingTimeInterval(3600))]
+        vm.delete(id: UUID())   // 只置未保存标记
+        vm.persistDraft()
+
+        // 切到明天：干净页 → 已确认计划；草稿不跟车
+        vm.targetDay = tomorrow
+        vm.targetDayDidChange()
+        #expect(vm.hasUnsavedChanges == false)
+        #expect(vm.blocks.first?.title == "晨会")
+
+        // 切回今天：脏草稿页原样还原
+        vm.targetDay = today
+        vm.targetDayDidChange()
+        #expect(vm.hasUnsavedChanges == true)
+        #expect(vm.blocks.first?.title == "写代码")
+        #expect(vm.inputText == "今天想干的事")
+    }
+
     // MARK: 排X天按钮文案（目标日口语词）
 
     @Test func relativeDayWordFollowsTargetDay() {
@@ -1101,8 +1171,8 @@ struct LogicTests {
         #expect(merged.first?.end == at(2026, 7, 4, 10, 30))   // 内容用 addition 的
     }
 
-    /// 切目标日平移草稿：凌晨块（0–4 点）落到新逻辑日的**次日日历日**，归属跟着逻辑日走。
-    @Test func homeShiftDraftsKeepsCrossMidnightAttribution() throws {
+    /// 显式挪日（0.23 C，取代自动平移）：凌晨块（0–4 点）落到新逻辑日的**次日日历日**，归属跟着逻辑日走。
+    @Test func homeMoveDraftKeepsCrossMidnightAttribution() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let vm = Self.makeHomeVM(planStore: PlanStore(context: container.mainContext))
@@ -1110,7 +1180,8 @@ struct LogicTests {
             EditableBlock(title: "写代码", start: at(2026, 7, 7, 21), end: at(2026, 7, 7, 22)),
             EditableBlock(title: "睡前看书", start: at(2026, 7, 8, 0, 30), end: at(2026, 7, 8, 1)),
         ]
-        vm.shiftDraftsToDay(at(2026, 7, 9, 0))
+        vm.moveDraft(to: at(2026, 7, 9, 0))
+        #expect(Calendar.current.startOfDay(for: vm.targetDay) == at(2026, 7, 9, 0))   // 挪日=切到那页
         #expect(vm.blocks[0].start == at(2026, 7, 9, 21))          // 白天块落目标日
         #expect(vm.blocks[1].start == at(2026, 7, 10, 0, 30))      // 凌晨块落目标日次日（同一逻辑日）
         #expect(DayContext.logicalStartOfDay(vm.blocks[1].start) == at(2026, 7, 9, 0))

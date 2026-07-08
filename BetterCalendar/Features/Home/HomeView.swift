@@ -259,6 +259,18 @@ struct HomeView: View {
                         }
                         .font(.caption)
                         #endif
+                        // 0.23 C：整份草稿显式挪日（取代退役的"切日自动平移"）
+                        if !model.blocks.isEmpty {
+                            Menu {
+                                Button("挪到今天") { model.moveDraft(to: DayContext.logicalDay(offset: 0)) }
+                                Button("挪到明天") { model.moveDraft(to: DayContext.logicalDay(offset: 1)) }
+                                Button("挪到后天") { model.moveDraft(to: DayContext.logicalDay(offset: 2)) }
+                            } label: {
+                                Label("挪到…", systemImage: "arrow.uturn.forward")
+                            }
+                            .font(.caption)
+                            .help("把这一整份草稿挪到别的日子（保留时分）")
+                        }
                         Button { model.addBlock() } label: { Label("加一项", systemImage: "plus") }
                             .font(.caption)
                     }
@@ -459,12 +471,9 @@ struct HomeView: View {
                      + "（可随时在 设置→进阶 里改处理策略）")
             }
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
-            .onChange(of: model.targetDay) { _, newDay in
-                if model.hasUnsavedChanges {
-                    model.shiftDraftsToDay(newDay)   // 未保存的修改跟人走：平移到新日、不丢
-                } else {
-                    model.loadConfirmedPlan()        // 已保存视图：切目标日 = 加载那天的计划
-                }
+            // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）
+            .onChange(of: model.targetDay) { _, _ in
+                model.targetDayDidChange()
             }
             .safeAreaInset(edge: .bottom) {
                 NavigationLink {
