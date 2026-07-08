@@ -111,6 +111,8 @@ struct BenchOutput: Sendable {
     var promptSystem: String? = nil        // 实际发送的 system prompt（可看）
     var promptUser: String? = nil          // 实际发送的 user 消息（可看）
     var latencyMS: Int = 0
+    var firstOutputMS: Int? = nil          // 流式首包延迟（TTFT；解析走 SSE 时记；非流式路径 nil）
+    var model: String? = nil               // 本次运行用的云端模型 ID（多模型对比；本地/端侧 nil）
     var decodeOK: Bool = true              // 约束解码维度的原料：格式/解码是否一次成功
     var errorText: String? = nil
 }

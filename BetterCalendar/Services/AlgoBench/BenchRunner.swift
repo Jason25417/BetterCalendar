@@ -22,12 +22,28 @@ final class BenchRunner {
 
     // MARK: - 入口
 
-    func run(_ c: BenchCase, variant: BenchVariant, graceMinutes: Int) async -> BenchCaseResult {
+    /// 云端变体集合（多模型对比只对它们生效；本地/端侧变体忽略 model）。
+    static let cloudVariantIDs: Set<String> = [
+        BenchVariantID.parseCloud, BenchVariantID.refineCloud, BenchVariantID.refineCloudGuard,
+        BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2,
+    ]
+
+    /// model 非 nil 且是云端变体 → 用该模型跑（同一服务商换模型 ID；key/服务商仍取当前设置）。
+    func run(_ c: BenchCase, variant: BenchVariant, graceMinutes: Int,
+             model: String? = nil) async -> BenchCaseResult {
+        var result: BenchCaseResult
         switch c.capability {
-        case .parse: await runParse(c, variant: variant)
-        case .refine: await runRefine(c, variant: variant)
-        case .reflow: await runReflow(c, variant: variant, graceMinutes: graceMinutes)
+        case .parse: result = await runParse(c, variant: variant, model: model)
+        case .refine: result = await runRefine(c, variant: variant, model: model)
+        case .reflow: result = await runReflow(c, variant: variant, graceMinutes: graceMinutes, model: model)
         }
+        if Self.cloudVariantIDs.contains(variant.id) { result.output.model = model ?? CloudSettings.activeModel }
+        return result
+    }
+
+    private func cloudClient(_ model: String?) -> AnthropicClient {
+        guard let model, !model.isEmpty else { return client }
+        return AnthropicClient(model: { model })
     }
 
     /// prompt 预览（不发请求）：LLM 变体给实际会发送的 system+user；本地变体返回 nil。
@@ -56,12 +72,9 @@ final class BenchRunner {
 
     // MARK: - 解析
 
-    private func runParse(_ c: BenchCase, variant: BenchVariant) async -> BenchCaseResult {
+    private func runParse(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
         guard let text = c.text else { return Self.skipped("用例缺 text") }
         if let reason = gate(variant) { return Self.skipped(reason) }
-        let parser: ScheduleParsing = (variant.id == BenchVariantID.parseFM)
-            ? FoundationModelsScheduleParser(fallback: BenchFailFastParser(), liveDraft: nil)
-            : ClaudeScheduleParser(client: client, fallback: BenchFailFastParser(), liveDraft: nil)
 
         var out = BenchOutput()
         if let p = promptPreview(c, variant: variant, graceMinutes: 0) {
@@ -69,19 +82,41 @@ final class BenchRunner {
         }
         let t0 = Date()
         do {
-            let plan = try await parser.parse(text, referenceDate: referenceDay, context: ParseContext())
-            out.latencyMS = Self.ms(since: t0)
-            out.blocks = plan.blocks.compactMap { pb in
-                guard let s = pb.start, let e = pb.end else { return nil }
-                return ScheduledBlock(title: pb.title, start: s, end: e,
-                                      isFixed: pb.isFixed, isAnchor: pb.isAnchor,
-                                      timingStyle: pb.timingStyle, priority: pb.priority,
-                                      labels: pb.labels)
-            }
-            let dropped = plan.blocks.count - out.blocks.count
-            if dropped > 0 {
-                out.decodeOK = false
-                out.note = "\(dropped) 块缺起止时间被丢弃（解码不完整）"
+            if variant.id == BenchVariantID.parseCloud {
+                // 云端走**流式**（同线上体验路径）：记 TTFT（首包）+ 总时长——「流式表现」指标
+                let mc = cloudClient(model)
+                let system = ClaudeScheduleParser.systemPrompt(referenceDate: referenceDay,
+                                                               context: ParseContext())
+                var first: Int?
+                let raw = try await mc.completeStreaming(system: system, user: text, maxTokens: 10000,
+                                                         jsonSchema: ClaudeScheduleParser.parseSchema) { _ in
+                    if first == nil { first = Self.ms(since: t0) }
+                }
+                out.latencyMS = Self.ms(since: t0)
+                out.firstOutputMS = first
+                out.raw = raw
+                guard let decoded = ClaudeScheduleParser.decodePlan(JSONText.extractObject(raw)) else {
+                    out.decodeOK = false
+                    out.errorText = "JSON 解码失败"
+                    let checks = BenchAssertions.evaluate(c.expects, output: out,
+                                                          context: .init(referenceDay: referenceDay))
+                    return BenchCaseResult(output: out, checks: checks)
+                }
+                out.blocks = decoded.blocks.compactMap { Self.scheduled(from: $0) }
+                if decoded.dropped > 0 {
+                    out.decodeOK = false
+                    out.note = "\(decoded.dropped) 个损坏条目被丢弃（解码不完整）"
+                }
+            } else {
+                let parser = FoundationModelsScheduleParser(fallback: BenchFailFastParser(), liveDraft: nil)
+                let plan = try await parser.parse(text, referenceDate: referenceDay, context: ParseContext())
+                out.latencyMS = Self.ms(since: t0)
+                out.blocks = plan.blocks.compactMap { Self.scheduled(from: $0) }
+                let dropped = plan.blocks.count - out.blocks.count
+                if dropped > 0 {
+                    out.decodeOK = false
+                    out.note = "\(dropped) 块缺起止时间被丢弃（解码不完整）"
+                }
             }
         } catch {
             out.latencyMS = Self.ms(since: t0)
@@ -93,16 +128,24 @@ final class BenchRunner {
         return BenchCaseResult(output: out, checks: checks)
     }
 
+    private static func scheduled(from pb: ParsedBlock) -> ScheduledBlock? {
+        guard let s = pb.start, let e = pb.end else { return nil }
+        return ScheduledBlock(title: pb.title, start: s, end: e,
+                              isFixed: pb.isFixed, isAnchor: pb.isAnchor,
+                              timingStyle: pb.timingStyle, priority: pb.priority,
+                              labels: pb.labels)
+    }
+
     // MARK: - 微调
 
-    private func runRefine(_ c: BenchCase, variant: BenchVariant) async -> BenchCaseResult {
+    private func runRefine(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
         guard let command = c.command, let specs = c.blocks else { return Self.skipped("用例缺 command/blocks") }
         if let reason = gate(variant) { return Self.skipped(reason) }
         let input = specs.compactMap { $0.materialize(on: referenceDay) }
         guard input.count == specs.count else { return Self.skipped("用例块时间无效") }
         let refiner: PlanRefining = (variant.id == BenchVariantID.refineFM)
             ? FoundationModelsPlanRefiner(fallback: BenchFailFastRefiner())
-            : ClaudePlanRefiner(client: client)
+            : ClaudePlanRefiner(client: cloudClient(model))
 
         var out = BenchOutput()
         out.promptUser = command
@@ -112,6 +155,8 @@ final class BenchRunner {
             var refined = try await refiner.refine(input, command: command,
                                                    originalRequest: c.originalRequest ?? "", now: now)
             if variant.id == BenchVariantID.refineCloudGuard {
+                // = 现行线上组合（0.23.1 起防呆三连）：部分返回并回 + 标志防翻 + 固定块时间还原
+                refined = HomeViewModel.mergePartialRefine(original: input, refined: refined, command: command)
                 refined = HomeViewModel.guardRefineFlags(original: input, refined: refined, command: command)
             }
             out.latencyMS = Self.ms(since: t0)
@@ -145,7 +190,8 @@ final class BenchRunner {
         return ReflowInputs(input: input, from: from, windDown: windDown)
     }
 
-    private func runReflow(_ c: BenchCase, variant: BenchVariant, graceMinutes: Int) async -> BenchCaseResult {
+    private func runReflow(_ c: BenchCase, variant: BenchVariant, graceMinutes: Int,
+                           model: String?) async -> BenchCaseResult {
         guard let r = reflowInputs(c) else { return Self.skipped("用例缺 blocks/fromHM 或时间无效") }
         let fixed = r.input.filter(\.isFixed)
         let flexibleByStart = r.input.filter { !$0.isFixed }.sorted { $0.start < $1.start }
@@ -172,7 +218,7 @@ final class BenchRunner {
             }
             out.promptSystem = p.system; out.promptUser = p.user
             do {
-                let raw = try await client.complete(system: p.system, user: p.user, maxTokens: 4000,
+                let raw = try await cloudClient(model).complete(system: p.system, user: p.user, maxTokens: 4000,
                                                     jsonMode: true,
                                                     jsonSchema: v2 ? BenchPrompts.reflowSchemaV2
                                                                    : BenchPrompts.reflowSchemaV1)

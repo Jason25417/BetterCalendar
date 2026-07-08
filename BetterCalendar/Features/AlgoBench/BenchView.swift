@@ -24,14 +24,26 @@ final class BenchViewModel {
     var graceMinutes = 10                       // 收工线宽限：算法参数（不进设置页），10/20/30 实验
     var running = false
     var progress = ""
-    var results: [String: [String: BenchCaseResult]] = [:]   // caseID → variantID → 结果
+    var results: [String: [String: BenchCaseResult]] = [:]   // caseID → 运行键(变体|模型) → 结果
     var selectedCaseID: String? = nil
     private var runTask: Task<Void, Never>?
+
+    /// 云端模型清单（逗号分隔编辑；同服务商多模型对比——Jason 2026-07-08 提）。持久化本机。
+    var cloudModelsText: String {
+        didSet { UserDefaults.standard.set(cloudModelsText, forKey: "bench.cloudModels") }
+    }
+    var cloudModels: [String] {
+        let list = cloudModelsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return list.isEmpty ? [CloudSettings.activeModel] : list
+    }
 
     init(runner: BenchRunner) {
         self.runner = runner
         self.cases = store.load()
         self.enabledVariants = Set(BenchVariants.all.map(\.id))
+        self.cloudModelsText = UserDefaults.standard.string(forKey: "bench.cloudModels")
+            ?? CloudSettings.activeModel
     }
 
     var filteredCases: [BenchCase] {
@@ -41,6 +53,25 @@ final class BenchViewModel {
 
     func variants(for capability: BenchCapability) -> [BenchVariant] {
         BenchVariants.of(capability).filter { enabledVariants.contains($0.id) }
+    }
+
+    /// 一次「运行」= 变体 ×（云端变体则再乘模型清单）。
+    struct BenchRun: Identifiable {
+        let variant: BenchVariant
+        let model: String?       // nil = 本地/端侧
+        var id: String { model.map { "\(variant.id)|\($0)" } ?? variant.id }
+        var label: String { model.map { "\(variant.name) · \(Self.shortModel($0))" } ?? variant.name }
+        static func shortModel(_ m: String) -> String {
+            m.split(separator: "/").last.map(String.init) ?? m
+        }
+    }
+
+    func runs(for capability: BenchCapability) -> [BenchRun] {
+        variants(for: capability).flatMap { v -> [BenchRun] in
+            BenchRunner.cloudVariantIDs.contains(v.id)
+                ? cloudModels.map { BenchRun(variant: v, model: $0) }
+                : [BenchRun(variant: v, model: nil)]
+        }
     }
 
     var selectedCase: BenchCase? { cases.first { $0.id == selectedCaseID } }
@@ -53,15 +84,16 @@ final class BenchViewModel {
         let todo = filteredCases
         runTask = Task { [weak self] in
             guard let self else { return }
-            let total = todo.reduce(0) { $0 + self.variants(for: $1.capability).count }
+            let total = todo.reduce(0) { $0 + self.runs(for: $1.capability).count }
             var done = 0
             for c in todo {
-                for v in self.variants(for: c.capability) {
+                for run in self.runs(for: c.capability) {
                     if Task.isCancelled { break }
                     done += 1
-                    self.progress = "\(c.id) × \(v.name)（\(done)/\(total)）…"
-                    let r = await self.runner.run(c, variant: v, graceMinutes: self.graceMinutes)
-                    self.results[c.id, default: [:]][v.id] = r
+                    self.progress = "\(c.id) × \(run.label)（\(done)/\(total)）…"
+                    let r = await self.runner.run(c, variant: run.variant,
+                                                  graceMinutes: self.graceMinutes, model: run.model)
+                    self.results[c.id, default: [:]][run.id] = r
                 }
                 if Task.isCancelled { break }
             }
@@ -100,34 +132,38 @@ final class BenchViewModel {
     // MARK: - 导出
 
     func exportMarkdown() -> String {
-        var md = "# 算法试验台 · 跑分（宽限 \(graceMinutes)min）\n\n"
-        md += "## 分数矩阵（变体 × 通过率）\n\n"
-        md += "| 变体 | 维度 | 通过 | 平均耗时 | 解码失败 |\n|---|---|---|---|---|\n"
-        for v in BenchVariants.all where enabledVariants.contains(v.id) {
-            let vCases = cases.filter { $0.capability == v.capability }
-            let dims = Set(vCases.map(\.dimension)).sorted()
-            for d in dims {
-                let dCases = vCases.filter { $0.dimension == d }
-                let done = dCases.compactMap { results[$0.id]?[v.id] }
-                guard !done.isEmpty else { continue }
-                let ran = done.filter { $0.skippedReason == nil }
-                let passed = ran.filter(\.passed).count
-                let avg = ran.isEmpty ? 0 : ran.map(\.output.latencyMS).reduce(0, +) / ran.count
-                let decodeFails = ran.filter { !$0.output.decodeOK }.count
-                md += "| \(v.name) | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(decodeFails) |\n"
+        var md = "# 算法试验台 · 跑分（宽限 \(graceMinutes)min · 模型清单 \(cloudModels.joined(separator: ", ")))\n\n"
+        md += "## 分数矩阵（变体×模型 × 通过率）\n\n"
+        md += "| 变体 | 模型 | 维度 | 通过 | 平均耗时 | 平均首包 | 解码失败 |\n|---|---|---|---|---|---|---|\n"
+        for cap in BenchCapability.allCases {
+            let capCases = cases.filter { $0.capability == cap }
+            for run in runs(for: cap) {
+                let dims = Set(capCases.map(\.dimension)).sorted()
+                for d in dims {
+                    let done = capCases.filter { $0.dimension == d }.compactMap { results[$0.id]?[run.id] }
+                    guard !done.isEmpty else { continue }
+                    let ran = done.filter { $0.skippedReason == nil }
+                    let passed = ran.filter(\.passed).count
+                    let avg = ran.isEmpty ? 0 : ran.map(\.output.latencyMS).reduce(0, +) / ran.count
+                    let ttfts = ran.compactMap(\.output.firstOutputMS)
+                    let ttft = ttfts.isEmpty ? "—" : "\(ttfts.reduce(0, +) / ttfts.count)ms"
+                    let decodeFails = ran.filter { !$0.output.decodeOK }.count
+                    md += "| \(run.variant.name) | \(run.model.map(BenchRun.shortModel) ?? "—") | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(ttft) | \(decodeFails) |\n"
+                }
             }
         }
         md += "\n## 逐用例\n\n"
         for c in cases {
             guard let row = results[c.id], !row.isEmpty else { continue }
             md += "### \(c.id) \(c.name)（\(c.dimension)）\n"
-            for v in BenchVariants.of(c.capability) where enabledVariants.contains(v.id) {
-                guard let r = row[v.id] else { continue }
-                if let skip = r.skippedReason { md += "- \(v.name)：⏭ \(skip)\n"; continue }
+            for run in runs(for: c.capability) {
+                guard let r = row[run.id] else { continue }
+                if let skip = r.skippedReason { md += "- \(run.label)：⏭ \(skip)\n"; continue }
                 let mark = r.passed ? "✅" : "❌"
                 let fails = r.checks.filter { !$0.passed }
                     .map { "\($0.expectation.kind.rawValue)：\($0.detail)" }
-                md += "- \(v.name)：\(mark) \(r.output.latencyMS)ms"
+                md += "- \(run.label)：\(mark) \(r.output.latencyMS)ms"
+                if let f = r.output.firstOutputMS { md += "（首包 \(f)ms）" }
                 if let err = r.output.errorText { md += " · 错误：\(err)" }
                 if !fails.isEmpty { md += " · " + fails.joined(separator: "；") }
                 md += "\n"
@@ -146,6 +182,7 @@ final class BenchViewModel {
 
 struct BenchView: View {
     @State private var model: BenchViewModel
+    @State private var showModelEditor = false
 
     init(runner: BenchRunner) {
         _model = State(initialValue: BenchViewModel(runner: runner))
@@ -190,11 +227,11 @@ struct BenchView: View {
             }
             Spacer()
             HStack(spacing: 4) {
-                ForEach(model.variants(for: c.capability)) { v in
+                ForEach(model.runs(for: c.capability)) { run in
                     Circle()
-                        .fill(dotColor(model.results[c.id]?[v.id]))
+                        .fill(dotColor(model.results[c.id]?[run.id]))
                         .frame(width: 9, height: 9)
-                        .help(v.name)
+                        .help(run.label)
                 }
             }
         }
@@ -214,8 +251,8 @@ struct BenchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     caseHeader(c)
-                    ForEach(model.variants(for: c.capability)) { v in
-                        variantSection(c, v)
+                    ForEach(model.runs(for: c.capability)) { run in
+                        variantSection(c, run)
                     }
                 }
                 .padding()
@@ -249,20 +286,23 @@ struct BenchView: View {
     }
 
     @ViewBuilder
-    private func variantSection(_ c: BenchCase, _ v: BenchVariant) -> some View {
-        let r = model.results[c.id]?[v.id]
+    private func variantSection(_ c: BenchCase, _ run: BenchViewModel.BenchRun) -> some View {
+        let v = run.variant
+        let r = model.results[c.id]?[run.id]
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Circle().fill(dotColor(r)).frame(width: 10, height: 10)
-                    Text(v.name).font(.headline)
+                    Text(run.label).font(.headline)
                     if v.frozen {
                         Text("冻结快照").font(.caption2).padding(.horizontal, 4)
                             .background(.quaternary, in: Capsule())
                     }
                     Spacer()
                     if let r, r.skippedReason == nil {
-                        Text("\(r.output.latencyMS)ms").font(.caption.monospacedDigit())
+                        Text((r.output.firstOutputMS.map { "首包 \($0)ms · " } ?? "")
+                             + "\(r.output.latencyMS)ms")
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -376,6 +416,26 @@ struct BenchView: View {
                 }
             } label: {
                 Label("变体", systemImage: "square.stack.3d.up")
+            }
+
+            Button {
+                showModelEditor.toggle()
+            } label: {
+                Label("模型×\(model.cloudModels.count)", systemImage: "cpu")
+            }
+            .help("云端变体的模型清单（逗号分隔）：同服务商多模型对比，每个云端变体逐一跑")
+            .popover(isPresented: $showModelEditor) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("云端模型清单（逗号分隔；服务商/key 取当前设置）").font(.caption)
+                    TextField("如：claude-sonnet-5, claude-haiku-4-5-20251001",
+                              text: Binding(get: { model.cloudModelsText },
+                                            set: { model.cloudModelsText = $0 }))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 420)
+                    Text("当前生效：" + model.cloudModels.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(12)
             }
 
             if model.running {

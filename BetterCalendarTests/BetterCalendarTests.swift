@@ -1263,6 +1263,50 @@ struct LogicTests {
         #expect(started.isStarted(label))
     }
 
+    /// 微调防呆之二（0.23.1 #9）：模型只返回改动块 → 并回原清单（没回=未改；id 继承；新增保留）。
+    @Test func mergePartialRefineRestoresOmittedBlocks() {
+        let a = ScheduledBlock(title: "写作", start: at(2026,7,9,9), end: at(2026,7,9,11))
+        let b = ScheduledBlock(title: "会议", start: at(2026,7,9,11,30), end: at(2026,7,9,12,30), isFixed: true)
+        let c = ScheduledBlock(title: "阅读", start: at(2026,7,9,14), end: at(2026,7,9,15))
+        // 模型抽风：让挪阅读，却只回了阅读一块（R1 实锤形态）
+        let onlyRead = ScheduledBlock(title: "阅读", start: at(2026,7,9,16), end: at(2026,7,9,17))
+        let merged = HomeViewModel.mergePartialRefine(original: [a, b, c], refined: [onlyRead],
+                                                      command: "把阅读挪到16点")
+        #expect(merged.count == 3)
+        #expect(merged.first { $0.title == "阅读" }?.start == at(2026,7,9,16))   // 改动生效
+        #expect(merged.first { $0.title == "阅读" }?.id == c.id)                 // 身份保持
+        #expect(merged.first { $0.title == "写作" }?.start == a.start)           // 没回=未改
+        #expect(merged.first { $0.title == "会议" }?.start == b.start)
+
+        // 模型新增块保留（"加一件"场景）
+        let added = ScheduledBlock(title: "散步", start: at(2026,7,9,18), end: at(2026,7,9,18,30))
+        let withNew = HomeViewModel.mergePartialRefine(original: [a], refined: [a, added], command: "加个散步")
+        #expect(withNew.count == 2)
+    }
+
+    /// 命令含删除词 → 信任模型的省略（删除功能不被"恢复"破坏）。
+    @Test func mergePartialRefineRespectsDeleteIntent() {
+        let a = ScheduledBlock(title: "写作", start: at(2026,7,9,9), end: at(2026,7,9,11))
+        let c = ScheduledBlock(title: "阅读", start: at(2026,7,9,14), end: at(2026,7,9,15))
+        let merged = HomeViewModel.mergePartialRefine(original: [a, c], refined: [a], command: "删掉阅读")
+        #expect(merged.count == 1)
+        #expect(merged.first?.title == "写作")
+    }
+
+    /// 微调防呆之三（0.23.1 #9）：命令没点名的固定块，起止时间也还原（R3 实锤：整体挪一小时把会议也挪了）。
+    @Test func guardRestoresFixedBlockTimeWhenUnmentioned() {
+        let meeting = ScheduledBlock(title: "会议", start: at(2026,7,9,11,30), end: at(2026,7,9,12,30), isFixed: true)
+        var moved = meeting; moved.start = at(2026,7,9,12,30); moved.end = at(2026,7,9,13,30)
+        // 没点名 → 时间还原
+        let guarded = HomeViewModel.guardRefineFlags(original: [meeting], refined: [moved],
+                                                     command: "整体往后挪一小时")
+        #expect(guarded.first?.start == at(2026,7,9,11,30))
+        // 点名了 → 尊重用户（模型改动保留）
+        let named = HomeViewModel.guardRefineFlags(original: [meeting], refined: [moved],
+                                                   command: "把会议挪到12点半")
+        #expect(named.first?.start == at(2026,7,9,12,30))
+    }
+
     /// 微调防呆：命令没提到 固定/星/计时 时，模型批量翻转这些属性会被恢复原值（端侧全番茄钟抽风的根治）。
     @Test func refineGuardBlocksUnaskedFlagFlips() {
         let a = ScheduledBlock(title: "写代码", start: at(2026,7,8,9), end: at(2026,7,8,11),
