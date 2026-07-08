@@ -27,7 +27,10 @@ final class BenchViewModel {
     var progress = ""
     var progressDone = 0
     var progressTotal = 0
-    var results: [String: [String: BenchCaseResult]] = [:]   // caseID → 运行键(变体|模型|宽限) → 结果
+    /// caseID → 运行键(变体|模型|宽限) → **多次尝试**（重复 N 轮看稳定性——模型有方差，单轮说了不算）。
+    var results: [String: [String: [BenchCaseResult]]] = [:]
+    /// 每格重复次数（1–10）：Sonnet 三轮 0→6→2/7 的教训——通过率要用分布说话。
+    var repeatCount = 1
     var selectedCaseID: String? = nil
     private var runTask: Task<Void, Never>?
 
@@ -108,18 +111,26 @@ final class BenchViewModel {
         let todo = filteredCases
         runTask = Task { [weak self] in
             guard let self else { return }
-            let total = todo.reduce(0) { $0 + self.runs(for: $1.capability).count }
+            let n = max(1, min(10, self.repeatCount))
+            let total = todo.reduce(0) { $0 + self.runs(for: $1.capability).count } * n
             self.progressTotal = total
             self.progressDone = 0
             for c in todo {
                 for run in self.runs(for: c.capability) {
+                    var attempts: [BenchCaseResult] = []
+                    for i in 1...n {
+                        if Task.isCancelled { break }
+                        self.progress = "\(c.id) × \(run.label)" + (n > 1 ? "（第 \(i)/\(n) 轮）" : "") + "…"
+                        let r = await self.runner.run(c, variant: run.variant,
+                                                      graceMinutes: run.grace ?? WorkHoursSettings.graceMinutes,
+                                                      model: run.model)
+                        attempts.append(r)
+                        self.progressDone += 1
+                        // 跳过的格子（没 key/开关没开）重复毫无意义，跑一次即止
+                        if r.skippedReason != nil { self.progressDone += n - i; break }
+                    }
+                    self.results[c.id, default: [:]][run.id] = attempts
                     if Task.isCancelled { break }
-                    self.progress = "\(c.id) × \(run.label)…"
-                    let r = await self.runner.run(c, variant: run.variant,
-                                                  graceMinutes: run.grace ?? WorkHoursSettings.graceMinutes,
-                                                  model: run.model)
-                    self.results[c.id, default: [:]][run.id] = r
-                    self.progressDone += 1
                 }
                 if Task.isCancelled { break }
             }
@@ -145,6 +156,27 @@ final class BenchViewModel {
         running = false
     }
 
+    /// 一格的聚合读数（多轮）：nil = 没跑过。
+    struct CellSummary {
+        var attempts: [BenchCaseResult]
+        var skipped: String? { attempts.first?.skippedReason }
+        var ran: [BenchCaseResult] { attempts.filter { $0.skippedReason == nil } }
+        var passCount: Int { ran.filter(\.passed).count }
+        var passText: String { "\(passCount)/\(ran.count)" }
+        var avgLatency: Int { ran.isEmpty ? 0 : ran.map(\.output.latencyMS).reduce(0, +) / ran.count }
+        var avgTTFT: Int? {
+            let t = ran.compactMap(\.output.firstOutputMS)
+            return t.isEmpty ? nil : t.reduce(0, +) / t.count
+        }
+        /// 展示哪一次的明细：第一个失败的（信息量最大），全过则最后一次。
+        var showcase: BenchCaseResult? { ran.first { !$0.passed } ?? ran.last ?? attempts.first }
+    }
+
+    func cell(_ caseID: String, _ runID: String) -> CellSummary? {
+        guard let a = results[caseID]?[runID], !a.isEmpty else { return nil }
+        return CellSummary(attempts: a)
+    }
+
     // MARK: - 用例集
 
     func reloadCases() { cases = store.load() }
@@ -166,9 +198,11 @@ final class BenchViewModel {
             for run in runs(for: cap) {
                 let dims = Set(capCases.map(\.dimension)).sorted()
                 for d in dims {
-                    let done = capCases.filter { $0.dimension == d }.compactMap { results[$0.id]?[run.id] }
-                    guard !done.isEmpty else { continue }
-                    let ran = done.filter { $0.skippedReason == nil }
+                    // 多轮：把该维度所有用例的所有尝试摊平统计（通过率=通过次数/总次数）
+                    let allAttempts = capCases.filter { $0.dimension == d }
+                        .compactMap { results[$0.id]?[run.id] }.flatMap { $0 }
+                    guard !allAttempts.isEmpty else { continue }
+                    let ran = allAttempts.filter { $0.skippedReason == nil }
                     let passed = ran.filter(\.passed).count
                     let avg = ran.isEmpty ? 0 : ran.map(\.output.latencyMS).reduce(0, +) / ran.count
                     let ttfts = ran.compactMap(\.output.firstOutputMS)
@@ -183,15 +217,18 @@ final class BenchViewModel {
             guard let row = results[c.id], !row.isEmpty else { continue }
             md += "### \(c.id) \(c.name)（\(c.dimension)）\n"
             for run in runs(for: c.capability) {
-                guard let r = row[run.id] else { continue }
-                if let skip = r.skippedReason { md += "- \(run.label)：⏭ \(skip)\n"; continue }
-                let mark = r.passed ? "✅" : "❌"
-                let fails = r.checks.filter { !$0.passed }
-                    .map { "\($0.expectation.kind.rawValue)：\($0.detail)" }
-                md += "- \(run.label)：\(mark) \(r.output.latencyMS)ms"
-                if let f = r.output.firstOutputMS { md += "（首包 \(f)ms）" }
-                if let err = r.output.errorText { md += " · 错误：\(err)" }
-                if !fails.isEmpty { md += " · " + fails.joined(separator: "；") }
+                guard let summary = cell(c.id, run.id) else { continue }
+                if let skip = summary.skipped { md += "- \(run.label)：⏭ \(skip)\n"; continue }
+                let mark = summary.passCount == summary.ran.count ? "✅"
+                         : (summary.passCount == 0 ? "❌" : "⚠️")
+                md += "- \(run.label)：\(mark) \(summary.passText) · 均 \(summary.avgLatency)ms"
+                if let f = summary.avgTTFT { md += "（首包均 \(f)ms）" }
+                if let bad = summary.showcase, !bad.passed {
+                    let fails = bad.checks.filter { !$0.passed }
+                        .map { "\($0.expectation.kind.rawValue)：\($0.detail)" }
+                    if let err = bad.output.errorText { md += " · 错误：\(err)" }
+                    if !fails.isEmpty { md += " · 样例失败：" + fails.joined(separator: "；") }
+                }
                 md += "\n"
             }
         }
@@ -255,7 +292,7 @@ struct BenchView: View {
             HStack(spacing: 4) {
                 ForEach(model.runs(for: c.capability)) { run in
                     Circle()
-                        .fill(dotColor(model.results[c.id]?[run.id]))
+                        .fill(cellColor(model.cell(c.id, run.id)))
                         .frame(width: 9, height: 9)
                         .help(run.label)
                 }
@@ -263,10 +300,12 @@ struct BenchView: View {
         }
     }
 
-    private func dotColor(_ r: BenchCaseResult?) -> Color {
-        guard let r else { return .gray.opacity(0.25) }
-        if r.skippedReason != nil { return .gray }
-        return r.passed ? .green : .red
+    /// 多轮聚合灯色：绿=全过，橙=部分过（不稳定！），红=全挂，灰=没跑/跳过。
+    private func cellColor(_ c: BenchViewModel.CellSummary?) -> Color {
+        guard let c else { return .gray.opacity(0.25) }
+        if c.skipped != nil || c.ran.isEmpty { return .gray }
+        if c.passCount == c.ran.count { return .green }
+        return c.passCount == 0 ? .red : .orange
     }
 
     // MARK: 右：明细
@@ -314,25 +353,40 @@ struct BenchView: View {
     @ViewBuilder
     private func variantSection(_ c: BenchCase, _ run: BenchViewModel.BenchRun) -> some View {
         let v = run.variant
-        let r = model.results[c.id]?[run.id]
+        let summary = model.cell(c.id, run.id)
+        let r = summary?.showcase
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Circle().fill(dotColor(r)).frame(width: 10, height: 10)
+                    Circle().fill(cellColor(summary)).frame(width: 10, height: 10)
                     Text(run.label).font(.headline)
                     if v.frozen {
                         Text("冻结快照").font(.caption2).padding(.horizontal, 4)
                             .background(.quaternary, in: Capsule())
                     }
                     Spacer()
-                    if let r, r.skippedReason == nil {
-                        Text((r.output.firstOutputMS.map { "首包 \($0)ms · " } ?? "")
-                             + "\(r.output.latencyMS)ms")
+                    if let summary, summary.skipped == nil, !summary.ran.isEmpty {
+                        Text("通过 \(summary.passText)"
+                             + (summary.avgTTFT.map { " · 首包均 \($0)ms" } ?? "")
+                             + " · 均 \(summary.avgLatency)ms")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
                 }
                 Text(v.detail).font(.caption).foregroundStyle(.secondary)
+                // 多轮时：每轮一个小灯（一眼看方差）；明细展示信息量最大的那轮（首个失败，全过则最后一轮）
+                if let summary, summary.ran.count > 1 {
+                    HStack(spacing: 3) {
+                        ForEach(summary.ran.indices, id: \.self) { i in
+                            Circle().fill(summary.ran[i].passed ? Color.green : .red)
+                                .frame(width: 6, height: 6)
+                                .help("第 \(i + 1) 轮：\(summary.ran[i].passed ? "过" : "挂") · \(summary.ran[i].output.latencyMS)ms")
+                        }
+                        if let show = r, !show.passed {
+                            Text("（下方明细=失败样例）").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
 
                 if let r {
                     if let skip = r.skippedReason {
@@ -432,6 +486,12 @@ struct BenchView: View {
                 Label("宽限×\(model.selectedGraces.count)", systemImage: "clock.badge.questionmark")
             }
             .help("收工线宽限多选（只作用于 reflow V2）：勾几个矩阵乘几份；实验定值后写死进软件")
+
+            Picker("轮数", selection: Binding(get: { model.repeatCount },
+                                             set: { model.repeatCount = $0 })) {
+                ForEach([1, 2, 3, 5, 10], id: \.self) { n in Text("×\(n) 轮").tag(n) }
+            }
+            .help("每格重复跑 N 轮看稳定性（模型有方差，单轮说了不算）；跳过的格子只跑一次")
 
             Menu {
                 ForEach(BenchCapability.allCases, id: \.self) { cap in
