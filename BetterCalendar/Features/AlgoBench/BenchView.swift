@@ -235,6 +235,7 @@ final class BenchViewModel {
                 }
             }
         }
+        md += timeoutSensitivitySection()
         md += "\n## 逐用例\n\n"
         for c in cases {
             guard let row = results[c.id], !row.isEmpty else { continue }
@@ -255,6 +256,29 @@ final class BenchViewModel {
                 md += "\n"
             }
         }
+        return md
+    }
+
+    /// 超时敏感度（2026-07-09 Jason 提「看门狗是生产功能」）：不重跑，从每次运行**已记录的耗时**回溯——
+    /// 若生产总时限设为 T，会切掉多少次模型调用、其中多少是「本可成功却被误杀」的好答案。
+    /// 看门狗封顶 120s：真卡死记为 120000ms，三档都正确显示为"会被切"。
+    /// 直接回答"用户等多久"与"别切掉合法慢答案"的取舍——比实际设三个值各跑一遍更干净（隔离超时这一个变量、零额外耗时）。
+    private func timeoutSensitivitySection() -> String {
+        // 只统计会发起模型调用的运行（本地铺排耗时≈0，永远在任何时限内，天然不计入）
+        let calls = results.values.flatMap { $0.values }.flatMap { $0 }
+            .filter { $0.skippedReason == nil && $0.output.latencyMS > 0 }
+        guard !calls.isEmpty else { return "" }
+        var md = "\n## 超时敏感度（生产总时限该设多少）\n\n"
+        md += "共 \(calls.count) 次模型调用。若把生产总时限（超时即回退本地/报错）设为下列各值：\n\n"
+        md += "| 时限 | 会被切断 | 其中本可成功（误杀好答案） |\n|---|---|---|\n"
+        let slowestPass = calls.filter(\.passed).map(\.output.latencyMS).max() ?? 0
+        for t in [30, 60, 120] {
+            let ms = t * 1000
+            let cut = calls.filter { $0.output.latencyMS > ms }
+            let wrongKill = cut.filter(\.passed).count
+            md += "| \(t)s | \(cut.count) | \(wrongKill) |\n"
+        }
+        md += "\n最慢的**成功**答案耗时 \(slowestPass)ms（\(slowestPass / 1000)s）——生产时限低于它就会误杀合法慢答案。\n"
         return md
     }
 
