@@ -56,7 +56,8 @@ struct HomeView: View {
             longTaskStore: container.longTasks,
             draftStore: container.draftSnapshots,
             looseDays: container.looseDays,
-            startedDays: container.startedDays))
+            startedDays: container.startedDays,
+            progress: container.execution))
     }
 
     var body: some View {
@@ -235,6 +236,21 @@ struct HomeView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
+                }
+
+                // 新鲜度徽标（0.24 C2）：中性、不打断——底层变了，两个显式出路，绝不弹窗/自动合并
+                if model.freshness {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                        Text("这天的日程有更新")
+                        Button("载入最新（放弃本页修改）") { model.reloadFreshBase() }
+                            .buttonStyle(.plain).underline()
+                        Text("· 或继续编辑，确认时以本页为准").foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .font(.caption)
+                    .padding(6)
+                    .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                 }
 
                 // 有块、或有未保存修改（含"删到空"）都保留写入区——否则删掉最后一件就没法确认保存
@@ -439,9 +455,13 @@ struct HomeView: View {
                 container.router.scheduleRequest = nil   // 消费掉
             }
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
-            // 双向同步回流后即时刷新（0.22.2）：日历手改进了真相源 → 干净视图跟着变；有未保存修改不打扰
+            // 双向同步回流后（0.22.2→0.24 C2）：干净视图直接刷新；编辑中亮新鲜度徽标（不打扰、不弹窗）
             .onReceive(NotificationCenter.default.publisher(for: ReconcileService.planChangedExternally)) { _ in
-                if !model.hasUnsavedChanges { model.loadConfirmedPlan() }
+                model.noteExternalPlanChange()
+            }
+            // 执行进展（开始/完成/换件）→ 实时日精修台跟着现实走；编辑中亮徽标（0.24 C2）
+            .onReceive(NotificationCenter.default.publisher(for: ExecutionProgressSignal.changed)) { _ in
+                model.noteExecutionProgress()
             }
             // 0.20 双向同步：日历里的 删除/新建 → 一个中性对话框合并询问（挂起到主窗口，不发通知）。
             // 关闭 = 本次保留现状、不记住。具体是哪几件列在正文里。

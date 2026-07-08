@@ -653,6 +653,8 @@ final class ExecutionViewModel {
     /// 串在同一个 Task 里保证时序：先淡绿（project），再铺"从现在起"的橙（updatePreview）。
     private var previewTask: Task<Void, Never>?
     private func refreshPreview(enteringLiveMode: Bool = false) {
+        // 进展信号（0.24 C2）：每个改变执行态的动作都会走到这里——排日程页据此刷新精修台/亮新鲜度徽标
+        NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
         previewTask = Task {
             if enteringLiveMode { await enterLiveModeIfNeeded() }
             await updatePreview()
@@ -712,5 +714,16 @@ final class ExecutionViewModel {
             lastError = error.localizedDescription
             DevLog.shared.warn("reflow", "更新橙色预览失败：\(error.localizedDescription)")
         }
+    }
+}
+
+// MARK: - 执行进展只读接缝（0.24 C2）：精修台的"过去只读"边界数据源
+
+extension ExecutionViewModel: ExecutionProgressReading {
+    var settledPlannedIDs: Set<UUID> {
+        var ids = Set(done.compactMap(\.plannedID))
+        if let a = active?.plannedID { ids.insert(a) }
+        for run in background { if let p = run.plannedID { ids.insert(p) } }
+        return ids
     }
 }

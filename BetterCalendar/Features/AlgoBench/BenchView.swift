@@ -21,29 +21,42 @@ final class BenchViewModel {
     var cases: [BenchCase] = []
     var enabledVariants: Set<String>
     var capabilityFilter: BenchCapability? = nil
-    var graceMinutes = 10                       // 收工线宽限：算法参数（不进设置页），10/20/30 实验
+    /// 宽限多选（只作用于 reflow V2 变体）：勾几个就把矩阵乘几份。
+    var selectedGraces: Set<Int> = [10]
     var running = false
     var progress = ""
-    var results: [String: [String: BenchCaseResult]] = [:]   // caseID → 运行键(变体|模型) → 结果
+    var progressDone = 0
+    var progressTotal = 0
+    var results: [String: [String: BenchCaseResult]] = [:]   // caseID → 运行键(变体|模型|宽限) → 结果
     var selectedCaseID: String? = nil
     private var runTask: Task<Void, Never>?
 
-    /// 云端模型清单（逗号分隔编辑；同服务商多模型对比——Jason 2026-07-08 提）。持久化本机。
+    /// 云端模型池（逗号分隔编辑）+ 池内多选（勾上的才进矩阵）。池持久化本机。
     var cloudModelsText: String {
-        didSet { UserDefaults.standard.set(cloudModelsText, forKey: "bench.cloudModels") }
+        didSet {
+            UserDefaults.standard.set(cloudModelsText, forKey: "bench.cloudModels")
+            enabledModels.formIntersection(cloudModelPool)          // 池里删掉的取消勾选
+            if enabledModels.isEmpty, let first = cloudModelPool.first { enabledModels = [first] }
+        }
     }
-    var cloudModels: [String] {
+    var cloudModelPool: [String] {
         let list = cloudModelsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return list.isEmpty ? [CloudSettings.activeModel] : list
     }
+    var enabledModels: Set<String>
+    /// 进矩阵的模型（保持池内顺序）。
+    var activeModels: [String] { cloudModelPool.filter { enabledModels.contains($0) } }
 
     init(runner: BenchRunner) {
         self.runner = runner
         self.cases = store.load()
         self.enabledVariants = Set(BenchVariants.all.map(\.id))
-        self.cloudModelsText = UserDefaults.standard.string(forKey: "bench.cloudModels")
-            ?? CloudSettings.activeModel
+        let pool = UserDefaults.standard.string(forKey: "bench.cloudModels") ?? CloudSettings.activeModel
+        self.cloudModelsText = pool
+        self.enabledModels = Set(pool.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty })
+        if enabledModels.isEmpty { enabledModels = [CloudSettings.activeModel] }
     }
 
     var filteredCases: [BenchCase] {
@@ -55,22 +68,33 @@ final class BenchViewModel {
         BenchVariants.of(capability).filter { enabledVariants.contains($0.id) }
     }
 
-    /// 一次「运行」= 变体 ×（云端变体则再乘模型清单）。
+    /// 一次「运行」= 变体 ×（云端变体 × 已勾选模型）×（reflow V2 变体 × 已勾选宽限）——测试矩阵。
     struct BenchRun: Identifiable {
         let variant: BenchVariant
         let model: String?       // nil = 本地/端侧
-        var id: String { model.map { "\(variant.id)|\($0)" } ?? variant.id }
-        var label: String { model.map { "\(variant.name) · \(Self.shortModel($0))" } ?? variant.name }
+        let grace: Int?          // nil = 宽限无关变体
+        var id: String { "\(variant.id)|\(model ?? "-")|g\(grace ?? 0)" }
+        var label: String {
+            var l = variant.name
+            if let m = model { l += " · \(Self.shortModel(m))" }
+            if let g = grace { l += " · 宽限\(g)" }
+            return l
+        }
         static func shortModel(_ m: String) -> String {
             m.split(separator: "/").last.map(String.init) ?? m
         }
     }
 
+    /// 宽限只对 V2 有意义（V1 本来就不执法收工线）。
+    private static let graceSensitive: Set<String> = [BenchVariantID.reflowNaiveV2, BenchVariantID.reflowLLMV2]
+
     func runs(for capability: BenchCapability) -> [BenchRun] {
         variants(for: capability).flatMap { v -> [BenchRun] in
-            BenchRunner.cloudVariantIDs.contains(v.id)
-                ? cloudModels.map { BenchRun(variant: v, model: $0) }
-                : [BenchRun(variant: v, model: nil)]
+            let models: [String?] = BenchRunner.cloudVariantIDs.contains(v.id)
+                ? activeModels.map { $0 } : [nil]
+            let graces: [Int?] = Self.graceSensitive.contains(v.id)
+                ? selectedGraces.sorted().map { $0 } : [nil]
+            return models.flatMap { m in graces.map { g in BenchRun(variant: v, model: m, grace: g) } }
         }
     }
 
@@ -85,19 +109,21 @@ final class BenchViewModel {
         runTask = Task { [weak self] in
             guard let self else { return }
             let total = todo.reduce(0) { $0 + self.runs(for: $1.capability).count }
-            var done = 0
+            self.progressTotal = total
+            self.progressDone = 0
             for c in todo {
                 for run in self.runs(for: c.capability) {
                     if Task.isCancelled { break }
-                    done += 1
-                    self.progress = "\(c.id) × \(run.label)（\(done)/\(total)）…"
+                    self.progress = "\(c.id) × \(run.label)…"
                     let r = await self.runner.run(c, variant: run.variant,
-                                                  graceMinutes: self.graceMinutes, model: run.model)
+                                                  graceMinutes: run.grace ?? WorkHoursSettings.graceMinutes,
+                                                  model: run.model)
                     self.results[c.id, default: [:]][run.id] = r
+                    self.progressDone += 1
                 }
                 if Task.isCancelled { break }
             }
-            self.progress = Task.isCancelled ? "已中止" : "完成（\(done) 次运行）"
+            self.progress = Task.isCancelled ? "已中止" : "完成（\(self.progressDone) 次运行）"
             self.running = false
             if !Task.isCancelled { self.autoSaveReport() }
         }
@@ -126,15 +152,15 @@ final class BenchViewModel {
     func revealCaseFile() { NSWorkspace.shared.activateFileViewerSelecting([store.caseFileURL]) }
 
     func promptPreview(_ c: BenchCase, variant: BenchVariant) -> (system: String, user: String)? {
-        runner.promptPreview(c, variant: variant, graceMinutes: graceMinutes)
+        runner.promptPreview(c, variant: variant, graceMinutes: selectedGraces.min() ?? WorkHoursSettings.graceMinutes)
     }
 
     // MARK: - 导出
 
     func exportMarkdown() -> String {
-        var md = "# 算法试验台 · 跑分（宽限 \(graceMinutes)min · 模型清单 \(cloudModels.joined(separator: ", ")))\n\n"
-        md += "## 分数矩阵（变体×模型 × 通过率）\n\n"
-        md += "| 变体 | 模型 | 维度 | 通过 | 平均耗时 | 平均首包 | 解码失败 |\n|---|---|---|---|---|---|---|\n"
+        var md = "# 算法试验台 · 跑分（宽限 \(selectedGraces.sorted().map(String.init).joined(separator: "/"))min · 模型 \(activeModels.joined(separator: ", "))）\n\n"
+        md += "## 分数矩阵（变体×模型×宽限 × 通过率）\n\n"
+        md += "| 变体 | 模型 | 宽限 | 维度 | 通过 | 平均耗时 | 平均首包 | 解码失败 |\n|---|---|---|---|---|---|---|---|\n"
         for cap in BenchCapability.allCases {
             let capCases = cases.filter { $0.capability == cap }
             for run in runs(for: cap) {
@@ -148,7 +174,7 @@ final class BenchViewModel {
                     let ttfts = ran.compactMap(\.output.firstOutputMS)
                     let ttft = ttfts.isEmpty ? "—" : "\(ttfts.reduce(0, +) / ttfts.count)ms"
                     let decodeFails = ran.filter { !$0.output.decodeOK }.count
-                    md += "| \(run.variant.name) | \(run.model.map(BenchRun.shortModel) ?? "—") | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(ttft) | \(decodeFails) |\n"
+                    md += "| \(run.variant.name) | \(run.model.map(BenchRun.shortModel) ?? "—") | \(run.grace.map { "\($0)min" } ?? "—") | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(ttft) | \(decodeFails) |\n"
                 }
             }
         }
@@ -279,7 +305,7 @@ struct BenchView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
             if c.capability == .reflow {
-                Text("从 \(c.fromHM ?? "?") 起重排 · 收工线 \(c.windDownHM ?? "23:00") · 宽限 \(model.graceMinutes)min")
+                Text("从 \(c.fromHM ?? "?") 起重排 · 收工线 \(c.windDownHM ?? "23:00") · 宽限 \(model.selectedGraces.sorted().map(String.init).joined(separator: "/"))min")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -393,13 +419,19 @@ struct BenchView: View {
             }
             .pickerStyle(.segmented)
 
-            Picker("宽限", selection: Binding(get: { model.graceMinutes },
-                                             set: { model.graceMinutes = $0 })) {
-                Text("宽限10").tag(10)
-                Text("宽限20").tag(20)
-                Text("宽限30").tag(30)
+            Menu {
+                ForEach([10, 20, 30], id: \.self) { g in
+                    Toggle("宽限 \(g) 分钟", isOn: Binding(
+                        get: { model.selectedGraces.contains(g) },
+                        set: { on in
+                            if on { model.selectedGraces.insert(g) }
+                            else if model.selectedGraces.count > 1 { model.selectedGraces.remove(g) }
+                        }))
+                }
+            } label: {
+                Label("宽限×\(model.selectedGraces.count)", systemImage: "clock.badge.questionmark")
             }
-            .help("收工线宽限（算法参数，实验定值后写死，不进设置）")
+            .help("收工线宽限多选（只作用于 reflow V2）：勾几个矩阵乘几份；实验定值后写死进软件")
 
             Menu {
                 ForEach(BenchCapability.allCases, id: \.self) { cap in
@@ -421,26 +453,39 @@ struct BenchView: View {
             Button {
                 showModelEditor.toggle()
             } label: {
-                Label("模型×\(model.cloudModels.count)", systemImage: "cpu")
+                Label("模型×\(model.activeModels.count)", systemImage: "cpu")
             }
             .help("云端变体的模型清单（逗号分隔）：同服务商多模型对比，每个云端变体逐一跑")
             .popover(isPresented: $showModelEditor) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("云端模型清单（逗号分隔；服务商/key 取当前设置）").font(.caption)
+                    Text("云端模型池（逗号分隔；服务商/key 取当前设置）").font(.caption)
                     TextField("如：claude-sonnet-5, claude-haiku-4-5-20251001",
                               text: Binding(get: { model.cloudModelsText },
                                             set: { model.cloudModelsText = $0 }))
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 420)
-                    Text("当前生效：" + model.cloudModels.joined(separator: " · "))
-                        .font(.caption2).foregroundStyle(.secondary)
+                    Divider()
+                    Text("勾选进入测试矩阵的模型：").font(.caption)
+                    ForEach(model.cloudModelPool, id: \.self) { m in
+                        Toggle(m, isOn: Binding(
+                            get: { model.enabledModels.contains(m) },
+                            set: { on in
+                                if on { model.enabledModels.insert(m) }
+                                else if model.enabledModels.count > 1 { model.enabledModels.remove(m) }
+                            }))
+                        .font(.caption)
+                    }
                 }
                 .padding(12)
             }
 
             if model.running {
                 Button { model.cancel() } label: { Label("中止", systemImage: "stop.circle") }
-                Text(model.progress).font(.caption).foregroundStyle(.secondary)
+                ProgressView(value: Double(model.progressDone),
+                             total: Double(max(model.progressTotal, 1)))
+                    .frame(width: 120)
+                Text("\(model.progressDone)/\(model.progressTotal) · \(model.progress)")
+                    .font(.caption).foregroundStyle(.secondary)
             } else {
                 Button { model.runAll() } label: { Label("跑全部", systemImage: "play.fill") }
                 if !model.progress.isEmpty {

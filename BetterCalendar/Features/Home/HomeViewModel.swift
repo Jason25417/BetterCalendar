@@ -34,6 +34,7 @@ final class HomeViewModel {
     private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
     private let looseDays: LooseDayStore?        // 松散日：LLM 识别"想松散"→标目标日（§5.12）；nil=不标
     private let startedDays: StartedDayStore?    // 绿色淡出：开始今天后进实时模式、绿色从日历淡出；nil=不淡出
+    private let progress: ExecutionProgressReading?  // 0.24 C2：精修台"过去只读"边界（已完成/进行中）；nil=不感知
 
     var inputText: String = ""
     var refineText: String = ""
@@ -52,13 +53,17 @@ final class HomeViewModel {
     private(set) var hasUnsavedChanges = false
     /// 上次退出时留下的未保存修改（D-g：不自动还原，顶部小字邀请「恢复/丢弃」）。
     private(set) var pendingRestore: DraftSnapshot?
+    /// 新鲜度徽标（0.24 C2，SPEC §11 ④）：编辑期间底层（真相源/执行进展）变了 → 亮中性小条，
+    /// 出路两个：「载入最新」（放弃本页）或什么都不点继续编辑（确认时以本页为准=最后动作赢）。绝不弹窗、不自动合并。
+    private(set) var freshness = false
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
          planStore: PlanStore, projection: ProjectionService,
          notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
-         looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil) {
+         looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil,
+         progress: ExecutionProgressReading? = nil) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -71,6 +76,7 @@ final class HomeViewModel {
         self.draftStore = draftStore
         self.looseDays = looseDays
         self.startedDays = startedDays
+        self.progress = progress
         restoreDraftIfAny()
     }
 
@@ -137,9 +143,17 @@ final class HomeViewModel {
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
 
+    /// 目标日是否处于实时模式（0.24 C2）：已开始 且 是逻辑今天——精修台只对"正在过的这一天"生效。
+    var isLiveTargetDay: Bool {
+        (startedDays?.isStarted(targetDay) ?? false)
+            && Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 0)
+    }
+
     /// 从真相源读**所选目标日**（逻辑日）的已确认计划 → 可编辑列表。
     /// 加载后的编辑只标未保存（0.16 文件模型），「确认写入」才落库+投影。
     /// 不显示完成状态——完成态归执行/复盘页，排日程页保持纯规划面。
+    /// **实时日 = 剩余精修台**（0.24 C2，「过去只读、未来可编」）：只加载未尘埃落定的块，
+    /// 且以"从现在起"的现实为底（本地 V2 铺排，瞬时无 LLM）——所见即所改；候补块附在尾部照样可编辑。
     func loadConfirmedPlan() {
         let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
         if stored.isEmpty {
@@ -147,7 +161,25 @@ final class HomeViewModel {
             if draftSource == .loaded { blocks = []; draftSource = .empty }
             return
         }
-        blocks = stored.map(EditableBlock.init(from:))
+        if isLiveTargetDay {
+            let settled = progress?.settledPlannedIDs ?? []
+            let nowT = Date.now
+            let remaining = stored.filter { !settled.contains($0.id) && $0.end > nowT }
+            guard !remaining.isEmpty else {
+                if draftSource == .loaded { blocks = []; draftSource = .empty }
+                hasUnsavedChanges = false
+                return
+            }
+            let laid = ReflowLayoutV2.layOut(
+                flexible: remaining.filter { !$0.isFixed }.sorted { $0.start < $1.start },
+                fixed: remaining.filter(\.isFixed), from: nowT,
+                windDown: WorkHoursSettings.effectiveWindDown(from: nowT),
+                graceMinutes: WorkHoursSettings.graceMinutes)
+            blocks = (laid.scheduled + laid.deferred.sorted { $0.start < $1.start })
+                .map(EditableBlock.init(from:))
+        } else {
+            blocks = stored.map(EditableBlock.init(from:))
+        }
         draftSource = .loaded
         hasUnsavedChanges = false
         committedCount = nil
@@ -339,6 +371,20 @@ final class HomeViewModel {
             var byLabel = Dictionary(grouping: sorted) { DayContext.logicalStartOfDay($0.start) }
             // 删光最后一件也要能保存：目标日即使无块也纳入 replace（清空真相源那天）。
             if byLabel[targetLabel] == nil { byLabel[targetLabel] = [] }
+            // 0.24 C2「过去只读」：实时日确认只替换未来——已完成/进行中/已流逝的块原样保留
+            // （复盘基线不被中途改写）；编辑期间被完成的块从草稿版剔除并中性带一句。
+            if isLiveTargetDay {
+                let stored = (try? planStore.plannedBlocks(on: targetLabel)) ?? []
+                let settled = progress?.settledPlannedIDs ?? []
+                let nowT = Date.now
+                let preserved = stored.filter { settled.contains($0.id) || $0.end <= nowT }
+                let preservedIDs = Set(preserved.map(\.id))
+                let draftPart = (byLabel[targetLabel] ?? []).filter { !preservedIDs.contains($0.id) }
+                let excluded = (byLabel[targetLabel]?.count ?? 0) - draftPart.count
+                byLabel[targetLabel] = (preserved.map(EditableBlock.init(from:)) + draftPart)
+                    .sorted { $0.start < $1.start }
+                if excluded > 0 { note = "\(excluded) 件在你编辑期间已完成/进行中，保持原样。" }
+            }
             for (label, dayBlocks) in byLabel {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
@@ -356,6 +402,7 @@ final class HomeViewModel {
             }
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
+            freshness = false           // 本页已成为最新（最后动作赢）
             persistDraft()
             // 松散日：静音早晚提醒（传 nil → 清掉旧的、不排新的）——退场姿态之一，不催不算账
             if looseDays?.isLoose(targetDay) ?? false {
@@ -392,11 +439,31 @@ final class HomeViewModel {
     /// 0.23 C（SPEC §11 ③）：切目标日 = 切草稿本。旧的「未保存修改自动平移跟人走」已退役——
     /// 聪明但意外（只想看看明天，今天的草稿却跟着搬家）；换页符合"每天一页纸"的心智模型。
     /// 该日有未保存草稿页 → 静默还原那一页；否则加载该日已确认计划。
+    // MARK: - 新鲜度（0.24 C2）
+
+    /// 真相源被外部改了（日历手改回流 / 他端同步）：干净 → 直接刷新；编辑中 → 亮徽标不打扰。
+    func noteExternalPlanChange() {
+        if hasUnsavedChanges { freshness = true } else { loadConfirmedPlan() }
+    }
+
+    /// 执行进展变了（开始/完成/换件）：只影响实时日的精修台底。
+    func noteExecutionProgress() {
+        guard isLiveTargetDay else { return }
+        if hasUnsavedChanges { freshness = true } else { loadConfirmedPlan() }
+    }
+
+    /// 「载入最新」：放弃本页未确认修改，回到当下最新的底（干净、无羞辱的显式选择）。
+    func reloadFreshBase() {
+        freshness = false
+        discardDraft()
+    }
+
     private var suppressNextDayChangeReload = false
     func targetDayDidChange() {
         if suppressNextDayChangeReload { suppressNextDayChangeReload = false; return }
         note = nil
         committedCount = nil
+        freshness = false
         if let snap = draftStore?.load(day: targetDay),
            snap.dirty ?? false, !snap.blocks.isEmpty {
             blocks = snap.blocks.map(\.editable)

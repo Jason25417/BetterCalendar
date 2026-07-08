@@ -534,6 +534,86 @@ struct LogicTests {
         #expect(vm.inputText == "今天想干的事")
     }
 
+    /// 精修台（0.24 C2「过去只读、未来可编」）：实时日只加载未尘埃落定的块，从现在起铺排。
+    @Test func liveDayLoadsOnlyRemainingAsBase() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let started = StartedDayStore(persisted: false)
+        let today = DayContext.logicalDay(offset: 0)
+        let doneBlock = ScheduledBlock(title: "已完成的事", start: today.addingTimeInterval(9 * 3600),
+                                       end: today.addingTimeInterval(10 * 3600))
+        let futureBlock = ScheduledBlock(title: "还没做的事", start: Date.now.addingTimeInterval(3600),
+                                         end: Date.now.addingTimeInterval(2 * 3600))
+        try planStore.replacePlanned([doneBlock, futureBlock], on: today)
+        started.markStarted(today)
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started,
+                                 progress: ProgressStub([doneBlock.id]))
+        vm.targetDay = today
+        vm.loadConfirmedPlan()
+        #expect(vm.isLiveTargetDay)
+        #expect(vm.blocks.map(\.title) == ["还没做的事"])   // 已完成不进精修台
+        #expect(vm.hasUnsavedChanges == false)
+    }
+
+    /// 精修台确认只替换未来：已完成/进行中/已流逝的块原样保留（复盘基线不被中途改写）。
+    @Test func liveDayConfirmPreservesSettledAndPast() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let started = StartedDayStore(persisted: false)
+        let today = DayContext.logicalDay(offset: 0)
+        let doneBlock = ScheduledBlock(title: "已完成的事", start: today.addingTimeInterval(9 * 3600),
+                                       end: today.addingTimeInterval(9 * 3600 + 1800))
+        let editable = ScheduledBlock(title: "待精修的事", start: Date.now.addingTimeInterval(3600),
+                                      end: Date.now.addingTimeInterval(2 * 3600))
+        try planStore.replacePlanned([doneBlock, editable], on: today)
+        started.markStarted(today)
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started,
+                                 progress: ProgressStub([doneBlock.id]))
+        vm.targetDay = today
+        vm.loadConfirmedPlan()
+        // 精修：把剩余那件改名 + 挪时间，确认
+        vm.blocks = [EditableBlock(title: "精修后的事", start: Date.now.addingTimeInterval(1800),
+                                   end: Date.now.addingTimeInterval(5400))]
+        await vm.confirm()
+        let stored = try planStore.plannedBlocks(on: today)
+        #expect(stored.count == 2)
+        let kept = stored.first { $0.id == doneBlock.id }
+        #expect(kept?.title == "已完成的事")                 // 过去只读：原样保留
+        #expect(kept?.start == doneBlock.start)
+        #expect(stored.contains { $0.title == "精修后的事" })  // 未来可编：草稿覆盖
+    }
+
+    /// 新鲜度徽标：编辑中底层变了 → 亮标不打扰；载入最新 → 清标回到干净底；确认 → 清标（最后动作赢）。
+    @Test func freshnessBadgeLifecycle() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let started = StartedDayStore(persisted: false)
+        let today = DayContext.logicalDay(offset: 0)
+        let b = ScheduledBlock(title: "一件事", start: Date.now.addingTimeInterval(3600),
+                               end: Date.now.addingTimeInterval(2 * 3600))
+        try planStore.replacePlanned([b], on: today)
+        started.markStarted(today)
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub())
+        vm.targetDay = today
+        vm.loadConfirmedPlan()
+        // 干净时进展变化 → 直接刷新、不亮标
+        vm.noteExecutionProgress()
+        #expect(vm.freshness == false)
+        // 编辑中进展变化 → 亮标（不打扰、不覆盖）
+        vm.blocks[0].title = "改了名"
+        vm.delete(id: UUID())   // 只置未保存标记
+        vm.noteExecutionProgress()
+        #expect(vm.freshness == true)
+        #expect(vm.blocks[0].title == "改了名")   // 本页没被动
+        // 载入最新 → 清标、放弃本页
+        vm.reloadFreshBase()
+        #expect(vm.freshness == false)
+        #expect(vm.hasUnsavedChanges == false)
+    }
+
     // MARK: 排X天按钮文案（目标日口语词）
 
     @Test func relativeDayWordFollowsTargetDay() {
@@ -1025,10 +1105,16 @@ struct LogicTests {
         #expect(vm.blocks.count == 1)
     }
 
+    @MainActor final class ProgressStub: ExecutionProgressReading {
+        var settledPlannedIDs: Set<UUID> = []
+        init(_ ids: Set<UUID> = []) { settledPlannedIDs = ids }
+    }
+
     private static func makeHomeVM(planStore: PlanStore,
                                    draftStore: DraftSnapshotStore? = nil,
                                    startedDays: StartedDayStore? = nil,
-                                   calendar: FakeCalendarStore = FakeCalendarStore()) -> HomeViewModel {
+                                   calendar: FakeCalendarStore = FakeCalendarStore(),
+                                   progress: ExecutionProgressReading? = nil) -> HomeViewModel {
         struct NoRefine: PlanRefining {
             func refine(_ blocks: [ScheduledBlock], command: String,
                         originalRequest: String, now: Date) async throws -> [ScheduledBlock] { blocks }
@@ -1048,7 +1134,8 @@ struct LogicTests {
                                           startedDays: startedDays),
             notifier: NoNotify(),
             draftStore: draftStore,
-            startedDays: startedDays)
+            startedDays: startedDays,
+            progress: progress)
     }
 
     // MARK: 收工线 / 候补（0.23 B：溢出冲突弹窗退役，语义=候补）
