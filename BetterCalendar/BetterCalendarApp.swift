@@ -30,6 +30,12 @@ struct BetterCalendarApp: App {
             SettingsView()
                 .environment(\.appTheme, ThemeSettings.current)
         }
+
+        // 算法试验台（开发期）：入口=Home 工具栏烧瓶按钮 / 系统「窗口」菜单。上架前撤入口。
+        Window("算法试验台", id: "algo-bench") {
+            BenchView(runner: container.bench)
+                .environment(\.appTheme, ThemeSettings.current)
+        }
         #endif
     }
 

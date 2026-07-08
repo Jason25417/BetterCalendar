@@ -42,6 +42,7 @@ final class AppContainer {
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
+    let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
 
     init() {
         // 假日历退役（2026-07-07 Jason 定）：设置页不再提供切换、一律写真 Apple 日历。
@@ -88,6 +89,7 @@ final class AppContainer {
                                             planStore: planStore, reminderStore: routingReminder,
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore())
+        self.bench = BenchRunner(client: anthropic)
         self.logSync = LogSyncService()
         logSync.start()
         reconcile.start()

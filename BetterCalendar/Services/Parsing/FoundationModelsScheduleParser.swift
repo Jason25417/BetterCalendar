@@ -95,7 +95,8 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
     }
 
     /// 端侧模型小（~3B），指令保持精简；结构由 @Generable schema 承担、无需讲 JSON 格式。
-    private static func instructions(referenceDate: Date) -> String {
+    /// internal（原 private，0.22.3 放开）：算法试验台要展示"实际发送的 prompt"。
+    static func instructions(referenceDate: Date) -> String {
         let df = DateFormatter(); df.locale = Locale(identifier: "zh_CN"); df.timeZone = .current
         df.dateFormat = "yyyy-MM-dd EEEE"; let target = df.string(from: referenceDate)
         df.dateFormat = "yyyy-MM-dd EEEE HH:mm"; let now = df.string(from: .now)

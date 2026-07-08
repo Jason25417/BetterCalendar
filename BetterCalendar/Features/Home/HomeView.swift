@@ -31,7 +31,9 @@ struct HomeView: View {
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
-    #if !os(macOS)
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
+    #else
     @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
     @State private var showDraftExpanded = false   // iOS 草稿全屏浏览/编辑（小窗太挤）
     #endif
@@ -354,7 +356,11 @@ struct HomeView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink(value: HomeRoute.review) { Label("今日复盘", systemImage: "checkmark.seal") }
                     NavigationLink(value: HomeRoute.preview) { Label("预览", systemImage: "calendar") }
-                    #if !os(macOS)
+                    #if os(macOS)
+                    // 开发期：算法试验台（上架前随「可见报错」条款一起撤）
+                    Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
+                        .help("算法试验台（开发期）：解析/微调/reflow 各变体跑分对比")
+                    #else
                     Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
                     #endif
                 }
