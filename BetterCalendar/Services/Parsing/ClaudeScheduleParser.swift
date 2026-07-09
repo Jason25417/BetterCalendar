@@ -71,19 +71,47 @@ struct ClaudeScheduleParser: ScheduleParsing {
         }
     }
 
+    /// 并发对冲请求数（2026-07-09 Jason）：主请求 + (N-1) 备胎并行发同一模型；单发 89% → 2 发 ~99%、3 发 ~99.9%。
+    /// token 便宜（Haiku）、时间取最快，失败率断崖下降。内部参数，不进设置（原则6）。
+    static let parseHedgeCount = 2
+
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
+        let system = Self.systemPrompt(referenceDate: referenceDate, context: context)
+        // 并发对冲（选 i）：**主请求流式**（喂 liveDraft 冒块，保留现体验）+ 备胎非流式并行；
+        // 谁先返回**有效**（解码非空/松散）用谁、取消其余。全败 → 回退本地。
+        let winner: ParsedPlan? = await withTaskGroup(of: ParsedPlan?.self) { group in
+            for i in 0..<max(1, Self.parseHedgeCount) {
+                let streaming = (i == 0)
+                group.addTask { await self.oneParse(system: system, text: text, streaming: streaming) }
+            }
+            for await r in group where r != nil {
+                group.cancelAll()   // 已有有效结果 → 取消其余对冲请求（省 token/算力）
+                return r
+            }
+            return nil
+        }
+        liveDraft?.clear()   // 无论谁赢，最终结果即将替换草稿，收掉流式暂显
+        if let winner {
+            DevLog.shared.info("解析", "云端成功 · \(winner.blocks.count) 块"
+                               + (winner.longTasks.isEmpty ? "" : " · \(winner.longTasks.count) 在途")
+                               + (winner.isLoose ? " · 松散" : "")
+                               + " · \(CloudSettings.activeModel)×\(Self.parseHedgeCount)")
+            return winner
+        }
+        DevLog.shared.warn("解析", "云端对冲全部失败/空，回退本地")
+        return try await fallback.parse(text, referenceDate: referenceDate, context: context)
+    }
+
+    /// 单次解析请求（对冲的一路）：streaming=主路（喂 liveDraft）；返回 nil = 本路失败/空（不抛，交给对冲汇总）。
+    private func oneParse(system: String, text: String, streaming: Bool) async -> ParsedPlan? {
         do {
-            // 长日程输出可观（20+ 块 + 长期任务），上限给足（2048→6000→10000：6000 仍见截断，2026-07-07 日志实锤；
-            // 若加了预算还截断=模型在循环复读，看「云端原文」截断样本的尾 500 字即知）
-            let system = Self.systemPrompt(referenceDate: referenceDate, context: context)
             let raw: String
-            if let live = liveDraft {
-                // 云端流式：SSE 边收边把已闭合的块冒进草稿区（0.20.1，同端侧 FM 的体验）
+            // 长日程输出可观（20+ 块），上限给足 10000（6000 见过截断）
+            if streaming, let live = liveDraft {
                 var lastCount = 0
                 var scannedLength = 0
                 raw = try await client.completeStreaming(
                     system: system, user: text, maxTokens: 10000, jsonSchema: Self.parseSchema) { partial in
-                    // 新增文本里出现过 "}" 才重扫（0.22.2 修：原按"结尾是}"判断——SSE 分片很少恰好以 } 结尾，扫描几乎不触发=流式看不见）
                     let newPart = partial.dropFirst(scannedLength)
                     scannedLength = partial.count
                     guard newPart.contains("}") else { return }
@@ -93,34 +121,16 @@ struct ClaudeScheduleParser: ScheduleParsing {
                         live.streaming = blocks.sorted { $0.start < $1.start }
                     }
                 }
-                live.clear()   // 最终结果即将替换草稿，收掉流式暂显
             } else {
                 raw = try await client.complete(
                     system: system, user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema)
             }
-            let json = JSONText.extractObject(raw)
-            guard let decoded = Self.decodePlan(json) else {
-                DevLog.shared.warn("解析", "JSON 解码失败，原文前 300 字：\(String(raw.prefix(300)))")
-                throw AnthropicError(message: "JSON 解码失败")
-            }
-            if decoded.dropped > 0 {
-                DevLog.shared.warn("解析", "跳过 \(decoded.dropped) 个损坏条目（其余正常解析）")
-            }
-            let blocks = decoded.blocks
-            let longTasks = decoded.longTasks
-            // 纯松散意图（"明天松散一下"）可无块无长期事项 → 不回退，照样把松散标志带上来
-            guard !blocks.isEmpty || !longTasks.isEmpty || decoded.loose else {
-                DevLog.shared.warn("解析", "云端返回 0 块，回退本地")
-                return try await fallback.parse(text, referenceDate: referenceDate, context: context)
-            }
-            DevLog.shared.info("解析", "云端成功 · \(blocks.count) 块"
-                               + (longTasks.isEmpty ? "" : " · \(longTasks.count) 在途")
-                               + (decoded.loose ? " · 松散" : "") + " · \(CloudSettings.activeModel)")
-            return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: decoded.loose)
+            guard let decoded = Self.decodePlan(JSONText.extractObject(raw)) else { return nil }
+            // 纯松散意图可无块无长期事项，仍算有效
+            guard !decoded.blocks.isEmpty || !decoded.longTasks.isEmpty || decoded.loose else { return nil }
+            return ParsedPlan(blocks: decoded.blocks, longTasks: decoded.longTasks, isLoose: decoded.loose)
         } catch {
-            liveDraft?.clear()   // 失败也别留流式残影
-            DevLog.shared.warn("解析", "云端失败，回退本地：\(error.localizedDescription)")
-            return try await fallback.parse(text, referenceDate: referenceDate, context: context)
+            return nil   // 本路失败（网络/取消/解码）——对冲里其它路可能成功
         }
     }
 
