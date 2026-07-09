@@ -1010,7 +1010,7 @@ struct LogicTests {
     @Test func poolDeadlineTaskWritesReminderUnlessAlreadyScheduledAsBlock() {
         let ddl = at(2026,7,10,23)
         let pending = [
-            ParsedLongTask(title: "期末论文", deadline: ddl),            // 有 DDL、没排块 → 出提醒
+            ParsedLongTask(title: "期末论文", deadline: ddl, totalMinutes: 120),  // 有 DDL+估算 → 出提醒
             ParsedLongTask(title: "学 Swift"),                          // 无 DDL → 不出
             ParsedLongTask(title: "读论文", deadline: at(2026,7,8,20)),  // 有 DDL 但已排成今天块 → 去重跳过
         ]
@@ -1020,7 +1020,7 @@ struct LogicTests {
         #expect(drafts.first?.title == "期末论文")
         #expect(drafts.first?.due == ddl)
         #expect(drafts.first?.priority == 5)          // 中优先级，同带 DDL 块口径
-        #expect(drafts.first?.leadMinutes == 30)
+        #expect(drafts.first?.leadMinutes == 150)     // p−m−N：估算 120 + 提前 30 → 响在「最迟该开始」而非刚好截止
     }
 
     // MARK: 复盘对比跳过锚点（0.18.1，午饭这类不算 missed）

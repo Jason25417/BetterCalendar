@@ -15,10 +15,13 @@ protocol NotificationScheduling {
     func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async
     /// 取消已排的早晚提醒（松散日静音：标松散时清掉，即使昨晚已排今早的也不响）。同步。
     func cancelDailyReminders()
+    /// 立刻发一条一次性本地通知。DDL 过点补发用（p−m−N 已过去 → 不写提醒事项、直接发消息）。默认 no-op。
+    func notifyNow(title: String, body: String) async
 }
 
 extension NotificationScheduling {
     func cancelDailyReminders() {}   // 默认 no-op（旧 stub/测试兼容）
+    func notifyNow(title: String, body: String) async {}
 }
 
 final class UNNotificationService: NotificationScheduling {
@@ -45,6 +48,18 @@ final class UNNotificationService: NotificationScheduling {
         }
         if let e = evening, e > .now {
             await add(id: Self.eveningID, title: "今天过得怎么样？", body: "30 秒看看做成了什么。", at: e)
+        }
+    }
+
+    func notifyNow(title: String, body: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        do {   // trigger=nil → 立刻送达
+            try await center.add(UNNotificationRequest(identifier: "bc.ddl.\(UUID().uuidString)",
+                                                       content: content, trigger: nil))
+        } catch {
+            DevLog.shared.warn("通知", "DDL 过点补发失败：\(error.localizedDescription)")
         }
     }
 

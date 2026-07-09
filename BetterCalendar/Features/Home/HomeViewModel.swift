@@ -265,8 +265,10 @@ final class HomeViewModel {
         pending.compactMap { p in
             guard let due = p.deadline else { return nil }
             if blockTitles.contains(where: { TitleMatch.similarity($0, p.title) >= 0.6 }) { return nil }
+            // p−m−N：未来任务估算 m=totalMinutes → 提醒响在「最迟该开始」，而非刚好到截止
+            let lead = (p.totalMinutes ?? 0) + (leadMinutes ?? 0)
             return ReminderDraft(title: p.title, due: due, priority: 5,
-                                 notes: "未来任务截止", leadMinutes: leadMinutes)
+                                 notes: "未来任务截止", leadMinutes: lead)
         }
     }
 
@@ -359,16 +361,26 @@ final class HomeViewModel {
     }
 
     func confirm() async {
-        // ★要紧事 与 带硬DDL 的块都进提醒事项；due 优先用 DDL（"必须何时前做完"），否则用开始时间
-        var reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {
-            ReminderDraft(title: $0.title, due: $0.deadline ?? $0.start,
-                          priority: $0.priority == .important ? 1 : 5, notes: nil,
-                          leadMinutes: ReminderSettings.leadMinutes,
-                          blockID: $0.id)   // 0.25.4：盖章 → 打勾完成信号按 ID 精确匹配（不按标题）
+        // 提醒重设计（2026-07-09）：只给**有具体 DDL** 的块写提醒事项——「尽早」不再发时钟提醒
+        // （交给晨间/menu bar/nudge，因为它的开始时间是 reflow 的动态猜测、钉钟点=假精确+施压）。
+        // 提醒响在 **p−m−N**（截止 − 时长 − 提前量）=「最迟该开始」的前向提醒（"现在做还来得及"）。
+        let leadN = ReminderSettings.leadMinutes
+        var reminders: [ReminderDraft] = []
+        var pastDueNudges: [(title: String, ddl: Date, minutes: Int)] = []
+        for b in blocks where b.deadline != nil {
+            let ddl = b.deadline!
+            let m = max(1, Int(b.end.timeIntervalSince(b.start) / 60))       // 时长(分)
+            let fire = ddl.addingTimeInterval(TimeInterval(-(m + leadN) * 60))   // p−m−N
+            if fire > .now {
+                reminders.append(ReminderDraft(title: b.title, due: ddl, priority: 1, notes: nil,
+                                               leadMinutes: m + leadN, blockID: b.id))   // 到期前 m+N 分响 = p−m−N
+            } else {
+                pastDueNudges.append((b.title, ddl, m))   // 已过 p−m−N（加得太晚）→ 不写 VTODO、直接发消息（clamp）
+            }
         }
-        // 带 DDL 的未来任务入池 → 也写一条系统提醒(due=DDL)，得到系统级 DDL 提醒（已排成今天块的跳过、不重复）
+        // 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL、响在 p−m−N)；已排成今天块的跳过、不重复
         reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),
-                                             leadMinutes: ReminderSettings.leadMinutes)
+                                             leadMinutes: leadN)
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil; arrangedCount = nil
         do {
@@ -397,7 +409,12 @@ final class HomeViewModel {
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
                 try await projection.project(label: label)
             }
-            try await reminderStore.write(reminders)  // ★要紧事 → 提醒事项（含提前提醒）
+            try await reminderStore.write(reminders)  // 有 DDL 的事项 → 提醒事项（响在 p−m−N）
+            // 过点 clamp：p−m−N 已过去的（加得太晚），不写过期 VTODO（不会响），直接立刻发一条前向通知
+            for n in pastDueNudges {
+                await notifier.notifyNow(title: "「\(n.title)」该开始了",
+                    body: "今天 \(n.ddl.formatted(.dateTime.hour().minute())) 前要完成、约需 \(n.minutes) 分，现在开始还来得及")
+            }
             committedCount = sorted.count
             committedToReal = (CalendarSettings.backend == .eventKit)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
