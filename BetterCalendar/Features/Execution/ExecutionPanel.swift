@@ -76,10 +76,10 @@ struct ExecutionPanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(model.importantItems) { item in
                     if model.isImportantDone(item) {
-                        Text("🎯 最要紧的「\(item.title)」做成了")
+                        Text("🎯 想尽早的「\(item.title)」做成了")
                             .font(.caption.weight(.medium)).foregroundStyle(.green)
                     } else {
-                        Label("今日最要紧：\(item.title)", systemImage: "star.fill")
+                        Label("尽早：\(item.title)", systemImage: "arrow.up.circle.fill")
                             .font(.caption).foregroundStyle(.orange)
                     }
                 }

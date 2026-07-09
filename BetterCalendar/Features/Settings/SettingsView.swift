@@ -180,9 +180,9 @@ struct SettingsView: View {
                     Text("重开 App 时若有任务在计时：默认每次问怎么接；在恢复弹窗勾「不再询问」或这里改，即按固定选择自动处理。")
                         .font(.caption).foregroundStyle(.secondary)
 
-                    Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
+                    Stepper("提醒提前 \(leadMinutes) 分钟", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
-                    Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
+                    Text("确认写入时把「尽早」和有具体截止(DDL)的事项写进 Apple 提醒事项（带提前提醒）。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Toggle("固定块（会议）过点自动记完成", isOn: Binding(

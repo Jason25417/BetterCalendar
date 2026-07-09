@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.5", date: "2026-07", changes: [
+            "「星标要紧事」统一成事项的「时限」三选一：随时 / 尽早 / 有具体截止(DDL)——一个菜单管掉优先与截止。尽早=优先靠前排（原星标）、有DDL=尽量在截止前排进、随时=今天内即可",
+            "草稿里点每件事左侧的时限菜单切换；选了「有具体截止」可直接点时间调整 DDL",
+        ]),
         ChangelogEntry(version: "0.26.4", date: "2026-07", changes: [
             "设置里新增「固定块（会议）过点自动记完成」开关（默认开）：会议这类外部承诺到点就自动记完成、不用你手动点；想彻底手动可关掉。工作块一直是手动完成不受影响",
             "你在 Apple 日历里手建的、没有本 App 标记的蓝色事件，现在一律不碰（不认领/不改/不删）——只管理 App 自己写的带标记事件",

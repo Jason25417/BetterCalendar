@@ -77,7 +77,7 @@ struct CalendarPreviewView: View {
 
     private func label(_ r: ReminderDraft) -> String {
         var parts: [String] = []
-        if r.priority == 1 { parts.append("要紧事") }
+        if r.priority == 1 { parts.append("尽早") }
         if let due = r.due {
             parts.append("截止 " + due.formatted(date: .abbreviated, time: .shortened))
         }

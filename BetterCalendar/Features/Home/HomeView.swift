@@ -328,10 +328,10 @@ struct HomeView: View {
                         .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
                     }
 
-                    // 要紧事软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都要紧=什么都不要紧
+                    // 「尽早」软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都尽早=什么都不尽早
                     let mitCount = model.blocks.filter { $0.priority == .important }.count
                     if mitCount > 2 {
-                        Label("要紧事贵在少（已标 \(mitCount) 件）——越多越稀释，真正最要紧的留 1–2 件就好",
+                        Label("「尽早」贵在少（已标 \(mitCount) 件）——越多越稀释，真正想优先的留 1–2 件就好",
                               systemImage: "sparkles")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
@@ -728,17 +728,33 @@ struct EditableRow: View {
     /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
     private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
 
+    /// 时限图标：有硬 DDL=红旗 / 尽早=橙上箭 / 随时=灰钟。
+    private var timingLimitIcon: String {
+        if block.deadline != nil { return "flag.checkered" }
+        return block.priority == .important ? "arrow.up.circle.fill" : "clock"
+    }
+    private var timingLimitColor: Color {
+        if block.deadline != nil { return .red }
+        return block.priority == .important ? .orange : .secondary
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            Button {
-                block.priority = (block.priority == .important) ? .normal : .important
+            // 时限（星标→DDL 统一，2026-07-09）：三态互斥——随时 / 尽早 / 有具体截止。
+            // 复用现成字段：priority==.important 即「尽早」（星标继任、reflow 靠前排），deadline 即硬 DDL。
+            Menu {
+                Button("随时（今天内即可）") { block.priority = .normal; block.deadline = nil }
+                Button("尽早") { block.priority = .important; block.deadline = nil }
+                Button("有具体截止…") {
+                    block.priority = .normal
+                    if block.deadline == nil { block.deadline = block.end }
+                }
             } label: {
-                Image(systemName: block.priority == .important ? "star.fill" : "star")
-                    .foregroundStyle(block.priority == .important ? .orange : .secondary)
+                Image(systemName: timingLimitIcon).foregroundStyle(timingLimitColor)
             }
-            .buttonStyle(.plain)
-            .help("标为今日要紧事")
-            .disabled(block.isAnchor)   // 锚点不是任务，谈不上要紧
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("时限：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）")
+            .disabled(block.isAnchor)   // 锚点不是任务，谈不上时限
 
             VStack(alignment: .leading, spacing: 4) {
                 TextField("标题", text: $block.title)
@@ -771,10 +787,15 @@ struct EditableRow: View {
                         Text(Self.styleLabel(block.timingStyle))
                     }
                     .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
-                    if let ddl = block.deadline {
-                        Label(ddl.formatted(.dateTime.hour().minute()), systemImage: "flag.checkered")
-                            .font(.caption2).foregroundStyle(.red)
-                            .help("硬截止（DDL）：必须在此之前完成——会写进提醒事项、按它提前提醒")
+                    if block.deadline != nil {
+                        HStack(spacing: 2) {
+                            Image(systemName: "flag.checkered").foregroundStyle(.red).font(.caption2)
+                            DatePicker("", selection: Binding(get: { block.deadline ?? block.end },
+                                                              set: { block.deadline = $0 }),
+                                       displayedComponents: .hourAndMinute)
+                                .labelsHidden().controlSize(.small)
+                        }
+                        .help("硬截止（DDL）：必须在此之前完成——点时间可调；写进提醒事项、按它提醒。清除请在时限菜单选「随时/尽早」")
                     }
                     Spacer()
                     // 并行组（0.22）：链条菜单——选一块结组（同组=同时段、reflow 绑定）；再选已同组的=解除
