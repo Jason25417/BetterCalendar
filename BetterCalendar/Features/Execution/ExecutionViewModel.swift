@@ -309,22 +309,37 @@ final class ExecutionViewModel {
     /// **手动触发**（用户点「同步日历改动」）：此刻用户本机日历是最新的 → 直接信任日历、不弹窗
     /// （区别于后台自动对账：跨设备同步延迟下，自动把"日历里暂缺"当删除会误删；手动无此风险，也合原则7=用户主动）。
     /// 逻辑：真相源里有、但日历里已无的带章蓝块 = 用户删了 → 删真相源实际 + 给对应计划块盖 tombstone
-    /// （completion=.missed）→ loadToday 的自动完成不再重推断（删了 stick）。仅处理删除；无章新建认领待后续。
+    /// （completion=.missed）→ loadToday 的自动完成不再重推断（删了 stick）。带章还在但时间/标题改了 → 回填。
+    /// （无章新建认领待后续：需给日历事件盖章回写、防重复导入，CalendarStore 暂无改事件能力。）
     func reconcileCalendarActuals() async {
         let label = DayContext.logicalStartOfDay(.now)
         let stored = (try? planStore.actualBlocks(on: label)) ?? []
         guard !stored.isEmpty else { return }
-        let calIDs = Set(((try? await calendarStore.read(kind: .actual)) ?? [])
+        let calEvents = ((try? await calendarStore.read(kind: .actual)) ?? [])
             .filter { DayContext.isSameLogicalDay($0.start, .now) }
-            .compactMap(\.blockID))
-        let deleted = stored.map(\.id).filter { !calIDs.contains($0) }
-        guard !deleted.isEmpty else { return }
-        try? planStore.deleteActuals(ids: deleted)
-        let plannedIDs = Set((try? planStore.plannedBlocks(on: label))?.map(\.id) ?? [])
-        for id in deleted where plannedIDs.contains(id) {
-            try? planStore.latchCompletion(plannedID: id, .missed)   // tombstone：删了不再自动重推断
+        let calByID = Dictionary(calEvents.compactMap { e in e.blockID.map { ($0, e) } },
+                                 uniquingKeysWith: { a, _ in a })
+        var deleted: [UUID] = []
+        var timeUpdates: [ActualBlock] = []
+        for s in stored {
+            if let c = calByID[s.id] {
+                if c.start != s.start || c.end != s.end || c.title != s.title {   // 时间/标题回填：你在日历改了实际
+                    timeUpdates.append(ActualBlock(id: s.id, title: c.title, start: c.start, end: c.end))
+                }
+            } else {
+                deleted.append(s.id)   // 带章实际日历里没了 → 你删了
+            }
         }
-        DevLog.shared.info("对账", "蓝色实际对账：日历里已删 \(deleted.count) 件 → 真相源同步移除")
+        guard !deleted.isEmpty || !timeUpdates.isEmpty else { return }
+        if !timeUpdates.isEmpty { try? planStore.upsertActuals(timeUpdates) }
+        if !deleted.isEmpty {
+            try? planStore.deleteActuals(ids: deleted)
+            let plannedIDs = Set((try? planStore.plannedBlocks(on: label))?.map(\.id) ?? [])
+            for id in deleted where plannedIDs.contains(id) {
+                try? planStore.latchCompletion(plannedID: id, .missed)   // tombstone：删了不再自动重推断
+            }
+        }
+        DevLog.shared.info("对账", "蓝色实际对账：删 \(deleted.count) · 时间/标题回填 \(timeUpdates.count)")
         await loadToday()
     }
 

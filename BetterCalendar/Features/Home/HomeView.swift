@@ -47,6 +47,13 @@ struct HomeView: View {
     private var showingPlanArea: Bool { !model.blocks.isEmpty || model.hasUnsavedChanges }
     /// 是否展示"说"的完整输入（无计划 或 主动点了重说）。
     private var showSayInput: Bool { !showingPlanArea || reSayExpanded }
+    /// 「确认写入 + 同步」合一按钮的标题（Jason 2026-07-09）：绿(计划)与蓝(实际)是一天里错开的两相、
+    /// 并集覆盖整天——"改/看"时刻是确认写入绿计划，"过"时刻叠加同步蓝色实际的日历改动。
+    private var confirmSyncButtonTitle: String {
+        let base = calendarBackendRaw == "eventKit" ? "确认写入真日历(Dev)" : "确认写入（假）日历"
+        guard model.isLiveTargetDay else { return base }                              // 说/改/看：仅确认写入（绿）
+        return model.hasUnsavedChanges ? base + " · 同步日历" : "同步日历改动"          // 过：叠加/单做蓝色对账
+    }
 
     init(container: AppContainer) {
         self.container = container
@@ -332,13 +339,18 @@ struct HomeView: View {
                     // AI 调整已移到输入区上方（改/看的时刻·原位替换排今天）——此处不再重复
 
                     HStack {
-                        Button { Task { await model.confirm() } } label: {
-                            Label(calendarBackendRaw == "eventKit"
-                                  ? "确认写入真日历(Dev)" : "确认写入（假）日历",
-                                  systemImage: "checkmark.circle")
+                        Button {
+                            Task {
+                                // 合一（Jason 2026-07-09）：确认写入绿计划（push，有改动才）+ 实时日同步蓝色实际改动（pull）。
+                                // 主动点=用户此刻本机日历最新 → 对账直接信任日历、不弹窗。
+                                if model.hasUnsavedChanges { await model.confirm() }
+                                if model.isLiveTargetDay { await container.execution.reconcileCalendarActuals() }
+                            }
+                        } label: {
+                            Label(confirmSyncButtonTitle, systemImage: "checkmark.circle")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(model.isWorking || !model.hasUnsavedChanges)
+                        .disabled(model.isWorking || (!model.hasUnsavedChanges && !model.isLiveTargetDay))
                         // ICS 导出归"看的时刻"、仅高密皮肤露（原皮不出——渐进披露 v2）
                         if DisclosureSettings.showsDeepFeatures {
                             #if os(macOS)

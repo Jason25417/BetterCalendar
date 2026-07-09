@@ -888,6 +888,40 @@ struct LogicTests {
         #expect(vm.doneCount == 0)                                      // 删了 stick：即使提醒仍打勾也不重建
     }
 
+    /// 蓝对账 B：在 Apple 日历里改了带章蓝块的时间/标题 → 手动对账 → 真相源回填新时间/标题。
+    @Test func reconcileBackfillsEditedActualTimeAndTitle() async throws {
+        final class StubReminders: ReminderStore {
+            let completed: Set<UUID>
+            init(_ c: Set<UUID>) { completed = c }
+            func write(_ drafts: [ReminderDraft]) async throws {}
+            func completedBlockIDs() async -> Set<UUID> { completed }
+        }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let task = ScheduledBlock(title: "写报告", start: s, end: s.addingTimeInterval(3600), priority: .important)
+        try planStore.replacePlanned([task], on: day)
+        let cal = FakeCalendarStore()
+        let vm = ExecutionViewModel(
+            calendarStore: cal,
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: StubReminders([task.id]),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        #expect(try planStore.actualBlocks(on: day).first { $0.id == task.id }?.start == s)
+
+        // 用户在 Apple 日历里把这件实际改到 10:00 起、并改了标题
+        let newStart = s.addingTimeInterval(3600)
+        try await cal.write([CalendarEventDraft(title: "写报告(改)", start: newStart,
+                                                end: newStart.addingTimeInterval(5400), kind: .actual, blockID: task.id)])
+        await vm.reconcileCalendarActuals()
+        let a = try planStore.actualBlocks(on: day).first { $0.id == task.id }
+        #expect(a?.start == newStart)              // 时间回填
+        #expect(a?.title == "写报告(改)")           // 标题回填
+    }
+
     // MARK: 日记照片跨端（JournalPhoto：DB 真相源 + 本地缓存 + 旧文件迁移）
 
     @Test func photoStoreRoundTripsViaDBAndMigratesLocalFiles() throws {
