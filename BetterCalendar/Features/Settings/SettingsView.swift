@@ -147,6 +147,14 @@ struct SettingsView: View {
                     Text("皮肤系统接口已就绪（§5.9）：新皮肤设计定稿后会出现在这里，选择后随视图迁移逐步生效。")
                         .font(.caption).foregroundStyle(.secondary)
 
+                    Picker("界面披露风格", selection: Binding(
+                        get: { DisclosureSettings.style },
+                        set: { DisclosureSettings.style = $0 })) {
+                        ForEach(DisclosureStyle.allCases) { Text($0.label).tag($0) }
+                    }
+                    Text("排日程页信息密度（渐进披露 v2）：原皮「向导」按时刻只显当刻所需；控制台/禅暂未实现（选了暂回退向导）。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Picker("日历里删除计划块时", selection: Binding(
                         get: { ReconcileSettings.deletionPolicy },
                         set: { ReconcileSettings.deletionPolicy = $0 })) {

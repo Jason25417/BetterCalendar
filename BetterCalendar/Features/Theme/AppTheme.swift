@@ -38,6 +38,35 @@ enum ThemeSettings {
     }
 }
 
+// MARK: - 披露风格（0.26 渐进披露 v2）——皮肤的"信息密度"维度（与色板正交）
+
+/// 皮肤 = 色板(AppTheme) + **披露密度(DisclosureStyle)**（2026-07-09 Jason：用皮肤区分披露程度）。
+/// 本轮只实现 `guide`（原皮「向导」：按时刻只显当刻所需）；`console`/`zen` **先留枚举+设置接口**，设计定稿再填。
+enum DisclosureStyle: String, CaseIterable, Identifiable {
+    case guide     // 原皮·向导：克制、按时刻披露、最少项（已实现）
+    case console   // 控制台：全露高密（ICS/批量/时间轴常驻）——接口预留，暂回退 guide
+    case zen       // 禅：比原皮更少——接口预留，暂回退 guide
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .guide: "向导（默认·克制）"
+        case .console: "控制台（高密·暂未实现）"
+        case .zen: "禅（极简·暂未实现）"
+        }
+    }
+    /// 是否已实现（未实现的行为=回退 guide；设置页可选但标注暂未实现）。
+    var implemented: Bool { self == .guide }
+}
+
+enum DisclosureSettings {
+    static var style: DisclosureStyle {
+        get { DisclosureStyle(rawValue: UserDefaults.standard.string(forKey: "disclosure.style") ?? "") ?? .guide }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "disclosure.style") }
+    }
+    /// 高密皮肤才露的深水功能（如 ICS 导出）：目前仅 console 概念上为真，但 console 未实现→回退 guide→false。
+    static var showsDeepFeatures: Bool { style == .console && style.implemented }
+}
+
 // MARK: - Environment 注入点（视图消费口）
 
 private struct AppThemeKey: EnvironmentKey {

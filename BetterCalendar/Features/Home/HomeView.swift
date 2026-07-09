@@ -41,6 +41,12 @@ struct HomeView: View {
     @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
     @AppStorage("home.inputHeight") private var inputHeight: Double = 96   // 输入框高度（拖拽可调，记忆）
     @State private var dragBaseHeight: Double?
+    // 渐进披露 v2（0.26）：有草稿/计划 = 改/看的时刻，输入折叠成"重说"入口；点开临时展开重排。
+    @State private var reSayExpanded = false
+    /// 有草稿或已加载计划 = 进入"改/看"时刻（写入区显示、输入折叠）。
+    private var showingPlanArea: Bool { !model.blocks.isEmpty || model.hasUnsavedChanges }
+    /// 是否展示"说"的完整输入（无计划 或 主动点了重说）。
+    private var showSayInput: Bool { !showingPlanArea || reSayExpanded }
 
     init(container: AppContainer) {
         self.container = container
@@ -132,61 +138,45 @@ struct HomeView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                // 可滚动多行输入 + 底部把手拖拽调高（写长了也能看全，0.16.3）
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $model.inputText)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                    if model.inputText.isEmpty {
-                        // 预设文本三阶段（0.20.3）：教程示例 → 排满 10 次自动毕业 → 小提示/轻问候（设置可调回）
-                        Text(PlaceholderSettings.currentText())
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 11).padding(.vertical, 14)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .frame(height: CGFloat(inputHeight))
-                .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
-                Capsule().fill(.quaternary)
-                    .frame(width: 44, height: 5)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle().inset(by: -8))
-                    .gesture(
-                        DragGesture()
-                            .onChanged { v in
-                                if dragBaseHeight == nil { dragBaseHeight = inputHeight }
-                                inputHeight = min(max(72, (dragBaseHeight ?? inputHeight) + v.translation.height), 420)
-                            }
-                            .onEnded { _ in dragBaseHeight = nil }
-                    )
-                    .help("拖动调整输入框高度")
-
-                HStack {
-                    Button { Task { await model.arrange() } } label: {
-                        Label("排\(Self.relativeDayWord(model.targetDay))", systemImage: "wand.and.stars")
-                    }
-                    .disabled(model.isWorking)
-                    if model.isWorking {
-                        ProgressView().controlSize(.small)
-                        Text("模型思考中…").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-
-                // 端侧流式：解析中的部分块边生成边显示（FM streamResponse）
-                if model.isWorking, !container.liveDraft.streaming.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        ForEach(container.liveDraft.streaming) { b in
-                            HStack(spacing: 6) {
-                                Text(b.start.formatted(date: .omitted, time: .shortened))
-                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                Text(b.title).font(.caption)
-                            }
+                // ===== 输入 / 动作区（渐进披露 v2·按时刻，0.26）=====
+                if showSayInput {
+                    // 说的时刻（或点了「重说」）：完整输入 + 排今天
+                    inputEditor
+                    HStack {
+                        Button { reSayExpanded = false; Task { await model.arrange() } } label: {
+                            Label("排\(Self.relativeDayWord(model.targetDay))", systemImage: "wand.and.stars")
+                        }
+                        .disabled(model.isWorking)
+                        if model.isWorking {
+                            ProgressView().controlSize(.small)
+                            Text("模型思考中…").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if showingPlanArea {   // 重说态：可收起回到草稿
+                            Button("收起") { reSayExpanded = false }
+                                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.leading, 2)
+                    if model.isWorking, !container.liveDraft.streaming.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(container.liveDraft.streaming) { b in
+                                HStack(spacing: 6) {
+                                    Text(b.start.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                    Text(b.title).font(.caption)
+                                }
+                            }
+                        }
+                        .padding(.leading, 2)
+                    }
+                } else {
+                    // 改/看的时刻：输入折叠成「重说」入口 + AI 调整（原位替换「排今天」）
+                    Button { reSayExpanded = true } label: {
+                        Label("想重新说一遍今天？", systemImage: "arrow.uturn.backward")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    aiAdjustRow
                 }
 
                 // 防呆：模型偶尔把 note 抽风成「1」这种垃圾 → trim 后太短就不显
@@ -215,7 +205,8 @@ struct HomeView: View {
                     }
                 }
 
-                ongoingSection
+                // 未来任务/在途：只在"说的时刻"出现（改/看时收起——渐进披露 v2）
+                if !showingPlanArea { ongoingSection }
 
                 // 复盘常驻入口：随时决定"这一天到此为止"、看看做成了什么（不只藏在工具栏图标里）
                 NavigationLink(value: HomeRoute.review) {
@@ -333,20 +324,7 @@ struct HomeView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
 
-                    if !model.blocks.isEmpty {
-                        HStack(alignment: .bottom) {
-                            // 多行输入（2026-07-07 Jason 报：只显 1 行还不能滚）——长指令自动长高到 4 行
-                            TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
-                                      text: $model.refineText, axis: .vertical)
-                                .lineLimit(1...4)
-                                .textFieldStyle(.roundedBorder)
-                                .onSubmit { Task { await model.refine() } }
-                            Button { Task { await model.refine() } } label: {
-                                Label("AI 调整", systemImage: "sparkles")
-                            }
-                            .disabled(model.isWorking)
-                        }
-                    }
+                    // AI 调整已移到输入区上方（改/看的时刻·原位替换排今天）——此处不再重复
 
                     HStack {
                         Button { Task { await model.confirm() } } label: {
@@ -356,16 +334,19 @@ struct HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.isWorking || !model.hasUnsavedChanges)
-                        #if os(macOS)
-                        Button { exportICS() } label: {
-                            Label("导出 ICS", systemImage: "square.and.arrow.up")
+                        // ICS 导出归"看的时刻"、仅高密皮肤露（原皮不出——渐进披露 v2）
+                        if DisclosureSettings.showsDeepFeatures {
+                            #if os(macOS)
+                            Button { exportICS() } label: {
+                                Label("导出 ICS", systemImage: "square.and.arrow.up")
+                            }
+                            #else
+                            ShareLink(item: ICSDocument(text: model.currentICS()),
+                                      preview: SharePreview("BetterCalendar 计划.ics")) {
+                                Label("导出 ICS", systemImage: "square.and.arrow.up")
+                            }
+                            #endif
                         }
-                        #else
-                        ShareLink(item: ICSDocument(text: model.currentICS()),
-                                  preview: SharePreview("BetterCalendar 计划.ics")) {
-                            Label("导出 ICS", systemImage: "square.and.arrow.up")
-                        }
-                        #endif
                         if let c = model.committedCount {
                             Text(model.committedToReal
                                  ? "已写入真日历(Dev) \(c) 项 → 打开 Apple 日历查看"
@@ -492,6 +473,58 @@ struct HomeView: View {
             // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）
             .onChange(of: model.targetDay) { _, _ in
                 model.targetDayDidChange()
+            }
+        }
+    }
+
+    // MARK: 渐进披露 v2 抽出的子视图（0.26）
+
+    /// 完整输入编辑器（含占位、拖高把手）——"说的时刻"用。
+    @ViewBuilder private var inputEditor: some View {
+        ZStack(alignment: .topLeading) {
+            TextEditor(text: $model.inputText)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+            if model.inputText.isEmpty {
+                Text(PlaceholderSettings.currentText())
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 11).padding(.vertical, 14)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: CGFloat(inputHeight))
+        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        Capsule().fill(.quaternary)
+            .frame(width: 44, height: 5)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle().inset(by: -8))
+            .gesture(
+                DragGesture()
+                    .onChanged { v in
+                        if dragBaseHeight == nil { dragBaseHeight = inputHeight }
+                        inputHeight = min(max(72, (dragBaseHeight ?? inputHeight) + v.translation.height), 420)
+                    }
+                    .onEnded { _ in dragBaseHeight = nil }
+            )
+            .help("拖动调整输入框高度")
+    }
+
+    /// AI 调整行（"改/看的时刻"原位替换"排今天"）——把已排的草稿用一句话微调。
+    @ViewBuilder private var aiAdjustRow: some View {
+        HStack(alignment: .bottom) {
+            TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
+                      text: $model.refineText, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await model.refine() } }
+            Button { Task { await model.refine() } } label: {
+                Label("AI 调整", systemImage: "sparkles")
+            }
+            .disabled(model.isWorking)
+            if model.isWorking {
+                ProgressView().controlSize(.small)
             }
         }
     }
