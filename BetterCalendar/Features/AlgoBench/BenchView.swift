@@ -117,31 +117,35 @@ final class BenchViewModel {
             self.progressDone = 0
             let fmIDs: Set<String> = [BenchVariantID.parseFM, BenchVariantID.refineFM,
                                       BenchVariantID.refineFMGuard]
-            var fmTimeouts = 0   // 端侧熔断：连续超时 2 次 → 本轮剩余端侧全跳过（别拖死矩阵）
+            // 端侧熔断改**按能力计**（2026-07-09）：解析老死循环不该连累微调也测不到；各能力独立数超时。
+            var fmTimeouts: [BenchCapability: Int] = [:]
             for c in todo {
                 for run in self.runs(for: c.capability) {
+                    let isFM = fmIDs.contains(run.variant.id)
+                    // FM 看门狗收紧到 25s（FM 正常调用 <16s；120s 太慢，一次死循环白等太久）
+                    let watchdog: TimeInterval = isFM ? 25 : 120
                     var attempts: [BenchCaseResult] = []
                     for i in 1...n {
                         if Task.isCancelled { break }
                         self.progress = "\(c.id) × \(run.label)" + (n > 1 ? "（第 \(i)/\(n) 轮）" : "") + "…"
                         let r: BenchCaseResult
-                        if fmTimeouts >= 2, fmIDs.contains(run.variant.id) {
+                        if isFM, (fmTimeouts[c.capability] ?? 0) >= 2 {
                             r = BenchCaseResult(output: BenchOutput(), checks: [],
-                                                skippedReason: "端侧连续超时已熔断（重启 App / 查 Apple Intelligence 后再试）")
+                                                skippedReason: "端侧「\(c.capability.label)」连续超时已熔断（重启 App / 查 Apple Intelligence 后再试）")
                         } else {
                             let runner = self.runner
                             let grace = run.grace ?? WorkHoursSettings.graceMinutes
                             do {
-                                r = try await BenchRunner.withWatchdog(seconds: 120) {
+                                r = try await BenchRunner.withWatchdog(seconds: watchdog) {
                                     await runner.run(c, variant: run.variant,
                                                      graceMinutes: grace, model: run.model)
                                 }
                             } catch {
                                 r = BenchCaseResult(
-                                    output: BenchOutput(latencyMS: 120_000, decodeOK: false,
-                                                        errorText: "看门狗超时（120s）——模型疑似循环生成，本次判失败"),
+                                    output: BenchOutput(latencyMS: Int(watchdog) * 1000, decodeOK: false,
+                                                        errorText: "看门狗超时（\(Int(watchdog))s）——模型疑似循环生成，本次判失败"),
                                     checks: [])
-                                if fmIDs.contains(run.variant.id) { fmTimeouts += 1 }
+                                if isFM { fmTimeouts[c.capability, default: 0] += 1 }
                             }
                         }
                         attempts.append(r)
@@ -235,6 +239,7 @@ final class BenchViewModel {
                 }
             }
         }
+        md += latencyDistributionSection()
         md += timeoutSensitivitySection()
         md += "\n## 逐用例\n\n"
         for c in cases {
@@ -255,6 +260,34 @@ final class BenchViewModel {
                 }
                 md += "\n"
             }
+        }
+        return md
+    }
+
+    /// 延迟分布（2026-07-09 Jason「大数原理方差定看门狗」）：按 变体×模型 给 min/p50/p95/max，
+    /// 用真实分布定生产看门狗（如取 Haiku 的 p99 加余量），比只看平均严谨。
+    private func latencyDistributionSection() -> String {
+        var rows: [(String, [Int])] = []
+        for cap in BenchCapability.allCases {
+            for run in runs(for: cap) {
+                var lat: [Int] = []
+                for (_, byRun) in results {
+                    for r in (byRun[run.id] ?? []) where r.skippedReason == nil
+                        && r.output.errorText == nil && r.output.latencyMS > 0 {
+                        lat.append(r.output.latencyMS)
+                    }
+                }
+                lat.sort()
+                if !lat.isEmpty { rows.append((run.label, lat)) }
+            }
+        }
+        guard !rows.isEmpty else { return "" }
+        func pct(_ a: [Int], _ p: Double) -> Int { a[min(a.count - 1, Int(Double(a.count) * p))] }
+        var md = "\n## 延迟分布（定看门狗用；仅成功调用）\n\n"
+        md += "| 变体·模型 | n | min | p50 | p95 | max |\n|---|---|---|---|---|---|\n"
+        for (label, lat) in rows {
+            let cells = "\(lat.first!)ms | \(pct(lat, 0.5))ms | \(pct(lat, 0.95))ms | \(lat.last!)ms"
+            md += "| " + label + " | \(lat.count) | " + cells + " |\n"
         }
         return md
     }
