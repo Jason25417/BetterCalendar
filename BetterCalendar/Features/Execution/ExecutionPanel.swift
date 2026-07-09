@@ -443,9 +443,15 @@ struct ExecutionPanel: View {
 
     private var footer: some View {
         HStack {
-            Text("今日：完成 \(model.doneCount)"
-                 + (model.background.isEmpty ? "" : " · 同时 \(model.background.count)"))
-                .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("今日：完成 \(model.doneCount)"
+                     + (model.background.isEmpty ? "" : " · 同时 \(model.background.count)"))
+                    .font(.caption).foregroundStyle(.secondary)
+                // 版本标签（2026-07-09 Jason）：仅内测/Debug 显示，发行版不打扰
+                if BuildInfo.isPreRelease {
+                    Text(BuildInfo.tag).font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
             Spacer()
             #if os(macOS)
             // 走 reallyQuit：菜单栏面板里明确的「退出」，即使开了「保留在菜单栏」也应真退（否则被 applicationShouldTerminate 拦成隐藏）

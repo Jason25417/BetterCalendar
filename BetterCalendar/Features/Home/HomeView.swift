@@ -65,6 +65,12 @@ struct HomeView: View {
         NavigationStack(path: $navPath) {
             ScrollView {   // 页面过长可整页滚动（0.16.3）
             VStack(alignment: .leading, spacing: 12) {
+                // 版本/构建标签移到左上（2026-07-09 Jason）：平台·渠道·版本(build)，点开看更新日志
+                NavigationLink { ChangelogView() } label: {
+                    Text(BuildInfo.tag)
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
                 HStack {
                     Text("说说你的一天").font(.headline)
                     Spacer()
@@ -494,16 +500,6 @@ struct HomeView: View {
             // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）
             .onChange(of: model.targetDay) { _, _ in
                 model.targetDayDidChange()
-            }
-            .safeAreaInset(edge: .bottom) {
-                NavigationLink {
-                    ChangelogView()
-                } label: {
-                    Text("\(AppInfo.copyright) · v\(AppInfo.version)")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .padding(.bottom, 6)
-                }
-                .buttonStyle(.plain)
             }
         }
     }
