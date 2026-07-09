@@ -55,11 +55,18 @@ final class EventKitReminderStore: ReminderStore {
         return cal
     }
 
+    /// 「被动完成」信号：**只返回今天（逻辑日）打勾完成的**要紧事标题（2026-07-09 修）。
+    /// 老 bug：曾返回列表里**所有历史**已完成提醒，date-blind——今天排同名任务（如每天都有的「XX 开发」）
+    /// 会匹配到往日打勾的旧提醒 → 什么都没干却被自动标完成、写蓝色实际、删了每次打开又重建。
+    /// 违 SPEC §5.13「完成判定=永远手动、绝不推断」。限定到"今天完成"= 只反映你今天的显式打勾动作。
     func completedTitles() async -> [String] {
         do { try await ensureAccess() } catch { return [] }
         guard let list = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle })
         else { return [] }
-        return (await existingReminders(in: list)).filter(\.isCompleted).compactMap(\.title)
+        return (await existingReminders(in: list))
+            .filter { $0.isCompleted
+                && ($0.completionDate.map { DayContext.isSameLogicalDay($0, .now) } ?? false) }
+            .compactMap(\.title)
     }
 
     /// 某日历日到期、未完成的提醒（排除本 App 自建列表）——给排程当上下文。

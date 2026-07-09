@@ -330,6 +330,11 @@ struct ExecutionPanel: View {
               : "番茄工作段进行中锁定——段满或休息时可改（你选的约束）")
     }
 
+    /// 已完成的事（可再来一段）——0.25.2 补：换一件/同时做 菜单曾漏了它，空档时完成的事就没法继续做。
+    private var redoable: [ExecutionViewModel.PlannedItem] {
+        model.planned.filter { model.isDone($0) && $0.id != model.active?.plannedID }
+    }
+
     private var switchMenu: some View {
         Menu {
             if model.remaining.isEmpty {
@@ -337,6 +342,13 @@ struct ExecutionPanel: View {
             } else {
                 ForEach(model.remaining) { item in
                     Button(item.title) { Task { await model.switchTo(item) } }
+                }
+            }
+            if !redoable.isEmpty {
+                Section("已完成 · 再来一段") {
+                    ForEach(redoable) { item in
+                        Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
+                    }
                 }
             }
             Divider()
@@ -356,6 +368,13 @@ struct ExecutionPanel: View {
             } else {
                 ForEach(model.remaining) { item in
                     Button(item.title) { model.startAlso(item) }
+                }
+            }
+            if !redoable.isEmpty {
+                Section("已完成 · 再来一段") {
+                    ForEach(redoable) { item in
+                        Button("✓ \(item.title)") { model.startAlso(item) }
+                    }
                 }
             }
             Divider()
