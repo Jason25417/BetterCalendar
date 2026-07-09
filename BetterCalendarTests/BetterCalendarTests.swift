@@ -1570,6 +1570,20 @@ struct LogicTests {
         #expect(allowed.first?.isFixed == false)
     }
 
+    /// 微调防呆（bug 修复 2026-07-09）：模型重吐块漏了 isAnchor → 还原（午饭/晚饭绝不被悄悄变成"能干的事项"）。
+    @Test func refineGuardPreservesAnchor() {
+        let lunch = ScheduledBlock(title: "午饭", start: at(2026,7,8,12), end: at(2026,7,8,13),
+                                   isAnchor: true, timingStyle: .light, priority: .normal)
+        var rLunch = lunch; rLunch.isAnchor = false     // 模型抽风：把午饭的锚点标志丢了
+        let guarded = HomeViewModel.guardRefineFlags(original: [lunch], refined: [rLunch],
+                                                     command: "把健身挪到下午")   // 命令根本没提午饭
+        #expect(guarded.first?.isAnchor == true)         // 还原：午饭仍是锚点、不进执行列表
+        // 模型新加的午饭（原来没有）→ 标题兜底也锚
+        let newDinner = ScheduledBlock(title: "晚饭", start: at(2026,7,8,18), end: at(2026,7,8,19), isAnchor: false)
+        let guarded2 = HomeViewModel.guardRefineFlags(original: [], refined: [newDinner], command: "加个晚饭")
+        #expect(guarded2.first?.isAnchor == true)
+    }
+
     /// 时间重锚：编辑器把时间改到 0–3:59 → 自动落目标日的次日日历日（同一逻辑日，不窜到列表顶）。
     @Test func anchoredMovesWeeHoursToNextCalendarDay() {
         let label = at(2026, 7, 8, 0)

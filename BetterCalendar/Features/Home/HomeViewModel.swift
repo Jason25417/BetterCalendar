@@ -310,12 +310,21 @@ final class HomeViewModel {
         let allowFixed = fixedWords.contains { command.localizedCaseInsensitiveContains($0) }
         let allowPriority = priorityWords.contains { command.localizedCaseInsensitiveContains($0) }
         let allowTiming = timingWords.contains { command.localizedCaseInsensitiveContains($0) }
-        if allowFixed && allowPriority && allowTiming { return refined }
+        // isAnchor 永远守（作息锚点=结构性、无对应用户命令词；微调绝不能把午饭/晚饭悄悄变成「要完成的任务」）。
+        // 只加不减：还原原块 isAnchor，或标题兜底（新加的午饭也锚）。独立于上面三个 allow——bug 修复 2026-07-09。
+        func anchored(_ r: ScheduledBlock) -> ScheduledBlock {
+            let o = original.first { $0.id == r.id } ?? original.first { TitleMatch.similarity($0.title, r.title) >= 0.6 }
+            var nb = r
+            nb.isAnchor = r.isAnchor || (o?.isAnchor ?? false) || ArrangeDayUseCase.isObviousAnchor(r.title)
+            return nb
+        }
+        if allowFixed && allowPriority && allowTiming { return refined.map(anchored) }
         return refined.map { r in
+            let base = anchored(r)
             guard let o = original.first(where: { $0.id == r.id })
                     ?? original.first(where: { TitleMatch.similarity($0.title, r.title) >= 0.6 })
-            else { return r }
-            var nb = r
+            else { return base }
+            var nb = base
             if !allowFixed { nb.isFixed = o.isFixed }
             if !allowPriority { nb.priority = o.priority }
             if !allowTiming { nb.timingStyle = o.timingStyle }
