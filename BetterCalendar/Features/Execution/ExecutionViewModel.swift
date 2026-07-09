@@ -18,7 +18,8 @@ import WidgetKit
 final class ExecutionViewModel {
     private let calendarStore: CalendarStore
     private let reschedule: RescheduleService
-    private let planStore: PlanReading   // 只读角色：执行层永不写计划真相（它写的是蓝色实际）
+    // 执行层：读计划 + 读/写蓝色实际（真相源，蓝对账 A2）；**不改计划结构**（title/time/固定 仍只由确认写入 & 对账回流）。
+    private let planStore: PlanReading & ActualReading & ActualWriting
     private let reminderStore: ReminderStore
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
@@ -226,7 +227,7 @@ final class ExecutionViewModel {
     }
 
     init(calendarStore: CalendarStore, reschedule: RescheduleService,
-         planStore: PlanReading, reminderStore: ReminderStore,
+         planStore: PlanReading & ActualReading & ActualWriting, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
          persistsRunState: Bool = true,
          startedDays: StartedDayStore? = nil, projection: ProjectionService? = nil) {
@@ -248,19 +249,27 @@ final class ExecutionViewModel {
         restoreRunStateIfNeeded()   // 0.20：重启/清后台后，同逻辑日的计时原样接上
         do {
             // 计划块从 PlanStore（带 isFixed/timingStyle），不从日历（日历丢元数据）
-            let p = try planStore.plannedBlocks(on: DayContext.logicalStartOfDay(.now))
+            let label = DayContext.logicalStartOfDay(.now)
+            let p = try planStore.plannedBlocks(on: label)
             let a = try await calendarStore.read(kind: .actual)
+            let stored = (try? planStore.actualBlocks(on: label)) ?? []   // 蓝对账 A2：实际真相源=PlanStore(.actual)
+            let clearedIDs = (try? planStore.clearedPlannedIDs(on: label)) ?? []   // 蓝对账 B：批量读 tombstone（循环里只查 Set）
             // 锚点块（午饭/通勤等）不进执行列表：占日程但不是"要完成的任务"，menu bar 不催你完成（0.17）
             planned = p.filter { !$0.isAnchor }
                        .sorted { $0.start < $1.start }
                        .map { PlannedItem(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                           timingStyle: $0.timingStyle, isFixed: $0.isFixed,
                                           priority: $0.priority) }
-            // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」
-            // plannedID 从事件章读回（盖过章的实际=对应计划块的实际，跨设备也认得）
-            var merged = a.filter { DayContext.isSameLogicalDay($0.start, .now) }
-                          .map { ActualRecord(plannedID: $0.blockID, title: $0.title,
-                                              start: $0.start, end: $0.end) }
+            // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」。
+            // 蓝对账 A2：以 PlanStore(.actual) 为真相；再并入日历里带章、真相源还没有的实际
+            // （老数据迁移 + 跨设备日历同步来的；无章的留给 Stage B 认领弹窗）。
+            var merged = stored.map { ActualRecord(plannedID: $0.id, title: $0.title,
+                                                   start: $0.start, end: $0.end) }
+            let storedIDs = Set(stored.map(\.id))
+            for c in a where DayContext.isSameLogicalDay(c.start, .now) {
+                if let bid = c.blockID, storedIDs.contains(bid) { continue }
+                merged.append(ActualRecord(plannedID: c.blockID, title: c.title, start: c.start, end: c.end))
+            }
             let collectedCount = merged.count
 
             // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒今天打勾 → 自动并入实际
@@ -270,6 +279,8 @@ final class ExecutionViewModel {
             for item in planned where !merged.contains(where: {
                 $0.plannedID == item.id
                     || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
+                // 蓝对账 B：用户已在日历删过这块的蓝色实际（对账时盖了 tombstone）→ 不再自动重推断（删了 stick）。
+                if clearedIDs.contains(item.id) { continue }
                 let meetingHappened = item.isFixed && item.end < now
                 let reminderChecked = completedIDs.contains(item.id)
                 if meetingHappened || reminderChecked {
@@ -292,6 +303,29 @@ final class ExecutionViewModel {
             lastError = error.localizedDescription
             DevLog.shared.warn("执行", "读取今日计划/实际失败：\(error.localizedDescription)")
         }
+    }
+
+    /// 手动对账（蓝对账 Stage B）：把用户在 Apple 日历里对**蓝色实际**的删除同步进真相源。
+    /// **手动触发**（用户点「同步日历改动」）：此刻用户本机日历是最新的 → 直接信任日历、不弹窗
+    /// （区别于后台自动对账：跨设备同步延迟下，自动把"日历里暂缺"当删除会误删；手动无此风险，也合原则7=用户主动）。
+    /// 逻辑：真相源里有、但日历里已无的带章蓝块 = 用户删了 → 删真相源实际 + 给对应计划块盖 tombstone
+    /// （completion=.missed）→ loadToday 的自动完成不再重推断（删了 stick）。仅处理删除；无章新建认领待后续。
+    func reconcileCalendarActuals() async {
+        let label = DayContext.logicalStartOfDay(.now)
+        let stored = (try? planStore.actualBlocks(on: label)) ?? []
+        guard !stored.isEmpty else { return }
+        let calIDs = Set(((try? await calendarStore.read(kind: .actual)) ?? [])
+            .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            .compactMap(\.blockID))
+        let deleted = stored.map(\.id).filter { !calIDs.contains($0) }
+        guard !deleted.isEmpty else { return }
+        try? planStore.deleteActuals(ids: deleted)
+        let plannedIDs = Set((try? planStore.plannedBlocks(on: label))?.map(\.id) ?? [])
+        for id in deleted where plannedIDs.contains(id) {
+            try? planStore.latchCompletion(plannedID: id, .missed)   // tombstone：删了不再自动重推断
+        }
+        DevLog.shared.info("对账", "蓝色实际对账：日历里已删 \(deleted.count) 件 → 真相源同步移除")
+        await loadToday()
     }
 
     /// 执行状态 → 主屏小组件快照（App Group JSON + 刷时间线）。iOS 专属，macOS no-op。
@@ -676,7 +710,13 @@ final class ExecutionViewModel {
             let existing = (try? await calendarStore.read(kind: .actual)) ?? []
             let merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
             try await calendarStore.write(merged)
-            DevLog.shared.info("执行", "实际日历已更新：本次 \(drafts.count) 项 · 合并后 \(merged.count) 项")
+            // 蓝对账 A2：实际同时落 PlanStore 真相源（日历成投影）；按 id 幂等，不堆重复。
+            try? planStore.upsertActuals(done.map {
+                ActualBlock(id: $0.plannedID ?? $0.id, title: $0.title, start: $0.start, end: $0.end)
+            })
+            // 双向：App 内完成 → 回勾对应提醒事项完成（幂等；无对应提醒的 id 自动忽略）。
+            await reminderStore.markCompleted(blockIDs: Set(done.compactMap(\.plannedID)))
+            DevLog.shared.info("执行", "实际已更新：日历合并 \(merged.count) · 真相源 upsert \(done.count)")
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.error("执行", "写入实际日历失败：\(error.localizedDescription)")

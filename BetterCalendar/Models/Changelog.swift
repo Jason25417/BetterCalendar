@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.2", date: "2026-07", changes: [
+            "在 App 里完成一件带提醒的事，会自动把 Apple「提醒事项」里对应那条也勾成完成——不用两头各勾一次",
+            "今天面板底部新增「同步日历改动」：你在 Apple 日历里删掉或改了今天的蓝色实际后点一下，改动就同步进来——尤其是删掉的不会再被自动记回来了（根治过去「删了又自己冒回来」）",
+        ]),
         ChangelogEntry(version: "0.26.1", date: "2026-07", changes: [
             "排今天答完给一行清楚状态：成功时「✓ 排好 N 件」+ 模型的一句话；失败时不再硬塞一份乱排的草稿，而是保留你说的话 + 一句「检查网络/填 key 再试」——出错给你下一步，不给错误码，也不给需要收拾的垃圾",
         ]),

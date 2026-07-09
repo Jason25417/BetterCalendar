@@ -820,6 +820,74 @@ struct LogicTests {
         #expect(AppIntentRequest.consume() == .markDone)
     }
 
+    /// 蓝对账 A2：完成的实际落 PlanStore 真相源；换一个「日历全空」的新 VM 仍能从真相源读回 done。
+    /// 证明蓝色实际真相已从日历迁到 PlanStore（这是后续「删日历事件也 stick」的前置：真相不再只在日历）。
+    @Test func actualPersistsToPlanStoreTruthAndReloadsWithoutCalendar() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let coding = ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600))
+        try planStore.replacePlanned([coding], on: day)
+
+        let vm1 = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm1.loadToday()
+        _ = await vm1.markDone(titleLike: "写代码")
+        await vm1.waitForPreview()
+        #expect(vm1.doneCount == 1)
+        // 真相源里应有这条实际（id = 计划块 id，同 UUID 换幕布）
+        #expect(try planStore.actualBlocks(on: day).contains { $0.id == coding.id })
+
+        // 换一个「全新空日历」的 VM：done 仍能从 PlanStore 真相读回（不靠日历）
+        let vm2 = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm2.loadToday()
+        #expect(vm2.doneCount == 1)
+    }
+
+    /// 蓝对账 Stage B：自动完成（这里走提醒打勾）→ 用户在 Apple 日历删掉蓝块 → 手动对账 →
+    /// 真相源移除+盖 tombstone → 再 loadToday **不再重建**（删了 stick，根治 §3；即使提醒仍打着勾也不复活）。
+    @Test func reconcileDeletionTombstonesAndStaysDeleted() async throws {
+        final class StubReminders: ReminderStore {
+            let completed: Set<UUID>
+            init(_ c: Set<UUID>) { completed = c }
+            func write(_ drafts: [ReminderDraft]) async throws {}
+            func completedBlockIDs() async -> Set<UUID> { completed }
+        }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let task = ScheduledBlock(title: "写报告", start: s, end: s.addingTimeInterval(3600), priority: .important)
+        try planStore.replacePlanned([task], on: day)
+        let cal = FakeCalendarStore()
+        let vm = ExecutionViewModel(
+            calendarStore: cal,
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: StubReminders([task.id]),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        #expect(vm.doneCount == 1)                                        // 提醒打勾 → 自动完成、落真相源
+        #expect(try planStore.actualBlocks(on: day).contains { $0.id == task.id })
+
+        try await cal.clear(kind: .actual)                               // 用户在 Apple 日历删掉蓝块
+        await vm.reconcileCalendarActuals()                             // 手动对账
+        #expect(try planStore.actualBlocks(on: day).isEmpty)            // 真相源已同步移除
+        #expect(vm.doneCount == 0)                                      // 对账后立即反映
+
+        await vm.loadToday()
+        #expect(vm.doneCount == 0)                                      // 删了 stick：即使提醒仍打勾也不重建
+    }
+
     // MARK: 日记照片跨端（JournalPhoto：DB 真相源 + 本地缓存 + 旧文件迁移）
 
     @Test func photoStoreRoundTripsViaDBAndMigratesLocalFiles() throws {

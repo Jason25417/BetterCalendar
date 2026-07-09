@@ -26,8 +26,12 @@ protocol ReminderStore: AnyObject {
     func completedBlockIDs() async -> Set<UUID>
     /// 某日历日到期、未完成的提醒标题（排除本 App 自建列表），给排程当上下文。默认空。
     func dueReminders(on day: Date) async -> [String]
+    /// 在 App 内完成一件事 → 把它对应的（带本 App 身份章的）提醒事项也勾成完成（双向：App→提醒事项）。
+    /// 幂等：已完成的再勾一次无副作用。无章/无对应提醒的 blockID 忽略。默认 no-op（假实现/测试桩）。
+    func markCompleted(blockIDs: Set<UUID>) async
 }
 
 extension ReminderStore {
     func dueReminders(on day: Date) async -> [String] { [] }
+    func markCompleted(blockIDs: Set<UUID>) async {}
 }

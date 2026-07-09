@@ -72,6 +72,26 @@ final class EventKitReminderStore: ReminderStore {
         return Set(ids)
     }
 
+    /// App 内完成 → 回勾对应提醒事项（双向：App→提醒事项）。按身份章 blockID 精确匹配本 App 列表里的提醒。
+    /// 幂等：已完成的跳过、不重复 commit。无对应提醒的 id 静默忽略。
+    func markCompleted(blockIDs: Set<UUID>) async {
+        guard !blockIDs.isEmpty else { return }
+        do { try await ensureAccess() } catch { return }
+        guard let list = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle })
+        else { return }
+        var changed = false
+        for r in await existingReminders(in: list) where !r.isCompleted {
+            guard let bid = EventKitCalendarStore.blockID(from: r.url), blockIDs.contains(bid) else { continue }
+            r.isCompleted = true
+            try? store.save(r, commit: false)
+            changed = true
+        }
+        if changed {
+            try? store.commit()
+            DevLog.shared.info("提醒", "回勾完成的提醒事项（App→提醒事项）")
+        }
+    }
+
     /// 某日历日到期、未完成的提醒（排除本 App 自建列表）——给排程当上下文。
     func dueReminders(on day: Date) async -> [String] {
         do { try await ensureAccess() } catch { return [] }

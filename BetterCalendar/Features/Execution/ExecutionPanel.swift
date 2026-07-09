@@ -453,6 +453,12 @@ struct ExecutionPanel: View {
                 }
             }
             Spacer()
+            // 蓝对账 Stage B：手动同步——你在 Apple 日历里删/改今天蓝色实际后，点它把改动同步进来（信任日历、不弹窗）
+            Button { Task { await model.reconcileCalendarActuals() } } label: {
+                Label("同步日历改动", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+            .help("把你在 Apple 日历里对今天蓝色实际的删/改同步进来（删了就不再自动记回来）")
             #if os(macOS)
             // 走 reallyQuit：菜单栏面板里明确的「退出」，即使开了「保留在菜单栏」也应真退（否则被 applicationShouldTerminate 拦成隐藏）
             Button { AppLifecycle.shared?.reallyQuit() } label: {

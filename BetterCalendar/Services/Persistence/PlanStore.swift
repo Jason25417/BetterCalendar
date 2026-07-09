@@ -31,8 +31,43 @@ protocol PlanWriting: AnyObject {
     func deletePlanned(ids: [UUID]) throws
 }
 
+// MARK: - 蓝色实际（真相源，蓝对账 0.27 起）
+// 蓝色实际从「日历即真相」升级为「PlanStore(.actual) 即真相、日历是投影」——与绿色对称，
+// 复用同一个 PlanBlock 表（kind 区分）、同一套 stamp+投影去重。实际块**复用对应计划块的 UUID**
+// （同 UUID 换幕布：橙随下次预览消失、蓝带同章出现）；计划外 bonus 用自己的新 UUID。
+
+/// 蓝色实际（真相）只读：执行页 / 复盘 / 对账 读回。
 @MainActor
-final class PlanStore: PlanReading, PlanWriting {
+protocol ActualReading: AnyObject {
+    func actualBlocks(on day: Date) throws -> [ActualBlock]
+    /// 某计划块的完成闩（nil=尚未决定，固定块可自动完成；一旦置值=已决定，永不再推断）。
+    func completionLatch(plannedID: UUID) throws -> CompletionStatus?
+    /// 某逻辑日被用户「清掉完成」的计划块 id（tombstone=completion .missed）——一次批量读，
+    /// 供 loadToday 跳过自动重推断（对账删除后不再重建=stick）。绝不逐项在循环里 fetch。
+    func clearedPlannedIDs(on day: Date) throws -> Set<UUID>
+}
+
+/// 蓝色实际（真相）写：执行层 flushActuals + 对账 ReconcileService。
+@MainActor
+protocol ActualWriting: AnyObject {
+    /// 按 id 幂等 upsert 实际块（已存在则更新时间/标题，否则插入）。
+    func upsertActuals(_ blocks: [ActualBlock]) throws
+    /// 按 id 删除实际块（对账：用户在日历删蓝块经确认后 → 真相源）。
+    func deleteActuals(ids: [UUID]) throws
+    /// 置/清某计划块的完成闩：自动完成或用户手动改回都走这里，nil 代表清回「未决定」。
+    func latchCompletion(plannedID: UUID, _ status: CompletionStatus?) throws
+}
+
+/// 蓝色实际块 DTO（真相层，无排程元数据；priority/isFixed 等属计划块，不搬到实际）。
+struct ActualBlock: Sendable, Identifiable, Equatable {
+    let id: UUID        // = 对应计划块 id（换幕布）；计划外 bonus = 自身新 id
+    let title: String
+    let start: Date
+    let end: Date
+}
+
+@MainActor
+final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     private let context: ModelContext
 
     init(context: ModelContext? = nil) {
@@ -102,6 +137,68 @@ final class PlanStore: PlanReading, PlanWriting {
         for v in victims { context.delete(v) }
         try context.save()
         DevLog.shared.info("PlanStore", "对账回流删除 \(victims.count) 块")
+    }
+
+    // MARK: - 蓝色实际（真相源）
+
+    /// 读回某**逻辑日**的实际块（蓝色）。day 语义同 plannedBlocks（4 点日界线、凌晨须先转标签）。
+    func actualBlocks(on day: Date) throws -> [ActualBlock] {
+        let label = Calendar.current.startOfDay(for: day)
+        return try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { $0.kind == .actual && DayContext.logicalStartOfDay($0.start) == label }
+            .sorted { $0.start < $1.start }
+            .map { ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end) }
+    }
+
+    /// 某计划块的完成闩（读 planned 行的 completion；kind 过滤避免撞同 UUID 的实际行）。
+    func completionLatch(plannedID: UUID) throws -> CompletionStatus? {
+        try context.fetch(FetchDescriptor<PlanBlock>())
+            .first(where: { $0.id == plannedID && $0.kind == .planned })?.completion
+    }
+
+    /// 某逻辑日被清掉完成的计划块 id（tombstone）——一次批量读，供 loadToday 用 Set 查跳过。
+    func clearedPlannedIDs(on day: Date) throws -> Set<UUID> {
+        let label = Calendar.current.startOfDay(for: day)
+        return Set(try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { $0.kind == .planned && $0.completion == .missed
+                      && DayContext.logicalStartOfDay($0.start) == label }
+            .map { $0.id })
+    }
+
+    /// 按 id 幂等 upsert 实际块。同 id 只更新时间/标题，不新增行（防每次 flush 堆重复实际）。
+    func upsertActuals(_ blocks: [ActualBlock]) throws {
+        guard !blocks.isEmpty else { return }
+        let existing = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .actual }
+        var byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for b in blocks {
+            if let row = byID[b.id] {
+                row.title = b.title; row.start = b.start; row.end = b.end
+            } else {
+                let row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end, kind: .actual)
+                context.insert(row); byID[b.id] = row
+            }
+        }
+        try context.save()
+        DevLog.shared.info("PlanStore", "实际块 upsert \(blocks.count) 项（真相源）")
+    }
+
+    /// 按 id 删除实际块（只删 .actual 行，绝不误删同 UUID 的计划行）。
+    func deleteActuals(ids: [UUID]) throws {
+        guard !ids.isEmpty else { return }
+        let idSet = Set(ids)
+        let victims = try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { $0.kind == .actual && idSet.contains($0.id) }
+        for v in victims { context.delete(v) }
+        try context.save()
+        DevLog.shared.info("PlanStore", "实际块删除 \(victims.count) 项（真相源）")
+    }
+
+    /// 置/清计划块的完成闩（原则7：自动完成先斩，用户手动改回永远赢；nil=清回未决定）。
+    func latchCompletion(plannedID: UUID, _ status: CompletionStatus?) throws {
+        guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
+            .first(where: { $0.id == plannedID && $0.kind == .planned }) else { return }
+        block.completion = status
+        try context.save()
     }
 
     private static func dayStr(_ d: Date) -> String {

@@ -103,7 +103,8 @@ final class LongTaskStore {
     /// 块 id → 归属未来任务 id（只含已归属的块）。0.18.2 精确归属：让投入统计锚 id、不靠标题漂移。
     private func blockLinkMap() -> [UUID: UUID] {
         var map: [UUID: UUID] = [:]
-        for b in (try? context.fetch(FetchDescriptor<PlanBlock>())) ?? [] {
+        // 只认「计划」块：蓝对账后库里也存 .actual 行（同 UUID 换幕布），不按 kind 过滤会把实际块也算进归属。
+        for b in (try? context.fetch(FetchDescriptor<PlanBlock>())) ?? [] where b.kind == .planned {
             if let linked = b.linkedTaskID { map[b.id] = linked }
         }
         return map
