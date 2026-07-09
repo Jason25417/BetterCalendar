@@ -469,32 +469,24 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: ExecutionProgressSignal.changed)) { _ in
                 model.noteExecutionProgress()
             }
-            // 0.20 双向同步：日历里的 删除/新建 → 一个中性对话框合并询问（挂起到主窗口，不发通知）。
-            // 关闭 = 本次保留现状、不记住。具体是哪几件列在正文里。
-            .confirmationDialog(
-                "日历里有改动，要同步吗？",
-                isPresented: Binding(get: { container.reconcile.hasPendingChanges },
-                                     set: { if !$0 { container.reconcile.resolveChanges(sync: false, remember: false) } }),
-                titleVisibility: .visible
-            ) {
-                Button("同步（照日历的改）", role: .destructive) {
-                    container.reconcile.resolveChanges(sync: true, remember: false)
-                }
-                Button("同步，并记住（以后都这样）", role: .destructive) {
-                    container.reconcile.resolveChanges(sync: true, remember: true)
-                }
-                Button("保留现状（不同步）") {
-                    container.reconcile.resolveChanges(sync: false, remember: false)
-                }
-                Button("保留，并记住（以后都保留）") {
-                    container.reconcile.resolveChanges(sync: false, remember: true)
-                }
-            } message: {
+            // 0.20 双向同步 → 0.25.6 改带「不再询问」勾选 sheet（与运行态恢复统一交互）。
+            .sheet(isPresented: Binding(get: { container.reconcile.hasPendingChanges },
+                                        set: { if !$0, container.reconcile.hasPendingChanges {
+                                            container.reconcile.resolveChanges(sync: false, remember: false) } })) {
                 let dels = container.reconcile.pendingDeletions.map(\.title).joined(separator: "、")
                 let adds = container.reconcile.pendingAdditions.map(\.title).joined(separator: "、")
-                Text((dels.isEmpty ? "" : "移除了：\(dels)\n")
-                     + (adds.isEmpty ? "" : "新建了：\(adds)\n")
-                     + "（可随时在 设置→进阶 里改处理策略）")
+                RememberableConfirmSheet(
+                    title: "日历里有改动，要同步吗？",
+                    message: (dels.isEmpty ? "" : "移除了：\(dels)\n")
+                        + (adds.isEmpty ? "" : "新建了：\(adds)\n")
+                        + "（可随时在 设置→进阶 里改处理策略）",
+                    options: [
+                        .init(label: "同步（照日历的改）", role: .destructive, appliesRemember: true),
+                        .init(label: "保留现状（不同步）", role: nil, appliesRemember: true),
+                    ],
+                    onChoose: { i, remember in
+                        container.reconcile.resolveChanges(sync: i == 0, remember: remember)
+                    })
             }
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
             // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）

@@ -160,6 +160,17 @@ struct SettingsView: View {
                     Text("双向同步（0.20）：在 Apple 日历里挪/改绿色计划块会自动同步回 App；删除/新建按上面两条策略处理。")
                         .font(.caption).foregroundStyle(.secondary)
 
+                    Picker("退出时有任务在进行", selection: Binding(
+                        get: { ExecutionViewModel.RunRestoreSettings.policy },
+                        set: { ExecutionViewModel.RunRestoreSettings.policy = $0 })) {
+                        Text("每次询问").tag(ExecutionViewModel.RunRestoreChoice?.none)
+                        Text("继续（离开时间也算）").tag(ExecutionViewModel.RunRestoreChoice?.some(.continueWithGap))
+                        Text("直接继续（离开时间不算）").tag(ExecutionViewModel.RunRestoreChoice?.some(.continueWithoutGap))
+                        Text("重新开始").tag(ExecutionViewModel.RunRestoreChoice?.some(.discard))
+                    }
+                    Text("重开 App 时若有任务在计时：默认每次问怎么接；在恢复弹窗勾「不再询问」或这里改，即按固定选择自动处理。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")

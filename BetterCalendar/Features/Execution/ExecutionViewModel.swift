@@ -146,12 +146,23 @@ final class ExecutionViewModel {
 
     /// 三选恢复（0.22.1，Jason 设计）：同逻辑日的快照不再静默接上，挂起弹窗问——
     /// 继续（把离开的时间也算上）/ 直接继续（离开时间不算）/ 重新开始（当作没做过）。
-    enum RunRestoreChoice { case continueWithGap, continueWithoutGap, discard }
+    enum RunRestoreChoice: String { case continueWithGap, continueWithoutGap, discard }
+
+    /// 恢复策略（0.25.6，Jason：恢复弹窗加「不再询问」勾选 + 设置可改）：ask=每次问；其余=记住的选择自动应用。
+    enum RunRestoreSettings {
+        private static let key = "execution.runRestorePolicy"
+        /// nil = ask（每次询问）。
+        static var policy: RunRestoreChoice? {
+            get { UserDefaults.standard.string(forKey: key).flatMap(RunRestoreChoice.init) }
+            set { newValue.map { UserDefaults.standard.set($0.rawValue, forKey: key) }
+                  ?? UserDefaults.standard.removeObject(forKey: key) }
+        }
+    }
 
     /// 待用户三选的退出前运行态（非 nil → 执行面板弹恢复对话框）。
     var pendingRunRestore: RunStateSnapshot?
 
-    /// 启动检查：同逻辑日 → 挂起三选；跨逻辑日 → 丢弃快照（昨天的事不接续）。
+    /// 启动检查：同逻辑日 → 挂起三选（或按记住的策略自动应用）；跨逻辑日 → 丢弃快照。
     private func restoreRunStateIfNeeded() {
         guard persistsRunState else { return }
         guard active == nil, background.isEmpty, pendingRunRestore == nil,
@@ -160,6 +171,12 @@ final class ExecutionViewModel {
         guard RunStateSnapshot.isRestorable(snap) else {
             UserDefaults.standard.removeObject(forKey: Self.runStateKey)
             DevLog.shared.info("执行", "跨逻辑日的旧计时快照已丢弃（昨天的事不接续）")
+            return
+        }
+        if let remembered = RunRestoreSettings.policy {   // 记住过 → 直接应用、不打扰
+            pendingRunRestore = snap
+            resolveRunRestore(remembered)
+            DevLog.shared.info("执行", "按记住的恢复策略自动处理（\(remembered.rawValue)）")
             return
         }
         pendingRunRestore = snap

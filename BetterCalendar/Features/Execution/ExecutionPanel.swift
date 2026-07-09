@@ -42,24 +42,24 @@ struct ExecutionPanel: View {
         .frame(width: 280)
         #endif
         .task { await model.loadToday() }
-        // 三选恢复（0.22.1）：退出/闪退/清后台前有任务在进行 → 问怎么接（关闭=直接继续、离开时间不算）
-        .confirmationDialog(
-            "退出时「\(model.pendingRunRestore?.active?.title ?? model.pendingRunRestore?.background.first?.title ?? "任务")」正在进行，想继续吗？",
-            isPresented: Binding(get: { model.pendingRunRestore != nil },
-                                 set: { if !$0 { model.resolveRunRestore(.continueWithoutGap) } }),
-            titleVisibility: .visible
-        ) {
-            Button("继续（离开的 \(Self.gapText(model.pendingRunRestore)) 也算上）") {
-                model.resolveRunRestore(.continueWithGap)
-            }
-            Button("直接继续（离开的时间不算）") {
-                model.resolveRunRestore(.continueWithoutGap)
-            }
-            Button("重新开始（当作没做过）", role: .destructive) {
-                model.resolveRunRestore(.discard)
-            }
-        } message: {
-            Text("同一逻辑日内的计时可以接上；并行任务与番茄段状态会一并恢复。")
+        // 三选恢复（0.22.1 → 0.25.6 改带「不再询问」勾选 sheet）：退出/闪退/清后台前有任务在进行 → 问怎么接
+        .sheet(isPresented: Binding(get: { model.pendingRunRestore != nil },
+                                    set: { if !$0, model.pendingRunRestore != nil {
+                                        model.resolveRunRestore(.continueWithoutGap) } })) {
+            RememberableConfirmSheet(
+                title: "退出时「\(model.pendingRunRestore?.active?.title ?? model.pendingRunRestore?.background.first?.title ?? "任务")」正在进行，想继续吗？",
+                message: "同一逻辑日内的计时可以接上；并行任务与番茄段状态会一并恢复。",
+                options: [
+                    .init(label: "继续（离开的 \(Self.gapText(model.pendingRunRestore)) 也算上）", role: nil, appliesRemember: true),
+                    .init(label: "直接继续（离开的时间不算）", role: nil, appliesRemember: true),
+                    .init(label: "重新开始（当作没做过）", role: .destructive, appliesRemember: true),
+                ],
+                onChoose: { i, remember in
+                    let choice: ExecutionViewModel.RunRestoreChoice =
+                        [.continueWithGap, .continueWithoutGap, .discard][i]
+                    if remember { ExecutionViewModel.RunRestoreSettings.policy = choice }
+                    model.resolveRunRestore(choice)
+                })
         }
     }
 
