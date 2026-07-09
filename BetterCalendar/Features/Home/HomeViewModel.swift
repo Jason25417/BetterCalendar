@@ -58,6 +58,18 @@ final class HomeViewModel {
     /// 新鲜度徽标（0.24 C2，SPEC §11 ④）：编辑期间底层（真相源/执行进展）变了 → 亮中性小条，
     /// 出路两个：「载入最新」（放弃本页）或什么都不点继续编辑（确认时以本页为准=最后动作赢）。绝不弹窗、不自动合并。
     private(set) var freshness = false
+    /// 新鲜度来源（v2，Jason 2026-07-10）：告诉用户"和你草稿对不上的最新内容从哪来"，
+    /// 在预览两边前先给个判断锚、降理解压力。
+    enum FreshnessSource { case calendarEdit, reflow, external
+        var label: String {
+            switch self {
+            case .calendarEdit: return "你在系统日历里改了这天"
+            case .reflow: return "你的执行进展触发了重排"
+            case .external: return "别的设备同步来的更新"
+            }
+        }
+    }
+    private(set) var freshnessSource: FreshnessSource = .external
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
          calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
@@ -476,13 +488,13 @@ final class HomeViewModel {
 
     /// 真相源被外部改了（日历手改回流 / 他端同步）：干净 → 直接刷新；编辑中 → 亮徽标不打扰。
     func noteExternalPlanChange() {
-        if hasUnsavedChanges { freshness = true } else { loadConfirmedPlan() }
+        if hasUnsavedChanges { freshnessSource = .calendarEdit; freshness = true } else { loadConfirmedPlan() }
     }
 
     /// 执行进展变了（开始/完成/换件）：只影响实时日的精修台底。
     func noteExecutionProgress() {
         guard isLiveTargetDay else { return }
-        if hasUnsavedChanges { freshness = true } else { loadConfirmedPlan() }
+        if hasUnsavedChanges { freshnessSource = .reflow; freshness = true } else { loadConfirmedPlan() }
     }
 
     /// 「载入最新」：放弃本页未确认修改，回到当下最新的底（干净、无羞辱的显式选择）。

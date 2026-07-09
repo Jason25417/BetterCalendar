@@ -251,7 +251,8 @@ struct HomeView: View {
                 if model.freshness {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.triangle.2.circlepath")
-                        Text("这天的日程有更新")
+                        // 来源标注（v2）：先告诉用户这份最新从哪来，再让他决定
+                        Text("这天有更新：\(model.freshnessSource.label)")
                         Button("载入最新（放弃本页修改）") { model.reloadFreshBase() }
                             .buttonStyle(.plain).underline()
                         Text("· 或继续编辑，确认时以本页为准").foregroundStyle(.secondary)
