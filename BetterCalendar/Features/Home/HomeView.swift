@@ -728,12 +728,14 @@ struct EditableRow: View {
     /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
     private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
 
-    /// 时限图标：有硬 DDL=红旗 / 尽早=橙上箭 / 随时=灰钟。
+    /// 时限图标：锚点=图钉 / 有硬 DDL=红旗 / 尽早=橙上箭 / 随时=灰钟。
     private var timingLimitIcon: String {
+        if block.isAnchor { return "pin.fill" }
         if block.deadline != nil { return "flag.checkered" }
         return block.priority == .important ? "arrow.up.circle.fill" : "clock"
     }
     private var timingLimitColor: Color {
+        if block.isAnchor { return .brown }
         if block.deadline != nil { return .red }
         return block.priority == .important ? .orange : .secondary
     }
@@ -743,18 +745,23 @@ struct EditableRow: View {
             // 时限（星标→DDL 统一，2026-07-09）：三态互斥——随时 / 尽早 / 有具体截止。
             // 复用现成字段：priority==.important 即「尽早」（星标继任、reflow 靠前排），deadline 即硬 DDL。
             Menu {
-                Button("随时（今天内即可）") { block.priority = .normal; block.deadline = nil }
-                Button("尽早") { block.priority = .important; block.deadline = nil }
+                Button("随时（今天内即可）") { block.priority = .normal; block.deadline = nil; block.isAnchor = false }
+                Button("尽早") { block.priority = .important; block.deadline = nil; block.isAnchor = false }
                 Button("有具体截止…") {
-                    block.priority = .normal
+                    block.priority = .normal; block.isAnchor = false
                     if block.deadline == nil { block.deadline = block.end }
+                }
+                Divider()
+                // 锚点手动开关（Jason 2026-07-09）：午饭/通勤这类=占时间不催完成；能手动设也能改回任务。
+                Button(block.isAnchor ? "✓ 生活锚点（不催完成）" : "设为生活锚点（午饭/通勤这类）") {
+                    block.isAnchor.toggle()
+                    if block.isAnchor { block.priority = .normal; block.deadline = nil }
                 }
             } label: {
                 Image(systemName: timingLimitIcon).foregroundStyle(timingLimitColor)
             }
             .menuStyle(.borderlessButton).fixedSize()
-            .help("时限：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）")
-            .disabled(block.isAnchor)   // 锚点不是任务，谈不上时限
+            .help("这件事是什么：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）/ 生活锚点")
 
             VStack(alignment: .leading, spacing: 4) {
                 TextField("标题", text: $block.title)

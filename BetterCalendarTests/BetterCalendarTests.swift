@@ -1584,6 +1584,17 @@ struct LogicTests {
         #expect(guarded2.first?.isAnchor == true)
     }
 
+    /// 计时显示格式（2026-07-09 敲定）：到分、XhYm、无秒（去滴答）。
+    @Test func timerHmFormatsMinuteGranularityNoSeconds() {
+        #expect(ExecutionViewModel.hm(0) == "0m")
+        #expect(ExecutionViewModel.hm(59) == "0m")          // <1 分 → 0m（到分、不显秒）
+        #expect(ExecutionViewModel.hm(60) == "1m")
+        #expect(ExecutionViewModel.hm(45 * 60) == "45m")
+        #expect(ExecutionViewModel.hm(60 * 60) == "1h")     // 整点不显 0m
+        #expect(ExecutionViewModel.hm(75 * 60) == "1h15m")
+        #expect(ExecutionViewModel.hm(120 * 60) == "2h")
+    }
+
     /// 时间重锚：编辑器把时间改到 0–3:59 → 自动落目标日的次日日历日（同一逻辑日，不窜到列表顶）。
     @Test func anchoredMovesWeeHoursToNextCalendarDay() {
         let label = at(2026, 7, 8, 0)

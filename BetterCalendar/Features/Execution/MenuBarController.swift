@@ -62,9 +62,9 @@ final class MenuBarController: NSObject {
             case .pomodoro:   // 兜底（正常走上面 phase 分支）
                 button.title = " 🍅 " + ExecutionPanel.hms(model.currentElapsed)
             case .light:
-                button.title = " ▶ 计时 " + ExecutionPanel.hms(model.currentElapsed)
+                button.title = " ▶ " + model.timerDisplay      // 已 X · 计划 Y（超计划撤计划），到分 XhYm
             case .none:
-                button.title = " ● 不计时"   // 正在做但不计时——明示状态，不再空白
+                button.title = " ● " + model.timerDisplay      // 已 X，到分 XhYm
             }
         } else {
             button.title = ""        // 空档：只显图标

@@ -268,11 +268,10 @@ struct ExecutionPanel: View {
                     }
                 }
             }
-        } else if model.activeStyle == TimingStyle.none {
-            Text("不计时").font(.caption).foregroundStyle(.secondary)
         } else {
-            Label(Self.hms(model.currentElapsed), systemImage: "timer")
-                .font(.callout.monospacedDigit()).foregroundStyle(.blue)
+            // 轻计时=已 X · 计划 Y（超计划撤计划）；不计时=已 X。到分 XhYm、中性色（2026-07-09 敲定）。
+            Label(model.timerDisplay, systemImage: "timer")
+                .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
         }
     }
 

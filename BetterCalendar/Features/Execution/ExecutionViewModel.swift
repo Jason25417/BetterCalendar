@@ -403,6 +403,32 @@ final class ExecutionViewModel {
         return max(0, endRef.timeIntervalSince(a.start) - a.pausedTotal)
     }
 
+    /// 当前块的**计划时长**（轻计时的预算参照；从对应计划块的起止算）。nil=计划外 bonus / 无对应。
+    var activePlannedDuration: TimeInterval? {
+        guard let a = active else { return nil }
+        return planned.first { $0.id == a.plannedID }.map { $0.end.timeIntervalSince($0.start) }
+    }
+
+    /// 计时显示（2026-07-09 敲定，去羞辱去滴答）：**轻计时 = 已 X · 计划 Y**（累积框架 + 预算参照，
+    /// 超计划则撤掉「计划 Y」= 自然退化成不计时的样子、不留"你超了"尾巴）；**不计时 = 已 X**。
+    /// 到分 XhYm、无秒（去滴答紧张感）；全程中性、无倒计时归零节拍、绝不变红/闹铃。
+    var timerDisplay: String {
+        guard active != nil else { return "" }
+        let elapsed = "已 " + Self.hm(currentElapsed)
+        guard activeStyle == .light, let planned = activePlannedDuration, currentElapsed < planned else {
+            return elapsed
+        }
+        return elapsed + " · 计划 " + Self.hm(planned)
+    }
+
+    /// 时长 → 「XhYm」（到分、无秒）："1h15m" / "45m" / "2h" / "0m"。
+    static func hm(_ ti: TimeInterval) -> String {
+        let mins = max(0, Int(ti) / 60)
+        let h = mins / 60, m = mins % 60
+        if h > 0 { return m > 0 ? "\(h)h\(m)m" : "\(h)h" }
+        return "\(m)m"
+    }
+
     /// 当前这次休息已进行多久（仅休息中有意义）。
     var breakElapsed: TimeInterval {
         guard isOnBreak, let bs = breakStart else { return 0 }
