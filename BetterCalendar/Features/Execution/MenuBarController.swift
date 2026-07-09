@@ -45,20 +45,29 @@ final class MenuBarController: NSObject {
 
     @objc private func tick() { updateTitle() }
 
+    /// 直接显示**当前计时状态**（2026-07-09 Jason）：计时 / 不计时 / 番茄，而不只一个计时按钮。
+    /// 重写为按 active.timingStyle 显式 switch（旧版用 `!= TimingStyle.none` 隐晦比较，轻计时/不计时都错显成不计时）。
     private func updateTitle() {
         guard let button = statusItem.button else { return }
         if model.isOnBreak {
-            button.title = " ☕ " + ExecutionPanel.hms(model.breakElapsed)
+            button.title = " ☕ 休息 " + ExecutionPanel.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {
             if phase.pendingConfirm {
                 button.title = phase.kind == .work ? " 🍅 ✓段满" : " ☕ ✓回专注"
             } else {
-                button.title = " \(phase.kind == .work ? "🍅" : "☕") " + ExecutionPanel.hms(phase.remaining)
+                button.title = " 🍅 \(phase.kind == .work ? "专注" : "休息") " + ExecutionPanel.hms(phase.remaining)
             }
-        } else if model.active != nil, model.activeStyle != TimingStyle.none {
-            button.title = " ▶ " + ExecutionPanel.hms(model.currentElapsed)
+        } else if let a = model.active {
+            switch a.timingStyle {
+            case .pomodoro:   // 兜底（正常走上面 phase 分支）
+                button.title = " 🍅 " + ExecutionPanel.hms(model.currentElapsed)
+            case .light:
+                button.title = " ▶ 计时 " + ExecutionPanel.hms(model.currentElapsed)
+            case .none:
+                button.title = " ● 不计时"   // 正在做但不计时——明示状态，不再空白
+            }
         } else {
-            button.title = ""        // 不计时 / 空档：只显图标
+            button.title = ""        // 空档：只显图标
         }
     }
 

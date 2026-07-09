@@ -71,9 +71,9 @@ struct ClaudeScheduleParser: ScheduleParsing {
         }
     }
 
-    /// 并发对冲请求数（2026-07-09 Jason）：主请求 + (N-1) 备胎并行发同一模型；单发 89% → 2 发 ~99%、3 发 ~99.9%。
+    /// 并发对冲请求数（2026-07-09 Jason）：主请求 + (N-1) 备胎并行发同一模型；单发 89% → 3 发 ~99.9%。
     /// token 便宜（Haiku）、时间取最快，失败率断崖下降。内部参数，不进设置（原则6）。
-    static let parseHedgeCount = 2
+    static let parseHedgeCount = 3
 
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
         let system = Self.systemPrompt(referenceDate: referenceDate, context: context)
