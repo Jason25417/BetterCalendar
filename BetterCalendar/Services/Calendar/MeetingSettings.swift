@@ -16,4 +16,11 @@ enum MeetingSettings {
         get { defaults.object(forKey: "meeting.lead") as? Int ?? 5 }
         set { defaults.set(newValue, forKey: "meeting.lead") }
     }
+
+    /// 固定块（会议等）时间过了是否自动记为完成（§5.13 收窄：工作块坚持手动、固定块=外部承诺按墙钟真实发生、可自动）。
+    /// 默认开；关掉则固定块也彻底手动。删掉自动记的会议蓝块会 stick（对账 tombstone），与本开关正交。
+    static var autoCompleteFixedBlocks: Bool {
+        get { defaults.object(forKey: "meeting.autoComplete") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "meeting.autoComplete") }
+    }
 }

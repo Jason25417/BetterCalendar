@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var useCloud: Bool = CloudSettings.useCloud
     @State private var hasKey: Bool = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount) != nil
     @State private var leadMinutes: Int = ReminderSettings.leadMinutes
+    @State private var autoCompleteFixed: Bool = MeetingSettings.autoCompleteFixedBlocks
     @State private var pomoLimit: Int = PomodoroDiscipline.weeklyEarlyEndLimit
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
     @State private var pushIntensity: PushIntensity = SuggestionSettings.intensity
@@ -182,6 +183,12 @@ struct SettingsView: View {
                     Stepper("要紧事提前 \(leadMinutes) 分钟提醒", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
                     Text("确认写入时把 ★要紧事 写进 Apple 提醒事项（带提前提醒）。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Toggle("固定块（会议）过点自动记完成", isOn: Binding(
+                        get: { autoCompleteFixed },
+                        set: { autoCompleteFixed = $0; MeetingSettings.autoCompleteFixedBlocks = $0 }))
+                    Text("会议等固定块=外部承诺、到点就真的发生了 → 默认自动记为完成（工作块仍手动）。关掉则固定块也彻底手动。删掉自动记的会议蓝块会一直保持删除。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Stepper("最晚工作到 \(windDownHour):00", value: $windDownHour, in: 18...24)

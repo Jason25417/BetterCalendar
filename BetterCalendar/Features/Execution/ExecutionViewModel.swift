@@ -267,8 +267,10 @@ final class ExecutionViewModel {
                                                    start: $0.start, end: $0.end) }
             let storedIDs = Set(stored.map(\.id))
             for c in a where DayContext.isSameLogicalDay(c.start, .now) {
-                if let bid = c.blockID, storedIDs.contains(bid) { continue }
-                merged.append(ActualRecord(plannedID: c.blockID, title: c.title, start: c.start, end: c.end))
+                // 只并入**带章**、真相源还没有的实际（迁移+跨设备）。**无章事件与数据库无关 → 一律忽略**
+                // （Jason 2026-07-09：用户在日历首建的裸蓝块太罕见，不认领/不改/不删，假装不存在——凡关联库的都带 ID 章）。
+                guard let bid = c.blockID, !storedIDs.contains(bid) else { continue }
+                merged.append(ActualRecord(plannedID: bid, title: c.title, start: c.start, end: c.end))
             }
             let collectedCount = merged.count
 
@@ -281,7 +283,7 @@ final class ExecutionViewModel {
                     || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
                 // 蓝对账 B：用户已在日历删过这块的蓝色实际（对账时盖了 tombstone）→ 不再自动重推断（删了 stick）。
                 if clearedIDs.contains(item.id) { continue }
-                let meetingHappened = item.isFixed && item.end < now
+                let meetingHappened = item.isFixed && item.end < now && MeetingSettings.autoCompleteFixedBlocks
                 let reminderChecked = completedIDs.contains(item.id)
                 if meetingHappened || reminderChecked {
                     merged.append(ActualRecord(plannedID: item.id, title: item.title,
