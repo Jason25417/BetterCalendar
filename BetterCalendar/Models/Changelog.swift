@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.10", date: "2026-07", changes: [
+            "排今天时，没给具体时间的事从「现在+5 分钟」起排（留点启动缓冲），不再把事排在此刻或更早——排出来的一天永远是「从现在起可行」的，不会一排完就显得已经落后",
+            "正在做一件事时，它的蓝色「实际」块每 5 分钟自动往前长一截，日历上看得到进度在增长（成就感）；同时把被当前时刻越过的橙色预览块隐藏，不再看到「错过了多少」（menu bar 常驻的 Mac 上后台也长）",
+        ]),
         ChangelogEntry(version: "0.26.9", date: "2026-07", changes: [
             "执行面板的「计时」按钮现在直接显示当前计时状态（轻计时 / 不计时 / 🍅番茄），一眼看清现在是哪种计时，不再是笼统的「计时」",
         ]),

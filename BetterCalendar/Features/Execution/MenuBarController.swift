@@ -43,7 +43,11 @@ final class MenuBarController: NSObject {
         updateTitle()
     }
 
-    @objc private func tick() { updateTitle() }
+    @objc private func tick() {
+        updateTitle()
+        // 蓝色实时增长 + 橙色A（自节流 5 分）：正在做时把蓝块延长到此刻、清掉被越过的橙块。不调 LLM。
+        if model.shouldGrowActive { Task { await model.growActiveActual() } }
+    }
 
     /// 直接显示**当前计时状态**（2026-07-09 Jason）：计时 / 不计时 / 番茄，而不只一个计时按钮。
     /// 重写为按 active.timingStyle 显式 switch（旧版用 `!= TimingStyle.none` 隐晦比较，轻计时/不计时都错显成不计时）。

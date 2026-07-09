@@ -429,6 +429,34 @@ final class ExecutionViewModel {
         return "\(m)m"
     }
 
+    // MARK: - 蓝色实时增长 + 橙色A（Jason 2026-07-10，周期 tick、不调 LLM）
+    private var lastActualGrow: Date = .distantPast
+    /// 到点该长一次了吗（正在做**计划内**任务且距上次 ≥5 分）。菜单栏 1 秒 tick 同步查，只到点才真干。
+    /// v1 只长计划内任务（有稳定 plannedID）；计划外 bonus 无稳定 id、留后续。
+    var shouldGrowActive: Bool { active?.plannedID != nil && Date.now.timeIntervalSince(lastActualGrow) >= 300 }
+
+    /// 正在做一件事时把它的蓝色实际块延长到此刻（日历上看蓝色在长=实时进度、成就感），
+    /// 顺手清掉被红线越过的橙块（橙色A：end<now 的预览不再显示=不见错过多少）。不调 LLM。
+    func growActiveActual() async {
+        guard let a = active, let id = a.plannedID else { return }
+        lastActualGrow = .now
+        let now = Date.now
+        // ① 延长/建正在做那件的蓝色实际块（start..now）——盖对应计划块章
+        try? planStore.upsertActuals([ActualBlock(id: id, title: a.title, start: a.start, end: now)])
+        let draft = CalendarEventDraft(title: a.title, start: a.start, end: now, kind: .actual, blockID: id)
+        if let existing = try? await calendarStore.read(kind: .actual) {
+            try? await calendarStore.write(CalendarMerge.union(existing: existing, additions: [draft], kind: .actual))
+        }
+        // ② 橙色A：清掉被红线越过的橙块（end ≤ now）
+        if let preview = try? await calendarStore.read(kind: .preview) {
+            let survivors = preview.filter { $0.end > now }
+            if survivors.count != preview.count {
+                try? await calendarStore.clear(kind: .preview)
+                if !survivors.isEmpty { try? await calendarStore.write(survivors) }
+            }
+        }
+    }
+
     /// 当前这次休息已进行多久（仅休息中有意义）。
     var breakElapsed: TimeInterval {
         guard isOnBreak, let bs = breakStart else { return 0 }
