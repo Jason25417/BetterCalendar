@@ -1311,6 +1311,34 @@ struct LogicTests {
         #expect(vm.remaining.count == 1)             // 另一件仍在「换一件/同时做」列表
     }
 
+    /// 提醒 ID 盖章根治（0.25.4）：被动完成只认 blockID 精确匹配——同名两块，只有"被打勾的那个 id"标完成，
+    /// 另一个同名块不被连坐（旧 bug：往日打勾的同名旧提醒会误标今天的同名任务）。
+    @Test func passiveCompletionMatchesByBlockIDNotTitle() async throws {
+        final class StubReminders: ReminderStore {
+            let completed: Set<UUID>
+            init(_ c: Set<UUID>) { completed = c }
+            func write(_ drafts: [ReminderDraft]) async throws {}
+            func completedBlockIDs() async -> Set<UUID> { completed }
+        }
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let a = ScheduledBlock(title: "开发", start: s, end: s.addingTimeInterval(3600), priority: .important)
+        let b = ScheduledBlock(title: "开发", start: s.addingTimeInterval(7200), end: s.addingTimeInterval(10800), priority: .important)
+        try planStore.replacePlanned([a, b], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: StubReminders([a.id]),   // 只勾了 a
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        await vm.waitForPreview()
+        #expect(vm.doneCount == 1)                                      // 只有 a 完成，同名 b 不连坐
+        #expect(vm.remaining.contains { $0.id == b.id })               // b 仍在待做
+    }
+
     /// 计划外「+ 新事项…」（0.25，点子 #1）：临时事项直接开始 = bonus——不进 planned、
     /// 完成即记蓝色实际、复盘里无匹配计划（extra）；同时做的进后台。
     @Test func adHocBonusStartsWithoutTouchingPlan() async throws {

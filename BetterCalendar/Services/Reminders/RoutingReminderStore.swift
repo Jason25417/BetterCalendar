@@ -21,9 +21,9 @@ final class RoutingReminderStore: ReminderStore {
         try await current.write(drafts)
     }
 
-    func completedTitles() async -> [String] {
+    func completedBlockIDs() async -> Set<UUID> {
         let current: ReminderStore = CalendarSettings.backend == .eventKit ? eventKit : fake
-        return await current.completedTitles()
+        return await current.completedBlockIDs()
     }
 
     func dueReminders(on day: Date) async -> [String] {

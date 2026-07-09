@@ -27,6 +27,7 @@ final class EventKitReminderStore: ReminderStore {
             r.title = d.title
             r.notes = d.notes
             r.priority = d.priority
+            r.url = d.blockID.flatMap(EventKitCalendarStore.stampURL)   // 身份章：完成信号按 ID 匹配
             if let due = d.due {
                 r.dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute], from: due)
@@ -55,18 +56,20 @@ final class EventKitReminderStore: ReminderStore {
         return cal
     }
 
-    /// 「被动完成」信号：**只返回今天（逻辑日）打勾完成的**要紧事标题（2026-07-09 修）。
-    /// 老 bug：曾返回列表里**所有历史**已完成提醒，date-blind——今天排同名任务（如每天都有的「XX 开发」）
-    /// 会匹配到往日打勾的旧提醒 → 什么都没干却被自动标完成、写蓝色实际、删了每次打开又重建。
-    /// 违 SPEC §5.13「完成判定=永远手动、绝不推断」。限定到"今天完成"= 只反映你今天的显式打勾动作。
-    func completedTitles() async -> [String] {
+    /// 「被动完成」信号（0.25.4 根治）：**今天打勾完成 且 带本 App 身份章**的提醒 → 返回其 blockID。
+    /// 双闸门：①按 blockID 精确匹配（不按标题——同名任务不再串）②只认今天完成（不翻旧账）。
+    /// 无章老提醒不参与（0.25.4 前写的没盖章，宁可漏认、绝不误认；下次确认写入会补章）。
+    /// 老 bug 全貌：曾返回列表里所有历史已完成提醒的标题，date-blind + title-fuzzy——今天排同名任务
+    /// 就匹配往日打勾的旧提醒 → 什么都没干被自动标完成、写蓝色实际、删了每次打开又重建（违 §5.13）。
+    func completedBlockIDs() async -> Set<UUID> {
         do { try await ensureAccess() } catch { return [] }
         guard let list = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle })
         else { return [] }
-        return (await existingReminders(in: list))
+        let ids = (await existingReminders(in: list))
             .filter { $0.isCompleted
                 && ($0.completionDate.map { DayContext.isSameLogicalDay($0, .now) } ?? false) }
-            .compactMap(\.title)
+            .compactMap { EventKitCalendarStore.blockID(from: $0.url) }
+        return Set(ids)
     }
 
     /// 某日历日到期、未完成的提醒（排除本 App 自建列表）——给排程当上下文。

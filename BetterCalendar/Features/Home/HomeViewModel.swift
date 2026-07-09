@@ -357,7 +357,8 @@ final class HomeViewModel {
         var reminders = blocks.filter { $0.priority == .important || $0.deadline != nil }.map {
             ReminderDraft(title: $0.title, due: $0.deadline ?? $0.start,
                           priority: $0.priority == .important ? 1 : 5, notes: nil,
-                          leadMinutes: ReminderSettings.leadMinutes)
+                          leadMinutes: ReminderSettings.leadMinutes,
+                          blockID: $0.id)   // 0.25.4：盖章 → 打勾完成信号按 ID 精确匹配（不按标题）
         }
         // 带 DDL 的未来任务入池 → 也写一条系统提醒(due=DDL)，得到系统级 DDL 提醒（已排成今天块的跳过、不重复）
         reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),

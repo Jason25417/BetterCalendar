@@ -17,7 +17,7 @@ final class FakeReminderStore: ReminderStore {
     }
 
     /// 假模式不跟踪打勾（无真提醒），返回空。
-    func completedTitles() async -> [String] { [] }
+    func completedBlockIDs() async -> Set<UUID> { [] }
 
     func clear() {
         captured.removeAll()

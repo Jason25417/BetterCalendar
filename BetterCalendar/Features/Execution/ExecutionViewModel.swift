@@ -246,15 +246,15 @@ final class ExecutionViewModel {
                                               start: $0.start, end: $0.end) }
             let collectedCount = merged.count
 
-            // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒打勾 → 自动并入实际
-            // 覆盖判定按 ID 优先（无章记录才退标题相似），同名块不互相顶掉
-            let completed = await reminderStore.completedTitles()
+            // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒今天打勾 → 自动并入实际
+            // 0.25.4 根治：提醒打勾**按 blockID 精确匹配**（不再按标题相似——同名任务被往日旧提醒误标完成的 bug）
+            let completedIDs = await reminderStore.completedBlockIDs()
             let now = Date.now
             for item in planned where !merged.contains(where: {
                 $0.plannedID == item.id
                     || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
                 let meetingHappened = item.isFixed && item.end < now
-                let reminderChecked = completed.contains { TitleMatch.similarity($0, item.title) >= 0.6 }
+                let reminderChecked = completedIDs.contains(item.id)
                 if meetingHappened || reminderChecked {
                     merged.append(ActualRecord(plannedID: item.id, title: item.title,
                                                start: item.start, end: item.end))
