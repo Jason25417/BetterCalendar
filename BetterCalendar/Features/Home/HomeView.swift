@@ -626,7 +626,9 @@ struct HomeView: View {
             Divider()
             Button("昨天（不建议）") { model.targetDay = DayContext.logicalDay(offset: -1) }
         } label: {
-            Label("为 \(Self.relativeDayWord(model.targetDay)) 安排", systemImage: "calendar")
+            // 口语词 + 具体日期（2026-07-09 Jason 要求「为今天安排」标上是哪天）
+            Label("为 \(Self.relativeDayWord(model.targetDay))（\(Self.dayLabel(model.targetDay))）安排",
+                  systemImage: "calendar")
                 .font(.caption)
         }
         .menuStyle(.borderlessButton)

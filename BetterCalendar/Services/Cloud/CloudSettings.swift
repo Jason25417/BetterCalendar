@@ -22,11 +22,14 @@ enum CloudSettings {
     /// 已下线的 `claude-sonnet-4-6` 不支持结构化输出（也不支持 prefill），故移除并在 getter 里自动迁移。
     static let availableModels = ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"]
 
+    // 默认 Haiku 4.5（2026-07-09 试验台 10 轮定：解析 89%/微调+防呆 100%/reflowV2 98%，全面胜 Sonnet
+    // 且快 40–50%、最便宜；Opus 结构化输出灾难=解码失败率极高，不作默认）。已选过模型的老用户不受影响。
+    static let defaultModel = "claude-haiku-4-5"
     static var model: String {
         get {
-            let stored = defaults.string(forKey: "cloud.model") ?? "claude-sonnet-5"
+            let stored = defaults.string(forKey: "cloud.model") ?? defaultModel
             if stored == "claude-sonnet-4-6" { return "claude-sonnet-5" }   // 4.6 不支持结构化输出 → 迁到 5
-            return availableModels.contains(stored) ? stored : "claude-sonnet-5"
+            return availableModels.contains(stored) ? stored : defaultModel
         }
         set { defaults.set(newValue, forKey: "cloud.model") }
     }
