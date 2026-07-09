@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.12", date: "2026-07", changes: [
+            "（实验 · Mac）设置→进阶 新增「聪音联动」开关：开启后 BC 把你的专注状态写进本地文件，供《放松时光：与你共享 Lo-Fi 故事》的 mod 读来同步——你在 BC 开始/完成事项、计时进度会驱动聪音的番茄和经验值。需另装 mod（开发中）；关掉即停、删文件",
+        ]),
         ChangelogEntry(version: "0.26.11", date: "2026-07", changes: [
             "「这天有更新」的新鲜度提示现在会说明更新从哪来（你在系统日历里改了 / 你的执行进展触发了重排 / 别的设备同步来的），让你在决定「载入最新还是继续编辑」前先有个判断",
         ]),

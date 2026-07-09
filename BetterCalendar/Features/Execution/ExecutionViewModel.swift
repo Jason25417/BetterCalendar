@@ -455,6 +455,18 @@ final class ExecutionViewModel {
                 if !survivors.isEmpty { try? await calendarStore.write(survivors) }
             }
         }
+        exportFocusState(event: "tick")
+    }
+
+    /// 聪音联动（2026-07-10）：把当前专注状态写出 focus-state.json（仅设置开「聪音联动」时真写）。
+    private func exportFocusState(event kind: String, completedTitle: String? = nil, completedSec: Int? = nil) {
+        let a: FocusStateExporter.State.Active? = active.map {
+            .init(title: $0.title, timingStyle: $0.timingStyle.rawValue, startedAt: $0.start,
+                  elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) })
+        }
+        let ev = FocusStateExporter.State.Event(kind: kind, title: completedTitle ?? active?.title ?? "",
+                                                durationSec: completedSec)
+        FocusStateExporter.write(active: a, event: ev)
     }
 
     /// 当前这次休息已进行多久（仅休息中有意义）。
@@ -584,6 +596,7 @@ final class ExecutionViewModel {
         persistRunState()
         refreshPreview(enteringLiveMode: true)
         if let s = liveSnapshot() { liveActivity.start(s) }
+        exportFocusState(event: "start")   // 聪音：开始一件事→起番茄/专注
     }
 
     /// 计划外临时事项直接开始（menu bar「+ 新事项…」，SPEC §11 ① 连带、点子 #1，2026-07-09 过审）：
@@ -661,12 +674,15 @@ final class ExecutionViewModel {
 
     /// 完成当前块 → 落盘 → 回到空档（不自动开下一件，由你按「下一件」）。
     func completeCurrent() async {
+        let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
+        let doneSec = Int(currentElapsed)
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
         persistRunState()
         refreshPreview()
         liveActivity.end()
+        exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；

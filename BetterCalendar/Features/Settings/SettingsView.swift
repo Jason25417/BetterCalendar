@@ -121,6 +121,12 @@ struct SettingsView: View {
                         set: { MenuBarSettings.keepRunningOnQuit = $0 }))
                     Text("打开后 ⌘Q / Dock 右键退出 不会真退——收进菜单栏继续跑（计时不断），Dock 图标消失、防手滑误退。真要退出：点菜单栏图标 → 右键 → 退出 BetterCalendar。")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    Toggle("聪音联动（把专注状态同步给《放松时光》）", isOn: Binding(
+                        get: { FocusStateExporter.isEnabled },
+                        set: { FocusStateExporter.isEnabled = $0 }))
+                    Text("开启后，开始/完成事项、计时进度会写进本地 focus-state.json，供聪音的 mod 读来驱动番茄/情绪/经验值（需另装 mod）。关掉即停、删文件。")
+                        .font(.caption).foregroundStyle(.secondary)
                     #endif
 
                     Stepper(value: $pomoLimit, in: 0...7) {
