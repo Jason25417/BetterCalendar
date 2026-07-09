@@ -76,7 +76,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            // 「日历后端」选择已退役（2026-07-07 Jason 定）：一律写真 Apple 日历（Dev 专用日历）；
+            // 「日历后端」选择已退役（2026-07-07 Jason 定）：一律写真 系统日历（Dev 专用日历）；
             // 假日历仅存于单测/预览页，不再暴露给用户。
 
             Section("日记") {
@@ -109,10 +109,10 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    Toggle("端侧解析（试验 · Apple 端侧模型）", isOn: Binding(
+                    Toggle("端侧解析（试验 · 端侧模型）", isOn: Binding(
                         get: { CloudSettings.useOnDeviceParser },
                         set: { CloudSettings.useOnDeviceParser = $0 }))
-                    Text("打开后「排今天」解析 + 「AI 调整」优先用 Apple 端侧模型（免费/离线/私密），不可用或失败自动回退云端。排序/建议这类文本仍走云端。~3B 偏小、试验中。")
+                    Text("打开后「排今天」解析 + 「AI 调整」优先用 端侧模型（免费/离线/私密），不可用或失败自动回退云端。排序/建议这类文本仍走云端。~3B 偏小、试验中。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     #if os(macOS)
@@ -166,7 +166,7 @@ struct SettingsView: View {
                         set: { ReconcileSettings.additionPolicy = $0 })) {
                         ForEach(ReconcileAdditionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
-                    Text("双向同步（0.20）：在 Apple 日历里挪/改绿色计划块会自动同步回 App；删除/新建按上面两条策略处理。")
+                    Text("双向同步（0.20）：在 系统日历里挪/改绿色计划块会自动同步回 App；删除/新建按上面两条策略处理。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Picker("退出时有任务在进行", selection: Binding(
@@ -182,7 +182,7 @@ struct SettingsView: View {
 
                     Stepper("提醒提前 \(leadMinutes) 分钟", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
-                    Text("确认写入时把「尽早」和有具体截止(DDL)的事项写进 Apple 提醒事项（带提前提醒）。")
+                    Text("确认写入时把「尽早」和有具体截止(DDL)的事项写进 系统「提醒事项」（带提前提醒）。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Toggle("固定块（会议）过点自动记完成", isOn: Binding(

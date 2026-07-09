@@ -366,7 +366,7 @@ struct HomeView: View {
                         }
                         if let c = model.committedCount {
                             Text(model.committedToReal
-                                 ? "已写入真日历(Dev) \(c) 项 → 打开 Apple 日历查看"
+                                 ? "已写入真日历(Dev) \(c) 项 → 打开 系统日历查看"
                                  : "已写入假日历 \(c) 项 → 看「预览日历」")
                                 .font(.caption).foregroundStyle(.green)
                         }
