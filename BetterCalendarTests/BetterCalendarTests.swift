@@ -84,19 +84,18 @@ struct LogicTests {
 
     // MARK: 云端失败 → 回退本地（用无 key 客户端模拟失败）
 
-    @Test func parserFallsBackToLocalWhenNoKey() async throws {
+    @Test func parserThrowsCleanlyWhenNoKeyAndNoFallback() async throws {
+        // 0.26 删 Stub：无 key 且终端兜底=FailedScheduleParser → 干净抛错（HomeViewModel.arrange 转成失败态，不产垃圾）
         let noKey = AnthropicClient(apiKey: { nil }, useCloud: { true })
-        let parser = ClaudeScheduleParser(client: noKey, fallback: StubScheduleParser())
-        let plan = try await parser.parse("写代码，开会", referenceDate: Date())
-        #expect(plan.blocks.count == 2)          // 回退本地桩按逗号切
+        let parser = ClaudeScheduleParser(client: noKey, fallback: FailedScheduleParser())
+        await #expect(throws: (any Error).self) {
+            _ = try await parser.parse("写代码，开会", referenceDate: Date())
+        }
     }
 
-    @Test func parseContextDefaultIgnoredByStubAndPromptIncludesBusy() async throws {
-        // 协议扩展默认：Stub 带上下文调用 = 不带（本地兜底不看上下文）
+    @Test func parsePromptIncludesBusyAndDueContext() async throws {
         let ctx = ParseContext(busy: [BusySlot(title: "牙医", start: at(2026,7,5,10), end: at(2026,7,5,11))],
                                dueReminders: ["交电费"])
-        let plan = try await StubScheduleParser().parse("写代码", referenceDate: at(2026,7,5,0), context: ctx)
-        #expect(plan.blocks.count == 1)
         // 云端 prompt 注入：已有日程/提醒进 system prompt
         let prompt = ClaudeScheduleParser.systemPrompt(referenceDate: at(2026,7,5,0), context: ctx)
         #expect(prompt.contains("牙医"))
@@ -165,15 +164,6 @@ struct LogicTests {
     }
 
     // MARK: 本地兜底解析抽时长（0.18.23：云端失败时也给可用草稿）
-    @Test func stubExtractsDurations() {
-        #expect(StubScheduleParser.extractMinutes("写两个小时的论文") == 120)
-        #expect(StubScheduleParser.extractMinutes("花半个小时整理房间") == 30)
-        #expect(StubScheduleParser.extractMinutes("1。5个小时的数据库学习") == 90)   // 中文句号当小数
-        #expect(StubScheduleParser.extractMinutes("3个小时的开发") == 180)
-        #expect(StubScheduleParser.extractMinutes("锻炼一个半小时") == 90)
-        #expect(StubScheduleParser.extractMinutes("发呆 20 分钟") == 20)
-        #expect(StubScheduleParser.extractMinutes("没提时长的事") == nil)
-    }
 
     // MARK: JSON 尾逗号修复（0.18.22：治「JSON 解码失败」）
     @Test func extractObjectRepairsTrailingCommas() {
@@ -1124,7 +1114,7 @@ struct LogicTests {
             func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {}
         }
         return HomeViewModel(
-            arrangeDay: ArrangeDayUseCase(parser: StubScheduleParser(), planner: NaivePlanningEngine()),
+            arrangeDay: ArrangeDayUseCase(parser: FailedScheduleParser(), planner: NaivePlanningEngine()),
             refiner: NoRefine(),
             calendarStore: calendar,
             reminderStore: FakeReminderStore(),

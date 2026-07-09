@@ -179,7 +179,12 @@ struct HomeView: View {
                     aiAdjustRow
                 }
 
-                // 防呆：模型偶尔把 note 抽风成「1」这种垃圾 → trim 后太短就不显
+                // A 状态行（0.26 ABC）：确定性成功状态「✓ 排好 N 件」——与模型 note(B) 叠加
+                if let n = model.arrangedCount {
+                    Label("排好 \(n) 件", systemImage: "checkmark.circle.fill")
+                        .font(.callout.weight(.medium)).foregroundStyle(.green)
+                }
+                // B：模型 note（宪法约束、温和前向）。防呆：抽风成「1」这种垃圾 → trim 后太短不显
                 if let note = model.note,
                    note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
                     Text(note).font(.callout).foregroundStyle(.secondary)

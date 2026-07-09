@@ -47,6 +47,8 @@ final class HomeViewModel {
     var errorText: String?
     var committedCount: Int?
     var committedToReal: Bool = false
+    /// 状态行 A（0.26 ABC）：排今天成功后的确定性状态「排好 N 件」（与模型 note=B 叠加显示）；编辑/确认/切日即清。
+    private(set) var arrangedCount: Int?
     /// 解析识别到、待确认入池的长期事项（确认写入时入「在途」）。
     var pendingLongTasks: [ParsedLongTask] = []
     /// 未保存修改（0.16 文件模型，D-f）：任何编辑/新草稿置真；「确认写入」=保存清零。
@@ -137,6 +139,7 @@ final class HomeViewModel {
         note = nil
         draftSource = .empty
         hasUnsavedChanges = false
+        arrangedCount = nil
         loadConfirmedPlan()
         persistDraft()
     }
@@ -202,7 +205,7 @@ final class HomeViewModel {
     func arrange() async {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        isWorking = true; errorText = nil; committedCount = nil
+        isWorking = true; errorText = nil; committedCount = nil; arrangedCount = nil
         do {
             // 在途摘要给排程大脑（M10-2：LLM 可建议 0–2 块，标来源、删除零成本）
             let pool = (longTaskStore?.active() ?? []).map {
@@ -244,10 +247,13 @@ final class HomeViewModel {
             }
             pendingLongTasks = outcome.longTasks   // 确认写入时入「在途」
             hasUnsavedChanges = true
+            arrangedCount = blocks.count   // A：确定性状态行「排好 N 件」
             PlaceholderSettings.recordArrangeSuccess()   // 排今天成功计数（教程满 10 次自动毕业换小提示）
             persistDraft()
         } catch {
-            errorText = "排程失败：\(error.localizedDescription)"
+            // C 干净失败态（0.26 删 Stub 后）：端云全失败 → 保留输入原文，给可操作的下一步（不给错误码/垃圾草稿）
+            errorText = "没能排出来——检查网络连接，或在 设置→云端 填好 API key，再点一次「排今天」。你说的话还在。"
+            DevLog.shared.warn("排程", "解析全失败（干净失败态）：\(error.localizedDescription)")
         }
         isWorking = false
     }
@@ -325,7 +331,7 @@ final class HomeViewModel {
     func refine() async {
         let cmd = refineText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
-        isWorking = true; committedCount = nil
+        isWorking = true; committedCount = nil; arrangedCount = nil
         let scheduled = blocks.map(\.scheduled)
         // 归属按标题留存：LLM 微调重建块时会丢 linkedTaskID，refine 后按标题补回（自动+手动归属都不丢）
         var linkByTitle: [String: UUID] = [:]
@@ -364,7 +370,7 @@ final class HomeViewModel {
         reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),
                                              leadMinutes: ReminderSettings.leadMinutes)
         let sorted = blocks.sorted { $0.start < $1.start }
-        isWorking = true; errorText = nil
+        isWorking = true; errorText = nil; arrangedCount = nil
         do {
             // 单一真相源（重构 P2）：先写 PlanStore，再由投影层画日历——本方法不再直接写日历。
             // 按**逻辑日**分组逐日 replace：跨午夜块（睡前看书 00:30）随前一逻辑日走，不再被拆到次日。
@@ -464,6 +470,7 @@ final class HomeViewModel {
         if suppressNextDayChangeReload { suppressNextDayChangeReload = false; return }
         note = nil
         committedCount = nil
+        arrangedCount = nil
         freshness = false
         if let snap = draftStore?.load(day: targetDay),
            snap.dirty ?? false, !snap.blocks.isEmpty {
@@ -506,6 +513,7 @@ final class HomeViewModel {
     /// 标记未保存修改（0.16 文件模型：任何来源的编辑都不自动写库——「确认写入」才保存）。
     private func markEditedIfLoaded() {
         hasUnsavedChanges = true
+        arrangedCount = nil   // A 状态行仅贴合"刚排好"的瞬间——一编辑即过期
     }
 
     func addBlock() {
