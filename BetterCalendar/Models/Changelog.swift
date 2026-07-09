@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.9", date: "2026-07", changes: [
+            "执行面板的「计时」按钮现在直接显示当前计时状态（轻计时 / 不计时 / 🍅番茄），一眼看清现在是哪种计时，不再是笼统的「计时」",
+        ]),
         ChangelogEntry(version: "0.26.8", date: "2026-07", changes: [
             "计时显示改造：轻计时现在显「已 1h15m · 计划 2h」，看得到已投入 + 计划预算；一旦超过计划，就把「计划」撤掉、只留已投入，不留「你超了」的尾巴。不计时显「已 1h15m」。全部到分、不显秒——去掉秒针滴答的隐形紧张感",
             "草稿里每件事的时限菜单新增「生活锚点」：可手动把一件事设成午饭/通勤那样的锚点（占时间、不催你完成），也能随时改回任务",

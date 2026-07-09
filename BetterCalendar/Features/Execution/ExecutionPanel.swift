@@ -320,7 +320,8 @@ struct ExecutionPanel: View {
                 Button("不限段") { model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
             }
         } label: {
-            Label("计时", systemImage: "stopwatch")
+            // 直接显示当前计时状态（轻计时/不计时/🍅番茄），不再是通用「计时」——Jason 2026-07-09
+            Label(Self.styleLabel(model.activeStyle ?? .light), systemImage: "stopwatch")
         }
         .menuStyle(.borderlessButton)
         .disabled(!model.canChangeTimingNow)
