@@ -3,7 +3,8 @@
 //  BetterCalendar
 //
 //  云端解析（M1）：自然语言 → 结构化 PlanBlock[]，走 Anthropic API。
-//  失败/未配 key/离线 → 回退本地 StubScheduleParser。
+//  对冲全败/未配 key/离线 → fallback（FailedScheduleParser 干净抛错；上层链再试端侧 FM 兜底）。
+//  prompt 已静态化（#21④，0.29.0）：静态规则段=缓存前缀（字节稳定），动态值全在【今日上下文】段。
 //
 
 import Foundation
@@ -76,7 +77,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     static let parseHedgeCount = 3
 
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
-        let system = Self.systemPrompt(referenceDate: referenceDate, context: context)
+        let system = Self.dynamicContext(referenceDate: referenceDate, context: context)
         // 并发对冲（选 i）：**主请求流式**（喂 liveDraft 冒块，保留现体验）+ 备胎非流式并行；
         // 谁先返回**有效**（解码非空/松散）用谁、取消其余。全败 → 回退本地。
         let winner: ParsedPlan? = await withTaskGroup(of: ParsedPlan?.self) { group in
@@ -115,7 +116,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 var lastCount = 0
                 var scannedLength = 0
                 raw = try await client.completeStreaming(
-                    system: system, user: text, maxTokens: 10000, jsonSchema: Self.parseSchema) { partial in
+                    system: system, user: text, maxTokens: 10000, jsonSchema: Self.parseSchema,
+                    cachedSystemPrefix: Self.staticSystemPrompt) { partial in
                     let newPart = partial.dropFirst(scannedLength)
                     scannedLength = partial.count
                     guard newPart.contains("}") else { return }
@@ -127,7 +129,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 }
             } else {
                 raw = try await client.complete(
-                    system: system, user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema)
+                    system: system, user: text, maxTokens: 10000, jsonMode: true, jsonSchema: Self.parseSchema,
+                    cachedSystemPrefix: Self.staticSystemPrompt)
             }
             guard let decoded = Self.decodePlan(JSONText.extractObject(raw)) else { return nil }
             // 纯松散意图可无块无长期事项，仍算有效
@@ -138,7 +141,34 @@ struct ClaudeScheduleParser: ScheduleParsing {
         }
     }
 
-    static func systemPrompt(referenceDate: Date, context: ParseContext = ParseContext()) -> String {
+    /// 静态指令段（#21④ prompt 静态化，0.29.0）：**字节级稳定的缓存前缀**——任何动态值
+    /// （现在时刻/目标日/最早起排/收工线/池/busy/到期提醒）都不得写进这里，全部走 dynamicContext。
+    /// 内容与拆分前逐句对应，动态处改为指向【今日上下文】；行为回归由试验台 P 组护航。
+    static let staticSystemPrompt: String = PromptConstitution.with("""
+    你把用户用自然语言描述的一天，转成结构化日程。
+    现在真实时间与**目标日**见下方【今日上下文】——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。
+    目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
+    只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
+    {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
+    start/end 用 24 小时制本地时间。
+
+    【块规则】
+    - isFixed：**只有"与他人约定、时刻不可改"的事**（会议/上课/约诊/班车）=true；个人任务（写作业/写代码/健身/读书/吃饭）即使说了时间也 false（否则 re-flow 调不动）。
+    - **不漏**：用户提到的每件要做的事都出一个块（或 longTasks），逐一保留、数量对得上；真排不下宁可排到收工后，也别省略。
+    - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。并行的块给**同一个 parallel 组名**（如 "P1"；第二组用 "P2"）；不并行的块 parallel=null——这个组名让重排时同组保持同时段。
+    - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）。
+    - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
+    - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
+    - 收工时间（软限制）见【今日上下文】：没指定时间的事尽量排在收工前；只有略超 5–10 分钟正好做完一件大事才可越界。用户明说的晚间/睡前块不受限。
+
+    【松散 / 长期】
+    - loose：**仅当用户明说"想松散/放松/休息一下/摆烂"这类整段放松意愿**时设 true（解析他明说的意愿，不替他判断）；普通排程或只提某段小憩=false。loose=true 仍照常解析块。
+    - longTasks：截止在目标日之后的远期任务（"下周五交论文"）或多天长线（"这学期学完 X""每周健身三次"）放 longTasks、**不放 blocks**——除非用户明说今天也做一段（则两边都出）。cadenceMinutesPerWeek=每周投入分钟（"每天 1h"≈420），没提就 null；说了总量（"共9单元每40min"→total=360,unit=40；"共150小时"→total=9000,unit=null）就填，否则 null。没有长期事项 longTasks 给 []。
+    - 委托：用户说"今天做X小时长期任务/干哪个看你"这类委托，从【今日上下文】的〔池〕按时长挑合适的生成**具体 blocks**（块名=池中任务名），并把整件事也放 longTasks。
+    """)
+
+    /// 动态上下文段（每次请求都变，跟在静态前缀后面的第二个 system 块）。
+    static func dynamicContext(referenceDate: Date, context: ParseContext = ParseContext()) -> String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "zh_CN")
         df.timeZone = .current
@@ -172,29 +202,18 @@ struct ClaudeScheduleParser: ScheduleParsing {
             let lines = context.dueReminders.prefix(10).map { "- \($0)" }.joined(separator: "\n")
             contextSection += "\n目标日**到期的提醒事项**（用户可能想安排它们；用户没提且排不下就别硬塞）：\n" + lines
         }
-        return PromptConstitution.with("""
-        你把用户用自然语言描述的一天，转成结构化日程。
-        现在真实时间：\(realNow)。**目标日：\(target)**——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。
-        目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
+        return """
+        【今日上下文】
+        现在真实时间：\(realNow)。**目标日：\(target)**。
         \((isToday && !context.isBackfill) ? "**排今天时：没给具体时间的弹性块，最早从 \(earliest5)（现在+5 分、留启动缓冲）起排，不要排在此刻或更早**；用户明确给了时间的块按用户说的（哪怕已过去也照写）。" : "")
-        只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
-        {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
-        start/end 用 24 小时制本地时间。
+        收工时间（软限制）= \(WorkHoursSettings.windDownText)。
+        〔池〕：\(poolSection)\(contextSection)
+        """
+    }
 
-        【块规则】
-        - isFixed：**只有"与他人约定、时刻不可改"的事**（会议/上课/约诊/班车）=true；个人任务（写作业/写代码/健身/读书/吃饭）即使说了时间也 false（否则 re-flow 调不动）。
-        - **不漏**：用户提到的每件要做的事都出一个块（或 longTasks），逐一保留、数量对得上；真排不下宁可排到收工后，也别省略。
-        - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。并行的块给**同一个 parallel 组名**（如 "P1"；第二组用 "P2"）；不并行的块 parallel=null——这个组名让重排时同组保持同时段。
-        - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）。
-        - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
-        - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
-        - 收工时间（软限制）= \(WorkHoursSettings.windDownText)：没指定时间的事尽量排在收工前；只有略超 5–10 分钟正好做完一件大事才可越界。用户明说的晚间/睡前块不受限。
-
-        【松散 / 长期】
-        - loose：**仅当用户明说"想松散/放松/休息一下/摆烂"这类整段放松意愿**时设 true（解析他明说的意愿，不替他判断）；普通排程或只提某段小憩=false。loose=true 仍照常解析块。
-        - longTasks：截止在目标日之后的远期任务（"下周五交论文"）或多天长线（"这学期学完 X""每周健身三次"）放 longTasks、**不放 blocks**——除非用户明说今天也做一段（则两边都出）。cadenceMinutesPerWeek=每周投入分钟（"每天 1h"≈420），没提就 null；说了总量（"共9单元每40min"→total=360,unit=40；"共150小时"→total=9000,unit=null）就填，否则 null。没有长期事项 longTasks 给 []。
-        - 委托：用户说"今天做X小时长期任务/干哪个看你"这类委托，从〔池〕按时长挑合适的生成**具体 blocks**（块名=池中任务名），并把整件事也放 longTasks。〔池〕：\(poolSection)\(contextSection)
-        """)
+    /// 完整 system prompt（静态+动态拼接）——试验台展示「实际发送的 prompt」用；真实请求走两块 system。
+    static func systemPrompt(referenceDate: Date, context: ParseContext = ParseContext()) -> String {
+        staticSystemPrompt + "\n\n" + dynamicContext(referenceDate: referenceDate, context: context)
     }
 
     /// 结构化输出 schema（`output_config.format`）—— 对齐 `decodePlan` 读的字段。

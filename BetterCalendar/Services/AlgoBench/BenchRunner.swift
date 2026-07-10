@@ -374,7 +374,7 @@ final class BenchRunner {
         switch variant.id {
         case BenchVariantID.parseFM, BenchVariantID.refineFM, BenchVariantID.refineFMGuard,
              BenchVariantID.polishFM:
-            return CloudSettings.useOnDeviceParser ? nil : "端侧开关未开（设置→进阶）"
+            return CloudSettings.onDeviceOnly ? nil : "端侧开关未开（设置→进阶「只使用端侧」）"
         case BenchVariantID.parseCloud, BenchVariantID.refineCloud, BenchVariantID.refineCloudGuard,
              BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2, BenchVariantID.arrangeLLM,
              BenchVariantID.polishCloud:

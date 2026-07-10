@@ -62,18 +62,51 @@ struct AnthropicClient {
     /// - 硅基流动：优先 `response_format: json_schema`（API 参考已支持，schema 级约束解码，2026-07-08 核实）；
     ///   模型不支持时自动降级 `json_object`（弱保证，只保证合法 JSON）。
     /// - 不传 `jsonSchema` 则退化为普通请求（靠 prompt + 上层 extractObject 兜底）。
+    /// `cachedSystemPrefix`（#21④ prompt 静态化，2026-07-11）：**字节级稳定**的静态指令段——
+    /// Anthropic 走 system 数组 + `cache_control`（前缀命中省 ~90% 输入价 + 提速）；硅基流动拼成一段。
+    /// ⚠️ 实话：Haiku 4.5 最小可缓存前缀 4096 tokens，当前静态段可能不够（静默不缓存、无害）；
+    /// 且解析三路对冲同时起跑读不到彼此正在写的缓存——收益主要在 5 分钟内的连续操作间。
+    /// 用「云端用量」日志的 cache_read_input_tokens 实证。
     func complete(system: String, user: String, maxTokens: Int = 2048,
-                  jsonMode: Bool = false, jsonSchema: [String: Any]? = nil) async throws -> String {
+                  jsonMode: Bool = false, jsonSchema: [String: Any]? = nil,
+                  cachedSystemPrefix: String? = nil) async throws -> String {
         guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
         guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
         return provider() == .siliconflow
-            ? try await completeOpenAI(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
-            : try await completeAnthropic(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
+            ? try await completeOpenAI(key: key, system: Self.joined(cachedSystemPrefix, system), user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema)
+            : try await completeAnthropic(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode, jsonSchema: jsonSchema, cachedSystemPrefix: cachedSystemPrefix)
+    }
+
+    /// 硅基流动无 cache_control：静态+动态拼回一段。
+    private static func joined(_ prefix: String?, _ system: String) -> String {
+        guard let p = prefix, !p.isEmpty else { return system }
+        return system.isEmpty ? p : p + "\n\n" + system
+    }
+
+    /// Anthropic 的 system 字段：有静态前缀 → 数组形式（前缀块带 cache_control，动态块跟在后面）；
+    /// 无前缀 → 原样字符串。空块不发（API 拒绝空 text block）。
+    private static func systemPayload(_ prefix: String?, _ system: String) -> Any {
+        guard let p = prefix, !p.isEmpty else { return system }
+        var blocks: [[String: Any]] = [
+            ["type": "text", "text": p, "cache_control": ["type": "ephemeral"]],
+        ]
+        if !system.isEmpty { blocks.append(["type": "text", "text": system]) }
+        return blocks
+    }
+
+    /// 缓存用量可见化（开发期）：命中/写入才记，一眼看出静态化有没有真吃到缓存。
+    private static func logCacheUsage(_ obj: [String: Any], label: String) {
+        guard CloudSettings.logRawResponses, let usage = obj["usage"] as? [String: Any] else { return }
+        let read = usage["cache_read_input_tokens"] as? Int ?? 0
+        let write = usage["cache_creation_input_tokens"] as? Int ?? 0
+        if read > 0 || write > 0 {
+            DevLog.shared.info("云端用量", "\(label) cache_read=\(read) cache_write=\(write) input=\(usage["input_tokens"] as? Int ?? 0)")
+        }
     }
 
     // MARK: Anthropic 原生
 
-    private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool, jsonSchema: [String: Any]?) async throws -> String {
+    private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool, jsonSchema: [String: Any]?, cachedSystemPrefix: String? = nil) async throws -> String {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = maxTokens >= 4000 ? 150 : 60   // 长输出非流式会久，给足；日后上流式再收紧
@@ -81,7 +114,8 @@ struct AnthropicClient {
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         var body: [String: Any] = [
-            "model": model(), "max_tokens": maxTokens, "system": system,
+            "model": model(), "max_tokens": maxTokens,
+            "system": Self.systemPayload(cachedSystemPrefix, system),
             "messages": [["role": "user", "content": user]],
             // 关掉 extended thinking：排程/抽取是结构化任务，不需要"想一大段"。
             // 新模型（Sonnet 5 等）**不传 thinking = 默认开自适应思考** → ①每次都先思考=慢(连测 key 都慢)
@@ -96,6 +130,7 @@ struct AnthropicClient {
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let obj = try await send(req, provider: "Anthropic")
+        Self.logCacheUsage(obj, label: model())
         let stop = obj["stop_reason"] as? String
         let text = (obj["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? ""
         if CloudSettings.logRawResponses {
@@ -117,11 +152,12 @@ struct AnthropicClient {
     /// 附带收益：SSE 持续有包，60s 空闲超时即可（非流式长输出要给 150s 干等）。
     func completeStreaming(system: String, user: String, maxTokens: Int = 2048,
                            jsonSchema: [String: Any]? = nil,
+                           cachedSystemPrefix: String? = nil,
                            onPartial: (String) -> Void) async throws -> String {
         guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
         guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
         guard provider() == .anthropic else {
-            return try await completeOpenAI(key: key, system: system, user: user,
+            return try await completeOpenAI(key: key, system: Self.joined(cachedSystemPrefix, system), user: user,
                                             maxTokens: maxTokens, jsonMode: true, jsonSchema: jsonSchema)
         }
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
@@ -131,7 +167,8 @@ struct AnthropicClient {
         req.setValue(key, forHTTPHeaderField: "x-api-key")
         req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         var body: [String: Any] = [
-            "model": model(), "max_tokens": maxTokens, "system": system, "stream": true,
+            "model": model(), "max_tokens": maxTokens, "stream": true,
+            "system": Self.systemPayload(cachedSystemPrefix, system),
             "messages": [["role": "user", "content": user]],
             "thinking": ["type": "disabled"],   // 同非流式：结构化任务不要思考（慢+吃额度）
         ]
@@ -159,6 +196,8 @@ struct AnthropicClient {
                     text += t
                     onPartial(text)
                 }
+            case "message_start":
+                if let msg = obj["message"] as? [String: Any] { Self.logCacheUsage(msg, label: model() + "(流式)") }
             case "message_delta":
                 stop = (obj["delta"] as? [String: Any])?["stop_reason"] as? String
             default:

@@ -4,7 +4,8 @@
 //
 //  端侧微调（试点）：Apple Foundation Models 做「自然语言调整已排日程」。
 //  refine 是纯结构化（返回块清单、无 prose）→ 适合端侧：@Generable 直出、不截断、免费/私密。
-//  关闭 / 不可用 / 失败 / 空 → 回退云端 ClaudePlanRefiner。
+//  链语义 v2（2026-07-11，与解析链同款）：默认=云端优先（Haiku 微调跑分 100%）、云端失败才 FM 兜底、
+//  端云均败=保持原样+可见 warn（微调的失败契约=原样）；「只使用端侧」开=FM only 绝不出云。
 //  分工：arrange/reflow 因带「温和前向 note」（= 生成文本/给建议）留云端；refine 纯格式化上端侧。
 //
 
@@ -12,18 +13,38 @@ import Foundation
 import FoundationModels
 
 struct FoundationModelsPlanRefiner: PlanRefining {
-    let fallback: PlanRefining
+    let fallback: PlanRefining   // 云端通道（默认模式的主路；「只使用端侧」开着时绝不调它）
 
     func refine(_ blocks: [ScheduledBlock], command: String,
                 originalRequest: String, now: Date) async throws -> [ScheduledBlock] {
         let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard CloudSettings.useOnDeviceParser, !cmd.isEmpty, !blocks.isEmpty else {
-            return try await fallback.refine(blocks, command: command, originalRequest: originalRequest, now: now)
+        guard !cmd.isEmpty, !blocks.isEmpty else { return blocks }
+        if CloudSettings.onDeviceOnly {
+            if let r = await onDeviceAttempt(blocks, cmd: cmd, originalRequest: originalRequest) { return r }
+            DevLog.shared.warn("微调", "端侧未成功（「只使用端侧」不回退云端），保持原样")
+            return blocks
         }
+        do {
+            return try await fallback.refine(blocks, command: command, originalRequest: originalRequest, now: now)
+        } catch {
+            DevLog.shared.warn("微调", "云端失败 → 试端侧 FM 兜底：\(error.localizedDescription)")
+            if let r = await onDeviceAttempt(blocks, cmd: cmd, originalRequest: originalRequest) {
+                DevLog.shared.info("微调", "端侧 FM 兜底成功")
+                return r
+            }
+            DevLog.shared.warn("微调", "端云均未成功，保持原样")
+            return blocks
+        }
+    }
+
+    /// 端侧单尝试：不可用/失败/空 → nil（去留交给上面的链决定）。
+    private func onDeviceAttempt(_ blocks: [ScheduledBlock], cmd: String,
+                                 originalRequest: String) async -> [ScheduledBlock]? {
         switch SystemLanguageModel.default.availability {
         case .available: break
         default:
-            return try await fallback.refine(blocks, command: command, originalRequest: originalRequest, now: now)
+            DevLog.shared.info("端侧微调", "Foundation Models 不可用（设备不支持/未就绪）")
+            return nil
         }
         do {
             let listing = blocks.map {
@@ -44,14 +65,14 @@ struct FoundationModelsPlanRefiner: PlanRefining {
                                       priority: BlockPriority(rawValue: b.priority) ?? .normal)
             }
             guard !result.isEmpty else {
-                DevLog.shared.warn("端侧微调", "Foundation Models 返回空 → 回退云端")
-                return try await fallback.refine(blocks, command: command, originalRequest: originalRequest, now: now)
+                DevLog.shared.warn("端侧微调", "Foundation Models 返回空")
+                return nil
             }
             DevLog.shared.info("端侧微调", "Foundation Models 成功 · \(result.count) 块（端侧·免费）")
             return result
         } catch {
-            DevLog.shared.warn("端侧微调", "Foundation Models 失败 → 回退云端：\(error.localizedDescription)")
-            return try await fallback.refine(blocks, command: command, originalRequest: originalRequest, now: now)
+            DevLog.shared.warn("端侧微调", "Foundation Models 失败：\(error.localizedDescription)")
+            return nil
         }
     }
 

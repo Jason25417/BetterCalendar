@@ -50,13 +50,17 @@ final class AppContainer {
         CalendarSettings.backend = .eventKit
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
-        // 解析兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude → 本地 Stub；两级都接流式冒块（0.20.1 云端也流式）
-        // 终端兜底改 FailedScheduleParser（0.26 删 Stub）：端云全失败=干净失败态，不产垃圾草稿
+        // 解析链 v2（2026-07-11「只使用端侧」定稿）：默认=云端 Claude（Haiku·三路对冲）优先、
+        // 失败→端侧 FM 兜底、再失败=FailedScheduleParser 干净失败态（0.26 删 Stub，不产垃圾草稿）；
+        // 「只使用端侧」开=FM only 绝不出云。两级都接流式冒块（0.20.1 云端也流式）。
         let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: FailedScheduleParser(),
                                                liveDraft: liveDraft)
         self.parser = FoundationModelsScheduleParser(fallback: cloudParser, liveDraft: liveDraft)
-        self.planner = LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine())
-        // 微调兜底链：端侧 FM（试点、进阶设置开）→ 云端 Claude
+        // 排程大脑：默认=云端 LLM（失败回退 Naive）；「只使用端侧」开=直接 Naive（隐私闸，见 PrivacyGatedPlanningEngine）
+        self.planner = PrivacyGatedPlanningEngine(
+            llm: LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine()),
+            local: NaivePlanningEngine())
+        // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
         self.calendarStore = FakeCalendarStore()
         self.routingStore = RoutingCalendarStore(fake: calendarStore, eventKit: EventKitCalendarStore())

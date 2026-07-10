@@ -108,14 +108,14 @@ struct SettingsView: View {
                         Picker("AI 模型", selection: $model) {
                             ForEach(CloudSettings.availableModels, id: \.self) { Text($0).tag($0) }
                         }
-                        Text("省钱可切 claude-haiku-4-5；个人用每月约几分钱到一块多。改完点上方「保存」。")
+                        Text("默认 claude-haiku-4-5（试验台跑分综合最优、最快最省）；个人用每月约几分钱到一块多。改完点上方「保存」。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    Toggle("端侧解析（试验 · 端侧模型）", isOn: Binding(
-                        get: { CloudSettings.useOnDeviceParser },
-                        set: { CloudSettings.useOnDeviceParser = $0 }))
-                    Text("打开后「排今天」解析 + 「AI 调整」优先用 端侧模型（免费/离线/私密），不可用或失败自动回退云端。排序/建议这类文本仍走云端。~3B 偏小、试验中。")
+                    Toggle("只使用端侧（绝对隐私）", isOn: Binding(
+                        get: { CloudSettings.onDeviceOnly },
+                        set: { CloudSettings.onDeviceOnly = $0 }))
+                    Text("打开后「排今天」解析、AI 调整、排序全部只在设备上运行（系统内置端侧模型 + 本地排序），你的文字绝不上传；端侧失败就干净失败、绝不悄悄改走云端。注意：云端 Haiku 的理解力明显更优——只建议隐私优先时打开。关闭时云端失败会自动用端侧兜底。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     #if os(macOS)

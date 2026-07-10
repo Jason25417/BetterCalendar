@@ -193,13 +193,20 @@ struct LogicTests {
 
     @Test func refinerKeepsDraftOnFailureOrEmptyCommand() async throws {
         let noKey = AnthropicClient(apiKey: { nil }, useCloud: { true })
-        let refiner = ClaudePlanRefiner(client: noKey)
         let now = Date()
         let block = ScheduledBlock(title: "x", start: now, end: now.addingTimeInterval(3600))
-        let onFailure = try await refiner.refine([block], command: "把x挪到下午", originalRequest: "写一天代码", now: now)
-        #expect(onFailure.count == 1)            // 云端失败 → 原样
-        let onEmpty = try await refiner.refine([block], command: "  ", originalRequest: "", now: now)
-        #expect(onEmpty.count == 1)              // 空指令 → 原样
+        // 0.29.0 链语义：ClaudePlanRefiner=云端车道，失败**抛错**（「保持原样」的决定上收到 FM 链，
+        // 否则云端失败没机会给端侧 FM 兜底）
+        let cloudLane = ClaudePlanRefiner(client: noKey)
+        await #expect(throws: (any Error).self) {
+            _ = try await cloudLane.refine([block], command: "把x挪到下午", originalRequest: "写一天代码", now: now)
+        }
+        // 组装链（FM 包装器）：云端失败 → FM 兜底（测试机不可用 → nil）→ 保持原样；空指令 → 原样
+        let chain = FoundationModelsPlanRefiner(fallback: cloudLane)
+        let onFailure = try await chain.refine([block], command: "把x挪到下午", originalRequest: "写一天代码", now: now)
+        #expect(onFailure.count == 1)
+        let onEmpty = try await chain.refine([block], command: "  ", originalRequest: "", now: now)
+        #expect(onEmpty.count == 1)
     }
 
     // MARK: 草稿映射
@@ -2022,34 +2029,78 @@ struct LogicTests {
         #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 2, done: 2, inWork: false) == 0)     // 做满
     }
 
-    // MARK: 端云并行（#13）+ 回填跨午夜整形 + 徽标 v2（0.26.19）
+    // MARK: 解析链 v2（「只使用端侧」0.29.0，race 退役）+ 回填跨午夜整形 + 徽标 v2（0.26.19）
 
-    @Test func parserRaceFirstValidWins() async throws {
+    /// 线程安全的一次性标志（chain 测试用：验证某条车道没被调过）。
+    final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag = false
+        func set() { lock.lock(); flag = true; lock.unlock() }
+        var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
+    }
+
+    @Test func parserChainRespectsOnDeviceOnly() async throws {
         func plan(_ tag: String) -> ParsedPlan {
             ParsedPlan(blocks: [], longTasks: [ParsedLongTask(title: tag, deadline: nil,
                        cadenceMinutesPerWeek: nil, totalMinutes: nil, unitMinutes: nil)], isLoose: false)
         }
-        // 端侧先到 → 端侧胜（云端被取消）
-        var r = try await FoundationModelsScheduleParser.race(
+        // 默认：云端优先，成功时端侧根本不该被调（省电+行为可预期）
+        let deviceTouched = LockedFlag()
+        var r = try await FoundationModelsScheduleParser.chain(
+            onDeviceOnly: false,
+            onDevice: { deviceTouched.set(); return plan("端侧") },
+            cloud: { plan("云端") })
+        #expect(r.longTasks.first?.title == "云端")
+        #expect(!deviceTouched.value)
+        // 默认：云端失败 → 端侧 FM 兜底
+        r = try await FoundationModelsScheduleParser.chain(
+            onDeviceOnly: false,
             onDevice: { plan("端侧") },
-            cloud: { try? await Task.sleep(for: .milliseconds(300)); return plan("云端") })
+            cloud: { throw AnthropicError(message: "云端挂了") })
         #expect(r.longTasks.first?.title == "端侧")
-        // 端侧失手（nil）→ 云端胜
-        r = try await FoundationModelsScheduleParser.race(
-            onDevice: { nil },
-            cloud: { plan("云端") })
-        #expect(r.longTasks.first?.title == "云端")
-        // 云端先到 → 云端胜（端侧慢不拖累）
-        r = try await FoundationModelsScheduleParser.race(
-            onDevice: { try? await Task.sleep(for: .milliseconds(300)); return plan("端侧") },
-            cloud: { plan("云端") })
-        #expect(r.longTasks.first?.title == "云端")
-        // 双失 → 抛云端错误（干净失败态）
+        // 默认：端云双失 → 抛云端原错（干净失败态）
         await #expect(throws: (any Error).self) {
-            _ = try await FoundationModelsScheduleParser.race(
-                onDevice: { nil },
+            _ = try await FoundationModelsScheduleParser.chain(
+                onDeviceOnly: false, onDevice: { nil },
                 cloud: { throw AnthropicError(message: "云端挂了") })
         }
+        // 只使用端侧：端侧胜出，云端**绝不被调**（绝对隐私承诺）
+        let cloudTouched = LockedFlag()
+        r = try await FoundationModelsScheduleParser.chain(
+            onDeviceOnly: true,
+            onDevice: { plan("端侧") },
+            cloud: { cloudTouched.set(); return plan("云端") })
+        #expect(r.longTasks.first?.title == "端侧")
+        #expect(!cloudTouched.value)
+        // 只使用端侧：端侧失手 → 干净抛错，云端仍不被调（不静默回云）
+        await #expect(throws: (any Error).self) {
+            _ = try await FoundationModelsScheduleParser.chain(
+                onDeviceOnly: true, onDevice: { nil },
+                cloud: { cloudTouched.set(); return plan("云端") })
+        }
+        #expect(!cloudTouched.value)
+    }
+
+    @Test func refineChangeCountDiffsBySignature() {
+        let base = at(2026, 7, 11, 9, 0)
+        func blk(_ t: String, h: Int, fixed: Bool = false) -> ScheduledBlock {
+            ScheduledBlock(title: t, start: base.addingTimeInterval(TimeInterval(h * 3600)),
+                           end: base.addingTimeInterval(TimeInterval(h * 3600 + 1800)), isFixed: fixed)
+        }
+        let before = [blk("写代码", h: 0), blk("健身", h: 2), blk("读书", h: 4)]
+        // 没改 → 0 处
+        #expect(HomeViewModel.countRefineChanges(before: before, after: before) == 0)
+        // 挪一个块的时间 → 1 处
+        #expect(HomeViewModel.countRefineChanges(before: before,
+                                                 after: [blk("写代码", h: 1), blk("健身", h: 2), blk("读书", h: 4)]) == 1)
+        // 删一个块 → 1 处；加一个块 → 1 处
+        #expect(HomeViewModel.countRefineChanges(before: before,
+                                                 after: [blk("写代码", h: 0), blk("健身", h: 2)]) == 1)
+        #expect(HomeViewModel.countRefineChanges(before: before,
+                                                 after: before + [blk("散步", h: 6)]) == 1)
+        // 改属性（标固定）→ 1 处
+        #expect(HomeViewModel.countRefineChanges(before: before,
+                                                 after: [blk("写代码", h: 0, fixed: true), blk("健身", h: 2), blk("读书", h: 4)]) == 1)
     }
 
     @Test func backfillSpanNormalizationKeepsMidnightWhole() {

@@ -2,8 +2,9 @@
 //  ClaudePlanRefiner.swift
 //  BetterCalendar
 //
-//  自然语言微调（云端）：把当前块清单 + 用户指令发给 Claude，返回调整后的块清单。
-//  失败 → 原样返回 + 可见报错。
+//  自然语言微调（云端车道）：把当前块清单 + 用户指令发给 Claude，返回调整后的块清单。
+//  失败/空 → **抛错**（0.29.0 起）：「保持原样」的决定上收到 FoundationModelsPlanRefiner 链
+//  （云端失败要先给端侧 FM 兜底的机会，这里吞掉错误链就断了）。试验台直接用本类=失败如实计败。
 //
 
 import Foundation
@@ -45,10 +46,12 @@ struct ClaudePlanRefiner: PlanRefining {
             """
             // 4000 见过截断（2026-07-07 17:16 日志）：微调返回完整清单、块多时不够 → 提到 8000
             let client = self.client
-            // 看门狗 10s（p95 定值，2026-07-10）：超时抛错 → 下面 catch「保持原样」+ 可见 warn
+            // 看门狗 10s（p95 定值，2026-07-10）：超时抛错 → 上层链先试 FM 兜底再定原样
+            // 缓存（#21④）：本 prompt 全静态 → 整段作缓存前缀（cache_control），user 消息承载全部动态
             let raw = try await LLMWatchdog.run {
-                try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 8000,
-                                          jsonMode: true, jsonSchema: Self.outputSchema)
+                try await client.complete(system: "", user: user, maxTokens: 8000,
+                                          jsonMode: true, jsonSchema: Self.outputSchema,
+                                          cachedSystemPrefix: Self.systemPrompt)
             }
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
@@ -61,14 +64,14 @@ struct ClaudePlanRefiner: PlanRefining {
                                       priority: BlockPriority(rawValue: b.priority ?? "normal") ?? .normal)
             }
             guard !result.isEmpty else {
-                DevLog.shared.warn("微调", "云端返回空，保持原样")
-                return blocks
+                DevLog.shared.warn("微调", "云端返回空")
+                throw AnthropicError(message: "微调返回空结果")
             }
             DevLog.shared.info("微调", "云端成功 · \(result.count) 块")
             return result
         } catch {
-            DevLog.shared.warn("微调", "云端失败，保持原样：\(error.localizedDescription)")
-            return blocks
+            DevLog.shared.warn("微调", "云端失败：\(error.localizedDescription)")
+            throw error
         }
     }
 

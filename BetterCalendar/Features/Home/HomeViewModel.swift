@@ -49,6 +49,10 @@ final class HomeViewModel {
     var committedToReal: Bool = false
     /// 状态行 A（0.26 ABC）：排今天成功后的确定性状态「排好 N 件」（与模型 note=B 叠加显示）；编辑/确认/切日即清。
     private(set) var arrangedCount: Int?
+    /// 状态行 C（#15，2026-07-11 审核定稿）：AI 微调完成后的**确定性**反馈——N=本地 diff 出的事实。
+    /// 审核结论：模型自由回复通道不开（可能违措辞红线且无法事前保证）；模型嗓音只走宪法约束的 note(B)。
+    /// 生命周期同 A：新操作/编辑/确认/切日即清。
+    private(set) var refinedChangeCount: Int?
     /// 解析识别到、待确认入池的长期事项（确认写入时入「在途」）。
     var pendingLongTasks: [ParsedLongTask] = []
     /// 未保存修改（0.16 文件模型，D-f）：任何编辑/新草稿置真；「确认写入」=保存清零。
@@ -151,7 +155,7 @@ final class HomeViewModel {
         note = nil
         draftSource = .empty
         hasUnsavedChanges = false
-        arrangedCount = nil
+        arrangedCount = nil; refinedChangeCount = nil
         loadConfirmedPlan()
         persistDraft()
     }
@@ -232,7 +236,7 @@ final class HomeViewModel {
     func arrange() async {
         let trimmed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        isWorking = true; errorText = nil; committedCount = nil; arrangedCount = nil
+        isWorking = true; errorText = nil; committedCount = nil; arrangedCount = nil; refinedChangeCount = nil
         do {
             // 在途摘要给排程大脑（M10-2：LLM 可建议 0–2 块，标来源、删除零成本）
             let pool = (longTaskStore?.active() ?? []).map {
@@ -369,7 +373,7 @@ final class HomeViewModel {
     func refine() async {
         let cmd = refineText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, !blocks.isEmpty else { return }
-        isWorking = true; committedCount = nil; arrangedCount = nil
+        isWorking = true; committedCount = nil; arrangedCount = nil; refinedChangeCount = nil
         let scheduled = blocks.map(\.scheduled)
         // 归属按标题留存：LLM 微调重建块时会丢 linkedTaskID，refine 后按标题补回（自动+手动归属都不丢）
         var linkByTitle: [String: UUID] = [:]
@@ -389,11 +393,29 @@ final class HomeViewModel {
             if eb.labels.isEmpty, let ls = labelsByTitle[b.title] { eb.labels = ls }
             return eb
         }
+        // C 状态行（#15）：本地 diff 出「改了几处」的确定性事实——不是模型的话，零措辞风险
+        refinedChangeCount = Self.countRefineChanges(before: scheduled, after: result)
         draftSource = .arranged   // AI 微调后 = 未确认草稿（含对已加载计划的微调）
         refineText = ""
         hasUnsavedChanges = true
         persistDraft()
         isWorking = false
+    }
+
+    /// 微调前后差异计数（纯函数、可单测）：以「标题|起|止|固定|计时|优先级」为块签名做多重集合差，
+    /// 改动数 = max(新增签名数, 消失签名数)——改一个块=旧签名消失+新签名出现，算 1 处；加/删块也各算 1 处。
+    static func countRefineChanges(before: [ScheduledBlock], after: [ScheduledBlock]) -> Int {
+        func sig(_ b: ScheduledBlock) -> String {
+            "\(b.title)|\(b.start.timeIntervalSince1970)|\(b.end.timeIntervalSince1970)|\(b.isFixed)|\(b.timingStyle.rawValue)|\(b.priority.rawValue)"
+        }
+        var beforeCounts: [String: Int] = [:]
+        for b in before { beforeCounts[sig(b), default: 0] += 1 }
+        var afterCounts: [String: Int] = [:]
+        for b in after { afterCounts[sig(b), default: 0] += 1 }
+        var added = 0, removed = 0
+        for (s, c) in afterCounts { added += max(0, c - (beforeCounts[s] ?? 0)) }
+        for (s, c) in beforeCounts { removed += max(0, c - (afterCounts[s] ?? 0)) }
+        return max(added, removed)
     }
 
     func confirm() async {
@@ -418,7 +440,7 @@ final class HomeViewModel {
         reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),
                                              leadMinutes: leadN)
         let sorted = blocks.sorted { $0.start < $1.start }
-        isWorking = true; errorText = nil; arrangedCount = nil
+        isWorking = true; errorText = nil; arrangedCount = nil; refinedChangeCount = nil
         do {
             // 单一真相源（重构 P2）：先写 PlanStore，再由投影层画日历——本方法不再直接写日历。
             // 按**逻辑日**分组逐日 replace：跨午夜块（睡前看书 00:30）随前一逻辑日走，不再被拆到次日。
@@ -556,7 +578,7 @@ final class HomeViewModel {
         if suppressNextDayChangeReload { suppressNextDayChangeReload = false; return }
         note = nil
         committedCount = nil
-        arrangedCount = nil
+        arrangedCount = nil; refinedChangeCount = nil
         freshness = false
         freshBase = nil
         if let snap = draftStore?.load(day: targetDay),
@@ -600,7 +622,7 @@ final class HomeViewModel {
     /// 标记未保存修改（0.16 文件模型：任何来源的编辑都不自动写库——「确认写入」才保存）。
     private func markEditedIfLoaded() {
         hasUnsavedChanges = true
-        arrangedCount = nil   // A 状态行仅贴合"刚排好"的瞬间——一编辑即过期
+        arrangedCount = nil; refinedChangeCount = nil   // A/C 状态行仅贴合"刚完成"的瞬间——一编辑即过期
     }
 
     func addBlock() {

@@ -5,7 +5,7 @@
 //  端侧解析（试点，D1 端侧目标）：Apple Foundation Models（macOS 26+/iOS 26+ 系统内置 ~3B 模型）。
 //  @Generable 直出结构化日程——完全本地、免费、离线、私密、快。
 //  **流式**：streamResponse 边生成边把"部分块"写进 LiveDraft，UI 边出边显示（不影响最终完整结果）。
-//  不可用 / 失败 / 0 块 → 回退云端(fallback)。是 ScheduleParsing 的又一实现，和 ClaudeScheduleParser 平级。
+//  链语义 v2（2026-07-11）：默认=云端优先、FM 兜底；「只使用端侧」开=FM only 绝不出云。见 chain。
 //
 
 import Foundation
@@ -21,7 +21,7 @@ final class LiveDraft {
 }
 
 struct FoundationModelsScheduleParser: ScheduleParsing {
-    let fallback: ScheduleParsing      // 端侧关闭/不可用/失败 → 云端
+    let fallback: ScheduleParsing      // 云端通道（默认模式的主路；「只使用端侧」开着时绝不调它）
     var liveDraft: LiveDraft?          // 流式部分块出口（nil = 不流式，仅最终结果）
 
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan {
@@ -29,56 +29,40 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
     }
 
     func parse(_ text: String, referenceDate: Date, context: ParseContext) async throws -> ParsedPlan {
-        guard CloudSettings.useOnDeviceParser else {
-            return try await fallback.parse(text, referenceDate: referenceDate, context: context)
-        }
-        // #13 端云并行（2026-07-10 Jason 拍板）：端侧与云端（自带三路对冲+10s 看门狗）**同时起跑**，
-        // 先到的有效结果胜出——端侧赢=免费/离线；端侧抽风或慢=云端兜着。不再串行「先端侧、失败再等云端」。
-        // LiveDraft：两路都可能边生成边冒块（最后写入者可见），胜出方的最终结果落草稿时统一替换。
-        return try await Self.race(
+        try await Self.chain(
+            onDeviceOnly: CloudSettings.onDeviceOnly,
             onDevice: { await self.onDeviceAttempt(text, referenceDate: referenceDate) },
             cloud: { try await self.fallback.parse(text, referenceDate: referenceDate, context: context) })
     }
 
-    /// 端云赛跑（纯编排、可单测）：onDevice 返回 nil=端侧未产出有效结果（关/不可用/失败/0 块）。
-    /// 云端错误只在端侧也失手后才抛（两路都空才算失败）。
-    static func race(onDevice: @escaping @Sendable () async -> ParsedPlan?,
-                     cloud: @escaping @Sendable () async throws -> ParsedPlan) async throws -> ParsedPlan {
-        enum Lane { case device(ParsedPlan?), cloud(Result<ParsedPlan, Error>) }
-        return try await withThrowingTaskGroup(of: Lane.self) { group in
-            group.addTask { .device(await onDevice()) }
-            group.addTask {
-                do { return .cloud(.success(try await cloud())) }
-                catch { return .cloud(.failure(error)) }
+    /// 解析链 v2（2026-07-11「只使用端侧」定稿，替代 0.26.19 的端云并行 race——并行会把文字发云，
+    /// 与「端侧=隐私」语义矛盾，随语义升级退役）。纯编排、可单测：
+    /// - onDeviceOnly=true：只走端侧；失败**干净抛错、绝不回云**（绝对隐私承诺的代价，设置里已明示）。
+    /// - false（默认）：云端优先（Haiku 快且强）；云端失败才试端侧 FM 兜底；再失败抛云端原错。
+    static func chain(onDeviceOnly: Bool,
+                      onDevice: @Sendable () async -> ParsedPlan?,
+                      cloud: @Sendable () async throws -> ParsedPlan) async throws -> ParsedPlan {
+        if onDeviceOnly {
+            if let plan = await onDevice() { return plan }
+            throw AnthropicError(message: "端侧解析未成功（「只使用端侧」开着，不回退云端——可在设置里关闭）")
+        }
+        do {
+            return try await cloud()
+        } catch {
+            if let plan = await onDevice() {
+                DevLog.shared.info("解析", "云端失败 → 端侧 FM 兜底成功")
+                return plan
             }
-            var deviceMissed = false
-            var cloudError: Error?
-            for try await lane in group {
-                switch lane {
-                case .device(let plan?):
-                    group.cancelAll()
-                    return plan
-                case .device(nil):
-                    deviceMissed = true
-                    if let e = cloudError { throw e }
-                case .cloud(.success(let plan)):
-                    group.cancelAll()
-                    return plan
-                case .cloud(.failure(let e)):
-                    cloudError = e
-                    if deviceMissed { throw e }
-                }
-            }
-            throw cloudError ?? AnthropicError(message: "解析失败（端云均无结果）")
+            throw error
         }
     }
 
-    /// 端侧单尝试：可用则流式生成；不可用/失败/0 块 → nil（交给赛跑汇总，不自己调云端）。
+    /// 端侧单尝试：可用则流式生成；不可用/失败/0 块 → nil（去留交给 chain 决定，不自己调云端）。
     private func onDeviceAttempt(_ text: String, referenceDate: Date) async -> ParsedPlan? {
         switch SystemLanguageModel.default.availability {
         case .available: break
         default:
-            DevLog.shared.info("端侧解析", "Foundation Models 不可用 → 等云端")
+            DevLog.shared.info("端侧解析", "Foundation Models 不可用（设备不支持/未就绪）")
             return nil
         }
         do {
@@ -101,14 +85,14 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
             }
             let loose = final.loose ?? false
             guard !blocks.isEmpty || !longTasks.isEmpty || loose else {
-                DevLog.shared.warn("端侧解析", "Foundation Models 返回 0 块 → 等云端")
+                DevLog.shared.warn("端侧解析", "Foundation Models 返回 0 块")
                 return nil
             }
-            DevLog.shared.info("端侧解析", "Foundation Models 胜出 · \(blocks.count) 块（端侧·免费·流式）")
+            DevLog.shared.info("端侧解析", "Foundation Models 成功 · \(blocks.count) 块（端侧·免费·流式）")
             return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: loose)
         } catch {
             liveDraft?.clear()
-            DevLog.shared.warn("端侧解析", "Foundation Models 失手 → 等云端：\(error.localizedDescription)")
+            DevLog.shared.warn("端侧解析", "Foundation Models 失手：\(error.localizedDescription)")
             return nil
         }
     }

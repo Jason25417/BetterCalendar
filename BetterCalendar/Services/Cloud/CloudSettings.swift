@@ -17,7 +17,6 @@ enum LLMProvider: String, CaseIterable, Sendable {
 enum CloudSettings {
     private static let defaults = UserDefaults.standard
 
-    /// 默认 Sonnet 5（近 Opus 质量、更便宜、支持结构化输出）；想更强切 Opus 4.8、想更省切 Haiku 4.5。
     /// ⚠️ 列表内模型都**支持结构化输出**（`output_config.format`）——排程/微调走它强制直出 JSON。
     /// 已下线的 `claude-sonnet-4-6` 不支持结构化输出（也不支持 prefill），故移除并在 getter 里自动迁移。
     static let availableModels = ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"]
@@ -46,9 +45,13 @@ enum CloudSettings {
         set { defaults.set(newValue, forKey: "cloud.logRaw") }
     }
 
-    /// 试点（D1 端侧目标）：解析优先用 **Apple Foundation Models 端侧模型**（免费/离线/私密），
-    /// 不可用/失败/0 块自动回退云端。默认**关**——进阶设置里打开才用（~3B 偏小、试验中）。
-    static var useOnDeviceParser: Bool {
+    /// **只使用端侧**（2026-07-11 Jason 定，原「优先端侧」语义升级）：开=解析/AI 调整/排序全部只在
+    /// 设备上运行（Apple Foundation Models + 本地排序），**文字绝不出云**——选它的唯一理由是绝对隐私，
+    /// 云端兜底会让这个承诺不成立，所以失败=干净失败、绝不静默回云。
+    /// 关（默认）=云端 Haiku 优先（表现明显更优），云端失败时端侧 FM 自动兜底。
+    /// 端云并行赛跑（0.26.19 #13）随本语义退役：并行=文字必然发云，与「端侧=隐私」矛盾。
+    /// 沿用旧键 cloud.onDeviceParser（老用户开着的直接获得新语义，changelog 已说明）。
+    static var onDeviceOnly: Bool {
         get { defaults.object(forKey: "cloud.onDeviceParser") as? Bool ?? false }
         set { defaults.set(newValue, forKey: "cloud.onDeviceParser") }
     }

@@ -199,6 +199,14 @@ struct HomeView: View {
                     MessageStrip(icon: "checkmark.circle.fill", tint: .green,
                                  text: "排好 \(n) 件", textStyle: .primary)
                 }
+                // C 状态行（#15，0.29.0）：微调完成的确定性反馈——N=本地 diff 出的事实，
+                // 非模型自由发挥（自由通道审核未过：可能违措辞红线；模型嗓音只走宪法约束的 note=B）
+                if let c = model.refinedChangeCount {
+                    MessageStrip(icon: c > 0 ? "checkmark.circle.fill" : "info.circle",
+                                 tint: c > 0 ? .green : .gray,
+                                 text: c > 0 ? "已按指令调整 \(c) 处" : "没识别出要改的动作——一切保持原样",
+                                 textStyle: .primary)
+                }
                 // B：模型 note（宪法约束、温和前向）。防呆：抽风成「1」这种垃圾 → trim 后太短不显
                 if let note = model.note,
                    note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {

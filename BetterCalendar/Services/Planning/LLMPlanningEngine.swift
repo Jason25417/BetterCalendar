@@ -59,9 +59,11 @@ struct LLMPlanningEngine: PlanningEngine {
             """
             let client = self.client
             // 看门狗 10s（p95 定值，2026-07-10）：超时抛错 → 下面 catch 走 Naive 回退（约束不随降级消失）
+            // 缓存（#21④）：本 prompt 全静态 → 整段作缓存前缀，动态全在 user 消息
             let raw = try await LLMWatchdog.run {
-                try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000,
-                                          jsonMode: true, jsonSchema: Self.arrangeSchema)
+                try await client.complete(system: "", user: user, maxTokens: 4000,
+                                          jsonMode: true, jsonSchema: Self.arrangeSchema,
+                                          cachedSystemPrefix: Self.systemPrompt)
             }
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }

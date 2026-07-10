@@ -2,9 +2,9 @@
 //  ScheduleParsing.swift
 //  BetterCalendar
 //
-//  自然语言 → 结构化计划。原型期实现 = 云端 Claude（ClaudeScheduleParser，待接）。
-//  现用 StubScheduleParser 兜底，保证离线/未配 key 也能跑。
-//  缝是 async throws，方便日后换成网络实现。
+//  自然语言 → 结构化计划。实现：FoundationModelsScheduleParser（链头：端侧/云端取舍）→
+//  ClaudeScheduleParser（云端）→ FailedScheduleParser（终端干净失败态，0.26 起无本地垃圾兜底）。
+//  缝是 async throws，实现无关。
 //
 
 import Foundation
