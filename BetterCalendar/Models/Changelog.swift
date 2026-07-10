@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.14", date: "2026-07", changes: [
+            "修 bug：复盘补一笔时，记「凌晨做的事」不再被当成「睡前跨午夜」窜到第二天的日历——补一笔是记过去，凌晨=今早已发生，就落在今天",
+        ]),
         ChangelogEntry(version: "0.26.13", date: "2026-07", changes: [
             "修 bug：复盘「补一笔今日完成事件」写入后，「做成了什么」现在会实时加上——之前复盘读的是系统日历（刚写完立即读有缓存延迟、读不到），改成读 App 数据库真相源，即时可见",
             "修 bug：补一笔记的是过去做成的事，之前会被「排今天从现在+5 分起」的新约束推到未来或丢弃；现在补一笔不受该约束、按你说的时间如实记",

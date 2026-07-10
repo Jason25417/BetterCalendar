@@ -26,7 +26,8 @@ struct ArrangeDayUseCase {
         let parsed = try await parser.parse(text, referenceDate: referenceDate, context: context)
         let scheduled: [ScheduledBlock] = parsed.blocks.compactMap { pb in
             guard let start = pb.start, let end = pb.end else { return nil }
-            let (s, e) = Self.clampToDay(start: start, end: end, referenceDate: referenceDate)
+            let (s, e) = Self.clampToDay(start: start, end: end, referenceDate: referenceDate,
+                                         backfill: context.isBackfill)
             // 锚点标题兜底（0.22.2，Jason 报模型漏标「午饭」）：明显的作息标题强制 isAnchor=true；只加不减
             let anchor = pb.isAnchor || Self.isObviousAnchor(pb.title)
             return ScheduledBlock(title: pb.title, start: s, end: e,
@@ -40,11 +41,12 @@ struct ArrangeDayUseCase {
     /// 把块钉到"目标日"那天（保留时分）——杀日期漂移（"明天"被读成次日 7/7、LLM 年份幻觉如 2025 等），
     /// 否则块落到别的日子、今天读回来是空的（menu bar 空档 / 开始今天无计划块）。
     /// 凌晨(<6点)的块=睡前跨午夜，落**次日**；其余落参考日。纯函数、可单测。
-    static func clampToDay(start: Date, end: Date, referenceDate: Date) -> (Date, Date) {
+    static func clampToDay(start: Date, end: Date, referenceDate: Date, backfill: Bool = false) -> (Date, Date) {
         let cal = Calendar.current
         let sc = cal.dateComponents([.hour, .minute], from: start)
         let hour = sc.hour ?? 0
-        let base = hour < 6 ? (cal.date(byAdding: .day, value: 1, to: referenceDate) ?? referenceDate) : referenceDate
+        // 凌晨(<6点)的块=睡前跨午夜、落次日——这是**规划**口径；补一笔记的是过去、凌晨=今早已发生，不推次日。
+        let base = (hour < 6 && !backfill) ? (cal.date(byAdding: .day, value: 1, to: referenceDate) ?? referenceDate) : referenceDate
         let s = cal.date(bySettingHour: hour, minute: sc.minute ?? 0, second: 0, of: base) ?? start
         return (s, s.addingTimeInterval(max(0, end.timeIntervalSince(start))))
     }
