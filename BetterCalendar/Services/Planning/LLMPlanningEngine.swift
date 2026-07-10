@@ -57,8 +57,12 @@ struct LLMPlanningEngine: PlanningEngine {
             只输出 JSON：{"orderedIndexes":[按推荐顺序的索引数组],"note":"一句话","poolSuggestions":[{"poolIndex":0,"start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm"}]}
             没有建议时 poolSuggestions 给 []。
             """
-            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000,
-                                                jsonMode: true, jsonSchema: Self.arrangeSchema)
+            let client = self.client
+            // 看门狗 10s（p95 定值，2026-07-10）：超时抛错 → 下面 catch 走 Naive 回退（约束不随降级消失）
+            let raw = try await LLMWatchdog.run {
+                try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 4000,
+                                          jsonMode: true, jsonSchema: Self.arrangeSchema)
+            }
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(Wire.self, from: data)
@@ -121,9 +125,13 @@ struct LLMPlanningEngine: PlanningEngine {
             \(listing)
             给出弹性块的执行顺序 flexibleOrder + 放不进收工线的候补 deferred（两者不重复、合起来覆盖全部弹性块）+ 一句 note。
             """
-            let raw = try await client.complete(system: Self.reflowSystemPrompt(windDownText: Self.hm(windDown)),
-                                                user: user, maxTokens: 4000,
-                                                jsonMode: true, jsonSchema: Self.reflowSchema)
+            let client = self.client
+            // 看门狗 10s：试验台实锤过部分模型 reflow 的 deferred 格式会退化死循环灌数字——到点掐掉走 Naive
+            let raw = try await LLMWatchdog.run {
+                try await client.complete(system: Self.reflowSystemPrompt(windDownText: Self.hm(windDown)),
+                                          user: user, maxTokens: 4000,
+                                          jsonMode: true, jsonSchema: Self.reflowSchema)
+            }
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(ReflowWire.self, from: data)

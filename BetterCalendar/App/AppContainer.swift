@@ -67,9 +67,10 @@ final class AppContainer {
         self.comparer = OverlapTitleComparer()
         self.notificationDelegate = NotificationDelegate(router: router)
         UNUserNotificationCenter.current().delegate = notificationDelegate
-        self.reflectionContext = ReflectionContextProvider(calendarStore: routingStore, comparer: comparer)
         self.notifier = UNNotificationService()
         self.planStore = PlanStore()
+        // 日记引子读真相源（0.26.15 补迁移）：日历是投影——实时模式绿色淡出，从日历读会把做成的事全算成计划外
+        self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer)
         self.longTasks = LongTaskStore()
         self.reviewStore = ReviewLocalStore()
         self.journalStore = JournalStore()

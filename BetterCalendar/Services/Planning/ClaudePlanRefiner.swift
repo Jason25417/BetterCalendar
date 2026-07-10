@@ -44,8 +44,12 @@ struct ClaudePlanRefiner: PlanRefining {
             只输出 JSON：{"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"timingStyle":"light","priority":"normal"}]}
             """
             // 4000 见过截断（2026-07-07 17:16 日志）：微调返回完整清单、块多时不够 → 提到 8000
-            let raw = try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 8000,
-                                                jsonMode: true, jsonSchema: Self.outputSchema)
+            let client = self.client
+            // 看门狗 10s（p95 定值，2026-07-10）：超时抛错 → 下面 catch「保持原样」+ 可见 warn
+            let raw = try await LLMWatchdog.run {
+                try await client.complete(system: Self.systemPrompt, user: user, maxTokens: 8000,
+                                          jsonMode: true, jsonSchema: Self.outputSchema)
+            }
             let json = JSONText.extractObject(raw)
             guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
             let wire = try JSONDecoder().decode(Wire.self, from: data)

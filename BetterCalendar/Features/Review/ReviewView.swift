@@ -118,7 +118,7 @@ struct ReviewView: View {
         if !model.mitAccomplished.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.mitAccomplished, id: \.self) { title in
-                    Label("最要紧的「\(title)」做成了", systemImage: "target")
+                    Label("想尽早的「\(title)」做成了", systemImage: "target")
                         .font(.subheadline.weight(.medium)).foregroundStyle(.green)
                 }
             }

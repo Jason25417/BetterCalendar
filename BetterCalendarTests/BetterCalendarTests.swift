@@ -1823,6 +1823,128 @@ struct LogicTests {
         #expect(!ExecutionViewModel.RunStateSnapshot.isRestorable(.init(), now: at(2026,7,9,23)))
     }
 
+    // MARK: 并行接替（0.26.15 点子 #20）：前台完成 → 同时做队首顶上；被换走 → 回同时做不误结束
+
+    @Test func parallelTakeoverPromotesFirstBackgroundOnComplete() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        // B 计划风格是番茄：接替时必须降轻计时（绝不自动进番茄——锁必须用户自己上）
+        try planStore.replacePlanned([
+            ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600)),
+            ScheduledBlock(title: "洗衣服", start: s.addingTimeInterval(3600), end: s.addingTimeInterval(5400),
+                           timingStyle: .pomodoro),
+            ScheduledBlock(title: "跑数据", start: s.addingTimeInterval(5400), end: s.addingTimeInterval(7200)),
+        ], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        let itemA = vm.planned.first { $0.title == "写代码" }!
+        let itemB = vm.planned.first { $0.title == "洗衣服" }!
+        let itemC = vm.planned.first { $0.title == "跑数据" }!
+        await vm.startBlock(itemA)
+        vm.startAlso(itemB)
+        vm.startAlso(itemC)
+        let bStart = vm.background.first!.start
+        await vm.completeCurrent()          // A 完成 → B 顶上、C 前移
+        await vm.waitForPreview()
+        #expect(vm.isDone(itemA))
+        #expect(vm.active?.plannedID == itemB.id)
+        #expect(vm.active?.start == bStart)                    // 计时无缝：沿用后台起点
+        #expect(vm.activeStyle == .light)                      // 番茄降轻计时
+        #expect(vm.background.count == 1)
+        #expect(vm.background.first?.plannedID == itemC.id)    // C 成同时做第一位
+        await vm.completeCurrent()          // 链式：B 完成 → C 顶上
+        await vm.waitForPreview()
+        #expect(vm.isDone(itemB))
+        #expect(vm.active?.plannedID == itemC.id)
+        #expect(vm.background.isEmpty)
+    }
+
+    @Test func parallelTakeoverDemotesBackOnSwitchInsteadOfEnding() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        try planStore.replacePlanned([
+            ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600)),
+            ScheduledBlock(title: "洗衣服", start: s.addingTimeInterval(3600), end: s.addingTimeInterval(5400)),
+            ScheduledBlock(title: "读书", start: s.addingTimeInterval(5400), end: s.addingTimeInterval(7200)),
+        ], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        let itemA = vm.planned.first { $0.title == "写代码" }!
+        let itemB = vm.planned.first { $0.title == "洗衣服" }!
+        let itemD = vm.planned.first { $0.title == "读书" }!
+        await vm.startBlock(itemA)
+        vm.startAlso(itemB)
+        await vm.completeCurrent()                    // B 自动接替上前台
+        #expect(vm.active?.plannedID == itemB.id)
+        await vm.startBlock(itemD)                    // 开始别件：接替块回同时做，不是被结束
+        await vm.waitForPreview()
+        #expect(vm.active?.plannedID == itemD.id)
+        #expect(!vm.isDone(itemB))                                 // B 没被误记完成
+        #expect(vm.background.first?.plannedID == itemB.id)        // 回到同时做队首（计时保留）
+        await vm.completeCurrent()                    // D 完成 → B 再接替
+        #expect(vm.active?.plannedID == itemB.id)
+        await vm.completeCurrent()                    // 明确点完成才落实际
+        await vm.waitForPreview()
+        #expect(vm.isDone(itemB))
+        #expect(vm.active == nil)                     // 没有并行块了 → 回空档
+    }
+
+    // MARK: 日记第一方情境读真相源（0.26.15 补迁移：实时模式绿色淡出，从日历读会全算计划外）
+
+    @Test func reflectionPromptReadsTruthStoreNotCalendarProjection() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let coding = ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600))
+        let lunch = ScheduledBlock(title: "午饭", start: s.addingTimeInterval(3600),
+                                   end: s.addingTimeInterval(5400), isAnchor: true)
+        try planStore.replacePlanned([coding, lunch], on: day)
+        try planStore.upsertActuals([ActualBlock(id: coding.id, title: "写代码",
+                                                 start: s, end: s.addingTimeInterval(3000))])
+        // 不给日历（日历全空 = 实时模式绿色已淡出的极端情形）——引子仍从真相源算出正确口径
+        let provider = ReflectionContextProvider(planStore: planStore, comparer: OverlapTitleComparer())
+        let prompt = await provider.todayPrompt()
+        #expect(prompt?.contains("做成 1 件") == true)
+        #expect(prompt?.contains("计划外") != true)   // 计划内做成，不再被算成 bonus
+    }
+
+    // MARK: 真相源边界守卫（2026-07-10：复盘/日记两次漏迁移的复盘产物）
+
+    /// 日历 = 投影不是真相源：读它当数据源只允许白名单文件（∪带章合并 / 手动对账 / 绿对账回流）。
+    /// 新代码要读计划/实际 → 从 PlanStore 读；确要读日历，先想清楚语义再把文件加进白名单。
+    @Test func calendarReadsStayWithinSanctionedFiles() throws {
+        let appRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // BetterCalendarTests/
+            .deletingLastPathComponent()   // repo root
+            .appendingPathComponent("BetterCalendar")
+        let allowed: Set<String> = ["ExecutionViewModel.swift", "ReviewViewModel.swift",
+                                    "ReconcileService.swift"]
+        var offenders: [String] = []
+        let files = FileManager.default.enumerator(at: appRoot, includingPropertiesForKeys: nil)!
+        for case let url as URL in files where url.pathExtension == "swift" {
+            guard !allowed.contains(url.lastPathComponent) else { continue }
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            if text.contains("calendarStore.read(") { offenders.append(url.lastPathComponent) }
+        }
+        #expect(offenders.isEmpty, "白名单外从日历读数据：\(offenders)——计划/实际请读 PlanStore 真相源")
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

@@ -82,7 +82,11 @@ struct ClaudeScheduleParser: ScheduleParsing {
         let winner: ParsedPlan? = await withTaskGroup(of: ParsedPlan?.self) { group in
             for i in 0..<max(1, Self.parseHedgeCount) {
                 let streaming = (i == 0)
-                group.addTask { await self.oneParse(system: system, text: text, streaming: streaming) }
+                // 看门狗（p95≈10s，Jason 2026-07-10 定）：单路最长 10s——三路同时起跑=等效整场 10s 兜底，
+                // 超时按本路失败算（全败→回退），流卡死/极端慢答不再拖住确认按钮。
+                group.addTask {
+                    (try? await LLMWatchdog.run { await self.oneParse(system: system, text: text, streaming: streaming) }) ?? nil
+                }
             }
             for await r in group where r != nil {
                 group.cancelAll()   // 已有有效结果 → 取消其余对冲请求（省 token/算力）

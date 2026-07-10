@@ -73,6 +73,9 @@ final class ExecutionViewModel {
         var start: Date
         var pausedTotal: TimeInterval = 0   // 休息累计（从已用时长里扣）
         var timingStyle: TimingStyle = .light
+        /// 并行接替（点子 #20）：true=完成前台后从「同时做」自动顶上来的——被「换一件/开始别件」时
+        /// 回同时做队首（计时保留）而不是被结束（原则7：自动接替只是显示提升、随时可逆）。
+        var cameFromBackground: Bool = false
     }
     /// 后台并行块：只记起点，按墙钟计时。休息时也一起冻结（0.17：rest=从所有正在做的事休息）。
     struct BackgroundRun: Identifiable, Sendable {
@@ -90,6 +93,7 @@ final class ExecutionViewModel {
         struct ActiveSnap: Codable {
             var plannedID: UUID?; var title: String; var start: Date
             var pausedTotal: TimeInterval; var timingStyleRaw: String
+            var cameFromBackground: Bool?   // 并行接替标记（Optional：老快照缺此键照常解码）
         }
         struct RunSnap: Codable {
             var plannedID: UUID?; var title: String; var start: Date; var pausedTotal: TimeInterval
@@ -127,7 +131,8 @@ final class ExecutionViewModel {
         var snap = RunStateSnapshot()
         if let a = active {
             snap.active = .init(plannedID: a.plannedID, title: a.title, start: a.start,
-                                pausedTotal: a.pausedTotal, timingStyleRaw: a.timingStyle.rawValue)
+                                pausedTotal: a.pausedTotal, timingStyleRaw: a.timingStyle.rawValue,
+                                cameFromBackground: a.cameFromBackground)
         }
         snap.background = background.map { .init(plannedID: $0.plannedID, title: $0.title,
                                                  start: $0.start, pausedTotal: $0.pausedTotal) }
@@ -212,7 +217,8 @@ final class ExecutionViewModel {
         if let a = snap.active {
             active = ActiveBlock(plannedID: a.plannedID, title: a.title, start: a.start,
                                  pausedTotal: a.pausedTotal,
-                                 timingStyle: TimingStyle(rawValue: a.timingStyleRaw) ?? .light)
+                                 timingStyle: TimingStyle(rawValue: a.timingStyleRaw) ?? .light,
+                                 cameFromBackground: a.cameFromBackground ?? false)
         }
         background = snap.background.map { BackgroundRun(plannedID: $0.plannedID, title: $0.title,
                                                          start: $0.start, pausedTotal: $0.pausedTotal) }
@@ -244,7 +250,7 @@ final class ExecutionViewModel {
 
     // MARK: - 读取今日
 
-    /// 重建今日状态：计划从**真相库**读（带 timingStyle 等元数据），实际从日历读。
+    /// 重建今日状态：计划与实际都以 **PlanStore 真相源**为准（实际再 ∪ 带章日历=迁移+跨设备兜底）。
     func loadToday() async {
         restoreRunStateIfNeeded()   // 0.20：重启/清后台后，同逻辑日的计时原样接上
         do {
@@ -579,9 +585,37 @@ final class ExecutionViewModel {
 
     // MARK: - 动作
 
+    // MARK: 并行接替（点子 #20，2026-07-10 过审）
+
+    /// 前台完成后，「同时做」队首自动顶上「正在做」——计时无缝（沿用后台的 start/pausedTotal）、
+    /// 其余并行块顺位前移。**只在完成时接替**（空档挂机=用户有意留空前台，不抢位）。
+    /// 风格沿用计划块设置、但**绝不自动进番茄**（锁必须用户自己上，原则4④/7）→ 番茄降轻计时，转番茄用户手点。
+    private func promoteFirstBackgroundIfAny() {
+        guard active == nil, !background.isEmpty else { return }
+        let run = background.removeFirst()
+        let style = planned.first { $0.id == run.plannedID }?.timingStyle ?? .light
+        active = ActiveBlock(plannedID: run.plannedID, title: run.title, start: run.start,
+                             pausedTotal: run.pausedTotal,
+                             timingStyle: style == .pomodoro ? .light : style,
+                             cameFromBackground: true)
+        pomoRestAccumulated = 0   // 上一件的番茄残留不带给接替块
+        pomoTargetSegments = nil
+        DevLog.shared.info("执行", "并行接替：「\(run.title)」顶上前台续走（同时做剩 \(background.count) 件）")
+    }
+
+    /// 若当前前台块是并行接替自动顶上来的 → 放回「同时做」队首（计时保留），返回 true。
+    /// 「开始别件/换一件」不该终结它（接替前这两个动作本不影响后台块）；明确点「完成」才落实际。
+    private func demoteAutoPromotedActive() -> Bool {
+        guard let a = active, a.cameFromBackground else { return false }
+        background.insert(BackgroundRun(plannedID: a.plannedID, title: a.title,
+                                        start: a.start, pausedTotal: a.pausedTotal), at: 0)
+        active = nil
+        return true
+    }
+
     /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
     func startBlock(_ item: PlannedItem) async {
-        await recordActiveIfAny()
+        if !demoteAutoPromotedActive() { await recordActiveIfAny() }
         active = ActiveBlock(plannedID: item.id, title: item.title, start: .now,
                              timingStyle: item.timingStyle)
         selected = nil
@@ -621,8 +655,9 @@ final class ExecutionViewModel {
     }
 
     /// 换一件：结束当前 → 把目标设为「待开始」（**不立即开始**）；要再点「开始任务」才计时。
+    /// 接替上来的块例外：回「同时做」继续，不被结束（点子 #20 约束③）。
     func switchTo(_ item: PlannedItem) async {
-        await recordActiveIfAny()
+        if !demoteAutoPromotedActive() { await recordActiveIfAny() }
         active = nil
         pomoSegStart = nil
         selected = item
@@ -672,16 +707,18 @@ final class ExecutionViewModel {
         refreshPreview()
     }
 
-    /// 完成当前块 → 落盘 → 回到空档（不自动开下一件，由你按「下一件」）。
+    /// 完成当前块 → 落盘 → 「同时做」队首自动接替（点子 #20）；没有并行块才回空档。
     func completeCurrent() async {
         let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
         let doneSec = Int(currentElapsed)
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
+        promoteFirstBackgroundIfAny()           // 并行接替：B 顶上、C 前移（无并行块=原样回空档）
         persistRunState()
         refreshPreview()
         liveActivity.end()
+        if let s = liveSnapshot() { liveActivity.start(s) }   // 接替块继续占灵动岛/锁屏
         exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
     }
 
@@ -760,9 +797,13 @@ final class ExecutionViewModel {
 
     private func recordActiveIfAny() async {
         guard let a = active else { return }
-        // 收尾休息（若正暂停）：先把这段休息计入 pausedTotal
+        // 收尾休息（若正暂停）：先把这段休息计入 pausedTotal。
+        // 后台并行块也一起扣（bug 修 0.26.15：之前只扣前台——休息中直接完成/换走的话，
+        // isOnBreak 被清掉，这段冻结的休息会突然算进后台块的投入）。
         if isOnBreak, let bs = breakStart {
-            active?.pausedTotal += Date.now.timeIntervalSince(bs)
+            let pause = Date.now.timeIntervalSince(bs)
+            active?.pausedTotal += pause
+            for i in background.indices { background[i].pausedTotal += pause }
             isOnBreak = false
             breakStart = nil
         }
