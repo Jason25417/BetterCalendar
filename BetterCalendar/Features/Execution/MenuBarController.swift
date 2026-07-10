@@ -15,10 +15,14 @@ import SwiftUI
 /// menu bar 弹窗「保持打开」标记：中文输入法按空格选字会让 transient 弹窗关掉（候选窗抢焦点）——
 /// 「新事项」输入期间挂起自动关闭（applicationDefined），输入结束/取消恢复 transient。
 /// 点菜单栏图标始终可关（togglePopover 走 performClose，不受 behavior 影响）。
-@MainActor enum MenuBarPopoverHold { static var isHeld = false }
+@MainActor enum MenuBarPopoverHold {
+    static var isHeld = false
+    /// 弹窗即将重新打开 → 让面板清掉遗留的「新事项」输入态（防 hold 卡死/陈旧输入框）。
+    static let resetAdHocNotice = Notification.Name("bc.menubar.resetAdHoc")
+}
 
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private let model: ExecutionViewModel
@@ -40,6 +44,7 @@ final class MenuBarController: NSObject {
         }
 
         popover.behavior = .transient
+        popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: ExecutionPanel(model: model))
 
         // AppKit Timer + 字符串赋值：轻量、不失控（与 SwiftUI label 的周期重绘本质不同）
@@ -112,6 +117,18 @@ final class MenuBarController: NSObject {
 
     @objc private func openMain() { AppLifecycle.shared?.showMainWindow() }
     @objc private func quitApp() { AppLifecycle.shared?.reallyQuit() }
+
+    /// 弹窗生命周期兜底（0.26.19 修「点外面不自动收起」）：hold 标记只该活在"输入进行中且弹窗开着"——
+    /// 弹窗关了（不管怎么关的）必须复位，否则下次点外面永远关不掉；重新打开时也顺手清掉遗留的输入态。
+    func popoverDidClose(_ notification: Notification) {
+        MenuBarPopoverHold.isHeld = false
+        popover.behavior = .transient
+    }
+
+    func popoverWillShow(_ notification: Notification) {
+        // 上次弹窗是在「新事项」输入中被图标点关的 → 面板状态还留着输入框：通知它复位（同时清 hold）
+        NotificationCenter.default.post(name: MenuBarPopoverHold.resetAdHocNotice, object: nil)
+    }
 
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }

@@ -2020,6 +2020,88 @@ struct LogicTests {
         #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 2, done: 2, inWork: false) == 0)     // 做满
     }
 
+    // MARK: 端云并行（#13）+ 回填跨午夜整形 + 徽标 v2（0.26.19）
+
+    @Test func parserRaceFirstValidWins() async throws {
+        func plan(_ tag: String) -> ParsedPlan {
+            ParsedPlan(blocks: [], longTasks: [ParsedLongTask(title: tag, deadline: nil,
+                       cadenceMinutesPerWeek: nil, totalMinutes: nil, unitMinutes: nil)], isLoose: false)
+        }
+        // 端侧先到 → 端侧胜（云端被取消）
+        var r = try await FoundationModelsScheduleParser.race(
+            onDevice: { plan("端侧") },
+            cloud: { try? await Task.sleep(for: .milliseconds(300)); return plan("云端") })
+        #expect(r.longTasks.first?.title == "端侧")
+        // 端侧失手（nil）→ 云端胜
+        r = try await FoundationModelsScheduleParser.race(
+            onDevice: { nil },
+            cloud: { plan("云端") })
+        #expect(r.longTasks.first?.title == "云端")
+        // 云端先到 → 云端胜（端侧慢不拖累）
+        r = try await FoundationModelsScheduleParser.race(
+            onDevice: { try? await Task.sleep(for: .milliseconds(300)); return plan("端侧") },
+            cloud: { plan("云端") })
+        #expect(r.longTasks.first?.title == "云端")
+        // 双失 → 抛云端错误（干净失败态）
+        await #expect(throws: (any Error).self) {
+            _ = try await FoundationModelsScheduleParser.race(
+                onDevice: { nil },
+                cloud: { throw AnthropicError(message: "云端挂了") })
+        }
+    }
+
+    @Test func backfillSpanNormalizationKeepsMidnightWhole() {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: 23, minute: 30, second: 0, of: .now)!
+        // 模型把「23:30–0:30」的结束写成当天 0:30（end < start）→ 顺延次日、时长 1h
+        let sameDayEnd = cal.date(bySettingHour: 0, minute: 30, second: 0, of: start)!
+        var out = ReviewViewModel.normalizedSpans(
+            [EditableBlock(title: "看书", start: start, end: sameDayEnd)])[0]
+        #expect(out.end > out.start)
+        #expect(abs(out.end.timeIntervalSince(out.start) - 3600) < 61)
+        // 用户把结束时分改回同一天、日期挂在次日（10:00→次日18:00=32h）→ 收回一天（8h）
+        let s10 = cal.date(bySettingHour: 10, minute: 0, second: 0, of: .now)!
+        let nextDay18 = cal.date(byAdding: .day, value: 1,
+                                 to: cal.date(bySettingHour: 18, minute: 0, second: 0, of: .now)!)!
+        out = ReviewViewModel.normalizedSpans(
+            [EditableBlock(title: "写作", start: s10, end: nextDay18)])[0]
+        #expect(abs(out.end.timeIntervalSince(out.start) - 8 * 3600) < 61)
+        // 真跨午夜块（23:30–次日 01:00）原样保留
+        let nextDay1 = cal.date(byAdding: .day, value: 1,
+                                to: cal.date(bySettingHour: 1, minute: 0, second: 0, of: start)!)!
+        out = ReviewViewModel.normalizedSpans(
+            [EditableBlock(title: "夜聊", start: start, end: nextDay1)])[0]
+        #expect(abs(out.end.timeIntervalSince(out.start) - 5400) < 61)
+    }
+
+    /// 徽标 v2：亮标时算最新底但不套用（freshBase 快照）；保留我的编辑 → 熄标、本页不动。
+    @Test func freshnessCompareSnapshotAndChoices() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let started = StartedDayStore(persisted: false)
+        let today = DayContext.logicalDay(offset: 0)
+        let b = ScheduledBlock(title: "一件事", start: Date.now.addingTimeInterval(3600),
+                               end: Date.now.addingTimeInterval(2 * 3600))
+        try planStore.replacePlanned([b], on: today)
+        started.markStarted(today)
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub())
+        vm.targetDay = today
+        vm.loadConfirmedPlan()
+        vm.blocks[0].title = "改了名"
+        vm.delete(id: UUID())   // 只置未保存标记
+        vm.noteExecutionProgress()
+        #expect(vm.freshness == true)
+        #expect(vm.freshBase != nil)                 // 算了最新底、没套用
+        #expect(vm.freshBase?.first?.title == "一件事")
+        #expect(vm.blocks[0].title == "改了名")       // 本页原样
+        vm.keepMyDraft()                             // 保留我的编辑
+        #expect(vm.freshness == false)
+        #expect(vm.freshBase == nil)
+        #expect(vm.blocks[0].title == "改了名")
+        #expect(vm.hasUnsavedChanges == true)
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

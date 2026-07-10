@@ -170,34 +170,42 @@ final class HomeViewModel {
     /// **实时日 = 剩余精修台**（0.24 C2，「过去只读、未来可编」）：只加载未尘埃落定的块，
     /// 且以"从现在起"的现实为底（本地 V2 铺排，瞬时无 LLM）——所见即所改；候补块附在尾部照样可编辑。
     func loadConfirmedPlan() {
-        let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
-        if stored.isEmpty {
+        guard let base = computeFreshBase() else {
             // 这天没有已确认计划：之前显示的是别天加载来的就清掉；别动用户排的新草稿
             if draftSource == .loaded { blocks = []; draftSource = .empty }
             return
         }
-        if isLiveTargetDay {
-            let settled = progress?.settledPlannedIDs ?? []
-            let nowT = Date.now
-            let remaining = stored.filter { !settled.contains($0.id) && $0.end > nowT }
-            guard !remaining.isEmpty else {
-                if draftSource == .loaded { blocks = []; draftSource = .empty }
-                hasUnsavedChanges = false
-                return
-            }
-            let laid = ReflowLayoutV2.layOut(
-                flexible: remaining.filter { !$0.isFixed }.sorted { $0.start < $1.start },
-                fixed: remaining.filter(\.isFixed), from: nowT,
-                windDown: WorkHoursSettings.effectiveWindDown(from: nowT),
-                graceMinutes: WorkHoursSettings.graceMinutes)
-            blocks = (laid.scheduled + laid.deferred.sorted { $0.start < $1.start })
-                .map(EditableBlock.init(from:))
-        } else {
-            blocks = stored.map(EditableBlock.init(from:))
+        guard !base.isEmpty else {
+            // 实时日剩余为空（都做完/都流逝）
+            if draftSource == .loaded { blocks = []; draftSource = .empty }
+            hasUnsavedChanges = false
+            return
         }
+        blocks = base
         draftSource = .loaded
         hasUnsavedChanges = false
         committedCount = nil
+    }
+
+    /// 「算最新底但不套用」（徽标 v2 重构，2026-07-10）：目标日**此刻**的最新底——
+    /// 常规日=已确认计划；实时日=剩余从现在起 V2 铺排（=橙色预览同款口径，候补垫尾）。
+    /// nil=这天没有已确认计划；[]=实时日剩余为空。只计算、不改任何状态——
+    /// loadConfirmedPlan 拿它套用；徽标亮起时拿它做只读对比（freshBase）。
+    private func computeFreshBase() -> [EditableBlock]? {
+        let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
+        guard !stored.isEmpty else { return nil }
+        guard isLiveTargetDay else { return stored.map(EditableBlock.init(from:)) }
+        let settled = progress?.settledPlannedIDs ?? []
+        let nowT = Date.now
+        let remaining = stored.filter { !settled.contains($0.id) && $0.end > nowT }
+        guard !remaining.isEmpty else { return [] }
+        let laid = ReflowLayoutV2.layOut(
+            flexible: remaining.filter { !$0.isFixed }.sorted { $0.start < $1.start },
+            fixed: remaining.filter(\.isFixed), from: nowT,
+            windDown: WorkHoursSettings.effectiveWindDown(from: nowT),
+            graceMinutes: WorkHoursSettings.graceMinutes)
+        return (laid.scheduled + laid.deferred.sorted { $0.start < $1.start })
+            .map(EditableBlock.init(from:))
     }
 
     /// 进入排日程页时自动加载已保存计划（有未保存修改时绝不覆盖——文件模型）。
@@ -448,6 +456,7 @@ final class HomeViewModel {
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
             freshness = false           // 本页已成为最新（最后动作赢）
+            freshBase = nil
             persistDraft()
             // 松散日：静音早晚提醒（传 nil → 清掉旧的、不排新的）——退场姿态之一，不催不算账
             if looseDays?.isLoose(targetDay) ?? false {
@@ -486,21 +495,41 @@ final class HomeViewModel {
     /// 该日有未保存草稿页 → 静默还原那一页；否则加载该日已确认计划。
     // MARK: - 新鲜度（0.24 C2）
 
+    /// 徽标 v2「预览两边再选」（2026-07-10）：亮徽标那一刻的最新底快照（只算不套用，供只读对比）。
+    /// nil=没在对比状态。对比后二选一：adoptFreshBase（用最新）/ keepMyDraft（保留本页、熄标）。
+    private(set) var freshBase: [EditableBlock]?
+
     /// 真相源被外部改了（日历手改回流 / 他端同步）：干净 → 直接刷新；编辑中 → 亮徽标不打扰。
     func noteExternalPlanChange() {
-        if hasUnsavedChanges { freshnessSource = .calendarEdit; freshness = true } else { loadConfirmedPlan() }
+        if hasUnsavedChanges {
+            freshnessSource = .calendarEdit; freshness = true
+            freshBase = computeFreshBase()   // 算最新底但不套用（v2 对比用）
+        } else { loadConfirmedPlan() }
     }
 
     /// 执行进展变了（开始/完成/换件）：只影响实时日的精修台底。
     func noteExecutionProgress() {
         guard isLiveTargetDay else { return }
-        if hasUnsavedChanges { freshnessSource = .reflow; freshness = true } else { loadConfirmedPlan() }
+        if hasUnsavedChanges {
+            freshnessSource = .reflow; freshness = true
+            freshBase = computeFreshBase()
+        } else { loadConfirmedPlan() }
     }
 
     /// 「载入最新」：放弃本页未确认修改，回到当下最新的底（干净、无羞辱的显式选择）。
     func reloadFreshBase() {
         freshness = false
+        freshBase = nil
         discardDraft()
+    }
+
+    /// 对比后选「用最新的底」（=载入最新，语义同 reloadFreshBase，给对比视图一个明确动词）。
+    func adoptFreshBase() { reloadFreshBase() }
+
+    /// 对比后选「保留我的编辑」：熄徽标——最后动作赢，确认时以本页为准。
+    func keepMyDraft() {
+        freshness = false
+        freshBase = nil
     }
 
     private var suppressNextDayChangeReload = false
@@ -510,6 +539,7 @@ final class HomeViewModel {
         committedCount = nil
         arrangedCount = nil
         freshness = false
+        freshBase = nil
         if let snap = draftStore?.load(day: targetDay),
            snap.dirty ?? false, !snap.blocks.isEmpty {
             blocks = snap.blocks.map(\.editable)

@@ -31,6 +31,7 @@ struct HomeView: View {
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
+    @State private var showFreshCompare = false    // 徽标 v2：两版只读对比 sheet
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
     #else
@@ -247,12 +248,18 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                 }
 
-                // 新鲜度徽标（0.24 C2）：中性、不打断——底层变了，两个显式出路，绝不弹窗/自动合并
+                // 新鲜度徽标（0.24 C2 → v2 两边再选）：中性、不打断——底层变了，
+                // 三个显式出路：对比两版 / 载入最新 / 继续编辑。绝不弹窗打断、绝不自动合并。
                 if model.freshness {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.triangle.2.circlepath")
                         // 来源标注（v2）：先告诉用户这份最新从哪来，再让他决定
                         Text("这天有更新：\(model.freshnessSource.label)")
+                        if model.freshBase != nil {
+                            Button("对比两版…") { showFreshCompare = true }
+                                .buttonStyle(.plain).underline()
+                            Text("·").foregroundStyle(.secondary)
+                        }
                         Button("载入最新（放弃本页修改）") { model.reloadFreshBase() }
                             .buttonStyle(.plain).underline()
                         Text("· 或继续编辑，确认时以本页为准").foregroundStyle(.secondary)
@@ -261,6 +268,24 @@ struct HomeView: View {
                     .font(.caption)
                     .padding(6)
                     .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .sheet(isPresented: $showFreshCompare) {
+                        FreshCompareSheet(mine: model.blocks,
+                                          fresh: model.freshBase ?? [],
+                                          sourceLabel: model.freshnessSource.label,
+                                          onAdoptFresh: { model.adoptFreshBase(); showFreshCompare = false },
+                                          onKeepMine: { model.keepMyDraft(); showFreshCompare = false })
+                    }
+                }
+
+                // 实时橙色（SPEC §11，2026-07-10）：实时日的底=「从现在起」的橙色现实（与橙色预览同口径）——
+                // 明确告诉用户这页就是可编辑的橙色，reflow 会自动跟进（无编辑）或亮徽标（有编辑）。
+                if model.isLiveTargetDay, !model.blocks.isEmpty {
+                    HStack(spacing: 6) {
+                        Circle().fill(.orange).frame(width: 8, height: 8)
+                        Text("实时 · 从现在起（这就是橙色预览，改完确认即生效）")
+                            .font(.caption).foregroundStyle(.orange)
+                        Spacer()
+                    }
                 }
 
                 // 有块、或有未保存修改（含"删到空"）都保留写入区——否则删掉最后一件就没法确认保存
@@ -863,5 +888,71 @@ struct EditableRow: View {
         case .pomodoro: return "🍅 番茄"
         case .none: return "不计时"
         }
+    }
+}
+
+// MARK: - 徽标 v2「预览两边再选」（2026-07-10）：两版只读对比，用户看清差异再拍板。
+// 原则7：不自动合并、不替用户选——左=你的编辑（确认时生效），右=最新的底（reflow/日历改动后的现实）。
+
+struct FreshCompareSheet: View {
+    var mine: [EditableBlock]
+    var fresh: [EditableBlock]
+    var sourceLabel: String
+    var onAdoptFresh: () -> Void
+    var onKeepMine: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("两个版本，选一个继续").font(.headline)
+            Text("最新的底来自：\(sourceLabel)。只读对比——选哪版都不丢另一版的事实（真相源只在你确认时改）。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                column(title: "我的编辑（本页）", blocks: mine, accent: .blue)
+                column(title: "最新的底", blocks: fresh, accent: .orange)
+            }
+            HStack {
+                Spacer()
+                Button("保留我的编辑") { onKeepMine() }
+                Button("用最新的底") { onAdoptFresh() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 560, minHeight: 380)
+    }
+
+    @ViewBuilder private func column(title: String, blocks: [EditableBlock], accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: "list.bullet.rectangle")
+                .font(.subheadline.bold()).foregroundStyle(accent)
+            if blocks.isEmpty {
+                Text("（空）").font(.caption).foregroundStyle(.secondary)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(blocks) { b in
+                        HStack(spacing: 6) {
+                            Text(Self.hm(b.start) + "–" + Self.hm(b.end))
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Text(b.title).font(.caption).lineLimit(1)
+                            if b.isFixed { Text("固定").font(.caption2).foregroundStyle(.purple) }
+                            if b.isAnchor { Text("锚").font(.caption2).foregroundStyle(.brown) }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 2).padding(.horizontal, 6)
+                        .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private static func hm(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
+        return f.string(from: d)
     }
 }

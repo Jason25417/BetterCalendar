@@ -32,11 +32,54 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         guard CloudSettings.useOnDeviceParser else {
             return try await fallback.parse(text, referenceDate: referenceDate, context: context)
         }
+        // #13 端云并行（2026-07-10 Jason 拍板）：端侧与云端（自带三路对冲+10s 看门狗）**同时起跑**，
+        // 先到的有效结果胜出——端侧赢=免费/离线；端侧抽风或慢=云端兜着。不再串行「先端侧、失败再等云端」。
+        // LiveDraft：两路都可能边生成边冒块（最后写入者可见），胜出方的最终结果落草稿时统一替换。
+        return try await Self.race(
+            onDevice: { await self.onDeviceAttempt(text, referenceDate: referenceDate) },
+            cloud: { try await self.fallback.parse(text, referenceDate: referenceDate, context: context) })
+    }
+
+    /// 端云赛跑（纯编排、可单测）：onDevice 返回 nil=端侧未产出有效结果（关/不可用/失败/0 块）。
+    /// 云端错误只在端侧也失手后才抛（两路都空才算失败）。
+    static func race(onDevice: @escaping @Sendable () async -> ParsedPlan?,
+                     cloud: @escaping @Sendable () async throws -> ParsedPlan) async throws -> ParsedPlan {
+        enum Lane { case device(ParsedPlan?), cloud(Result<ParsedPlan, Error>) }
+        return try await withThrowingTaskGroup(of: Lane.self) { group in
+            group.addTask { .device(await onDevice()) }
+            group.addTask {
+                do { return .cloud(.success(try await cloud())) }
+                catch { return .cloud(.failure(error)) }
+            }
+            var deviceMissed = false
+            var cloudError: Error?
+            for try await lane in group {
+                switch lane {
+                case .device(let plan?):
+                    group.cancelAll()
+                    return plan
+                case .device(nil):
+                    deviceMissed = true
+                    if let e = cloudError { throw e }
+                case .cloud(.success(let plan)):
+                    group.cancelAll()
+                    return plan
+                case .cloud(.failure(let e)):
+                    cloudError = e
+                    if deviceMissed { throw e }
+                }
+            }
+            throw cloudError ?? AnthropicError(message: "解析失败（端云均无结果）")
+        }
+    }
+
+    /// 端侧单尝试：可用则流式生成；不可用/失败/0 块 → nil（交给赛跑汇总，不自己调云端）。
+    private func onDeviceAttempt(_ text: String, referenceDate: Date) async -> ParsedPlan? {
         switch SystemLanguageModel.default.availability {
         case .available: break
         default:
-            DevLog.shared.info("端侧解析", "Foundation Models 不可用 → 回退云端")
-            return try await fallback.parse(text, referenceDate: referenceDate, context: context)
+            DevLog.shared.info("端侧解析", "Foundation Models 不可用 → 等云端")
+            return nil
         }
         do {
             let session = LanguageModelSession(instructions: Self.instructions(referenceDate: referenceDate))
@@ -49,9 +92,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
                 liveDraft?.streaming = live.sorted { $0.start < $1.start }
             }
             liveDraft?.clear()
-            guard let final = last else {
-                return try await fallback.parse(text, referenceDate: referenceDate, context: context)
-            }
+            guard let final = last else { return nil }
             let blocks = (final.blocks ?? []).compactMap { Self.parsed(from: $0) }
             let longTasks = (final.longTasks ?? []).compactMap { lt -> ParsedLongTask? in
                 guard let t = lt.title, !t.isEmpty else { return nil }
@@ -60,15 +101,15 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
             }
             let loose = final.loose ?? false
             guard !blocks.isEmpty || !longTasks.isEmpty || loose else {
-                DevLog.shared.warn("端侧解析", "Foundation Models 返回 0 块 → 回退云端")
-                return try await fallback.parse(text, referenceDate: referenceDate, context: context)
+                DevLog.shared.warn("端侧解析", "Foundation Models 返回 0 块 → 等云端")
+                return nil
             }
-            DevLog.shared.info("端侧解析", "Foundation Models 成功 · \(blocks.count) 块（端侧·免费·流式）")
+            DevLog.shared.info("端侧解析", "Foundation Models 胜出 · \(blocks.count) 块（端侧·免费·流式）")
             return ParsedPlan(blocks: blocks, longTasks: longTasks, isLoose: loose)
         } catch {
             liveDraft?.clear()
-            DevLog.shared.warn("端侧解析", "Foundation Models 失败 → 回退云端：\(error.localizedDescription)")
-            return try await fallback.parse(text, referenceDate: referenceDate, context: context)
+            DevLog.shared.warn("端侧解析", "Foundation Models 失手 → 等云端：\(error.localizedDescription)")
+            return nil
         }
     }
 

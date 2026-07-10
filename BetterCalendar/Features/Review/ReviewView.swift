@@ -247,7 +247,9 @@ struct ReviewView: View {
             if !model.backfillBlocks.isEmpty {
                 List {
                     ForEach(model.backfillBlocks) { item in
+                        // referenceDay=逻辑日标签（0.26.19）：凌晨块（0–4 点）显「次日」、跨午夜块显「至次日」
                         EditableRow(block: model.binding(for: item.id),
+                                    referenceDay: DayContext.logicalStartOfDay(.now),
                                     onDelete: { model.deleteBackfill(id: item.id) })
                     }
                 }

@@ -157,17 +157,38 @@ final class ReviewViewModel {
         do {
             // 补一笔=记过去做的事 → isBackfill 关掉 now+5min 起排下限（否则约束把过去的事推到未来/丢弃）
             let decision = try await arrangeDay.full(text: t, context: ParseContext(isBackfill: true)).decision
-            backfillBlocks = decision.orderedBlocks.map(EditableBlock.init(from:))
+            backfillBlocks = Self.normalizedSpans(decision.orderedBlocks.map(EditableBlock.init(from:)))
         } catch {
             errorText = "解析失败：\(error.localizedDescription)"
         }
         isWorking = false
     }
 
+    /// 跨午夜时间分布整形（0.26.19，纯函数）：保证补一笔的每块**时长为正**、跨午夜块完整属于一条记录
+    /// （归桶按 start 的逻辑日 → 绝不拆到前一天/次日形成断档）。两条规则：
+    /// ① end ≤ start = 模型把「23:30 到 0:30」的结束写成了**当天** 0:30（该是次日）→ end 顺延到为正；
+    /// ② 时长离谱（>16h）且「把 end 拉回一天」仍为正 = 用户行内把结束时分改回了同一天
+    ///   （编辑器只改时分不改日期，日期还挂在次日）→ 收回一天；拉回会变负的（真跨午夜长块）不动。
+    static func normalizedSpans(_ blocks: [EditableBlock]) -> [EditableBlock] {
+        let cal = Calendar.current
+        return blocks.map { b in
+            var x = b
+            while x.end <= x.start {
+                x.end = cal.date(byAdding: .day, value: 1, to: x.end) ?? x.end.addingTimeInterval(86400)
+            }
+            if x.end.timeIntervalSince(x.start) > 16 * 3600,
+               let back = cal.date(byAdding: .day, value: -1, to: x.end), back > x.start {
+                x.end = back
+            }
+            return x
+        }
+    }
+
     /// 写蓝色实际日历：与已采集实际**合并**（保留 menu bar 攒的），再刷新对比。
     func confirmBackfill() async {
         guard !backfillBlocks.isEmpty else { return }
         isWorking = true; errorText = nil
+        backfillBlocks = Self.normalizedSpans(backfillBlocks)   // 用户行内编辑后再整形一次（编辑器只改时分）
         let newDrafts = backfillBlocks.sorted { $0.start < $1.start }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual,
                                blockID: $0.id)   // 回填的实际也盖章（草稿块 id）

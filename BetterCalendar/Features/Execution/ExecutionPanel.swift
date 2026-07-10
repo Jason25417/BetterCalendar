@@ -42,6 +42,12 @@ struct ExecutionPanel: View {
         .frame(width: 280)
         #endif
         .task { await model.loadToday() }
+        #if os(macOS)
+        // 弹窗重新打开 → 清掉遗留的「新事项」输入态（防 hold 卡死导致点外面关不掉，0.26.19）
+        .onReceive(NotificationCenter.default.publisher(for: MenuBarPopoverHold.resetAdHocNotice)) { _ in
+            if adHocKind != nil { resetAdHoc() }
+        }
+        #endif
         // 三选恢复（0.22.1 → 0.25.6 改带「不再询问」勾选 sheet）：退出/闪退/清后台前有任务在进行 → 问怎么接
         .sheet(isPresented: Binding(get: { model.pendingRunRestore != nil },
                                     set: { if !$0, model.pendingRunRestore != nil {
