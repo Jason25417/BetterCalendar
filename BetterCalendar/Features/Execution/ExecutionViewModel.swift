@@ -469,13 +469,40 @@ final class ExecutionViewModel {
     /// 联动开着时跑单测会把测试数据写进桥文件、驱动正在运行的游戏（幽灵番茄）。
     private func exportFocusState(event kind: String, completedTitle: String? = nil, completedSec: Int? = nil) {
         guard persistsRunState else { return }
-        let a: FocusStateExporter.State.Active? = active.map {
-            .init(title: $0.title, timingStyle: $0.timingStyle.rawValue, startedAt: $0.start,
-                  elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) })
+        let a: FocusStateExporter.State.Active? = active.map { blk in
+            // 终点对齐协议（Jason 2026-07-10）：BC 把"当前段/任务的结束钟点"算好推出去，游戏按终点反推。
+            // 休息暂停/番茄段切换都被折进 endsAt；tick（≤5 分）刷新时终点自动顺延——对齐永远稳。
+            var endsAt: Date?
+            var inRest: Bool?
+            var segRemain: Int?
+            var workSec: Int?
+            var restSec: Int?
+            if let phase = pomodoroPhase {
+                endsAt = Date.now.addingTimeInterval(max(0, phase.phaseLength - phase.elapsedInPhase))
+                inRest = phase.kind == .rest
+                workSec = Int(PomodoroTimer.work)
+                restSec = Int(PomodoroTimer.rest)
+                segRemain = Self.pomodoroSegmentsRemaining(target: pomoTargetSegments,
+                                                           done: pomoWorkSegmentsDone,
+                                                           inWork: phase.kind == .work)
+            } else if blk.timingStyle == .light, let planned = activePlannedDuration {
+                endsAt = Date.now.addingTimeInterval(max(0, planned - currentElapsed))
+            }
+            return .init(title: blk.title, timingStyle: blk.timingStyle.rawValue, startedAt: blk.start,
+                         elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) },
+                         endsAt: endsAt, inRest: inRest, segmentsRemaining: segRemain,
+                         workSec: workSec, restSec: restSec)
         }
         let ev = FocusStateExporter.State.Event(kind: kind, title: completedTitle ?? active?.title ?? "",
                                                 durationSec: completedSec)
         FocusStateExporter.write(active: a, event: ev)
+    }
+
+    /// 番茄"当前段之后还剩几个完整工作段"（纯函数、可单测）：nil 目标=不限段=-1；
+    /// 工作段进行中=当前这段不算剩余（target−done−1）；休息段中=下一段起全是剩余（target−done）。
+    static func pomodoroSegmentsRemaining(target: Int?, done: Int, inWork: Bool) -> Int {
+        guard let target else { return -1 }
+        return max(0, target - done - (inWork ? 1 : 0))
     }
 
     /// 当前这次休息已进行多久（仅休息中有意义）。

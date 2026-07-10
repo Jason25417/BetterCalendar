@@ -75,6 +75,20 @@ final class ReviewViewModel {
         }
     }
 
+    /// 聪音日历·日记槽摘要（2026-07-10 过审，含清单版）：只写做成的（含计划外标注）+ 尽早兑现 +
+    /// MVP + 有效投入。纯函数、可单测；空天返回空串（mod 不写）。绝不出现"没做成/完成率/逾期"。
+    static func chiyneDailySummary(comparison c: DayComparison?, mitDone: [String], mvpTitle: String?) -> String {
+        guard let c, c.accomplishedCount > 0 else { return "" }
+        var lines: [String] = []
+        let names = c.accomplished.map { $0.displayTitle + ($0.status == .extra ? "（计划外）" : "") }
+        lines.append("今天做成 \(c.accomplishedCount) 件：" + names.joined(separator: "、"))
+        if !mitDone.isEmpty { lines.append("🎯 想尽早的「\(mitDone.joined(separator: "」「"))」做成了") }
+        if let mvp = mvpTitle, !mvp.isEmpty { lines.append("⭐ 今日最有价值：\(mvp)") }
+        let m = c.effectiveMinutes
+        if m > 0 { lines.append(m >= 60 ? "有效投入 \(m / 60) 小时 \(m % 60) 分" : "有效投入 \(m) 分钟") }
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - 对比
 
     func load() async {
@@ -117,6 +131,10 @@ final class ReviewViewModel {
         mvpTitle = localStore.todayMVP
         mvpNote = localStore.todayMVPNote
         longTaskProgress = longTasks?.progressLine()
+        // 聪音日历·日记槽：复盘摘要出口（与待办投影同一把开关；测试 host 在 exporter 内部有防呆闸）
+        FocusStateExporter.writeDailySummary(
+            Self.chiyneDailySummary(comparison: comparison, mitDone: mitAccomplished, mvpTitle: mvpTitle),
+            logicalDay: DayContext.logicalStartOfDay(.now))
         isWorking = false
     }
 

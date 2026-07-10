@@ -1989,6 +1989,37 @@ struct LogicTests {
         #expect(items[1].done == false)
     }
 
+    // MARK: 聪音日历日档 + 终点对齐协议（0.26.17）
+
+    @Test func chiyneDailySummaryOnlyCelebratesAccomplished() {
+        // 空天/没做成 → 空串（mod 不写、不打扰）
+        #expect(ReviewViewModel.chiyneDailySummary(comparison: nil, mitDone: [], mvpTitle: nil) == "")
+        var c = DayComparison()
+        c.items = [
+            ComparedItem(status: .done, plannedTitle: "写代码", actualTitle: "写代码",
+                         plannedMinutes: 120, actualMinutes: 130, anchor: .now),
+            ComparedItem(status: .extra, plannedTitle: nil, actualTitle: "买菜",
+                         plannedMinutes: nil, actualMinutes: 20, anchor: .now),
+            ComparedItem(status: .missed, plannedTitle: "背单词", actualTitle: nil,
+                         plannedMinutes: 30, actualMinutes: nil, anchor: .now),
+        ]
+        let s = ReviewViewModel.chiyneDailySummary(comparison: c, mitDone: ["写代码"], mvpTitle: "写代码")
+        #expect(s.contains("做成 2 件"))
+        #expect(s.contains("买菜（计划外）"))
+        #expect(s.contains("🎯 想尽早的「写代码」做成了"))
+        #expect(s.contains("⭐ 今日最有价值：写代码"))
+        #expect(s.contains("有效投入 2 小时 30 分"))
+        #expect(!s.contains("背单词"))       // 羞辱铁律：没做成的绝不出现
+        #expect(!s.contains("完成率"))
+    }
+
+    @Test func pomodoroSegmentsRemainingMath() {
+        #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: nil, done: 0, inWork: true) == -1)   // 不限段
+        #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 3, done: 0, inWork: true) == 2)      // 第一段进行中
+        #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 3, done: 1, inWork: false) == 2)     // 休息段中
+        #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 2, done: 2, inWork: false) == 0)     // 做满
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

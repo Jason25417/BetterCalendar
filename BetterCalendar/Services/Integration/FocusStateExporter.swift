@@ -11,6 +11,10 @@
 import Foundation
 
 enum FocusStateExporter {
+    /// 测试 host 探测：CLI 单测与真 App 共享 UserDefaults/容器——测试绝不碰桥文件
+    /// （否则联动开着时跑单测会把测试数据推给正在运行的游戏）。集中在此，所有读写口都过这道闸。
+    private static var isTestHost: Bool { NSClassFromString("XCTestCase") != nil }
+
     /// 联动总开关（热切换）。关掉时顺手删掉状态文件——mod 靠文件在不在判断是否驱动。
     static var isEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "integration.chiyneSync") }
@@ -31,6 +35,13 @@ enum FocusStateExporter {
             var startedAt: Date
             var elapsedSec: Int
             var plannedSec: Int?      // 计划时长（轻计时的预算；nil=计划外）
+            // 终点对齐协议（Jason 2026-07-10 定）：BC 算好终点推给游戏、游戏按终点反推——
+            // 休息暂停/接替等都被 BC 折进 endsAt，游戏零计算误差；tick 刷新时终点自动顺延。
+            var endsAt: Date?             // 当前段/任务的预计结束时刻（轻计时=任务终点；番茄=当前段终点）
+            var inRest: Bool?             // 番茄：当前是否休息段
+            var segmentsRemaining: Int?   // 番茄：当前段之后还剩几个完整工作段；-1=不限段
+            var workSec: Int?             // 番茄：工作段长（秒）
+            var restSec: Int?             // 番茄：休息段长（秒）
         }
         struct Event: Codable {
             var kind: String          // start / complete / tick
@@ -58,7 +69,7 @@ enum FocusStateExporter {
     }
 
     static func write(active: State.Active?, event: State.Event?) {
-        guard isEnabled, let url = fileURL else { return }
+        guard !isTestHost, isEnabled, let url = fileURL else { return }
         let state = State(updatedAt: .now, active: active, lastEvent: event)
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
@@ -91,7 +102,7 @@ enum FocusStateExporter {
     }
 
     static func writeTodoProjection(_ items: [TodoItem]) {
-        guard isEnabled, todoProjectionEnabled, let url = bridgeURL("chiyne-todo.json") else { return }
+        guard !isTestHost, isEnabled, todoProjectionEnabled, let url = bridgeURL("chiyne-todo.json") else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         if let data = try? enc.encode(TodoProjection(updatedAt: .now, items: items)) {
@@ -102,7 +113,7 @@ enum FocusStateExporter {
     /// 游戏里勾完成的回流：读并删 chiyne-inbox.json，返回完成的计划块 id。
     /// 不 gate 在开关上：开关关掉前游戏里勾的完成仍然是用户亲手勾的，照常消化。
     static func consumeInbox() -> [UUID] {
-        guard let url = bridgeURL("chiyne-inbox.json"),
+        guard !isTestHost, let url = bridgeURL("chiyne-inbox.json"),
               FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url) else { return [] }
         try? FileManager.default.removeItem(at: url)
@@ -115,5 +126,27 @@ enum FocusStateExporter {
     static var hasPendingInbox: Bool {
         guard let url = bridgeURL("chiyne-inbox.json") else { return false }
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    // MARK: 日历日档·日记槽（2026-07-10 过审）：复盘正反馈摘要 → chiyne-daily.json →
+    // mod 追加进游戏日历当日日记（标记段替换=幂等、绝不覆盖用户手写；与待办投影同一把开关）。
+
+    static func writeDailySummary(_ summary: String, logicalDay: Date) {
+        guard !isTestHost, isEnabled, todoProjectionEnabled, !summary.isEmpty,
+              let url = bridgeURL("chiyne-daily.json") else { return }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        struct Daily: Codable {
+            var schemaVersion = 1
+            var updatedAt: Date
+            var date: String       // 逻辑日标签（凌晨复盘=写昨天那格）
+            var summary: String
+        }
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(Daily(updatedAt: .now, date: df.string(from: logicalDay), summary: summary)) {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 }
