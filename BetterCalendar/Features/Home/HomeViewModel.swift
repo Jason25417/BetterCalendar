@@ -474,7 +474,7 @@ final class HomeViewModel {
                 let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
                 await notifier.requestAuthorizationIfNeeded()
                 await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
-                                                      summary: "今天安排了 \(sorted.count) 件，开始吧。")
+                                                      summary: Self.morningSummary(for: sorted))
             }
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
@@ -485,6 +485,17 @@ final class HomeViewModel {
     // 「开始今天/晨间 reflow」已退役（0.23 A，SPEC §11 ①）：某逻辑日第一次真正开始一件事
     // （menu bar / 今天 tab 的 startBlock/startAlso）即进实时模式，重排由全天连续 reflow 后台完成；
     // 「塞不下」三选弹窗随之消失（产品债清偿——弹窗=羞辱，违 §3.3）。
+
+    /// 早通知小总结（0.28.1，Jason 定：带件数/重点）：件数只数任务（锚点不算）、有尽早★则点名、
+    /// 落点=第一件任务（前向：指向下一步动作）。纯函数、可单测。
+    static func morningSummary(for blocks: [EditableBlock]) -> String {
+        let tasks = blocks.filter { !$0.isAnchor }.sorted { $0.start < $1.start }
+        guard !tasks.isEmpty else { return "今天安排好了，开始吧。" }
+        var parts = ["今天 \(tasks.count) 件"]
+        if let mit = tasks.first(where: { $0.priority == .important }) { parts.append("尽早：\(mit.title)") }
+        if let first = tasks.first { parts.append("第一件：「\(first.title)」——准备好了就开始") }
+        return parts.joined(separator: " · ")
+    }
 
     /// 把时刻重锚到 day 所在日历日的逻辑日：时分不变；凌晨时分（0–4 点）落**次日**日历日
     /// （跨午夜段属同一逻辑日）。切目标日平移和行内时间编辑共用——编辑器只改时分不改日期，

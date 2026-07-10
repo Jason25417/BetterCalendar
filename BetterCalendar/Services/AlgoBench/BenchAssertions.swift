@@ -124,6 +124,12 @@ enum BenchAssertions {
             }
             return check(fa < fb, fa < fb ? "顺序正确" : "「\(e.title ?? "")」没排在「\(e.title2 ?? "")」前")
 
+        case .arrayOrderBefore:
+            let ia = blocks.firstIndex { TitleMatch.similarity($0.title, e.title ?? "") >= 0.6 }
+            let ib = blocks.firstIndex { TitleMatch.similarity($0.title, e.title2 ?? "") >= 0.6 }
+            guard let ia, let ib else { return check(false, "两块没都找到") }
+            return check(ia < ib, ia < ib ? "推荐顺序正确" : "「\(e.title ?? "")」没排在「\(e.title2 ?? "")」前")
+
         case .allWithinWindDown:
             guard let line = context.windDown?.addingTimeInterval(TimeInterval(context.graceMinutes * 60))
             else { return check(false, "用例缺收工线") }

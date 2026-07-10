@@ -15,12 +15,14 @@ nonisolated enum BenchCapability: String, Codable, CaseIterable, Sendable {
     case parse    // 自然语言 → 计划块
     case refine   // 草稿 + 一句指令 → 调整后草稿
     case reflow   // 剩余块从此刻重排
+    case arrange  // 排序+note（0.28.1：RuleBased 固化 vs LLM 对照）
 
     var label: String {
         switch self {
         case .parse: "解析"
         case .refine: "微调"
         case .reflow: "reflow"
+        case .arrange: "排序"
         }
     }
 }
@@ -70,6 +72,7 @@ nonisolated struct BenchExpectation: Codable, Sendable {
         case fixedFlag             // title + flag：匹配块的 isFixed 必须等于 flag（解析"雷打不动"）
         case sameStart             // title + title2：两块同一起点（并行）
         case orderBefore           // title 的起点必须早于 title2（eat-the-frog 等）
+        case arrayOrderBefore      // title 在输出**数组顺序**里必须先于 title2（arrange 推荐顺序用）
         case allWithinWindDown     // 排定块结束 ≤ 收工线+宽限（★与晚间豁免块除外）
         case deferredContains      // title：候补里必须有它
         case deferredNotContains   // title：候补里绝不能有它（★/晚间豁免）

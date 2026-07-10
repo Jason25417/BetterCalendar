@@ -36,6 +36,7 @@ final class BenchRunner {
         case .parse: result = await runParse(c, variant: variant, model: model)
         case .refine: result = await runRefine(c, variant: variant, model: model)
         case .reflow: result = await runReflow(c, variant: variant, graceMinutes: graceMinutes, model: model)
+        case .arrange: result = await runArrange(c, variant: variant, model: model)
         }
         if Self.cloudVariantIDs.contains(variant.id) { result.output.model = model ?? CloudSettings.activeModel }
         return result
@@ -297,6 +298,41 @@ final class BenchRunner {
         return BenchCaseResult(output: out, checks: checks)
     }
 
+    // MARK: - arrange（0.28.1：排序固化对照——规则 vs LLM）
+
+    private func runArrange(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
+        guard let r = reflowInputs(c) else { return Self.skipped("用例缺 blocks/fromHM 或时间无效") }
+        var out = BenchOutput()
+        let t0 = Date()
+        do {
+            let decision: PlanDecision
+            switch variant.id {
+            case BenchVariantID.arrangeRule:
+                decision = try await RuleBasedArranger().arrange(r.input, now: r.from)
+            case BenchVariantID.arrangeLLM:
+                if let reason = gate(variant) { return Self.skipped(reason) }
+                decision = try await LLMPlanningEngine(client: cloudClient(model),
+                                                       fallback: BenchFailFastPlanner())
+                    .arrange(r.input, now: r.from)
+                out.model = model ?? CloudSettings.activeModel
+            default:
+                return Self.skipped("未知排序变体")
+            }
+            out.blocks = decision.orderedBlocks   // ⚠️ 保持决策顺序（arrayOrderBefore 按数组序断言）
+            out.note = decision.note
+            out.latencyMS = Self.ms(since: t0)
+        } catch {
+            out.errorText = error.localizedDescription
+            out.latencyMS = Self.ms(since: t0)
+        }
+        let checks = BenchAssertions.evaluate(c.expects, output: out,
+                                              context: .init(referenceDay: referenceDay,
+                                                             inputBlocks: r.input,
+                                                             windDown: r.windDown,
+                                                             graceMinutes: 0))
+        return BenchCaseResult(output: out, checks: checks)
+    }
+
     // MARK: - 工具
 
     /// 变体运行前置条件（开关/key）；nil = 可跑。
@@ -305,7 +341,7 @@ final class BenchRunner {
         case BenchVariantID.parseFM, BenchVariantID.refineFM, BenchVariantID.refineFMGuard:
             return CloudSettings.useOnDeviceParser ? nil : "端侧开关未开（设置→进阶）"
         case BenchVariantID.parseCloud, BenchVariantID.refineCloud, BenchVariantID.refineCloudGuard,
-             BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2:
+             BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2, BenchVariantID.arrangeLLM:
             guard CloudSettings.useCloud else { return "云端开关未开" }
             let key = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount)
             return (key?.isEmpty == false) ? nil : "未配 API key（设置→云端）"
@@ -353,6 +389,18 @@ private nonisolated struct BenchReflowWire: Decodable {
 /// 无回退版兜底：被测实现失败时就地抛错（试验台要看到真实失败，不许静默回退）。
 private struct BenchFailFastParser: ScheduleParsing {
     func parse(_ text: String, referenceDate: Date) async throws -> ParsedPlan {
+        throw AnthropicError(message: "被测实现失败（试验台无回退，失败就地暴露）")
+    }
+}
+
+private struct BenchFailFastPlanner: PlanningEngine {
+    func arrange(_ blocks: [ScheduledBlock], now: Date) async throws -> PlanDecision {
+        throw AnthropicError(message: "被测实现失败（试验台无回退，失败就地暴露）")
+    }
+    func arrange(_ blocks: [ScheduledBlock], pool: [LongTaskBrief], now: Date) async throws -> PlanDecision {
+        throw AnthropicError(message: "被测实现失败（试验台无回退，失败就地暴露）")
+    }
+    func reflow(_ blocks: [ScheduledBlock], from startTime: Date, now: Date) async throws -> PlanDecision {
         throw AnthropicError(message: "被测实现失败（试验台无回退，失败就地暴露）")
     }
 }

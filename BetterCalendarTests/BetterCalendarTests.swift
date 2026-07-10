@@ -2155,6 +2155,43 @@ struct LogicTests {
         #expect(text?.contains("背单词") != true)              // 羞辱铁律
     }
 
+    // MARK: arrange 排序固化（0.28.1 候选，试验台对照中）+ 早通知小总结
+
+    @Test func ruleBasedArrangerOrdersMITThenDDLThenTime() async throws {
+        let anytime = ScheduledBlock(title: "杂务", start: at(2026, 7, 10, 9, 0), end: at(2026, 7, 10, 9, 30))
+        let ddlLate = ScheduledBlock(title: "交报销", start: at(2026, 7, 10, 15, 0),
+                                     end: at(2026, 7, 10, 15, 30), deadline: at(2026, 7, 10, 18, 0))
+        let ddlSoon = ScheduledBlock(title: "改简历", start: at(2026, 7, 10, 11, 0),
+                                     end: at(2026, 7, 10, 12, 0), deadline: at(2026, 7, 10, 14, 0))
+        let mit = ScheduledBlock(title: "写论文", start: at(2026, 7, 10, 10, 0),
+                                 end: at(2026, 7, 10, 12, 0), priority: .important)
+        let lunch = ScheduledBlock(title: "午饭", start: at(2026, 7, 10, 12, 30),
+                                   end: at(2026, 7, 10, 13, 0), isAnchor: true)
+        let d = try await RuleBasedArranger().arrange([anytime, ddlLate, ddlSoon, mit, lunch],
+                                                      now: at(2026, 7, 10, 8, 30))
+        #expect(d.orderedBlocks.map(\.title) == ["写论文", "改简历", "交报销", "杂务", "午饭"])
+        #expect(d.orderedBlocks.first { $0.title == "写论文" }?.start == mit.start)   // 时间绝不动
+        #expect(d.note?.contains("写论文") == true)                                    // note 点名 ★
+        // 无 ★ 有 DDL → note 点名最近截止；单件 → 专属句
+        let d2 = try await RuleBasedArranger().arrange([anytime, ddlSoon], now: at(2026, 7, 10, 8, 30))
+        #expect(d2.note?.contains("改简历") == true)
+        let d3 = try await RuleBasedArranger().arrange([anytime], now: at(2026, 7, 10, 8, 30))
+        #expect(d3.note == "今天就这一件，做完就赢。")
+    }
+
+    @Test func morningSummaryCountsTasksAndNamesFirst() {
+        let blocks = [
+            EditableBlock(title: "早饭", start: at(2026, 7, 10, 8, 0), end: at(2026, 7, 10, 8, 30), isAnchor: true),
+            EditableBlock(title: "写代码", start: at(2026, 7, 10, 9, 0), end: at(2026, 7, 10, 11, 0)),
+            EditableBlock(title: "健身", start: at(2026, 7, 10, 16, 0), end: at(2026, 7, 10, 17, 0),
+                          priority: .important),
+        ]
+        let s = HomeViewModel.morningSummary(for: blocks)
+        #expect(s.contains("今天 2 件"))                     // 锚点不计数
+        #expect(s.contains("尽早：健身"))
+        #expect(s.contains("第一件：「写代码」"))
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

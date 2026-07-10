@@ -24,6 +24,8 @@ enum BenchVariantID {
     static let refineFMGuard = "refine.fm.guard"
     static let refineCloud = "refine.cloud"
     static let refineCloudGuard = "refine.cloud.guard"
+    static let arrangeRule = "arrange.rule"
+    static let arrangeLLM = "arrange.llm"
     static let reflowNaiveV1 = "reflow.naive.v1"
     static let reflowLLMV1 = "reflow.llm.v1"
     static let reflowNaiveV2 = "reflow.naive.v2"
@@ -44,6 +46,10 @@ enum BenchVariants {
                      name: "云端微调（裸）", detail: "ClaudePlanRefiner 裸输出——量模型本身的服从性", frozen: false),
         BenchVariant(id: BenchVariantID.refineCloudGuard, capability: .refine,
                      name: "云端微调+防呆", detail: "ClaudePlanRefiner + guardRefineFlags（= 现行线上组合）", frozen: false),
+        BenchVariant(id: BenchVariantID.arrangeRule, capability: .arrange,
+                     name: "规则排序（候选固化）", detail: "RuleBasedArranger：尽早★→DDL 升序→原时间；note=本地文案库。零网络确定性", frozen: false),
+        BenchVariant(id: BenchVariantID.arrangeLLM, capability: .arrange,
+                     name: "LLM 排序（现行）", detail: "LLMPlanningEngine.arrange（服务商/模型=当前设置，无回退）", frozen: false),
         BenchVariant(id: BenchVariantID.reflowNaiveV1, capability: .reflow,
                      name: "本地 V1（旧现行 @0.22.x）", detail: "原顺序 + ReflowLayout；收工线不执法、铺到深夜（冻结快照）", frozen: true),
         BenchVariant(id: BenchVariantID.reflowLLMV1, capability: .reflow,

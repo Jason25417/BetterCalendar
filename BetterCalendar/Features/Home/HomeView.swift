@@ -119,10 +119,8 @@ struct HomeView: View {
                     intensity: SuggestionSettings.intensity.cap,
                     muted: SuggestionSettings.mutedTaskIDs)
                 ForEach(l3) { s in
-                    HStack(spacing: 8) {
-                        Image(systemName: "lightbulb").font(.caption).foregroundStyle(.orange)
-                        Text(s.text).font(.callout).foregroundStyle(.secondary)
-                        Spacer()
+                    // 统一消息条（0.28.1）：L3 建议与 A+B 状态行同一视觉家族（位置各守其位）
+                    MessageStrip(icon: "lightbulb", tint: .orange, text: s.text) {
                         if s.kind == .shelve {
                             Button("先放下") {
                                 if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
@@ -141,9 +139,6 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
                     }
-                    .padding(8)
-                    .background(Color.orange.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
                 // ===== 输入 / 动作区（渐进披露 v2·按时刻，0.26）=====
@@ -187,15 +182,15 @@ struct HomeView: View {
                     aiAdjustRow
                 }
 
-                // A 状态行（0.26 ABC）：确定性成功状态「✓ 排好 N 件」——与模型 note(B) 叠加
+                // A 状态行（0.26 ABC → 0.28.1 统一消息条）：确定性成功状态「✓ 排好 N 件」——与 note(B) 叠加
                 if let n = model.arrangedCount {
-                    Label("排好 \(n) 件", systemImage: "checkmark.circle.fill")
-                        .font(.callout.weight(.medium)).foregroundStyle(.green)
+                    MessageStrip(icon: "checkmark.circle.fill", tint: .green,
+                                 text: "排好 \(n) 件", textStyle: .primary)
                 }
                 // B：模型 note（宪法约束、温和前向）。防呆：抽风成「1」这种垃圾 → trim 后太短不显
                 if let note = model.note,
                    note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
-                    Text(note).font(.callout).foregroundStyle(.secondary)
+                    MessageStrip(icon: "quote.opening", tint: .blue, text: note)
                 }
                 if !model.pendingLongTasks.isEmpty {
                     Label("识别到未来事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「未来任务」",

@@ -191,6 +191,56 @@ final class BenchSuiteStore {
                     .init(kind: .deferredEmpty),
                     .init(kind: .blockCountExact, count: 2),
                   ]),
+
+        // ===== arrange 排序（0.28.1：规则固化 vs LLM 对照；断言=数组推荐顺序，不看时间）=====
+        BenchCase(id: "S1", name: "尽早★最前", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "整理邮箱", startHM: "09:00", durationMinutes: 30),
+                    .init(title: "写论文", startHM: "10:00", durationMinutes: 120, priority: "important"),
+                    .init(title: "读书", startHM: "14:00", durationMinutes: 60),
+                  ],
+                  fromHM: "08:30",
+                  expects: [
+                    .init(kind: .blockCountExact, count: 3),
+                    .init(kind: .arrayOrderBefore, title: "写论文", title2: "整理邮箱"),
+                    .init(kind: .arrayOrderBefore, title: "写论文", title2: "读书"),
+                    .init(kind: .fixedUnmoved),
+                  ]),
+        BenchCase(id: "S2", name: "DDL 升序其次", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "随时的杂务", startHM: "09:00", durationMinutes: 30),
+                    .init(title: "交报销", startHM: "15:00", durationMinutes: 30),
+                    .init(title: "改简历", startHM: "11:00", durationMinutes: 60),
+                  ],
+                  fromHM: "08:30",
+                  expects: [
+                    .init(kind: .blockCountExact, count: 3),
+                    .init(kind: .hasBlock, title: "交报销"),
+                    .init(kind: .hasBlock, title: "改简历"),
+                  ]),
+        BenchCase(id: "S3", name: "锚点不占推荐位", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "午饭", startHM: "12:30", durationMinutes: 30, isAnchor: true),
+                    .init(title: "写代码", startHM: "09:00", durationMinutes: 120),
+                    .init(title: "健身", startHM: "16:00", durationMinutes: 60, priority: "important"),
+                  ],
+                  fromHM: "08:30",
+                  expects: [
+                    .init(kind: .blockCountExact, count: 3),
+                    .init(kind: .arrayOrderBefore, title: "健身", title2: "写代码"),
+                    .init(kind: .arrayOrderBefore, title: "写代码", title2: "午饭"),
+                  ]),
+        BenchCase(id: "S4", name: "固定块时间绝不动", capability: .arrange, dimension: "服从性",
+                  blocks: [
+                    .init(title: "组会", startHM: "10:00", durationMinutes: 60, isFixed: true),
+                    .init(title: "写周报", startHM: "13:00", durationMinutes: 60, priority: "important"),
+                  ],
+                  fromHM: "09:00",
+                  expects: [
+                    .init(kind: .fixedUnmoved),
+                    .init(kind: .blockCountExact, count: 2),
+                    .init(kind: .arrayOrderBefore, title: "写周报", title2: "组会"),
+                  ]),
     ]
 
     private static let refineBase: [BenchBlockSpec] = [
