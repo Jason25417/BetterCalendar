@@ -19,6 +19,8 @@ import SwiftUI
     static var isHeld = false
     /// 弹窗即将重新打开 → 让面板清掉遗留的「新事项」输入态（防 hold 卡死/陈旧输入框）。
     static let resetAdHocNotice = Notification.Name("bc.menubar.resetAdHoc")
+    /// menu bar「回看今天」→ 主窗口切到日记页（BetterCalendarApp 观察）。
+    static let openJournalNotice = Notification.Name("bc.menubar.openJournal")
 }
 
 @MainActor

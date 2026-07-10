@@ -27,7 +27,9 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             router.primeNextStart = true
         case "bc.reminder.evening":
             router.selectedTab = .schedule
-            router.scheduleRequest = .review
+            // 0.28 提案A：复盘并入日记页 → 晚通知直达日记（复盘头+输入框都在那）
+            router.selectedTab = .journal
+            router.journalRequest = .now
         default:
             break
         }

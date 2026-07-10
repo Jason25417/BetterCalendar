@@ -81,7 +81,9 @@ final class AppContainer {
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
                                           calendarStore: routingStore, projection: projection,
                                           startedDays: startedDays)
-        self.reschedule = RescheduleService(planStore: planStore, planner: planner)
+        // L2 固化（2026-07-10 拍板）：reflow 默认走本地 V2（试验台 50/50 满分、瞬时、零出云）；
+        // LLM reflow 保留在试验台作对照。arrange 仍走 LLM（self.planner），待试验台跑分后再议。
+        self.reschedule = RescheduleService(planStore: planStore, planner: NaivePlanningEngine())
         #if os(iOS)
         self.liveActivity = ActivityKitLiveActivity()   // iOS：灵动岛 + 锁屏实时模块
         #else

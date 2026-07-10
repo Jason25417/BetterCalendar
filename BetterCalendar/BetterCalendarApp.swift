@@ -72,6 +72,11 @@ struct BetterCalendarApp: App {
                 handlePendingAppIntent()
                 consumePrimeNextStart()
             }
+            .onReceive(NotificationCenter.default.publisher(for: MenuBarPopoverHold.openJournalNotice)) { _ in
+                // menu bar「回看今天」（0.28 收口轻入口）→ 主窗口切到日记页、展开今天
+                container.router.selectedTab = .journal
+                container.router.journalRequest = .now
+            }
             #else
             .onAppear { handlePendingAppIntent(); consumePrimeNextStart() }
             #endif
@@ -122,8 +127,9 @@ struct BetterCalendarApp: App {
                 Task { await execution.markDone(titleLike: title) }
             }
         case .review:
-            container.router.selectedTab = .schedule
-            container.router.scheduleRequest = .review
+            // 0.28：复盘并入日记页——「今日复盘」快捷指令直达日记（回看今天在顶部）
+            container.router.selectedTab = .journal
+            container.router.journalRequest = .now
         }
     }
 

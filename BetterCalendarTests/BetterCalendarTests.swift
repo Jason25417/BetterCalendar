@@ -96,11 +96,13 @@ struct LogicTests {
     @Test func parsePromptIncludesBusyAndDueContext() async throws {
         let ctx = ParseContext(busy: [BusySlot(title: "牙医", start: at(2026,7,5,10), end: at(2026,7,5,11))],
                                dueReminders: ["交电费"])
-        // 云端 prompt 注入：已有日程/提醒进 system prompt
+        // 云端 prompt 注入：已占用时段/提醒进 system prompt。
+        // L1 脱敏（0.28）：busy 只传时段**不传标题**——避开时段不需要云端知道是什么事。
         let prompt = ClaudeScheduleParser.systemPrompt(referenceDate: at(2026,7,5,0), context: ctx)
-        #expect(prompt.contains("牙医"))
-        #expect(prompt.contains("交电费"))
-        #expect(prompt.contains("已有的安排"))
+        #expect(!prompt.contains("牙医"))                 // 标题绝不出云
+        #expect(prompt.contains("10:00–11:00（已占用）"))  // 时段仍在（避让能力不丢）
+        #expect(prompt.contains("交电费"))                 // 提醒标题保留（本就是要排的候选任务）
+        #expect(prompt.contains("已被占用的时段"))
     }
 
     @Test func decodePlanIsLenientToDirtyLLMOutput() {
@@ -2123,6 +2125,34 @@ struct LogicTests {
         #expect(r.scheduled.first { $0.title == "午饭" }?.start == at(2026, 7, 10, 13, 0))
         #expect(r.scheduled.first { $0.title == "长任务" }?.start == at(2026, 7, 10, 13, 30))
         #expect(r.deferred.isEmpty)   // 锚点绝不进候补
+    }
+
+    // MARK: 自动日记（0.28：15–30 秒最低闭环，本地模板、零出云）
+
+    @Test func autoJournalComposeOnlyCelebrates() {
+        // 空天 → nil（绝不生成「今天 0 件」）
+        #expect(AutoJournal.compose(comparison: nil) == nil)
+        var empty = DayComparison()
+        empty.items = [ComparedItem(status: .missed, plannedTitle: "背单词", actualTitle: nil,
+                                    plannedMinutes: 30, actualMinutes: nil, anchor: .now)]
+        #expect(AutoJournal.compose(comparison: empty) == nil)
+        // 有做成 → 首行 🤖 标记 + 做成清单 + 投入 + 鼓励语；没做成的绝不出现
+        var c = DayComparison()
+        c.items = [
+            ComparedItem(status: .done, plannedTitle: "写代码", actualTitle: "写代码",
+                         plannedMinutes: 60, actualMinutes: 70, anchor: .now),
+            ComparedItem(status: .extra, plannedTitle: nil, actualTitle: "买菜",
+                         plannedMinutes: nil, actualMinutes: 20, anchor: .now),
+            ComparedItem(status: .missed, plannedTitle: "背单词", actualTitle: nil,
+                         plannedMinutes: 30, actualMinutes: nil, anchor: .now),
+        ]
+        let text = AutoJournal.compose(comparison: c, pick: 0)
+        #expect(text?.hasPrefix("🤖 自动日记") == true)       // 与手写明显区分
+        #expect(text?.contains("做成 2 件") == true)
+        #expect(text?.contains("买菜（计划外）") == true)
+        #expect(text?.contains("1 小时 30 分") == true)
+        #expect(text?.contains(AutoJournal.encouragements[0]) == true)
+        #expect(text?.contains("背单词") != true)              // 羞辱铁律
     }
 
     // MARK: M9/R1 日记

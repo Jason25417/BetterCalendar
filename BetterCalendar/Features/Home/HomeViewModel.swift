@@ -158,6 +158,13 @@ final class HomeViewModel {
 
     // MARK: - 自动加载目标日计划（2026-07-01 Jason 定）
 
+    /// 收口信号（0.28 提案A）：实时日 且（剩余为空=都做完/都流逝 ∨ 已过收工线）——
+    /// 强结束信号，收口卡据此出现（还要叠加「今天还没记录」，由视图查日记）。
+    var wrapUpSignal: Bool {
+        guard isLiveTargetDay else { return false }
+        return blocks.isEmpty || Date.now >= WorkHoursSettings.effectiveWindDown(from: .now)
+    }
+
     /// 目标日是否处于实时模式（0.24 C2）：已开始 且 是逻辑今天——精修台只对"正在过的这一天"生效。
     var isLiveTargetDay: Bool {
         (startedDays?.isStarted(targetDay) ?? false)
@@ -445,6 +452,7 @@ final class HomeViewModel {
                     body: "今天 \(n.ddl.formatted(.dateTime.hour().minute())) 前要完成、约需 \(n.minutes) 分，现在开始还来得及")
             }
             committedCount = sorted.count
+            BehaviorLog.record("确认写入", "\(sorted.count) 件")
             committedToReal = (CalendarSettings.backend == .eventKit)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）

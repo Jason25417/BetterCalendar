@@ -665,6 +665,7 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.start(s) }
         exportFocusState(event: "start")   // 聪音：开始一件事→起番茄/专注
         syncFocusShortcut()
+        if persistsRunState { BehaviorLog.record("开始", item.title) }
     }
 
     /// 计划外临时事项直接开始（menu bar「+ 新事项…」，SPEC §11 ① 连带、点子 #1，2026-07-09 过审）：
@@ -756,6 +757,7 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.start(s) }   // 接替块继续占灵动岛/锁屏
         exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
         syncFocusShortcut()
+        if persistsRunState, let t = doneTitle { BehaviorLog.record("完成", t) }
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；

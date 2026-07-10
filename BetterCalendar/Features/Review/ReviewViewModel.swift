@@ -203,6 +203,7 @@ final class ReviewViewModel {
             try await calendarStore.write(
                 CalendarMerge.union(existing: existing, additions: newDrafts, kind: .actual))
             backfillCommitted = newDrafts.count
+            BehaviorLog.record("补一笔", "\(newDrafts.count) 项")
             backfillBlocks = []
             backfillText = ""
             await load()

@@ -161,10 +161,12 @@ struct ClaudeScheduleParser: ScheduleParsing {
             let tf = DateFormatter()
             tf.locale = Locale(identifier: "en_US_POSIX")
             tf.dateFormat = "HH:mm"
+            // L1 脱敏（2026-07-10 拍板）：只传时段不传标题——避开时段不需要知道是什么事；
+            // 重要性/优先级由解析产出的结构化字段承载，不靠云端看见日历内容。
             let lines = context.busy.prefix(15)
-                .map { "- \($0.title) \(tf.string(from: $0.start))–\(tf.string(from: $0.end))" }
+                .map { "- \(tf.string(from: $0.start))–\(tf.string(from: $0.end))（已占用）" }
                 .joined(separator: "\n")
-            contextSection += "\n目标日日历里**已有的安排**（时段已被占用，新块避开；仅用户明确要求时才与其重叠）：\n" + lines
+            contextSection += "\n目标日已被占用的时段（新块避开；仅用户明确要求时才与其重叠）：\n" + lines
         }
         if !context.dueReminders.isEmpty {
             let lines = context.dueReminders.prefix(10).map { "- \($0)" }.joined(separator: "\n")

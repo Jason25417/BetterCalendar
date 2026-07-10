@@ -8,7 +8,9 @@
 
 import SwiftUI
 
-struct ReviewView: View {
+/// 可嵌入的复盘面板（0.28 提案A：并入日记页「回看今天」头部；独立复盘页已退役）。
+/// 无自己的滚动容器/导航标题——宿主（日记页）提供；内容与原 ReviewView 一致。
+struct ReviewPanel: View {
     let container: AppContainer
     @State private var model: ReviewViewModel
 
@@ -19,14 +21,12 @@ struct ReviewView: View {
 
     var body: some View {
         @Bindable var model = model
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
                 if let c = model.comparison {
                     if model.isLooseToday {
                         // 松散日：复盘转"休息肯定"——不显对比/完成率/要紧事压力，措辞赋义（§5.12）
                         looseAffirmation(c)
                         if !c.accomplished.isEmpty { accomplishedSection(c) }
-                        writeTodayButton
                     } else {
                         summaryCard(c)
                         mitSection()
@@ -38,7 +38,6 @@ struct ReviewView: View {
                         }
                         calibrationSection(c)
                         shareSummaryButton(c)
-                        writeTodayButton
                     }
                 } else if model.isWorking {
                     ProgressView("正在读取今天…")
@@ -47,25 +46,10 @@ struct ReviewView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Divider()
-                backfillSection
-            }
-            .padding()
+            Divider()
+            backfillSection
         }
-        .navigationTitle("今日复盘")
         .task { await model.load() }
-    }
-
-    // 写下今天 → 切到日记页、打开当天条目（带入今天的情境）
-    private var writeTodayButton: some View {
-        Button {
-            container.router.journalRequest = .now
-            container.router.selectedTab = .journal
-        } label: {
-            Label("写下今天的感受", systemImage: "square.and.pencil").frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .padding(.top, 4)
     }
 
     private func shareSummaryButton(_ c: DayComparison) -> some View {

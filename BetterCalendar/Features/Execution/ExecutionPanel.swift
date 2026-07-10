@@ -209,6 +209,16 @@ struct ExecutionPanel: View {
             } else if model.loaded {
                 Text(model.planned.isEmpty ? "今天还没排计划" : "今天的计划都做完了 🎉")
                     .font(.caption).foregroundStyle(.secondary)
+                #if os(macOS)
+                // 收口轻入口（0.28）：做完即回看=最顺的时机；信号与排日程页收口卡同源（全完成）
+                if !model.planned.isEmpty {
+                    Button("回看今天 →") {
+                        AppLifecycle.shared?.showMainWindow()
+                        NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
+                    }
+                    .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.orange)
+                }
+                #endif
             }
         }
     }

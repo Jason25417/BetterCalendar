@@ -49,6 +49,12 @@ final class JournalStore {
         }
     }
 
+    /// 今天（逻辑日）是否已有记录（正文或心情）——收口卡用：记录过就不再邀请。**只读不创建**。
+    func hasContentToday(_ now: Date = .now) -> Bool {
+        guard let e = entry(forLogicalDay: now) else { return false }
+        return !e.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || e.mood != nil
+    }
+
     func save() { try? context.save() }
 
     func delete(_ entry: JournalEntry) {

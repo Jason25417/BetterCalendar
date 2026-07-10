@@ -53,6 +53,7 @@ struct JournalView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
+                            reviewHeader
                             todayCard
                             onThisDayCard
                             Divider()
@@ -133,6 +134,58 @@ struct JournalView: View {
     }
     private func loadPrompt() {
         Task { todayPrompt = await container.reflectionContext.todayPrompt() }
+    }
+
+    // MARK: 复盘头（0.28 提案A：复盘并入日记页，时刻驱动出现——过收工线才展开，白天不打扰）
+
+    @State private var showReviewNow = false
+
+    private var isEveningTime: Bool { Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) }
+
+    @ViewBuilder private var reviewHeader: some View {
+        if isEveningTime || showReviewNow {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("回看今天", systemImage: "sunset").font(.headline)
+                    Spacer()
+                    // 自动日记（0.28，Jason 设想）：15–30 秒最低闭环——本地模板生成简短鼓励型正文
+                    //（不出云、瞬时）；与手写明显区分（首行 🤖 标记 + 「自动日记」标签）。
+                    Button { Task { await applyAutoJournal() } } label: {
+                        Label("自动日记", systemImage: "wand.and.stars")
+                    }
+                    .help("用今天的做成记录自动生成一篇简短日记（可再编辑；与手写内容明显区分）")
+                }
+                ReviewPanel(container: container)
+            }
+            .padding()
+            .background(Color.orange.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            HStack(spacing: 8) {
+                Image(systemName: "sun.max").foregroundStyle(.secondary)
+                Text("今天还在进行——晚上回来回看这一天").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("现在就回看") { showReviewNow = true }
+                    .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 自动日记落笔：正文空 → 填入；已有手写 → 追加在后（空行分隔）；打「自动日记」标签。
+    private func applyAutoJournal() async {
+        guard let text = await container.reflectionContext.autoJournalText() else {
+            authFailedHint = nil
+            todayPrompt = "今天还没有做成记录——开始一件事，自动日记就有素材了。"
+            return
+        }
+        let e = today ?? model.todayEntry()
+        if e.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { e.body = text }
+        else { e.body += "\n\n" + text }
+        if !e.tags.contains("自动日记") { e.tags.append("自动日记") }
+        e.modifiedAt = .now
+        model.save()
+        today = e
+        BehaviorLog.record("自动日记", "生成 \(text.count) 字")
     }
 
     @ViewBuilder private var todayCard: some View {

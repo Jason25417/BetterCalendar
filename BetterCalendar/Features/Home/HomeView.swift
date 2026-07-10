@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 import AppKit
 #endif
 
-enum HomeRoute: Hashable { case review, preview }
+enum HomeRoute: Hashable { case preview }   // .review 已退役（0.28：复盘并入日记页）
 
 #if !os(macOS)
 /// iOS 分享用：把当前计划的 ICS 文本包成可分享的 .ics 文件（ShareLink）。
@@ -221,12 +221,25 @@ struct HomeView: View {
                 // 未来任务/在途：只在"说的时刻"出现（改/看时收起——渐进披露 v2）
                 if !showingPlanArea { ongoingSection }
 
-                // 复盘常驻入口：随时决定"这一天到此为止"、看看做成了什么（不只藏在工具栏图标里）
-                NavigationLink(value: HomeRoute.review) {
-                    Label("今日复盘 · 看看做成了什么", systemImage: "checkmark.seal")
-                        .font(.callout).frame(maxWidth: .infinity)
+                // 收口卡（0.28 提案A）：常驻复盘入口退役——只在「强结束信号 且 今天还没记录」时出现，
+                // 给一个流畅脱离工作安排、进入收尾的温和出口（红线：措辞绝不出现「还剩 N 件」）。
+                if model.wrapUpSignal, !container.journalStore.hasContentToday() {
+                    Button {
+                        container.router.selectedTab = .journal
+                        container.router.journalRequest = .now
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "sunset")
+                            Text("今天差不多收尾了——去记录今天")
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .font(.callout)
+                        .padding(10)
+                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.bordered)
 
                 // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
                 if let issue = DevLog.shared.lastIssue {
@@ -406,7 +419,6 @@ struct HomeView: View {
             .navigationTitle("BetterCalendar")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    NavigationLink(value: HomeRoute.review) { Label("今日复盘", systemImage: "checkmark.seal") }
                     NavigationLink(value: HomeRoute.preview) { Label("预览", systemImage: "calendar") }
                     #if os(macOS)
                     // 开发期：算法试验台（上架前随「可见报错」条款一起撤）
@@ -467,7 +479,6 @@ struct HomeView: View {
             #endif
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
-                case .review: ReviewView(container: container)
                 case .preview: CalendarPreviewView(store: container.calendarStore,
                                                    reminderStore: container.reminderStore)
                 }
@@ -480,7 +491,6 @@ struct HomeView: View {
                         model.inputText = text
                         Task { await model.arrange() }
                     }
-                case .review: navPath = [.review]
                 }
                 container.router.scheduleRequest = nil   // 消费掉
             }

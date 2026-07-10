@@ -8,12 +8,29 @@
 import SwiftUI
 
 struct DevLogView: View {
+    /// 通道筛选（0.28）：全部 / 仅问题（警告+错误）/ 行为（BehaviorLog 镜像，source=「行为」）。
+    enum Channel: String, CaseIterable { case all = "全部", issues = "仅问题", behavior = "行为" }
+    @State private var channel: Channel = .all
+
+    private var filtered: [DevLog.Entry] {
+        switch channel {
+        case .all: return DevLog.shared.entries
+        case .issues: return DevLog.shared.entries.filter { $0.level != .info }
+        case .behavior: return DevLog.shared.entries.filter { $0.source == "行为" }
+        }
+    }
+
     var body: some View {
         List {
-            if DevLog.shared.entries.isEmpty {
-                Text("暂无日志").foregroundStyle(.secondary)
+            Picker("通道", selection: $channel) {
+                ForEach(Channel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            ForEach(DevLog.shared.entries.reversed()) { e in
+            .pickerStyle(.segmented)
+            if filtered.isEmpty {
+                Text(channel == .behavior ? "还没有行为记录（确认写入/开始/完成…会记在这里，只存本地）" : "暂无日志")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(filtered.reversed()) { e in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Circle().fill(Self.color(e.level)).frame(width: 8, height: 8)
