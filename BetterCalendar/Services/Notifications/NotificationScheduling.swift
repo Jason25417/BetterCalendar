@@ -37,18 +37,37 @@ final class UNNotificationService: NotificationScheduling {
         }
     }
 
+    /// 静音埋点按天去重：松散日 loadToday 会反复调 cancel，一天记一条就够分析用
+    private static var lastMuteLogDay: Date?
+
     func cancelDailyReminders() {
         center.removePendingNotificationRequests(withIdentifiers: [Self.morningID, Self.eveningID])
+        // 埋点（调研 A 组地基）：静音也是事实——A3 要拿「没通知的日子」当对照组
+        let day = Calendar.current.startOfDay(for: .now)
+        if Self.lastMuteLogDay != day {
+            Self.lastMuteLogDay = day
+            BehaviorLog.record("通知静音", "早晚提醒已清（松散日或用户清计划）")
+        }
     }
 
     func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {
         center.removePendingNotificationRequests(withIdentifiers: [Self.morningID, Self.eveningID])
-        if let m = morning, m > .now {
-            await add(id: Self.morningID, title: "开始今天", body: summary, at: m)
+        if let m = morning, m > .now, await add(id: Self.morningID, title: "开始今天", body: summary, at: m) {
+            // 埋点口径：本地通知没有「已送达/已看到」回执，用**排定的触发时刻**近似发出时刻
+            BehaviorLog.record("通知排定", "早 \(Self.stamp(m)) · \(summary) ·口径=排定时刻(无送达回执)")
         }
-        if let e = evening, e > .now {
-            await add(id: Self.eveningID, title: "30 秒记录今天", body: "给今天收个尾吧——一句话、30 秒。", at: e)
+        if let e = evening, e > .now, await add(id: Self.eveningID, title: "30 秒记录今天",
+                                                body: "给今天收个尾吧——一句话、30 秒。", at: e) {
+            BehaviorLog.record("通知排定", "晚 \(Self.stamp(e)) ·口径=排定时刻(无送达回执)")
         }
+    }
+
+    /// 埋点用的触发时刻戳（本地时区、到分）——分析脚本按它算「通知→首次开始」间隔，别用 at 字段（那是排定动作的时刻）。
+    private static func stamp(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        return df.string(from: date)
     }
 
     func notifyNow(title: String, body: String) async {
@@ -80,7 +99,8 @@ final class UNNotificationService: NotificationScheduling {
                                                     trigger: req.trigger))
     }
 
-    private func add(id: String, title: String, body: String, at date: Date) async {
+    @discardableResult
+    private func add(id: String, title: String, body: String, at date: Date) async -> Bool {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -88,8 +108,10 @@ final class UNNotificationService: NotificationScheduling {
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         do {
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+            return true
         } catch {
             DevLog.shared.warn("通知", "排通知失败：\(error.localizedDescription)")
+            return false
         }
     }
 }

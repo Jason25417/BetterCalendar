@@ -741,6 +741,11 @@ final class ExecutionViewModel {
         persistRunState()
         await flushActuals()
         refreshPreview()
+        // 聪音（0.28.4 补协议缝）：后台完成也导出 complete——此前只有前台 completeCurrent 导出，
+        // 后台做成的事游戏永远收不到经验。mod v0.5 按「title ≠ 正在驱动的标题」识别后台完成，
+        // 手动按原生公式结算、不碰前台计时器。
+        exportFocusState(event: "complete", completedTitle: run.title, completedSec: Int(net))
+        if persistsRunState { BehaviorLog.record("完成", run.title + "（后台）") }
     }
 
     /// 完成当前块 → 落盘 → 「同时做」队首自动接替（点子 #20）；没有并行块才回空档。
