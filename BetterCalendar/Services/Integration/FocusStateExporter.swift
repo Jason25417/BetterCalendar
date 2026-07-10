@@ -50,14 +50,52 @@ enum FocusStateExporter {
         }
     }
 
-    /// 桥文件目录（沙盒容器内的 Application Support/BetterCalendar；mod 侧按容器路径优先来读）。
+    // MARK: 桥文件夹（0.28.3，TCC 修复）：macOS 的「其他 App 数据」保护会拦住游戏读 BC 沙盒容器——
+    // 解法=用户在设置里**选一次**真实文件夹（推荐 ~/Library/Application Support/BetterCalendar），
+    // security-scoped bookmark 持久授权：BC（沙盒）合法写、游戏（非沙盒）零 TCC 直读。容器路径作后备。
+
+    #if os(macOS)
+    private static let bookmarkKey = "integration.bridgeFolderBookmark"
+
+    /// 当前桥文件夹路径（nil=未设置，走容器后备）。设置页显示用。
+    static var bridgeFolderPath: String? { resolvedBridgeFolder()?.path }
+
+    static func setBridgeFolder(_ url: URL) {
+        if let data = try? url.bookmarkData(options: .withSecurityScope,
+                                            includingResourceValuesForKeys: nil, relativeTo: nil) {
+            UserDefaults.standard.set(data, forKey: bookmarkKey)
+            DevLog.shared.info("聪音", "桥文件夹已设为 \(url.path)（游戏可直读，无 TCC 阻拦）")
+        } else {
+            DevLog.shared.error("聪音", "桥文件夹书签创建失败：\(url.path)")
+        }
+    }
+
+    private static func resolvedBridgeFolder() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, options: .withSecurityScope,
+                                 relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
+        _ = url.startAccessingSecurityScopedResource()   // 桥是长期通道：App 存续期保持访问（简化不配对 stop）
+        return url
+    }
+    #endif
+
+    /// 桥文件目录：优先用户授权的真实文件夹（macOS）；后备=沙盒容器（游戏读容器会被 TCC 拦，仅兜底）。
     private static func bridgeURL(_ name: String) -> URL? {
+        #if os(macOS)
+        if let folder = resolvedBridgeFolder() {
+            return folder.appendingPathComponent(name)
+        }
+        #endif
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
         let bc = dir.appendingPathComponent("BetterCalendar", isDirectory: true)
         try? FileManager.default.createDirectory(at: bc, withIntermediateDirectories: true)
         return bc.appendingPathComponent(name)
     }
+
+    /// 写入链路可见化（开发期铁律：失败不静默）：首次成功/路径变化打 info、失败打 error。
+    private static var lastLoggedWritePath: String?
 
     private static var fileURL: URL? { bridgeURL("focus-state.json") }
 
@@ -73,8 +111,15 @@ enum FocusStateExporter {
         let state = State(updatedAt: .now, active: active, lastEvent: event)
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
-        if let data = try? enc.encode(state) {
-            try? data.write(to: url, options: .atomic)
+        guard let data = try? enc.encode(state) else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+            if lastLoggedWritePath != url.path {
+                lastLoggedWritePath = url.path
+                DevLog.shared.info("聪音", "状态已写入 \(url.path)")
+            }
+        } catch {
+            DevLog.shared.error("聪音", "状态写入失败（\(url.path)）：\(error.localizedDescription)")
         }
     }
 

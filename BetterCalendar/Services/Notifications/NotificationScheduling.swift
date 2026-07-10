@@ -47,7 +47,7 @@ final class UNNotificationService: NotificationScheduling {
             await add(id: Self.morningID, title: "开始今天", body: summary, at: m)
         }
         if let e = evening, e > .now {
-            await add(id: Self.eveningID, title: "30 秒记录今天", body: "做成的都替你记好了——花半分钟收个尾就好。", at: e)
+            await add(id: Self.eveningID, title: "30 秒记录今天", body: "给今天收个尾吧——一句话、30 秒。", at: e)
         }
     }
 

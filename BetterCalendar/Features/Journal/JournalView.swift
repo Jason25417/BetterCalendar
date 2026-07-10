@@ -199,6 +199,9 @@ struct JournalView: View {
                         .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 JournalEditor(entry: e, model: model, photoStore: container.photoStore)
+                // 功能说明（非提示催写，Jason 2026-07-10 定）：只告知能力存在，绝不出现「你还没写给明天」
+                Text("小知识：写一行「给明天：……」，明早会替你带给明天的自己。")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
             .padding()
             .background(Color.purple.opacity(0.06))

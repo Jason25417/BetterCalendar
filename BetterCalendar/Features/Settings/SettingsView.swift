@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct SettingsView: View {
     @State private var apiKey: String = ""
@@ -135,6 +138,16 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                     HStack {
+                        Button("选择桥文件夹（游戏联动必需）") { chooseBridgeFolder() }
+                        Text(FocusStateExporter.bridgeFolderPath ?? "未设置——游戏暂时读不到联动文件")
+                            .font(.caption)
+                            .foregroundStyle(FocusStateExporter.bridgeFolderPath == nil ? .orange : .secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Text("macOS 会保护 App 的私有数据，游戏读不到 BC 沙盒里的联动文件——在弹出的面板里直接点「打开」（已定位到推荐位置）授权一次即可，之后联动文件写在那里、游戏直读。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    HStack {
                         Button("一键添加「番茄⇄专注」快捷指令") { FocusShortcutRunner.importTemplates() }
                         Text("会弹出两个添加预览，各点一次「添加」即可").font(.caption).foregroundStyle(.secondary)
                     }
@@ -256,6 +269,28 @@ struct SettingsView: View {
             testing = false
         }
     }
+
+    #if os(macOS)
+    /// 桥文件夹选择（0.28.3，TCC 修复）：NSOpenPanel 定位到真实 ~/Library/Application Support/BetterCalendar，
+    /// 用户点「打开」= security-scoped 授权一次；之后联动文件写这里、游戏零 TCC 直读。
+    /// 沙盒里 homeDirectory 是容器家目录 → 用 getpwuid 取真实家目录来定位面板。
+    private func chooseBridgeFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "选定为桥文件夹"
+        panel.message = "推荐直接点「选定为桥文件夹」（已定位）；没有该文件夹就先新建一个"
+        if let pw = getpwuid(getuid()), let home = String(validatingUTF8: pw.pointee.pw_dir) {
+            panel.directoryURL = URL(fileURLWithPath: home)
+                .appendingPathComponent("Library/Application Support/BetterCalendar", isDirectory: true)
+        }
+        if panel.runModal() == .OK, let url = panel.url {
+            FocusStateExporter.setBridgeFolder(url)
+        }
+    }
+    #endif
 
     private func save() {
         if !apiKey.isEmpty {
