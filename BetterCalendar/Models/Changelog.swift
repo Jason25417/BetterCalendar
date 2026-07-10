@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.26.18", date: "2026-07", changes: [
+            "修 bug：menu bar「新事项」输入中文时，按空格选字不再把整个窗口关掉——输入期间窗口保持打开，输入结束/取消后恢复点外面即关；点菜单栏图标随时可关",
+        ]),
         ChangelogEntry(version: "0.26.17", date: "2026-07", changes: [
             "聪音联动·终点对齐：BC 把「这件事/这段番茄的结束钟点」直接推给游戏，游戏按终点反推计时——休息暂停、番茄段切换都被折算进终点，游戏后开也能秒级贴齐（不再自己算剩余时长）",
             "聪音联动·番茄接续：BC 番茄进行中打开游戏，游戏先跑完当前段剩余、休息一段、再按剩余段数继续（不限段按 4 段兜底）",

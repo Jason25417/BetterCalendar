@@ -12,6 +12,11 @@
 import AppKit
 import SwiftUI
 
+/// menu bar 弹窗「保持打开」标记：中文输入法按空格选字会让 transient 弹窗关掉（候选窗抢焦点）——
+/// 「新事项」输入期间挂起自动关闭（applicationDefined），输入结束/取消恢复 transient。
+/// 点菜单栏图标始终可关（togglePopover 走 performClose，不受 behavior 影响）。
+@MainActor enum MenuBarPopoverHold { static var isHeld = false }
+
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
@@ -45,6 +50,9 @@ final class MenuBarController: NSObject {
 
     @objc private func tick() {
         updateTitle()
+        // 「新事项」输入中 → 挂起弹窗自动关闭（中文空格选字不再误关）；结束即恢复瞬态
+        let want: NSPopover.Behavior = MenuBarPopoverHold.isHeld ? .applicationDefined : .transient
+        if popover.behavior != want { popover.behavior = want }
         // 蓝色实时增长 + 橙色A（自节流 5 分）：正在做时把蓝块延长到此刻、清掉被越过的橙块。不调 LLM。
         if model.shouldGrowActive { Task { await model.growActiveActual() } }
         // 聪音回流：游戏里勾完成 → inbox 文件出现 → 消化成 BC 完成（文件探测轻量；重复触发幂等）

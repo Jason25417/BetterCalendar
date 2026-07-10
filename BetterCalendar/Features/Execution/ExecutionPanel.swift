@@ -121,7 +121,15 @@ struct ExecutionPanel: View {
 
     private func openAdHoc(_ kind: AdHocKind) {
         adHocKind = kind; adHocTitle = ""; adHocStyle = .light
+        setPopoverHold(true)   // 输入期间挂起弹窗自动关闭（中文空格选字不误关）
         DispatchQueue.main.async { adHocFocused = true }
+    }
+
+    /// macOS：新事项输入中 → menu bar 弹窗不自动关（transient 会被输入法候选窗抢焦点误关）。
+    private func setPopoverHold(_ hold: Bool) {
+        #if os(macOS)
+        MenuBarPopoverHold.isHeld = hold
+        #endif
     }
 
     private func commitAdHoc(_ kind: AdHocKind) {
@@ -134,7 +142,7 @@ struct ExecutionPanel: View {
         resetAdHoc()
     }
 
-    private func resetAdHoc() { adHocKind = nil; adHocTitle = ""; adHocStyle = .light }
+    private func resetAdHoc() { adHocKind = nil; adHocTitle = ""; adHocStyle = .light; setPopoverHold(false) }
 
     static func styleLabel(_ s: TimingStyle) -> String {
         switch s { case .pomodoro: "🍅番茄"; case .light: "轻计时"; case .none: "不计时" }
