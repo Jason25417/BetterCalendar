@@ -127,6 +127,12 @@ struct SettingsView: View {
                         set: { FocusStateExporter.isEnabled = $0 }))
                     Text("开启后，开始/完成事项、计时进度会写进本地 focus-state.json，供聪音的 mod 读来驱动番茄/情绪/经验值（需另装 mod）。关掉即停、删文件。")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    Toggle("聪音待办投影（今天的事项进游戏待办）", isOn: Binding(
+                        get: { FocusStateExporter.todoProjectionEnabled },
+                        set: { FocusStateExporter.todoProjectionEnabled = $0 }))
+                    Text("需先开聪音联动。把今天的事项同步成游戏里的「Better Calendar」待办清单：BC 完成的自动勾上；游戏里勾完成会回流记成 BC 完成。mod 首次写入前会自动备份游戏存档。")
+                        .font(.caption).foregroundStyle(.secondary)
                     #endif
 
                     Stepper(value: $pomoLimit, in: 0...7) {

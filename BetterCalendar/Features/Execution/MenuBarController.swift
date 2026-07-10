@@ -47,6 +47,12 @@ final class MenuBarController: NSObject {
         updateTitle()
         // 蓝色实时增长 + 橙色A（自节流 5 分）：正在做时把蓝块延长到此刻、清掉被越过的橙块。不调 LLM。
         if model.shouldGrowActive { Task { await model.growActiveActual() } }
+        // 聪音回流：游戏里勾完成 → inbox 文件出现 → 消化成 BC 完成（文件探测轻量；重复触发幂等）
+        if FocusStateExporter.hasPendingInbox { Task { await model.consumeChiyneInbox() } }
+        // 任务进行中途才开联动开关：状态文件缺失就补写一份，聪音立即接上（不等下个事件/5 分 tick）
+        if FocusStateExporter.isEnabled, model.active != nil, !FocusStateExporter.stateFileExists {
+            model.exportFocusStateNow()
+        }
     }
 
     /// 直接显示**当前计时状态**（2026-07-09 Jason）：计时 / 不计时 / 番茄，而不只一个计时按钮。

@@ -1945,6 +1945,50 @@ struct LogicTests {
         #expect(offenders.isEmpty, "白名单外从日历读数据：\(offenders)——计划/实际请读 PlanStore 真相源")
     }
 
+    // MARK: 聪音待办投影 + 回流（SPEC §11 过审，0.26.16）
+
+    @Test func chiyneCompleteByPlanIDMarksDoneIdempotently() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let planStore = PlanStore(context: container.mainContext)
+        let day = DayContext.logicalStartOfDay(.now)
+        let s = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        let coding = ScheduledBlock(title: "写代码", start: s, end: s.addingTimeInterval(3600))
+        let reading = ScheduledBlock(title: "读书", start: s.addingTimeInterval(3600), end: s.addingTimeInterval(7200))
+        try planStore.replacePlanned([coding, reading], on: day)
+        let vm = ExecutionViewModel(
+            calendarStore: FakeCalendarStore(),
+            reschedule: RescheduleService(planStore: planStore, planner: NaivePlanningEngine()),
+            planStore: planStore, reminderStore: FakeReminderStore(),
+            liveActivity: NoLiveActivity(), persistsRunState: false)
+        await vm.loadToday()
+        await vm.complete(planID: coding.id)      // 计划块 → 按计划时段记实际
+        await vm.waitForPreview()
+        #expect(vm.doneCount == 1)
+        #expect(try planStore.actualBlocks(on: day).contains { $0.id == coding.id })
+        await vm.complete(planID: coding.id)      // 幂等：重复回流不翻倍
+        await vm.complete(planID: UUID())         // 不认识的 id 忽略
+        #expect(vm.doneCount == 1)
+        // 后台并行块回流 → completeBackground 路径（净时长口径）
+        let item = vm.planned.first { $0.id == reading.id }!
+        vm.startAlso(item)
+        await vm.complete(planID: reading.id)
+        await vm.waitForPreview()
+        #expect(vm.doneCount == 2)
+        #expect(vm.background.isEmpty)
+    }
+
+    @Test func chiyneTodoProjectionItemsCarryIDTitleDone() {
+        let a = ExecutionViewModel.PlannedItem(title: "写代码", start: .now, end: .now.addingTimeInterval(3600))
+        let b = ExecutionViewModel.PlannedItem(title: "读书", start: .now, end: .now.addingTimeInterval(7200))
+        let items = ExecutionViewModel.todoProjectionItems(planned: [a, b]) { $0.id == a.id }
+        #expect(items.count == 2)
+        #expect(items[0].id == a.id.uuidString)
+        #expect(items[0].done == true)
+        #expect(items[1].title == "读书")
+        #expect(items[1].done == false)
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

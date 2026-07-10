@@ -306,7 +306,7 @@ final class ExecutionViewModel {
                 }
             }
             loaded = true
-            publishWidgetSnapshot()
+            publishIntegrations()
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.warn("执行", "读取今日计划/实际失败：\(error.localizedDescription)")
@@ -465,7 +465,10 @@ final class ExecutionViewModel {
     }
 
     /// 聪音联动（2026-07-10）：把当前专注状态写出 focus-state.json（仅设置开「聪音联动」时真写）。
+    /// ⚠️ gate 在 persistsRunState：CLI 测试 host 与真 App 共享 UserDefaults/容器——不 gate 的话
+    /// 联动开着时跑单测会把测试数据写进桥文件、驱动正在运行的游戏（幽灵番茄）。
     private func exportFocusState(event kind: String, completedTitle: String? = nil, completedSec: Int? = nil) {
+        guard persistsRunState else { return }
         let a: FocusStateExporter.State.Active? = active.map {
             .init(title: $0.title, timingStyle: $0.timingStyle.rawValue, startedAt: $0.start,
                   elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) })
@@ -915,12 +918,52 @@ final class ExecutionViewModel {
                                        blockID: $0.id)   // 橙也盖章：挪时间只改不删建
                 })
             }
-            publishWidgetSnapshot()   // 每次动作后的重排点 = 小组件刷新点
+            publishIntegrations()   // 每次动作后的重排点 = 小组件 + 聪音投影 刷新点
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.warn("reflow", "更新橙色预览失败：\(error.localizedDescription)")
         }
     }
+
+    // MARK: 聪音待办投影 + 回流（SPEC §11 过审 2026-07-10）
+
+    /// 小组件快照 + 聪音待办投影：状态落定点统一从这里发布。
+    private func publishIntegrations() {
+        publishWidgetSnapshot()
+        guard persistsRunState else { return }   // 测试 host 共享真容器：单测不写桥文件（见 exportFocusState 注释）
+        FocusStateExporter.writeTodoProjection(
+            Self.todoProjectionItems(planned: planned, isDone: isDone))
+    }
+
+    /// 投影内容（纯函数、可单测）：今天的计划事项 {id, title, done}（锚点在 loadToday 已剔除）。
+    static func todoProjectionItems(planned: [PlannedItem],
+                                    isDone: (PlannedItem) -> Bool) -> [FocusStateExporter.TodoItem] {
+        planned.map { .init(id: $0.id.uuidString, title: $0.title, done: isDone($0)) }
+    }
+
+    /// 聪音回流：游戏里勾完成 → 记 BC 完成（=手动完成的又一入口，同「提醒打勾」先例；§5.13 仍是手动）。
+    func consumeChiyneInbox() async {
+        let ids = FocusStateExporter.consumeInbox()
+        guard !ids.isEmpty else { return }
+        if !loaded { await loadToday() }
+        for id in ids { await complete(planID: id) }
+        DevLog.shared.info("聪音", "游戏里勾完成回流 \(ids.count) 件")
+    }
+
+    /// 按计划块 id 完成：前台→completeCurrent（保真计时）；后台并行→completeBackground；
+    /// 其余计划块→按计划时段记实际（同「提醒打勾」被动信号口径）。已完成/不认识的 id 忽略（幂等）。
+    func complete(planID id: UUID) async {
+        if active?.plannedID == id { await completeCurrent(); return }
+        if let run = background.first(where: { $0.plannedID == id }) { await completeBackground(run.id); return }
+        guard let item = planned.first(where: { $0.id == id }), !isDone(item) else { return }
+        done.append(ActualRecord(plannedID: item.id, title: item.title, start: item.start, end: item.end))
+        await flushActuals()
+        await updatePreview()
+    }
+
+    /// 立即补写一份聪音状态（menu bar tick 发现"联动开着+有任务在进行+状态文件缺失"时调；
+    /// 场景=任务进行中途才开联动开关，不用等下一个事件/5 分 tick）。
+    func exportFocusStateNow() { exportFocusState(event: "tick") }
 }
 
 // MARK: - 执行进展只读接缝（0.24 C2）：精修台的"过去只读"边界数据源

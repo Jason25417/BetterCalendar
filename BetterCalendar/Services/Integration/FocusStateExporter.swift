@@ -39,12 +39,22 @@ enum FocusStateExporter {
         }
     }
 
-    private static var fileURL: URL? {
+    /// 桥文件目录（沙盒容器内的 Application Support/BetterCalendar；mod 侧按容器路径优先来读）。
+    private static func bridgeURL(_ name: String) -> URL? {
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
         let bc = dir.appendingPathComponent("BetterCalendar", isDirectory: true)
         try? FileManager.default.createDirectory(at: bc, withIntermediateDirectories: true)
-        return bc.appendingPathComponent("focus-state.json")
+        return bc.appendingPathComponent(name)
+    }
+
+    private static var fileURL: URL? { bridgeURL("focus-state.json") }
+
+    /// 状态文件是否已存在（menu bar tick 用：联动开着+有任务在进行+文件缺失 → 补写一份，
+    /// 让"任务进行中途才开开关"也立即接上，不用等下一个事件）。
+    static var stateFileExists: Bool {
+        guard let url = fileURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     static func write(active: State.Active?, event: State.Event?) {
@@ -55,5 +65,55 @@ enum FocusStateExporter {
         if let data = try? enc.encode(state) {
             try? data.write(to: url, options: .atomic)
         }
+    }
+
+    // MARK: 待办投影（SPEC §11 过审 2026-07-10）：今天的事项 → chiyne-todo.json → 游戏「Better Calendar」清单；
+    // 游戏里勾完成 → mod 写 chiyne-inbox.json 回容器 → consumeInbox 消化成 BC 完成（同「提醒打勾」先例）。
+
+    /// 待办投影开关（默认关）。mod 侧会写游戏存档（首次写入前 mod 自动备份）；关掉即删投影文件。
+    static var todoProjectionEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "integration.chiyneTodoProjection") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "integration.chiyneTodoProjection")
+            if !newValue { try? bridgeURL("chiyne-todo.json").map { try FileManager.default.removeItem(at: $0) } }
+        }
+    }
+
+    struct TodoItem: Codable {
+        var id: String       // PlanBlock UUID 字符串（mod 藏进待办文本、回流按它认块）
+        var title: String
+        var done: Bool
+    }
+    private struct TodoProjection: Codable {
+        var schemaVersion = 1
+        var updatedAt: Date
+        var items: [TodoItem]
+    }
+
+    static func writeTodoProjection(_ items: [TodoItem]) {
+        guard isEnabled, todoProjectionEnabled, let url = bridgeURL("chiyne-todo.json") else { return }
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(TodoProjection(updatedAt: .now, items: items)) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// 游戏里勾完成的回流：读并删 chiyne-inbox.json，返回完成的计划块 id。
+    /// 不 gate 在开关上：开关关掉前游戏里勾的完成仍然是用户亲手勾的，照常消化。
+    static func consumeInbox() -> [UUID] {
+        guard let url = bridgeURL("chiyne-inbox.json"),
+              FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url) else { return [] }
+        try? FileManager.default.removeItem(at: url)
+        struct Inbox: Codable { var completedIDs: [String] }
+        let ids = (try? JSONDecoder().decode(Inbox.self, from: data))?.completedIDs ?? []
+        return ids.compactMap(UUID.init(uuidString:))
+    }
+
+    /// 是否有待消化的回流（menu bar tick 的轻量探测，只查文件存在）。
+    static var hasPendingInbox: Bool {
+        guard let url = bridgeURL("chiyne-inbox.json") else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
     }
 }
