@@ -18,7 +18,8 @@ final class ReviewViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let localStore: ReviewLocalStore
     private let longTasks: LongTaskStore?   // 长线推进行（M10-3）；nil=不显示
-    private let planStore: PlanReading?     // 只读角色：复盘只看计划，永不写（读锚点标题跳过对比；nil=不跳）
+    // 复盘：读计划 + 读/写蓝色实际（A2 后真相在 PlanStore；补一笔写这里=即时可读、无 EventKit 缓存竞态）。nil=测试可省。
+    private let planStore: (PlanReading & ActualReading & ActualWriting)?
     private let looseDays: LooseDayStore?    // 松散日 → 复盘转"休息肯定"（§5.12）；nil=不转
 
     /// 今天是否松散日 → 复盘转肯定（不显对比/完成率，措辞赋义）。
@@ -45,7 +46,7 @@ final class ReviewViewModel {
 
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
-         longTasks: LongTaskStore? = nil, planStore: PlanReading? = nil,
+         longTasks: LongTaskStore? = nil, planStore: (PlanReading & ActualReading & ActualWriting)? = nil,
          looseDays: LooseDayStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
@@ -79,8 +80,16 @@ final class ReviewViewModel {
     func load() async {
         isWorking = true; errorText = nil
         do {
-            let actual = try await calendarStore.read(kind: .actual)
-                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+            // 实际：A2 后真相在 PlanStore（读它=补一笔即时可见、无 EventKit 缓存竞态）；再并入带章、真相源还没有的日历实际。
+            let label = DayContext.logicalStartOfDay(.now)
+            let stored = (try? planStore?.actualBlocks(on: label)) ?? []
+            var actual = stored.map { CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end,
+                                                         kind: .actual, blockID: $0.id) }
+            let storedIDs = Set(stored.map(\.id))
+            for c in ((try? await calendarStore.read(kind: .actual)) ?? [])
+            where DayContext.isSameLogicalDay(c.start, .now) {
+                if let bid = c.blockID, !storedIDs.contains(bid) { actual.append(c) }
+            }
             // 绿色淡出地基（§5.10 原则6.4）：绿色计划从 PlanStore **真相源**读，不再从日历读——
             // 这样绿色即使从 Apple 日历常驻淡出，签名功能「计划×实际」对比依然成立。
             // 传**逻辑日标签**（凌晨 1 点复盘=复盘昨晚这一天）：计划与实际两侧同一逻辑日窗口，完成度不错位。
@@ -128,7 +137,8 @@ final class ReviewViewModel {
         guard !t.isEmpty else { return }
         isWorking = true; backfillCommitted = nil; errorText = nil
         do {
-            let decision = try await arrangeDay(text: t)   // referenceDate 默认今天
+            // 补一笔=记过去做的事 → isBackfill 关掉 now+5min 起排下限（否则约束把过去的事推到未来/丢弃）
+            let decision = try await arrangeDay.full(text: t, context: ParseContext(isBackfill: true)).decision
             backfillBlocks = decision.orderedBlocks.map(EditableBlock.init(from:))
         } catch {
             errorText = "解析失败：\(error.localizedDescription)"
@@ -145,8 +155,12 @@ final class ReviewViewModel {
                                blockID: $0.id)   // 回填的实际也盖章（草稿块 id）
         }
         do {
+            // A2 真相源：补一笔先 upsert 进 PlanStore（即时可读、load() 立刻能对比出来，无 EventKit 竞态）
+            try? planStore?.upsertActuals(backfillBlocks.map {
+                ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end)
+            })
             let existing = try await calendarStore.read(kind: .actual)
-            // union 去重（同 标题+起始分钟 = 同一事件），比裸拼接稳：重复确认不产生双份
+            // 再投影日历（union 去重：同 标题+起始分钟=同一事件，重复确认不双份）
             try await calendarStore.write(
                 CalendarMerge.union(existing: existing, additions: newDrafts, kind: .actual))
             backfillCommitted = newDrafts.count

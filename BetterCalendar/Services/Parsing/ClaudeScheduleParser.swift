@@ -170,7 +170,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
         你把用户用自然语言描述的一天，转成结构化日程。
         现在真实时间：\(realNow)。**目标日：\(target)**——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。
         目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
-        \(isToday ? "**排今天时：没给具体时间的弹性块，最早从 \(earliest5)（现在+5 分、留启动缓冲）起排，不要排在此刻或更早**；用户明确给了时间的块按用户说的（哪怕已过去也照写）。" : "")
+        \((isToday && !context.isBackfill) ? "**排今天时：没给具体时间的弹性块，最早从 \(earliest5)（现在+5 分、留启动缓冲）起排，不要排在此刻或更早**；用户明确给了时间的块按用户说的（哪怕已过去也照写）。" : "")
         只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
         {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
         start/end 用 24 小时制本地时间。

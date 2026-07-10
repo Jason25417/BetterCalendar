@@ -140,6 +140,7 @@ struct ParseContext: Sendable {
     var busy: [BusySlot] = []
     var dueReminders: [String] = []
     var pool: [LongTaskBrief] = []   // 长期任务池（C/L1：识别"今天做N小时长期任务"委托→生成具体块）
+    var isBackfill: Bool = false     // 复盘「补一笔今日完成事件」=记**过去**做的事 → 不套 now+5min 起排下限
     var isEmpty: Bool { busy.isEmpty && dueReminders.isEmpty }
 }
 
