@@ -11,6 +11,7 @@
 //
 
 #if os(macOS)
+import AppKit
 import Foundation
 
 enum FocusShortcutRunner {
@@ -27,6 +28,27 @@ enum FocusShortcutRunner {
 
     static func pomodoroDidStart() { run(startShortcut, phase: "开始") }
     static func pomodoroDidEnd() { run(endShortcut, phase: "结束") }
+
+    // MARK: 一键导入（#22，2026-07-10 Jason 提供 iCloud 模板链接）：
+    // 快捷指令无法由 App 程序化创建（格式私有+需签名）——业界「一键」= 预制模板的 iCloud 分享链接，
+    // 打开后系统弹「添加快捷指令」预览、用户各确认一次；名字与预填对齐，添加完即通。
+
+    static let templateStartName = "BC 开启专注"
+    static let templateEndName = "BC 关闭专注"
+    private static let templateStartURL = "https://www.icloud.com/shortcuts/4a7def817f204342a0ac9ea8931e3d5a"
+    private static let templateEndURL = "https://www.icloud.com/shortcuts/82898b49175b4f63a4d598c759ad7c8e"
+
+    /// 打开两个模板的添加页 + 预填名字（不覆盖用户已填的自定义名）。
+    static func importTemplates() {
+        if startShortcut.trimmingCharacters(in: .whitespaces).isEmpty { startShortcut = templateStartName }
+        if endShortcut.trimmingCharacters(in: .whitespaces).isEmpty { endShortcut = templateEndName }
+        if let u = URL(string: templateStartURL) { NSWorkspace.shared.open(u) }
+        // 第二个稍错开：两个导入预览同时弹会叠在一起
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if let u = URL(string: templateEndURL) { NSWorkspace.shared.open(u) }
+        }
+        DevLog.shared.info("专注", "已打开两个快捷指令模板的添加页（各确认一次即可）")
+    }
 
     /// 后台线程执行（AppleScript 会阻塞到快捷指令跑完/TCC 授权响应，不能占主线程）。
     private static func run(_ name: String, phase: String) {

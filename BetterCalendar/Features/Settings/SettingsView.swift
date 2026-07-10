@@ -134,6 +134,10 @@ struct SettingsView: View {
                     Text("需先开聪音联动。把今天的事项同步成游戏里的「Better Calendar」待办清单：BC 完成的自动勾上；游戏里勾完成会回流记成 BC 完成。mod 首次写入前会自动备份游戏存档。")
                         .font(.caption).foregroundStyle(.secondary)
 
+                    HStack {
+                        Button("一键添加「番茄⇄专注」快捷指令") { FocusShortcutRunner.importTemplates() }
+                        Text("会弹出两个添加预览，各点一次「添加」即可").font(.caption).foregroundStyle(.secondary)
+                    }
                     TextField("番茄开始时执行的快捷指令名（留空不启用）", text: Binding(
                         get: { FocusShortcutRunner.startShortcut },
                         set: { FocusShortcutRunner.startShortcut = $0 }))
@@ -142,7 +146,7 @@ struct SettingsView: View {
                         get: { FocusShortcutRunner.endShortcut },
                         set: { FocusShortcutRunner.endShortcut = $0 }))
                         .textFieldStyle(.roundedBorder)
-                    Text("番茄 ⇄ 系统专注：在「快捷指令」App 各建一个含「设定专注」动作的快捷指令（如 开启工作专注/关闭专注），把名字填这里——番茄开始/结束时无界面自动执行，不跳转（首次执行系统会弹一次授权）。")
+                    Text("番茄 ⇄ 系统专注：番茄开始/结束时无界面执行上面的快捷指令（首次执行系统弹一次授权）。用「一键添加」装模板（开工作专注/关专注），或自己建含「设定专注」动作的快捷指令再填名字；想换开哪个专注=编辑快捷指令里那一处。")
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 

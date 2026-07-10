@@ -55,9 +55,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     @objc private func tick() {
         updateTitle()
-        // 「新事项」输入中 → 挂起弹窗自动关闭（中文空格选字不再误关）；结束即恢复瞬态
-        let want: NSPopover.Behavior = MenuBarPopoverHold.isHeld ? .applicationDefined : .transient
-        if popover.behavior != want { popover.behavior = want }
         // 蓝色实时增长 + 橙色A（自节流 5 分）：正在做时把蓝块延长到此刻、清掉被越过的橙块。不调 LLM。
         if model.shouldGrowActive { Task { await model.growActiveActual() } }
         // 聪音回流：游戏里勾完成 → inbox 文件出现 → 消化成 BC 完成（文件探测轻量；重复触发幂等）
@@ -118,11 +115,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     @objc private func openMain() { AppLifecycle.shared?.showMainWindow() }
     @objc private func quitApp() { AppLifecycle.shared?.reallyQuit() }
 
+    /// 空格误关的正解（0.27.1）：behavior 在弹窗已显示后改动**不生效**（transient 监听 show 时装好）——
+    /// 改用 delegate 否决：每次瞬态关闭前都会问这里，「新事项」输入中一律驳回（输入法候选窗抢焦点、
+    /// 点外面都关不掉）；图标点击走 close() 强制关、不经此问。实时生效、无 1 秒竞态。
+    func popoverShouldClose(_ popover: NSPopover) -> Bool { !MenuBarPopoverHold.isHeld }
+
     /// 弹窗生命周期兜底（0.26.19 修「点外面不自动收起」）：hold 标记只该活在"输入进行中且弹窗开着"——
     /// 弹窗关了（不管怎么关的）必须复位，否则下次点外面永远关不掉；重新打开时也顺手清掉遗留的输入态。
     func popoverDidClose(_ notification: Notification) {
         MenuBarPopoverHold.isHeld = false
-        popover.behavior = .transient
     }
 
     func popoverWillShow(_ notification: Notification) {
@@ -133,7 +134,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
-            popover.performClose(nil)
+            popover.close()   // 强制关（不经 popoverShouldClose）：图标点击永远能关，即使输入进行中
         } else {
             Task { await model.loadToday() }   // 打开即刷新今日
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
