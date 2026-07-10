@@ -135,21 +135,29 @@ struct HomeView: View {
                     MessageStrip(icon: "lightbulb", tint: .orange, text: s.text) {
                         if s.kind == .shelve {
                             Button("先放下") {
+                                BehaviorLog.record("L3建议", "点「先放下」")
                                 if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
                                     container.longTasks.shelve(t)
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                         } else {
                             Button("排进今天") {
+                                BehaviorLog.record("L3建议", "点「排进今天」")
                                 if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
                                     model.smartInsertFromLongTask(t)
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                         }
-                        Button { SuggestionSettings.mute(s.id); l3Tick += 1 } label: {
+                        Button {
+                            BehaviorLog.record("L3建议", "静音（别再提）")
+                            SuggestionSettings.mute(s.id); l3Tick += 1
+                        } label: {
                             Image(systemName: "xmark").font(.caption2)
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
+                    }
+                    .onAppear {   // 埋点：出现按 (天, 建议) 去重
+                        BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现")
                     }
                 }
 
@@ -240,6 +248,7 @@ struct HomeView: View {
                 // 给一个流畅脱离工作安排、进入收尾的温和出口（红线：措辞绝不出现「还剩 N 件」）。
                 if model.wrapUpSignal, !container.journalStore.hasContentToday() {
                     Button {
+                        BehaviorLog.record("收口卡", "点击进日记")
                         container.router.selectedTab = .journal
                         container.router.journalRequest = .now
                     } label: {
@@ -254,6 +263,10 @@ struct HomeView: View {
                         .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
+                    .onAppear {   // 埋点（调研 B 组）：出现按天去重 + 触发信号
+                        BehaviorLog.recordOncePerDay(key: "收口卡",
+                            "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : "过收工线")")
+                    }
                 }
 
                 // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
@@ -283,7 +296,7 @@ struct HomeView: View {
                                  text: "这天有更新：\(model.freshnessSource.label)") {
                         HStack(spacing: 6) {
                             if model.freshBase != nil {
-                                Button("对比两版…") { showFreshCompare = true }
+                                Button("对比两版…") { BehaviorLog.record("徽标", "打开对比两版"); showFreshCompare = true }
                                     .buttonStyle(.plain).underline()
                             }
                             Button("载入最新") { model.reloadFreshBase() }

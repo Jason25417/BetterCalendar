@@ -29,6 +29,32 @@ struct ExecutionFocusFilter: SetFocusFilterIntent {
     }
 }
 
+/// 分心自动休息·iOS 腿（#26 V1，2026-07-11）：iOS 不开放前台 App 检测（隐私设计），
+/// 走**快捷指令个人自动化**——用户建「当打开〔某 App〕→ 运行 自动休息开始」「当关闭 → 自动休息结束」，
+/// 系统在后台调 perform 直达执行状态。mac 上这两个指令同样可用（给不想开感知器的人手动/脚本触发）。
+/// 红线同 mac 感知：日志只记「自动休息」，绝不记是哪个 App 触发的。
+struct StartAutoBreakIntent: AppIntent {
+    static var title: LocalizedStringResource = "自动休息开始"
+    static var description = IntentDescription(
+        "给快捷指令自动化用：打开分心 App 时调用，正在专注的计时自动暂停（休息）。空档或已在休息则什么都不做。")
+
+    func perform() async throws -> some IntentResult {
+        await ExecutionBridge.shared?.distractionAutoBreak(true)
+        return .result()
+    }
+}
+
+struct EndAutoBreakIntent: AppIntent {
+    static var title: LocalizedStringResource = "自动休息结束"
+    static var description = IntentDescription(
+        "给快捷指令自动化用：离开分心 App 时调用，自动结束刚才的自动休息、计时继续。只收自动开的休息，不动手动休息。")
+
+    func perform() async throws -> some IntentResult {
+        await ExecutionBridge.shared?.distractionAutoBreak(false)
+        return .result()
+    }
+}
+
 /// 供进程内 App Intents 直达执行状态（Focus 变化时系统可能后台拉起 App 执行 perform，
 /// 组装点建好容器即挂上——与 AppIntentRequest 的"排队等前台消费"不同，休息切换需要即时生效）。
 @MainActor

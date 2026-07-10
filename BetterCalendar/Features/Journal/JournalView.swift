@@ -54,6 +54,16 @@ struct JournalView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             reviewHeader
+                            // 成就静默解锁（#27）：零通知——只在日记页安静出一条，点 ✕ 收起；全景在工具栏 🏅
+                            ForEach(container.milestones.freshlyUnlocked) { m in
+                                MessageStrip(icon: "seal.fill", tint: .orange,
+                                             text: "\(m.title)——\(m.line)") {
+                                    Button { container.milestones.acknowledgeFresh() } label: {
+                                        Image(systemName: "xmark").font(.caption2)
+                                    }
+                                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                                }
+                            }
                             todayCard
                             onThisDayCard
                             Divider()
@@ -67,6 +77,12 @@ struct JournalView: View {
             .toolbar {
                 if !locked {
                     ToolbarItem(placement: .primaryAction) { exportButton }
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink { AchievementsView(store: container.milestones) } label: {
+                            Label("成就", systemImage: "seal")
+                        }
+                        .help("累计里程碑——只做加法，没有断签")
+                    }
                 }
             }
             .navigationDestination(for: JournalEntry.self) { e in
@@ -76,6 +92,7 @@ struct JournalView: View {
         .onAppear {
             if locked { unlock() }
             openTodayIfNeeded()
+            container.milestones.refresh()   // 成就检查（天级节奏：进日记页时看看有没有新点亮）
         }
         .onChange(of: scenePhase) { _, phase in
             // 退后台自动重新上锁（下次回前台需再解锁）
@@ -160,6 +177,10 @@ struct JournalView: View {
             .padding()
             .background(Color.orange.opacity(0.06))
             .clipShape(RoundedRectangle(cornerRadius: 12))
+            .onAppear {   // 埋点（调研 B 组）：复盘头展开方式（自动=过收工线 / 手动提前），按天去重
+                BehaviorLog.recordOncePerDay(key: "复盘头", "复盘头",
+                                             "展开·\(isEveningTime ? "自动（过收工线）" : "手动提前")")
+            }
         } else {
             HStack(spacing: 8) {
                 Image(systemName: "sun.max").foregroundStyle(.secondary)

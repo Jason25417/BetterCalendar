@@ -314,6 +314,14 @@ struct ExecutionPanel: View {
             .buttonStyle(.borderedProminent)
             // 「换一件」退役（0.21）：事件名按钮已收编；空位给「计时」切换菜单
             HStack { timingMenu; alsoMenu; breakButton }
+            // 分心自动休息的撤销口（#26 红线④）：感知误判（其实在查资料）→ 一键把那段算回投入。
+            // 只在自动休息刚结束的 10 分钟内出现；判定权在用户。
+            if model.canUndoAutoBreak {
+                Button { model.undoLastAutoBreak() } label: {
+                    Label("刚才不算休息（算回投入）", systemImage: "arrow.uturn.backward")
+                }
+                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
+            }
         } else if let s = model.selected {
             Button { Task { await model.startSelected() } } label: {
                 Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)

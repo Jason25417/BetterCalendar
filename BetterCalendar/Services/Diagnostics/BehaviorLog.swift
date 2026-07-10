@@ -46,6 +46,23 @@ enum BehaviorLog {
         }
     }
 
+    /// 「出现」类事件按天去重（0.30，调研埋点补全）：收口卡/L3/复盘头这类每次渲染都触发的信号，
+    /// 一天记一条就够分析用——否则滚动一次页面刷十条，日志变噪声。key 唯一标识信号源。
+    static func recordOncePerDay(key: String, _ kind: String, _ detail: String = "") {
+        guard !isTestHost else { return }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        let today = df.string(from: .now)
+        let mapKey = "behavior.oncePerDay"
+        var map = UserDefaults.standard.dictionary(forKey: mapKey) as? [String: String] ?? [:]
+        guard map[key] != today else { return }
+        map[key] = today
+        if map.count > 300 { map = map.filter { $0.value == today } }   // 防膨胀：只留今天的键
+        UserDefaults.standard.set(map, forKey: mapKey)
+        record(kind, detail)
+    }
+
     /// 读某时间窗的行为（未来周结算/月计划/连续天数的查询口）。逐行解码、坏行跳过。
     static func events(from: Date, to: Date) -> [Event] {
         guard let url = fileURL, let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }

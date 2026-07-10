@@ -35,6 +35,7 @@ final class AppContainer {
     let liveDraft = LiveDraft()                // 端侧流式解析的「进行中部分块」（边生成边显示）
     let logSync: LogSyncService                // 跨端日志：DevLog→CloudKit→(Mac)容器纯文本
     let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
+    let milestones: MilestoneStore             // 成就系统（#27）：累计里程碑（iCloud KV，零 schema）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
     let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿/橙计划事件的地方
@@ -43,6 +44,9 @@ final class AppContainer {
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
+    #if os(macOS)
+    var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
+    #endif
 
     init() {
         // 假日历退役（2026-07-07 Jason 定）：设置页不再提供切换、一律写真 Apple 日历。
@@ -77,6 +81,7 @@ final class AppContainer {
         self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer)
         self.longTasks = LongTaskStore()
         self.reviewStore = ReviewLocalStore()
+        self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
         self.projection = ProjectionService(planStore: planStore, calendarStore: routingStore,
@@ -103,6 +108,14 @@ final class AppContainer {
         logSync.start()
         reconcile.start()
         ExecutionBridge.shared = execution   // Focus Filter 联动直达口（§5.7）
+        #if os(macOS)
+        // 分心自动休息（#26 V1）：mac 前台感知 → 执行层换挡（iOS 腿=快捷指令自动化调同一入口）
+        let exec = execution
+        self.distractionSensor = MacDistractionSensor { enable in
+            await ExecutionBridge.shared?.distractionAutoBreak(enable)
+        }
+        distractionSensor.isRelevant = { [weak exec] in exec?.active != nil }
+        #endif
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。

@@ -215,6 +215,10 @@ final class HomeViewModel {
             fixed: remaining.filter(\.isFixed), from: nowT,
             windDown: WorkHoursSettings.effectiveWindDown(from: nowT),
             graceMinutes: WorkHoursSettings.graceMinutes)
+        // 埋点（调研 E 组）：块进候补——按天按标题去重（本函数高频重算，只记首次进候补）
+        for d in laid.deferred {
+            BehaviorLog.recordOncePerDay(key: "候补-\(d.title)", "候补", "进候补：\(d.title)")
+        }
         return (laid.scheduled + laid.deferred.sorted { $0.start < $1.start })
             .map(EditableBlock.init(from:))
     }
@@ -543,6 +547,7 @@ final class HomeViewModel {
     /// 真相源被外部改了（日历手改回流 / 他端同步）：干净 → 直接刷新；编辑中 → 亮徽标不打扰。
     func noteExternalPlanChange() {
         if hasUnsavedChanges {
+            if !freshness { BehaviorLog.record("徽标", "亮起：\(FreshnessSource.calendarEdit.label)") }
             freshnessSource = .calendarEdit; freshness = true
             freshBase = computeFreshBase()   // 算最新底但不套用（v2 对比用）
         } else { loadConfirmedPlan() }
@@ -552,6 +557,7 @@ final class HomeViewModel {
     func noteExecutionProgress() {
         guard isLiveTargetDay else { return }
         if hasUnsavedChanges {
+            if !freshness { BehaviorLog.record("徽标", "亮起：\(FreshnessSource.reflow.label)") }
             freshnessSource = .reflow; freshness = true
             freshBase = computeFreshBase()
         } else { loadConfirmedPlan() }
@@ -559,6 +565,7 @@ final class HomeViewModel {
 
     /// 「载入最新」：放弃本页未确认修改，回到当下最新的底（干净、无羞辱的显式选择）。
     func reloadFreshBase() {
+        if freshness { BehaviorLog.record("徽标", "用最新的（放弃本页）") }
         freshness = false
         freshBase = nil
         discardDraft()
@@ -569,6 +576,7 @@ final class HomeViewModel {
 
     /// 对比后选「保留我的编辑」：熄徽标——最后动作赢，确认时以本页为准。
     func keepMyDraft() {
+        BehaviorLog.record("徽标", "保留我的编辑")
         freshness = false
         freshBase = nil
     }
@@ -675,7 +683,9 @@ final class HomeViewModel {
     /// 手动切松散（右上开关）：标上时顺手静音当日早晚提醒（退场姿态；即使昨晚已排今早的也清掉）。
     func toggleLoose() {
         looseDays?.toggle(targetDay)
-        if looseDays?.isLoose(targetDay) ?? false { notifier.cancelDailyReminders() }
+        let nowLoose = looseDays?.isLoose(targetDay) ?? false
+        if nowLoose { notifier.cancelDailyReminders() }
+        BehaviorLog.record("松散日", nowLoose ? "标记" : "结束")
     }
 
     func move(_ source: IndexSet, _ destination: Int) {

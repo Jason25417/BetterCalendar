@@ -72,5 +72,7 @@ enum PomodoroDiscipline {
         defaults.set(weekKey(now), forKey: "pomo.earlyEnd.weekKey")
         defaults.set(used, forKey: "pomo.earlyEnd.used")
         DevLog.shared.info("番茄", "提前休息 本周已用 \(used)/\(weeklyEarlyEndLimit)")
+        BehaviorLog.record("提前休息", "本周第 \(used)/\(weeklyEarlyEndLimit) 次")
+        if used >= weeklyEarlyEndLimit { BehaviorLog.record("提前休息", "周上限触达（自设 \(weeklyEarlyEndLimit) 次）") }
     }
 }

@@ -45,6 +45,8 @@ enum TomorrowNote {
         let target = DayContext.logicalStartOfDay(now).addingTimeInterval(24 * 3600)
         if let note, !note.isEmpty {
             UserDefaults.standard.set(note, forKey: key(target))
+            // 埋点（调研 F 组）：有寄语的晚上——只记「今晚写了」这个事实（不记内容），按天去重
+            BehaviorLog.recordOncePerDay(key: "寄语提取", "寄语", "今晚写了给明天的一句话")
         } else {
             UserDefaults.standard.removeObject(forKey: key(target))
         }
@@ -58,6 +60,7 @@ enum TomorrowNote {
     /// 晨间消息条的「今天先收起」（只收当天，明天有新寄语照常出现）。
     static func dismiss(for now: Date = .now) {
         UserDefaults.standard.set(true, forKey: key(DayContext.logicalStartOfDay(now)) + ".dismissed")
+        BehaviorLog.record("寄语", "晨间条收起（✕）")
     }
     static func isDismissed(for now: Date = .now) -> Bool {
         UserDefaults.standard.bool(forKey: key(DayContext.logicalStartOfDay(now)) + ".dismissed")

@@ -118,6 +118,24 @@ struct SettingsView: View {
                     Text("打开后「排今天」解析、AI 调整、排序全部只在设备上运行（系统内置端侧模型 + 本地排序），你的文字绝不上传；端侧失败就干净失败、绝不悄悄改走云端。注意：云端 Haiku 的理解力明显更优——只建议隐私优先时打开。关闭时云端失败会自动用端侧兜底。")
                         .font(.caption).foregroundStyle(.secondary)
 
+                    // 分心自动休息（#26 V1，2026-07-11）：默认关；名单自建；检测到=静默转休息（菜单栏 ☕）
+                    Toggle("自动休息感知（去休息了就帮你记休息）", isOn: Binding(
+                        get: { DistractionSettings.enabled },
+                        set: { DistractionSettings.enabled = $0 }))
+                    if DistractionSettings.enabled {
+                        TextField("休息信号（逗号分隔）：如 bilibili, youtube, 小红书",
+                                  text: Binding(get: { DistractionSettings.keywordsText },
+                                                set: { DistractionSettings.keywordsText = $0 }))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    #if os(macOS)
+                    Text("专注中切到名单里的 App 或网页超过半分钟 → 自动开始休息（计时暂停、扣净投入）；切回来自动继续。判定只按你写的名单来；去了哪里绝不记录、绝不出现在复盘里——只会看到「休息了一会儿」。误判可在今天页点「刚才不算休息」算回投入。网页检测需在首次弹出的「自动化」授权里允许控制浏览器。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #else
+                    Text("iOS 不提供前台 App 检测——用快捷指令自动化：在快捷指令 App → 自动化 → 新建「当打开〔某 App〕」→ 运行「自动休息开始」；再建「当关闭」→「自动休息结束」。效果与 Mac 相同：去了哪里绝不记录，只记「休息」。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #endif
+
                     #if os(macOS)
                     Toggle("退出时保留在菜单栏后台运行", isOn: Binding(
                         get: { MenuBarSettings.keepRunningOnQuit },

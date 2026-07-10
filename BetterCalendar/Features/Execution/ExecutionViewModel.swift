@@ -527,6 +527,8 @@ final class ExecutionViewModel {
     /// 0.17：不必等段满——用户可随时提前结束当前段（继续软化番茄的刚性）。
     /// 0.21：做满自设目标段数 → 温和落地：自动转轻计时续走（不是戛然而止）。
     func confirmPomodoroNext() {
+        // 埋点（调研 D 组）：段满 vs 提前结束——pendingConfirm=段已满等确认
+        let wasFull = pomodoroPhase?.pendingConfirm ?? false
         // 离开休息段(回到工作) → 累计这段休息时长，供「继续计时」算净专注（总时长扣掉番茄休息）
         if pomoIsRest, let seg = pomoSegStart {
             let endRef = isOnBreak ? (breakStart ?? .now) : .now
@@ -534,11 +536,17 @@ final class ExecutionViewModel {
         }
         if !pomoIsRest {
             pomoWorkSegmentsDone += 1   // 工作段→休息 = 完成一个工作段
+            if persistsRunState {
+                BehaviorLog.record("番茄", "工作段 \(pomoWorkSegmentsDone) 结束\(wasFull ? "（段满）" : "（提前）") → 休息")
+            }
             if let target = pomoTargetSegments, pomoWorkSegmentsDone >= target {
                 DevLog.shared.info("番茄", "做满自设的 \(target) 段 🎉 → 转轻计时续走")
+                if persistsRunState { BehaviorLog.record("番茄", "做满 \(target) 段 → 转轻计时续走") }
                 continueUntimed()
                 return
             }
+        } else if persistsRunState {
+            BehaviorLog.record("番茄", "休息结束\(wasFull ? "（段满）" : "（提前）") → 第 \(pomoWorkSegmentsDone + 1) 个工作段")
         }
         pomoIsRest.toggle()
         pomoSegStart = .now
@@ -593,6 +601,7 @@ final class ExecutionViewModel {
         active = a
         pomoSegStart = nil
         pomoTargetSegments = nil
+        if persistsRunState { BehaviorLog.record("番茄", "转继续计时（净专注续走）") }
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
         syncFocusShortcut()
@@ -634,6 +643,7 @@ final class ExecutionViewModel {
         pomoRestAccumulated = 0   // 上一件的番茄残留不带给接替块
         pomoTargetSegments = nil
         DevLog.shared.info("执行", "并行接替：「\(run.title)」顶上前台续走（同时做剩 \(background.count) 件）")
+        if persistsRunState { BehaviorLog.record("接替", run.title) }
     }
 
     /// 若当前前台块是并行接替自动顶上来的 → 放回「同时做」队首（计时保留），返回 true。
@@ -643,6 +653,7 @@ final class ExecutionViewModel {
         background.insert(BackgroundRun(plannedID: a.plannedID, title: a.title,
                                         start: a.start, pausedTotal: a.pausedTotal), at: 0)
         active = nil
+        if persistsRunState { BehaviorLog.record("接替回队", a.title) }   // 接替块被换走（≠被完成）
         return true
     }
 
@@ -696,6 +707,7 @@ final class ExecutionViewModel {
         active = nil
         pomoSegStart = nil
         selected = item
+        if persistsRunState { BehaviorLog.record("换一件", item.title) }
         persistRunState()
         refreshPreview()
         liveActivity.end()
@@ -752,6 +764,7 @@ final class ExecutionViewModel {
     func completeCurrent() async {
         let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
         let doneSec = Int(currentElapsed)
+        let wasPromoted = active?.cameFromBackground ?? false   // 埋点：接替块的命运=被完成
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
@@ -762,7 +775,7 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.start(s) }   // 接替块继续占灵动岛/锁屏
         exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
         syncFocusShortcut()
-        if persistsRunState, let t = doneTitle { BehaviorLog.record("完成", t) }
+        if persistsRunState, let t = doneTitle { BehaviorLog.record("完成", t + (wasPromoted ? "（接替块）" : "")) }
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；
@@ -780,6 +793,55 @@ final class ExecutionViewModel {
             if isOnBreak { await toggleBreak() }
             DevLog.shared.info("专注联动", "退出专注 → 自动回来")
         }
+    }
+
+    // MARK: 分心自动休息（#26，0.30）：感知层（mac 感知器 / iOS 快捷指令自动化）→ 这里换挡。
+    // 语义同 focusAutoBreak（外部信号→自动休息→只收自己开的休息），另有红线④的撤销回填。
+
+    private var distractionBreakActive = false
+    private var autoBreakStart: Date?
+    private var autoBreakActiveID: UUID?
+    /// 最近一次已结束的自动休息（「刚才不算休息」撤销窗口用）。
+    private(set) var lastAutoBreak: (start: Date, end: Date)?
+
+    func distractionAutoBreak(_ enable: Bool) async {
+        if enable {
+            guard active != nil, !isOnBreak else { return }   // 空档不休；手动休息不接管
+            await toggleBreak()
+            distractionBreakActive = true
+            autoBreakStart = .now
+            autoBreakActiveID = active?.plannedID
+            if persistsRunState { BehaviorLog.record("自动休息", "开始（感知）") }   // 红线②：不记来源
+            DevLog.shared.info("分心感知", "像是去休息了 → 计时自动暂停")
+        } else {
+            guard distractionBreakActive else { return }
+            distractionBreakActive = false
+            if isOnBreak { await toggleBreak() }
+            if let s = autoBreakStart { lastAutoBreak = (s, .now) }
+            autoBreakStart = nil
+            if persistsRunState { BehaviorLog.record("自动休息", "结束（回来了）") }
+            DevLog.shared.info("分心感知", "回来了 → 计时自动继续")
+        }
+    }
+
+    /// 撤销入口是否可见：最近一段自动休息结束后 10 分钟内，且还在做同一件事（换了件就别改旧账）。
+    var canUndoAutoBreak: Bool {
+        guard let b = lastAutoBreak, active?.plannedID == autoBreakActiveID else { return false }
+        return Date.now.timeIntervalSince(b.end) < 600
+    }
+
+    /// 「刚才不算休息」（红线④）：把最近那段自动休息从暂停里扣回来——净投入回填，
+    /// 感知误判（比如在 B 站查资料）一键纠正，判定权永远在用户手里。
+    func undoLastAutoBreak() {
+        guard canUndoAutoBreak, let b = lastAutoBreak else { return }
+        let dur = max(0, b.end.timeIntervalSince(b.start))
+        if active != nil { active?.pausedTotal = max(0, (active?.pausedTotal ?? 0) - dur) }
+        for i in background.indices { background[i].pausedTotal = max(0, background[i].pausedTotal - dur) }
+        if let seg = pomoSegStart { pomoSegStart = seg.addingTimeInterval(-dur) }   // 撤销 toggleBreak 结束时的段点后移
+        lastAutoBreak = nil
+        if persistsRunState { BehaviorLog.record("自动休息", "撤销（刚才不算休息）") }
+        persistRunState()
+        if let s = liveSnapshot() { liveActivity.update(s) }
     }
 
     /// 单按钮 toggle：开始休息 ⇄ 结束休息。休息=暂停（保留当前块），结束后回来继续同一件。
@@ -800,6 +862,7 @@ final class ExecutionViewModel {
             breakStart = .now
             if active != nil { breakCount += 1 }   // 中途休息计入会话 interruptions
         }
+        if persistsRunState { BehaviorLog.record("休息", isOnBreak ? "开始" : "结束") }
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }
