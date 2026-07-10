@@ -210,6 +210,7 @@ final class ExecutionViewModel {
             persistRunState()
             if active != nil, let s = liveSnapshot() { liveActivity.start(s) }
             DevLog.shared.info("执行", "恢复运行态：\(active?.title ?? "")（\(choice == .continueWithGap ? "含离开时间" : "不含离开时间")）· 并行 \(background.count)")
+            syncFocusShortcut()
         }
     }
 
@@ -572,6 +573,7 @@ final class ExecutionViewModel {
         }
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
+        syncFocusShortcut()
     }
 
     /// 番茄段满/休息段中 →「继续计时」：转成往上记的计时（§5.10 到点行为，运行态非属性）。
@@ -593,6 +595,7 @@ final class ExecutionViewModel {
         pomoTargetSegments = nil
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
+        syncFocusShortcut()
     }
 
     /// 当前执行状态 → Live Activity 快照（无 active 则 nil）。
@@ -661,6 +664,7 @@ final class ExecutionViewModel {
         refreshPreview(enteringLiveMode: true)
         if let s = liveSnapshot() { liveActivity.start(s) }
         exportFocusState(event: "start")   // 聪音：开始一件事→起番茄/专注
+        syncFocusShortcut()
     }
 
     /// 计划外临时事项直接开始（menu bar「+ 新事项…」，SPEC §11 ① 连带、点子 #1，2026-07-09 过审）：
@@ -694,6 +698,7 @@ final class ExecutionViewModel {
         persistRunState()
         refreshPreview()
         liveActivity.end()
+        syncFocusShortcut()
     }
 
     /// 开始之前「换一件」选中的那件。
@@ -750,6 +755,7 @@ final class ExecutionViewModel {
         liveActivity.end()
         if let s = liveSnapshot() { liveActivity.start(s) }   // 接替块继续占灵动岛/锁屏
         exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
+        syncFocusShortcut()
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；
@@ -991,6 +997,27 @@ final class ExecutionViewModel {
     /// 立即补写一份聪音状态（menu bar tick 发现"联动开着+有任务在进行+状态文件缺失"时调；
     /// 场景=任务进行中途才开联动开关，不用等下一个事件/5 分 tick）。
     func exportFocusStateNow() { exportFocusState(event: "tick") }
+
+    // MARK: 番茄 ⇄ 系统专注（2026-07-10 初审通过 v1，macOS）
+
+    /// 当前是否处于"番茄专注"状态（已跑过开始快捷指令、还没跑结束的）。
+    private var pomodoroFocusActive = false
+
+    /// 幂等状态机：进番茄 → 跑开始快捷指令；出番茄（完成/换件/转轻计时/不计时）→ 跑结束快捷指令。
+    /// 在每个改变 active/计时风格的动作末尾调一次即可，重复调用无副作用。
+    private func syncFocusShortcut() {
+        #if os(macOS)
+        guard persistsRunState else { return }   // 单测不跑真快捷指令（共享 UserDefaults 的老坑）
+        let inPomodoro = active?.timingStyle == .pomodoro
+        if inPomodoro, !pomodoroFocusActive {
+            FocusShortcutRunner.pomodoroDidStart()
+            pomodoroFocusActive = true
+        } else if !inPomodoro, pomodoroFocusActive {
+            FocusShortcutRunner.pomodoroDidEnd()
+            pomodoroFocusActive = false
+        }
+        #endif
+    }
 }
 
 // MARK: - 执行进展只读接缝（0.24 C2）：精修台的"过去只读"边界数据源

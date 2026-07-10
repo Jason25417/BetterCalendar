@@ -2102,6 +2102,29 @@ struct LogicTests {
         #expect(vm.hasUnsavedChanges == true)
     }
 
+    // MARK: 锚点软固定 ±20 分钟（0.27.0，Jason 拍板定死）
+
+    @Test func reflowAnchorSoftFixedWithin20MinuteTolerance() {
+        let windDown = at(2026, 7, 10, 22, 0)
+        let anchor = ScheduledBlock(title: "午饭", start: at(2026, 7, 10, 13, 0),
+                                    end: at(2026, 7, 10, 13, 30), isAnchor: true)
+        // 70 分钟任务从 12:00 铺 → 12:00–13:10 撞午饭 10 分钟（≤20）→ 午饭顺延到 13:10、任务不断
+        var r = ReflowLayoutV2.layOut(
+            flexible: [ScheduledBlock(title: "写代码", start: at(2026, 7, 10, 9, 0),
+                                      end: at(2026, 7, 10, 10, 10)), anchor],
+            fixed: [], from: at(2026, 7, 10, 12, 0), windDown: windDown, graceMinutes: 10)
+        #expect(r.scheduled.first { $0.title == "写代码" }?.end == at(2026, 7, 10, 13, 10))
+        #expect(r.scheduled.first { $0.title == "午饭" }?.start == at(2026, 7, 10, 13, 10))
+        // 100 分钟任务需要让 40 分钟（>20）→ 午饭不动、任务绕到 13:30 之后
+        r = ReflowLayoutV2.layOut(
+            flexible: [ScheduledBlock(title: "长任务", start: at(2026, 7, 10, 9, 0),
+                                      end: at(2026, 7, 10, 10, 40)), anchor],
+            fixed: [], from: at(2026, 7, 10, 12, 0), windDown: windDown, graceMinutes: 10)
+        #expect(r.scheduled.first { $0.title == "午饭" }?.start == at(2026, 7, 10, 13, 0))
+        #expect(r.scheduled.first { $0.title == "长任务" }?.start == at(2026, 7, 10, 13, 30))
+        #expect(r.deferred.isEmpty)   // 锚点绝不进候补
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

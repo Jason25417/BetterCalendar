@@ -21,6 +21,10 @@ enum ReflowLayoutV2 {
         var deferred: [ScheduledBlock] = []   // 候补：保原始时间返回（列表展示用，不上画布）
     }
 
+    /// 锚点顺延容忍（Jason 2026-07-10 拍板定死，不进设置）：生活锚点（午饭/通勤）是**软固定**——
+    /// 保持原时刻，为让上一件事收尾可顺延最多 20 分钟；超过容忍就当固定障碍、弹性块绕到它后面。
+    static let anchorShiftTolerance: TimeInterval = 20 * 60
+
     /// flexible 按给定顺序铺（LLM 定序或原顺序），fixed 锚住；windDown = 收工线时刻。
     /// llmDeferred = LLM 建议进候补的块 id（★/晚间豁免块会被本地否决）。
     static func layOut(flexible: [ScheduledBlock], fixed: [ScheduledBlock],
@@ -29,10 +33,15 @@ enum ReflowLayoutV2 {
         let line = windDown.addingTimeInterval(TimeInterval(graceMinutes * 60))
         var result = Result()
 
+        // 生活锚点 = 软固定：不进槽（不被重铺、不进候补），作可顺延 ≤20 分钟的障碍参与避让
+        var anchors = flexible.filter(\.isAnchor)
+        let anchorOriginalStarts = anchors.map(\.start)
+        let nonAnchor = flexible.filter { !$0.isAnchor }
+
         // 晚间豁免：原计划 start ≥ 收工线的弹性块钉原时间（参与避让，同固定块地位）
-        let evening = flexible.filter { $0.start >= windDown }
+        let evening = nonAnchor.filter { $0.start >= windDown }
         let obstacles = fixed + evening
-        let movable = flexible.filter { $0.start < windDown }
+        let movable = nonAnchor.filter { $0.start < windDown }
 
         // 并行组合槽（同 V1）：同组合并为一个槽，槽长 = 组内最长时长，整组同起点
         var slots: [[ScheduledBlock]] = []
@@ -66,6 +75,23 @@ enum ReflowLayoutV2 {
                     e = s.addingTimeInterval(slotDur)
                     moved = true
                 }
+                // 锚点避让（软固定）：撞上锚点时，若把锚点顺延（累计 ≤20 分钟）就能让本槽收尾 → 顺延锚点；
+                // 顺延后不得撞上刚性障碍（固定/晚间），否则回退——锚点当刚性障碍、本槽绕后。
+                for i in anchors.indices where s < anchors[i].end && e > anchors[i].start {
+                    let need = e.timeIntervalSince(anchors[i].start)                       // 本槽需要锚点让出多少
+                    let already = anchors[i].start.timeIntervalSince(anchorOriginalStarts[i])
+                    var shifted = anchors[i]
+                    shifted.start = shifted.start.addingTimeInterval(need)
+                    shifted.end = shifted.end.addingTimeInterval(need)
+                    let hitsRigid = obstacles.contains { shifted.start < $0.end && shifted.end > $0.start }
+                    if need + already <= Self.anchorShiftTolerance, !hitsRigid {
+                        anchors[i] = shifted                                               // 午饭晚 ≤20 分钟，事收得完
+                    } else {
+                        s = anchors[i].end                                                 // 容忍不够：锚点即墙，绕后
+                        e = s.addingTimeInterval(slotDur)
+                        moved = true
+                    }
+                }
             }
             // 收工线硬执法：整槽放不进 线+宽限 → 候补（★槽豁免：超线照排，主权在用户）
             if !hasImportant && e > line {
@@ -81,7 +107,7 @@ enum ReflowLayoutV2 {
             cursor = e   // 顺序推进：排定槽之间天然不重叠
         }
 
-        result.scheduled += fixed + evening
+        result.scheduled += fixed + evening + anchors
         result.scheduled.sort { $0.start < $1.start }
         return result
     }
