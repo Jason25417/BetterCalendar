@@ -32,6 +32,7 @@ struct HomeView: View {
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
     @State private var showFreshCompare = false    // 徽标 v2：两版只读对比 sheet
+    @State private var tnDismissTick = false       // 寄语条「今天先收起」即时刷新（存储在 TomorrowNote）
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
     #else
@@ -97,6 +98,17 @@ struct HomeView: View {
                     .foregroundStyle(loose ? .purple : .secondary)
                     .help("把这天标为松散：App 退场陪你——不催、不算落后。随时可结束；短时间的小憩直接留白即可，不必标松散")
                     targetDayMenu
+                }
+
+                // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你——发出者是用户自己，
+                // 不写=不存在；点 ✕ 只收当天（明天有新寄语照常出现）。
+                if let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
+                    MessageStrip(icon: "sunrise", tint: .purple, text: "昨晚的你说：\(tn)") {
+                        Button { TomorrowNote.dismiss(); tnDismissTick = true } label: {
+                            Image(systemName: "xmark").font(.caption2)
+                        }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    }
                 }
 
                 // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
@@ -259,23 +271,20 @@ struct HomeView: View {
                 // 新鲜度徽标（0.24 C2 → v2 两边再选）：中性、不打断——底层变了，
                 // 三个显式出路：对比两版 / 载入最新 / 继续编辑。绝不弹窗打断、绝不自动合并。
                 if model.freshness {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                        // 来源标注（v2）：先告诉用户这份最新从哪来，再让他决定
-                        Text("这天有更新：\(model.freshnessSource.label)")
-                        if model.freshBase != nil {
-                            Button("对比两版…") { showFreshCompare = true }
+                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: .blue,
+                                 text: "这天有更新：\(model.freshnessSource.label)") {
+                        HStack(spacing: 6) {
+                            if model.freshBase != nil {
+                                Button("对比两版…") { showFreshCompare = true }
+                                    .buttonStyle(.plain).underline()
+                            }
+                            Button("载入最新") { model.reloadFreshBase() }
                                 .buttonStyle(.plain).underline()
-                            Text("·").foregroundStyle(.secondary)
+                            Text("· 或继续编辑，确认时以本页为准")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
-                        Button("载入最新（放弃本页修改）") { model.reloadFreshBase() }
-                            .buttonStyle(.plain).underline()
-                        Text("· 或继续编辑，确认时以本页为准").foregroundStyle(.secondary)
-                        Spacer()
+                        .font(.caption)
                     }
-                    .font(.caption)
-                    .padding(6)
-                    .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
                     .sheet(isPresented: $showFreshCompare) {
                         FreshCompareSheet(mine: model.blocks,
                                           fresh: model.freshBase ?? [],

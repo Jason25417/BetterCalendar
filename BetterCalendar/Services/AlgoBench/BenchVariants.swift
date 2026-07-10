@@ -24,6 +24,8 @@ enum BenchVariantID {
     static let refineFMGuard = "refine.fm.guard"
     static let refineCloud = "refine.cloud"
     static let refineCloudGuard = "refine.cloud.guard"
+    static let polishCloud = "polish.cloud"
+    static let polishFM = "polish.fm"
     static let arrangeRule = "arrange.rule"
     static let arrangeLLM = "arrange.llm"
     static let reflowNaiveV1 = "reflow.naive.v1"
@@ -46,6 +48,10 @@ enum BenchVariants {
                      name: "云端微调（裸）", detail: "ClaudePlanRefiner 裸输出——量模型本身的服从性", frozen: false),
         BenchVariant(id: BenchVariantID.refineCloudGuard, capability: .refine,
                      name: "云端微调+防呆", detail: "ClaudePlanRefiner + guardRefineFlags（= 现行线上组合）", frozen: false),
+        BenchVariant(id: BenchVariantID.polishCloud, capability: .polish,
+                     name: "云端润色", detail: "ClaudePolisher（服务商/模型=当前设置）。⚠️ 仅测合成样例，真日记绝不进", frozen: false),
+        BenchVariant(id: BenchVariantID.polishFM, capability: .polish,
+                     name: "端侧 FM 润色", detail: "FMPolisher（本地、隐私候选）。质量够即可直上生产", frozen: false),
         BenchVariant(id: BenchVariantID.arrangeRule, capability: .arrange,
                      name: "规则排序（候选固化）", detail: "RuleBasedArranger：尽早★→DDL 升序→原时间；note=本地文案库。零网络确定性", frozen: false),
         BenchVariant(id: BenchVariantID.arrangeLLM, capability: .arrange,

@@ -63,6 +63,23 @@ final class UNNotificationService: NotificationScheduling {
         }
     }
 
+    /// 「给明天的一句话」并入已排的早通知（#23）：找到 pending 的早提醒 → 原触发器重建、body 追加寄语。
+    /// 早通知还没排（明天的计划还没确认）则什么都不做——确认时 morningSummary 不含寄语，这里事后补。
+    static func appendTomorrowNoteToMorning(_ note: String) async {
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        guard let req = pending.first(where: { $0.identifier == morningID }),
+              let content = req.content.mutableCopy() as? UNMutableNotificationContent else { return }
+        let line = "昨晚的你说：\(note)"
+        guard !content.body.contains(line) else { return }   // 幂等：重复保存不重复追加
+        // 换行前先把旧寄语行去掉（用户改了寄语 → 以最新为准）
+        let kept = content.body.split(separator: "\n").filter { !$0.hasPrefix("昨晚的你说：") }
+        content.body = (kept.joined(separator: "\n") + "\n" + line)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try? await center.add(UNNotificationRequest(identifier: morningID, content: content,
+                                                    trigger: req.trigger))
+    }
+
     private func add(id: String, title: String, body: String, at date: Date) async {
         let content = UNMutableNotificationContent()
         content.title = title

@@ -230,6 +230,41 @@ final class BenchSuiteStore {
                     .init(kind: .arrayOrderBefore, title: "健身", title2: "写代码"),
                     .init(kind: .arrayOrderBefore, title: "写代码", title2: "午饭"),
                   ]),
+        // ===== polish 润色（0.28.2：云端 vs 端侧对照；合成样例——真日记绝不进试验台）=====
+        // 自动断言只锁底线（事实保留/错字修正/不瞎扩写）；结构与文风由人工评审（输出全文在 🐞/Downloads 日志「润色台」）。
+        BenchCase(id: "W1", name: "错别字修正", capability: .polish, dimension: "服从性",
+                  text: "今天下无去了图书馆，把论文的绪论写完了。晚上和室友吃了火锅，聊到很晚，有点开森。",
+                  expects: [
+                    .init(kind: .rawNotContains, title: "下无"),
+                    .init(kind: .rawNotContains, title: "开森"),
+                    .init(kind: .rawContains, title: "图书馆"),
+                    .init(kind: .rawContains, title: "火锅"),
+                    .init(kind: .rawLengthRatio, count: 200),
+                  ]),
+        BenchCase(id: "W2", name: "乱格式规整", capability: .polish, dimension: "服从性",
+                  text: "##今天\n-写代码 三小时…修了那个bug!!\n   - 健身（40min\n明天记得：买菜、、交电费",
+                  expects: [
+                    .init(kind: .rawContains, title: "写代码"),
+                    .init(kind: .rawContains, title: "健身"),
+                    .init(kind: .rawContains, title: "交电费"),
+                    .init(kind: .rawLengthRatio, count: 250),
+                  ]),
+        BenchCase(id: "W3", name: "病句轻润色·意思不变", capability: .polish, dimension: "服从性",
+                  text: "今天的话就是那个实验又失败了但是我觉得可能是试剂的问题吧应该，然后重新配了一次就好了，导师说下周组会我来讲。",
+                  expects: [
+                    .init(kind: .rawContains, title: "试剂"),
+                    .init(kind: .rawContains, title: "组会"),
+                    .init(kind: .rawLengthRatio, count: 180),
+                  ]),
+        BenchCase(id: "W4", name: "平直长文→结构化富文本", capability: .polish, dimension: "理解力",
+                  text: "早上八点起床先去食堂吃了早饭然后去教室上了两节数学课下午回宿舍睡了个午觉起来之后去图书馆写数据库作业写到五点半和同学去吃了麻辣烫晚上七点去健身房练了背和二头回来洗澡之后看了一集纪录片十一点半睡觉总的来说今天过得挺充实的但是数学课有点没听懂明天要找时间补一下。",
+                  expects: [
+                    .init(kind: .rawContains, title: "图书馆"),
+                    .init(kind: .rawContains, title: "健身"),
+                    .init(kind: .rawContains, title: "数学"),
+                    .init(kind: .rawLengthRatio, count: 160),
+                  ]),
+
         BenchCase(id: "S4", name: "固定块时间绝不动", capability: .arrange, dimension: "服从性",
                   blocks: [
                     .init(title: "组会", startHM: "10:00", durationMinutes: 60, isFixed: true),

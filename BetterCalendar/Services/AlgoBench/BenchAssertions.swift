@@ -15,6 +15,7 @@ enum BenchAssertions {
         var inputBlocks: [ScheduledBlock] = []   // refine/reflow 的输入（fixedUnmoved / flags 对照）
         var windDown: Date? = nil                // reflow 用例的收工线
         var graceMinutes: Int = 0
+        var sourceText: String? = nil            // polish 用例的原文（长度比断言用）
     }
 
     static func evaluate(_ expects: [BenchExpectation], output: BenchOutput,
@@ -123,6 +124,23 @@ enum BenchAssertions {
                 return check(false, "两块没都找到")
             }
             return check(fa < fb, fa < fb ? "顺序正确" : "「\(e.title ?? "")」没排在「\(e.title2 ?? "")」前")
+
+        case .rawContains:
+            let raw = output.raw ?? ""
+            let ok = raw.contains(e.title ?? "")
+            return check(ok, ok ? "包含 ✓" : "输出缺「\(e.title ?? "")」")
+
+        case .rawNotContains:
+            let raw = output.raw ?? ""
+            let ok = !raw.contains(e.title ?? "")
+            return check(ok, ok ? "已修正 ✓" : "输出仍含「\(e.title ?? "")」")
+
+        case .rawLengthRatio:
+            let raw = output.raw ?? ""
+            let src = context.sourceText ?? ""
+            guard !src.isEmpty, let pct = e.count else { return check(false, "用例缺原文/比例") }
+            let ok = raw.count <= src.count * pct / 100
+            return check(ok, ok ? "长度合理（\(raw.count)/\(src.count)）" : "扩写超限（\(raw.count) > \(src.count)×\(pct)%）")
 
         case .arrayOrderBefore:
             let ia = blocks.firstIndex { TitleMatch.similarity($0.title, e.title ?? "") >= 0.6 }

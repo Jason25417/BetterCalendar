@@ -2192,6 +2192,24 @@ struct LogicTests {
         #expect(s.contains("第一件：「写代码」"))
     }
 
+    // MARK: 「给明天的一句话」提取（0.28.2：写在日记里、本地规则解析——宁可漏不误提）
+
+    @Test func tomorrowNoteExtractionIsConservative() {
+        // 行首前缀才算；取最后一条（改主意以最后为准）；标点剥离
+        let body = """
+        今天把论文写完了，挺累的。
+        给明天：先把数据跑上再吃早饭。
+        中间还和导师聊了聊给明天的规划（这句不该被提取）。
+        致明天——轻松点，别慌。
+        """
+        #expect(TomorrowNote.extract(from: body) == "轻松点，别慌。")
+        // 没有寄语 → nil；前缀后为空 → nil
+        #expect(TomorrowNote.extract(from: "普通的一天，没什么想说的。") == nil)
+        #expect(TomorrowNote.extract(from: "给明天：") == nil)
+        // 行中出现「给明天」不算（宁可漏不误提）
+        #expect(TomorrowNote.extract(from: "我想给明天留点余地这样说说而已") == nil)
+    }
+
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {

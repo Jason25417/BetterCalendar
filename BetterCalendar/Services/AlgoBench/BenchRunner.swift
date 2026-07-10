@@ -37,6 +37,7 @@ final class BenchRunner {
         case .refine: result = await runRefine(c, variant: variant, model: model)
         case .reflow: result = await runReflow(c, variant: variant, graceMinutes: graceMinutes, model: model)
         case .arrange: result = await runArrange(c, variant: variant, model: model)
+        case .polish: result = await runPolish(c, variant: variant, model: model)
         }
         if Self.cloudVariantIDs.contains(variant.id) { result.output.model = model ?? CloudSettings.activeModel }
         return result
@@ -298,6 +299,39 @@ final class BenchRunner {
         return BenchCaseResult(output: out, checks: checks)
     }
 
+    // MARK: - polish（0.28.2：日记润色对照——云端 vs 端侧；合成样例文集，真日记绝不进）
+
+    private func runPolish(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
+        guard let source = c.text, !source.isEmpty else { return Self.skipped("用例缺 text（润色原文）") }
+        if let reason = gate(variant) { return Self.skipped(reason) }
+        var out = BenchOutput()
+        let t0 = Date()
+        do {
+            let polished: String
+            switch variant.id {
+            case BenchVariantID.polishCloud:
+                polished = try await ClaudePolisher(client: cloudClient(model)).polish(source)
+                out.model = model ?? CloudSettings.activeModel
+            case BenchVariantID.polishFM:
+                polished = try await FMPolisher().polish(source)
+            default:
+                return Self.skipped("未知润色变体")
+            }
+            out.raw = polished
+            out.latencyMS = Self.ms(since: t0)
+            // 人工评审通道（Jason 定：不能只看断言，要把结果拉出来读）——全文进 DevLog → 镜像到 Downloads 日志
+            DevLog.shared.info("润色台", "【\(c.id) \(c.name) · \(variant.name)】\n——原文——\n\(source)\n——输出——\n\(polished)")
+        } catch {
+            out.errorText = error.localizedDescription
+            out.latencyMS = Self.ms(since: t0)
+        }
+        let checks = BenchAssertions.evaluate(c.expects, output: out,
+                                              context: .init(referenceDay: referenceDay,
+                                                             inputBlocks: [],
+                                                             sourceText: source))
+        return BenchCaseResult(output: out, checks: checks)
+    }
+
     // MARK: - arrange（0.28.1：排序固化对照——规则 vs LLM）
 
     private func runArrange(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
@@ -338,10 +372,12 @@ final class BenchRunner {
     /// 变体运行前置条件（开关/key）；nil = 可跑。
     private func gate(_ variant: BenchVariant) -> String? {
         switch variant.id {
-        case BenchVariantID.parseFM, BenchVariantID.refineFM, BenchVariantID.refineFMGuard:
+        case BenchVariantID.parseFM, BenchVariantID.refineFM, BenchVariantID.refineFMGuard,
+             BenchVariantID.polishFM:
             return CloudSettings.useOnDeviceParser ? nil : "端侧开关未开（设置→进阶）"
         case BenchVariantID.parseCloud, BenchVariantID.refineCloud, BenchVariantID.refineCloudGuard,
-             BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2, BenchVariantID.arrangeLLM:
+             BenchVariantID.reflowLLMV1, BenchVariantID.reflowLLMV2, BenchVariantID.arrangeLLM,
+             BenchVariantID.polishCloud:
             guard CloudSettings.useCloud else { return "云端开关未开" }
             let key = KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount)
             return (key?.isEmpty == false) ? nil : "未配 API key（设置→云端）"

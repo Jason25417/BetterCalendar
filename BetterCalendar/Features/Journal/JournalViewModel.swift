@@ -47,6 +47,12 @@ final class JournalViewModel {
     /// 全部日记 → markdown（导出/备份；R5）。
     func exportMarkdown() -> String { JournalExport.markdown(entries) }
 
-    func save() { store.save(); reload() }
+    func save() {
+        store.save(); reload()
+        // 「给明天的一句话」（#23）：保存即本地提取（规则匹配，零模型）→ 存给明天；若明早通知已排则并入
+        let note = TomorrowNote.extract(from: store.entryForToday().body)
+        TomorrowNote.store(note)
+        if let note { Task { await UNNotificationService.appendTomorrowNoteToMorning(note) } }
+    }
     func delete(_ e: JournalEntry) { store.delete(e); reload() }
 }

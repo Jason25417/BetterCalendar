@@ -16,6 +16,7 @@ nonisolated enum BenchCapability: String, Codable, CaseIterable, Sendable {
     case refine   // 草稿 + 一句指令 → 调整后草稿
     case reflow   // 剩余块从此刻重排
     case arrange  // 排序+note（0.28.1：RuleBased 固化 vs LLM 对照）
+    case polish   // 日记润色（0.28.2：云端 vs 端侧对照——合成样例文集，真日记绝不进）
 
     var label: String {
         switch self {
@@ -23,6 +24,7 @@ nonisolated enum BenchCapability: String, Codable, CaseIterable, Sendable {
         case .refine: "微调"
         case .reflow: "reflow"
         case .arrange: "排序"
+        case .polish: "润色"
         }
     }
 }
@@ -73,6 +75,9 @@ nonisolated struct BenchExpectation: Codable, Sendable {
         case sameStart             // title + title2：两块同一起点（并行）
         case orderBefore           // title 的起点必须早于 title2（eat-the-frog 等）
         case arrayOrderBefore      // title 在输出**数组顺序**里必须先于 title2（arrange 推荐顺序用）
+        case rawContains           // title=子串：润色输出全文必须包含（错字修正后的正确词/关键事实）
+        case rawNotContains        // title=子串：润色输出全文绝不能包含（原错字/病句）
+        case rawLengthRatio        // count=最大百分比（如 150）：输出长度 ≤ 原文 × count%（防瞎扩写）
         case allWithinWindDown     // 排定块结束 ≤ 收工线+宽限（★与晚间豁免块除外）
         case deferredContains      // title：候补里必须有它
         case deferredNotContains   // title：候补里绝不能有它（★/晚间豁免）
