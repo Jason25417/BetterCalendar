@@ -47,6 +47,10 @@ enum FocusStateExporter {
             var kind: String          // start / complete / tick
             var title: String
             var durationSec: Int?     // complete 时=这件事投入时长（→换算经验值）
+            // 事件账本（0.31.3，2 秒导出配套）：重要事件（start/complete）带单调 seq（epoch 毫秒），
+            // tick 导出时**原样保留上一个重要事件**不覆盖——mod 按 seq 判「没见过才处理」（exactly-once），
+            // 见过的只做状态对账。否则 2 秒一写会把事件冲掉、mod 两次轮询间漏结算。
+            var seq: Int? = nil
         }
     }
 

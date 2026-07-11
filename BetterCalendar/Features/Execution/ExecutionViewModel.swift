@@ -494,10 +494,22 @@ final class ExecutionViewModel {
                          endsAt: endsAt, inRest: inRest, segmentsRemaining: segRemain,
                          workSec: workSec, restSec: restSec)
         }
-        let ev = FocusStateExporter.State.Event(kind: kind, title: completedTitle ?? active?.title ?? "",
-                                                durationSec: completedSec)
+        let ev: FocusStateExporter.State.Event
+        if kind == "tick" {
+            // 事件账本：tick 只刷 active/updatedAt，lastEvent 原样保留上一个重要事件（含 seq）——
+            // 2 秒导出下 start/complete 绝不被 tick 冲掉（mod 按 seq 去重）。
+            ev = chiyneLastSignificantEvent
+                ?? .init(kind: "tick", title: active?.title ?? "", durationSec: nil)
+        } else {
+            ev = .init(kind: kind, title: completedTitle ?? active?.title ?? "",
+                       durationSec: completedSec, seq: Int(Date.now.timeIntervalSince1970 * 1000))
+            chiyneLastSignificantEvent = ev
+        }
         FocusStateExporter.write(active: a, event: ev)
     }
+
+    /// 事件账本：本会话最近一次重要事件（start/complete），tick 导出时原样带上。
+    private var chiyneLastSignificantEvent: FocusStateExporter.State.Event?
 
     /// 番茄"当前段之后还剩几个完整工作段"（纯函数、可单测）：nil 目标=不限段=-1；
     /// 工作段进行中=当前这段不算剩余（target−done−1）；休息段中=下一段起全是剩余（target−done）。

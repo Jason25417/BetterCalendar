@@ -61,11 +61,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if model.shouldGrowActive { Task { await model.growActiveActual() } }
         // 聪音回流：游戏里勾完成 → inbox 文件出现 → 消化成 BC 完成（文件探测轻量；重复触发幂等）
         if FocusStateExporter.hasPendingInbox { Task { await model.consumeChiyneInbox() } }
-        // 任务进行中途才开联动开关：状态文件缺失就补写一份，聪音立即接上（不等下个事件/5 分 tick）
-        if FocusStateExporter.isEnabled, model.active != nil, !FocusStateExporter.stateFileExists {
-            model.exportFocusStateNow()
+        // 聪音状态 2 秒一导（2026-07-11 Jason 定「统一 2 秒」）：联动开着就持续写——mod 侧 2s 轮询
+        // + 状态对账，错过任何事件都秒级自愈；空档也写（游戏内状态栏靠文件新鲜度判「BC 在线」）。
+        // 事件不会被 tick 冲掉：见 ExecutionViewModel 的事件账本。文件 <1KB，写入压力可忽略。
+        chiyneTick += 1
+        if chiyneTick >= 2 {
+            chiyneTick = 0
+            if FocusStateExporter.isEnabled { model.exportFocusStateNow() }
         }
     }
+
+    /// 聪音 2 秒导出的分频器（menu bar 计时器是 1 秒一跳）。
+    private var chiyneTick = 0
 
     /// 直接显示**当前计时状态**（2026-07-09 Jason）：计时 / 不计时 / 番茄，而不只一个计时按钮。
     /// 重写为按 active.timingStyle 显式 switch（旧版用 `!= TimingStyle.none` 隐晦比较，轻计时/不计时都错显成不计时）。
