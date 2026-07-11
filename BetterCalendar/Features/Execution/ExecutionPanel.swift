@@ -22,9 +22,26 @@ struct ExecutionPanel: View {
     @State private var adHocStyle: TimingStyle = .light
     @FocusState private var adHocFocused: Bool
 
+    /// 多端跟随（#30）：另一台设备在做而本机空档 → 陪伴条（一键退出=审核红线③）。
+    @ViewBuilder private var followStrip: some View {
+        if model.active == nil, let f = FollowRunState.shared.run {
+            HStack(spacing: 6) {
+                Image(systemName: "ipad.and.iphone").foregroundStyle(.secondary)
+                Text("另一台设备正在做「\(f.title)」· 已 \(Self.hms(Date.now.timeIntervalSince(f.startedAt)))")
+                    .font(.caption)
+                Spacer()
+                Button("退出跟随") { FollowRunState.shared.exitFollow() }
+                    .font(.caption)
+            }
+            .padding(6)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            followStrip
             mitStrip
             Divider()
             adHocInput

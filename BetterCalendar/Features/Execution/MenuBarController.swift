@@ -95,6 +95,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             case .none:
                 button.title = " ● " + model.timerDisplay      // 已 X，到分 XhYm
             }
+        } else if let f = FollowRunState.shared.run {
+            // 多端跟随（#30）：本机空档而另一台在做 → 陪伴显示（点开面板可退出跟随）
+            button.title = " ⇄ " + ExecutionPanel.hms(Date.now.timeIntervalSince(f.startedAt))
         } else {
             button.title = ""        // 空档：只显图标
         }

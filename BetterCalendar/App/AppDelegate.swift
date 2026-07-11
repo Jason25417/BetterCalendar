@@ -21,6 +21,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppLifecycleControllin
     /// 启动即挂到生命周期缝：Features 通过 AppLifecycle.shared 调「打开主窗口/真退出」，不直摸本类。
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLifecycle.shared = self
+        NSApp.registerForRemoteNotifications()   // 多端跟随专注（#30）：CloudKit 静默推送唤醒
+    }
+
+    /// CloudKit 静默推送 → 多端跟随（#30）。SwiftData 的同步推送自带处理，转发无害。
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        FocusFollow.handlePush(userInfo)
     }
 
     /// 关掉最后一个窗口不终止 App → 常驻 menu bar。

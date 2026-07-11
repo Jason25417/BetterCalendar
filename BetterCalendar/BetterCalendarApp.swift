@@ -18,6 +18,10 @@ struct BetterCalendarApp: App {
     // 关窗不退出 → 常驻 menu bar（见 AppDelegate）。
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
+    #if os(iOS)
+    // 多端跟随（#30）：静默推送需要 UIKit delegate 缝
+    @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var iosDelegate
+    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -81,7 +85,10 @@ struct BetterCalendarApp: App {
             .onAppear { handlePendingAppIntent(); consumePrimeNextStart() }
             #endif
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { handlePendingAppIntent(); consumePrimeNextStart() }
+                if phase == .active {
+                    handlePendingAppIntent(); consumePrimeNextStart()
+                    Task { await FocusFollow.refreshAndApply(reason: "回前台") }
+                }
             }
             // 早通知 deep-link（0.23 A）：打开执行界面 + 第一件「待开始」（不自动计时）
             .onChange(of: container.router.primeNextStart) { _, want in
@@ -90,6 +97,13 @@ struct BetterCalendarApp: App {
             // 启动同步（0.20.2）：先对账（识别日历里攒的手改/新建/删除）再投影补章自愈；
             // 有待确认新建的日子暂缓投影（防止问都没问就清掉用户新建的事件）。幂等、无变更时零写入。
             .task { await container.reconcile.startupSync() }
+            // 多端跟随（#30）：启动/回前台 catch-up（推送错过也收敛，同聪音对账哲学）+ 屏蔽联动接线
+            .task {
+                FollowRunState.shared.onChange = { [execution = container.execution] in
+                    execution.updateScreenTimeShield()
+                }
+                await FocusFollow.refreshAndApply(reason: "启动")
+            }
             .userActivity(BetterCalendarHandoff.activityType, isActive: true) { activity in
                 BetterCalendarHandoff.configure(activity,
                                                 router: container.router,

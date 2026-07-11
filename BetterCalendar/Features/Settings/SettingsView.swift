@@ -7,6 +7,9 @@
 
 import SwiftUI
 #if os(macOS)
+import ServiceManagement
+#endif
+#if os(macOS)
 import AppKit
 #endif
 #if os(iOS)
@@ -38,6 +41,11 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var showAdvanced = false
+    @State private var showFeedback = false
+    @State private var focusFollowOn = FocusFollowSettings.enabled
+    #if os(macOS)
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    #endif
 
     var body: some View {
         Form {
@@ -92,6 +100,13 @@ struct SettingsView: View {
 
             // 「日历后端」选择已退役（2026-07-07 Jason 定）：一律写真 系统日历（Dev 专用日历）；
             // 假日历仅存于单测/预览页，不再暴露给用户。
+
+            Section("反馈") {
+                Button("发送反馈…") { showFeedback = true }
+                Text("一段话说清问题或想法；「附诊断信息」全文可预览（剔除行为通道，日记/日历内容不会进入）。内测期也可直接在 TestFlight 里截图反馈。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .sheet(isPresented: $showFeedback) { FeedbackView() }
 
             Section("日记") {
                 Toggle("隐私锁（Face ID / Touch ID / 密码）", isOn: $journalLock)
@@ -183,10 +198,33 @@ struct SettingsView: View {
                     #endif
 
                     #if os(macOS)
+                    Toggle("开机自动启动", isOn: $launchAtLogin)
+                        .onChange(of: launchAtLogin) { _, v in
+                            do {
+                                if v { try SMAppService.mainApp.register() }
+                                else { try SMAppService.mainApp.unregister() }
+                                DevLog.shared.info("设置", "开机自动启动 → \(v ? "开" : "关")")
+                            } catch {
+                                DevLog.shared.error("设置", "开机自启设置失败：\(error.localizedDescription)")
+                                launchAtLogin = SMAppService.mainApp.status == .enabled
+                            }
+                        }
+                    Text("登录后自动在菜单栏就位（配合「退出时保留在菜单栏」= 常驻陪伴）。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     Toggle("退出时保留在菜单栏后台运行", isOn: Binding(
                         get: { MenuBarSettings.keepRunningOnQuit },
                         set: { MenuBarSettings.keepRunningOnQuit = $0 }))
                     Text("打开后 ⌘Q / Dock 右键退出 不会真退——收进菜单栏继续跑（计时不断），Dock 图标消失、防手滑误退。真要退出：点菜单栏图标 → 右键 → 退出 BetterCalendar。")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    Toggle("多端跟随专注（Beta）", isOn: $focusFollowOn)
+                        .onChange(of: focusFollowOn) { _, v in
+                            FocusFollowSettings.enabled = v
+                            if v { Task { await FocusFollow.ensureSubscription() } }
+                            else { FollowRunState.shared.exitFollow() }
+                        }
+                    Text("同一 iCloud 的另一台设备开始专注时，这台准实时（秒~十几秒）跟随显示同任务计时；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Toggle("聪音联动（把专注状态同步给《放松时光》）", isOn: Binding(
