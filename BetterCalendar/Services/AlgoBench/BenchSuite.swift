@@ -24,15 +24,37 @@ final class BenchSuiteStore {
 
     var caseFileURL: URL { fileURL }
 
+    /// seen 旁车文件：记录「这台机器的用例文件见过哪些内置 id」——种子演进只补**从没见过的新增**，
+    /// 用户主动删掉的用例绝不复活（删除是编辑，编辑归用户）。
+    private var seenURL: URL { fileURL.deletingPathExtension().appendingPathExtension("seen.json") }
+
     /// 读用例：无文件/解不开 → 播种内置默认并返回之。
+    /// **种子演进合并**（0.31，踩坑：0.28 加的 S/W 用例被用户机上的旧种子文件整体盖住、试验台里根本看不见）：
+    /// 用户文件优先（保留其编辑与删除），但内置默认里**这台机器从没见过的新增 id** 自动补进并回写。
     func load() -> [BenchCase] {
         if let data = try? Data(contentsOf: fileURL),
-           let cases = try? JSONDecoder().decode([BenchCase].self, from: data), !cases.isEmpty {
+           var cases = try? JSONDecoder().decode([BenchCase].self, from: data), !cases.isEmpty {
+            let known = Set(cases.map(\.id))
+            let seen = (try? JSONDecoder().decode(Set<String>.self, from: Data(contentsOf: seenURL))) ?? known
+            let missing = Self.defaultCases.filter { !known.contains($0.id) && !seen.contains($0.id) }
+            if !missing.isEmpty {
+                cases.append(contentsOf: missing)
+                save(cases)
+                DevLog.shared.info("试验台", "用例种子演进：补入内置新增 \(missing.map(\.id).joined(separator: ","))")
+            }
+            writeSeen(seen.union(known).union(Self.defaultCases.map(\.id)))
             return cases
         }
         let seed = Self.defaultCases
         save(seed)
+        writeSeen(Set(seed.map(\.id)))
         return seed
+    }
+
+    private func writeSeen(_ ids: Set<String>) {
+        if let data = try? JSONEncoder().encode(ids.sorted()) {
+            try? data.write(to: seenURL, options: .atomic)
+        }
     }
 
     func save(_ cases: [BenchCase]) {

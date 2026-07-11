@@ -734,6 +734,7 @@ final class ExecutionViewModel {
         guard item.id != active?.plannedID,
               !isRunningInBackground(item) else { return }
         background.append(BackgroundRun(plannedID: item.id, title: item.title, start: .now))
+        if persistsRunState { BehaviorLog.record("同时做", item.title) }
         persistRunState()
         refreshPreview(enteringLiveMode: true)   // 从橙色预览里剔除它（正在做，不该再出现在"从现在起"）
     }
@@ -757,7 +758,10 @@ final class ExecutionViewModel {
         // 后台做成的事游戏永远收不到经验。mod v0.5 按「title ≠ 正在驱动的标题」识别后台完成，
         // 手动按原生公式结算、不碰前台计时器。
         exportFocusState(event: "complete", completedTitle: run.title, completedSec: Int(net))
-        if persistsRunState { BehaviorLog.record("完成", run.title + "（后台）") }
+        if persistsRunState {
+            let wasBonus = !planned.contains { $0.id == run.plannedID }   // 成就 A1：计划外后台块
+            BehaviorLog.record("完成", run.title + "（后台）" + (wasBonus ? "（计划外）" : ""))
+        }
     }
 
     /// 完成当前块 → 落盘 → 「同时做」队首自动接替（点子 #20）；没有并行块才回空档。
@@ -765,6 +769,8 @@ final class ExecutionViewModel {
         let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
         let doneSec = Int(currentElapsed)
         let wasPromoted = active?.cameFromBackground ?? false   // 埋点：接替块的命运=被完成
+        // 埋点（成就 A1）：计划外 bonus——active 的 id 不在今日计划里（startAdHoc 的新 UUID）＝§3.5 的赢
+        let wasBonus = active.map { a in !planned.contains { $0.id == a.plannedID } } ?? false
         await recordActiveIfAny()
         active = nil
         pomoSegStart = nil
@@ -775,7 +781,9 @@ final class ExecutionViewModel {
         if let s = liveSnapshot() { liveActivity.start(s) }   // 接替块继续占灵动岛/锁屏
         exportFocusState(event: "complete", completedTitle: doneTitle, completedSec: doneSec)   // 聪音：完成→经验值+欢快
         syncFocusShortcut()
-        if persistsRunState, let t = doneTitle { BehaviorLog.record("完成", t + (wasPromoted ? "（接替块）" : "")) }
+        if persistsRunState, let t = doneTitle {
+            BehaviorLog.record("完成", t + (wasPromoted ? "（接替块）" : "") + (wasBonus ? "（计划外）" : ""))
+        }
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；

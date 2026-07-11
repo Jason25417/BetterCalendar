@@ -49,6 +49,19 @@ final class ReviewLocalStore {
         Set(allRecords().filter(\.isActive).map(\.dayKey)).count
     }
 
+    /// 首个活跃日（成就 D1「相识 N 年」）：dayKey 为 yyyy-MM-dd，字典序最小即最早。nil = 还没活跃过。
+    var firstActiveDayKey: String? {
+        allRecords().filter(\.isActive).map(\.dayKey).min()
+    }
+
+    /// 活跃过的月份集合 1–12（成就 D2「四季都来过」）。
+    var activeMonths: Set<Int> {
+        Set(allRecords().filter(\.isActive).compactMap { r -> Int? in
+            let parts = r.dayKey.split(separator: "-")
+            return parts.count >= 2 ? Int(parts[1]) : nil
+        })
+    }
+
     /// 当天做成 ≥1 件时调用：把该逻辑日计入活跃日（幂等）。date 可注入便于测试。
     func markActive(on date: Date = .now) {
         let key = DayContext.dayKey(date)
