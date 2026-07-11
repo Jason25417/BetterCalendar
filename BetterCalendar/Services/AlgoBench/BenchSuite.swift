@@ -39,9 +39,19 @@ final class BenchSuiteStore {
             let missing = Self.defaultCases.filter { !known.contains($0.id) && !seen.contains($0.id) }
             if !missing.isEmpty {
                 cases.append(contentsOf: missing)
-                save(cases)
                 DevLog.shared.info("试验台", "用例种子演进：补入内置新增 \(missing.map(\.id).joined(separator: ","))")
             }
+            // 内置修订下发（0.31.2，首例=W1 撤「开森」断言）：内置 rev 比本地新 → 覆盖该条
+            //（修订是有意为之，会盖掉对该条的手改；用户删掉的仍不复活——新增归 seen 管，修订只碰还在的）。
+            var revised: [String] = []
+            for def in Self.defaultCases {
+                if let i = cases.firstIndex(where: { $0.id == def.id }), (cases[i].rev ?? 0) < (def.rev ?? 0) {
+                    cases[i] = def
+                    revised.append(def.id)
+                }
+            }
+            if !revised.isEmpty { DevLog.shared.info("试验台", "用例修订下发：\(revised.joined(separator: ","))") }
+            if !missing.isEmpty || !revised.isEmpty { save(cases) }
             writeSeen(seen.union(known).union(Self.defaultCases.map(\.id)))
             return cases
         }
@@ -254,15 +264,16 @@ final class BenchSuiteStore {
                   ]),
         // ===== polish 润色（0.28.2：云端 vs 端侧对照；合成样例——真日记绝不进试验台）=====
         // 自动断言只锁底线（事实保留/错字修正/不瞎扩写）；结构与文风由人工评审（输出全文在 🐞/Downloads 日志「润色台」）。
+        // rev 1（2026-07-11 Jason 拍板）：撤「开森」必改断言——W 组全文评审实证模型是在**保护刻意的
+        // 网络语气**（真错字「下无」10/10 全修）；日记产品保留用户声音是对的行为，不算失败。
         BenchCase(id: "W1", name: "错别字修正", capability: .polish, dimension: "服从性",
                   text: "今天下无去了图书馆，把论文的绪论写完了。晚上和室友吃了火锅，聊到很晚，有点开森。",
                   expects: [
                     .init(kind: .rawNotContains, title: "下无"),
-                    .init(kind: .rawNotContains, title: "开森"),
                     .init(kind: .rawContains, title: "图书馆"),
                     .init(kind: .rawContains, title: "火锅"),
                     .init(kind: .rawLengthRatio, count: 200),
-                  ]),
+                  ], rev: 1),
         BenchCase(id: "W2", name: "乱格式规整", capability: .polish, dimension: "服从性",
                   text: "##今天\n-写代码 三小时…修了那个bug!!\n   - 健身（40min\n明天记得：买菜、、交电费",
                   expects: [

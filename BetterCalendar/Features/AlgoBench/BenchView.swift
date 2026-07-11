@@ -166,16 +166,41 @@ final class BenchViewModel {
 
     /// 跑完自动把跑分 markdown 落盘到日志目录（Jason 要求：Claude 可直接读，无需手动贴）。
     /// partial=true（中止）：文件头标注"部分"，数据照存。
+    /// 「最新跑分.md」每次整份覆盖 + 另存时间戳+能力组名副本——2026-07-11 吃过亏：
+    /// 16:23 的解析跑分被 17:10 的润色跑分整份盖掉，只能从 DevLog 人工重建。
     private func autoSaveReport(partial: Bool = false) {
         guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
         else { return }
         let dir = downloads.appendingPathComponent("BetterCalendar-logs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("algo-bench-最新跑分.md")
         var md = exportMarkdown()
         if partial { md = "> ⚠️ 部分报告：中止于 \(progressDone)/\(progressTotal) 次运行。\n\n" + md }
-        try? md.data(using: .utf8)?.write(to: url, options: .atomic)
-        DevLog.shared.info("试验台", "跑分已落盘 \(url.lastPathComponent)（BetterCalendar-logs）")
+        let data = md.data(using: .utf8)
+        let latest = dir.appendingPathComponent("algo-bench-最新跑分.md")
+        try? data?.write(to: latest, options: .atomic)
+        let archive = archiveReportURL(in: dir)
+        try? data?.write(to: archive, options: .atomic)
+        DevLog.shared.info("试验台", "跑分已落盘 \(latest.lastPathComponent) + 副本 \(archive.lastPathComponent)（BetterCalendar-logs）")
+    }
+
+    /// 副本文件名：algo-bench-<yyyyMMdd-HHmm>-<能力组>.md（能力组 = 本轮实际有结果的能力，多个用 + 连）。
+    /// 同分钟重跑同能力会撞名 → 追加序号，绝不覆盖已有副本。
+    private func archiveReportURL(in dir: URL) -> URL {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyyMMdd-HHmm"
+        let stamp = fmt.string(from: .now)
+        let ranCaps = Set(cases.filter { results[$0.id] != nil }.map(\.capability))
+        let caps = BenchCapability.allCases.filter { ranCaps.contains($0) }.map(\.label)
+        let capName = caps.isEmpty ? "空" : caps.joined(separator: "+")
+        let base = "algo-bench-\(stamp)-\(capName)"
+        var url = dir.appendingPathComponent("\(base).md")
+        var i = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = dir.appendingPathComponent("\(base)-\(i).md")
+            i += 1
+        }
+        return url
     }
 
     func cancel() {

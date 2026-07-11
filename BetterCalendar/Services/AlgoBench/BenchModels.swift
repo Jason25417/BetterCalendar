@@ -108,6 +108,7 @@ nonisolated struct BenchCase: Codable, Identifiable, Sendable {
     var fromHM: String? = nil          // reflow：从几点起重排
     var windDownHM: String? = nil      // reflow：收工线（缺省 23:00；用例自带保证确定性，不读用户设置）
     var expects: [BenchExpectation]
+    var rev: Int? = nil                // 内置修订号：本地同 id 且 rev 落后 → 新内置覆盖下发（会盖手改；删除仍不复活）
 }
 
 /// 单次运行的产出（所有变体统一出口；断言引擎只认它）。
