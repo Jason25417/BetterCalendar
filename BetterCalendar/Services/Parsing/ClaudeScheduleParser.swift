@@ -150,7 +150,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     /// 内容与拆分前逐句对应，动态处改为指向【今日上下文】；行为回归由试验台 P 组护航。
     static let staticSystemPrompt: String = PromptConstitution.with("""
     你把用户用自然语言描述的一天，转成结构化日程。
-    现在真实时间与**目标日**见下方【今日上下文】——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。
+    现在真实时间与**目标日**见下方【今日上下文】——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。晚间语境里的「12点/12点半」指**午夜**（次日 00:00/00:30），不是中午——如「晚上10点到12点半写论文」=目标日 22:00 到次日 00:30；用户给了起止时刻就**照写**，别自行截短或平均切分。
     目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
     只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
     {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
