@@ -124,6 +124,7 @@ final class ExecutionViewModel {
     /// 每次运行态变化整份落盘（几百字节 JSON）；空档且无并行 → 清掉。
     private func persistRunState() {
         guard persistsRunState else { return }
+        updateScreenTimeShield()   // 幂等收敛：任何运行态变更后把屏蔽对齐（工作段=屏蔽，其余=解除）
         guard active != nil || !background.isEmpty else {
             UserDefaults.standard.removeObject(forKey: Self.runStateKey)
             return
@@ -247,6 +248,17 @@ final class ExecutionViewModel {
         self.persistsRunState = persistsRunState
         self.startedDays = startedDays
         self.projection = projection
+        // 番茄绝对专注（iOS）：启动即收敛一次——上次崩溃/被杀残留的屏蔽在这里解除
+        if persistsRunState { updateScreenTimeShield() }
+    }
+
+    /// 番茄绝对专注（iOS，SPEC §5.5）：屏蔽状态=纯函数(运行态)——番茄**工作段**且没在手动休息才屏蔽。
+    /// 挂在 persistRunState 必经点 + init，幂等廉价；macOS 空实现（系统不支持硬屏蔽）。
+    func updateScreenTimeShield() {
+        #if os(iOS)
+        let working = active?.timingStyle == .pomodoro && !pomoIsRest && !isOnBreak
+        ScreenTimeBlocker.shared.sync(shouldShield: working)
+        #endif
     }
 
     // MARK: - 读取今日

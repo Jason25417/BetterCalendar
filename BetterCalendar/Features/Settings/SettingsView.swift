@@ -9,6 +9,9 @@ import SwiftUI
 #if os(macOS)
 import AppKit
 #endif
+#if os(iOS)
+import FamilyControls   // 番茄钟绝对专注：FamilyActivitySelection / familyActivityPicker
+#endif
 
 struct SettingsView: View {
     @State private var apiKey: String = ""
@@ -23,6 +26,13 @@ struct SettingsView: View {
     @State private var windDownHour: Int = WorkHoursSettings.windDownHour
     @State private var pushIntensity: PushIntensity = SuggestionSettings.intensity
     @State private var journalLock: Bool = JournalSettings.privacyLock
+    #if os(iOS)
+    // 番茄钟绝对专注（SPEC §5.5，entitlement 已批）：屏蔽开关 + 名单选择器状态
+    @State private var shieldEnabled: Bool = ScreenTimeBlockingSettings.enabled
+    @State private var shieldSelection: FamilyActivitySelection = ScreenTimeBlockingSettings.selection
+    @State private var showShieldPicker = false
+    @State private var shieldAuthDenied = false
+    #endif
     @State private var savedHint: String?
     @State private var testing = false
     @State private var testResult: String?
@@ -133,6 +143,42 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     #else
                     Text("iOS 不提供前台 App 检测——用快捷指令自动化：在快捷指令 App → 自动化 → 新建「当打开〔某 App〕」→ 运行「自动休息开始」；再建「当关闭」→「自动休息结束」。效果与 Mac 相同：去了哪里绝不记录，只记「休息」。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #endif
+
+                    #if os(iOS)
+                    // 番茄钟绝对专注（§5.5）：默认关；名单=系统 FamilyActivityPicker 用户自选；
+                    // 只在番茄**工作段**屏蔽，休息/结束/取消自动解除（VM persistRunState 幂等收敛）。
+                    Toggle("番茄钟绝对专注（屏蔽分心 App）", isOn: Binding(
+                        get: { shieldEnabled },
+                        set: { on in
+                            shieldEnabled = on
+                            ScreenTimeBlockingSettings.enabled = on
+                            if on {
+                                Task {
+                                    let ok = await ScreenTimeBlocker.shared.requestAuthorization()
+                                    shieldAuthDenied = !ok
+                                    if !ok { shieldEnabled = false; ScreenTimeBlockingSettings.enabled = false }
+                                }
+                            } else {
+                                ScreenTimeBlocker.shared.liftNow()
+                            }
+                        }))
+                    if shieldEnabled {
+                        Button("选择要屏蔽的 App / 网站（已选：\(ScreenTimeBlockingSettings.selectionSummary)）") {
+                            showShieldPicker = true
+                        }
+                        .familyActivityPicker(isPresented: $showShieldPicker, selection: $shieldSelection)
+                        .onChange(of: shieldSelection) { _, sel in
+                            ScreenTimeBlockingSettings.selection = sel
+                        }
+                        Button("立即解除屏蔽", role: .destructive) { ScreenTimeBlocker.shared.liftNow() }
+                    }
+                    if shieldAuthDenied {
+                        Text("「屏幕使用时间」授权被拒——去 系统设置 → 屏幕使用时间 里允许 BetterCalendar 后再开。")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    Text("开着它时，番茄工作段期间打开名单里的 App 会被系统屏蔽页拦下；休息段、结束、取消随即自动解除。名单你自己选、随时可关；你的使用情况不被记录、不上传。")
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 

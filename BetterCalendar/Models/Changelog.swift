@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.32.0", date: "2026-07", changes: [
+            "番茄钟绝对专注（iOS）：设置里打开后，番茄工作段期间用「屏幕使用时间」屏蔽你自选的分心 App/网站——休息段、结束、取消随即自动解除。名单在系统选择器里自己挑、默认关、随时可关可解除；你的使用情况不被记录、不上传（Apple Family Controls 授权已获批）",
+        ]),
         ChangelogEntry(version: "0.31.3", date: "2026-07", changes: [
             "聪音联动全面升级为「2 秒同步」：联动开着时状态每 2 秒推给游戏，错过任何时机（游戏先开/BC 重启/中途换任务/休息顺延）都会在几秒内自动对齐——不再出现「明明在计时游戏却没跟上」",
             "配套：开始/完成事件带上序号，游戏侧严格只结算一次，经验不重发不漏发；游戏设置页开关下方新增联动状态行（已连接/同步中/正在陪跑）",
