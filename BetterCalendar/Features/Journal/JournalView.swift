@@ -29,8 +29,18 @@ struct MarkdownDocument: Transferable {
 }
 #endif
 
+/// 日记页所需依赖（组装点 AppContainer 构造；View 不见 AppContainer——反向依赖清零 2026-07-12）。
+struct JournalDeps {
+    let journalStore: JournalStore
+    let milestones: MilestoneStore
+    let photoStore: PhotoStore
+    let reflectionContext: ReflectionContextProvider
+    let router: AppRouter
+    let makeReviewModel: () -> ReviewViewModel   // 复盘头 VM 工厂（每次进视图新建，同原 container.reviewModel）
+}
+
 struct JournalView: View {
-    let container: AppContainer
+    let deps: JournalDeps
     @State private var model: JournalViewModel
     @State private var today: JournalEntry?
     @State private var todayPrompt: String?   // 第一方情境引子（来自当天 PlanComparing）
@@ -38,9 +48,9 @@ struct JournalView: View {
     @State private var authFailedHint: String?
     @Environment(\.scenePhase) private var scenePhase
 
-    init(container: AppContainer) {
-        self.container = container
-        _model = State(initialValue: JournalViewModel(store: container.journalStore))
+    init(deps: JournalDeps) {
+        self.deps = deps
+        _model = State(initialValue: JournalViewModel(store: deps.journalStore))
     }
 
     private var locked: Bool { JournalSettings.privacyLock && !unlocked }
@@ -55,10 +65,10 @@ struct JournalView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             reviewHeader
                             // 成就静默解锁（#27）：零通知——只在日记页安静出一条，点 ✕ 收起；全景在工具栏 🏅
-                            ForEach(container.milestones.freshlyUnlocked) { m in
+                            ForEach(deps.milestones.freshlyUnlocked) { m in
                                 MessageStrip(icon: "seal.fill", tint: .orange,
                                              text: "\(m.title)——\(m.line)") {
-                                    Button { container.milestones.acknowledgeFresh() } label: {
+                                    Button { deps.milestones.acknowledgeFresh() } label: {
                                         Image(systemName: "xmark").font(.caption2)
                                     }
                                     .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -78,7 +88,7 @@ struct JournalView: View {
                 if !locked {
                     ToolbarItem(placement: .primaryAction) { exportButton }
                     ToolbarItem(placement: .primaryAction) {
-                        NavigationLink { AchievementsView(store: container.milestones) } label: {
+                        NavigationLink { AchievementsView(store: deps.milestones) } label: {
                             Label("成就", systemImage: "seal")
                         }
                         .help("累计里程碑——只做加法，没有断签")
@@ -86,24 +96,24 @@ struct JournalView: View {
                 }
             }
             .navigationDestination(for: JournalEntry.self) { e in
-                JournalDetailView(entry: e, model: model, photoStore: container.photoStore)
+                JournalDetailView(entry: e, model: model, photoStore: deps.photoStore)
             }
         }
         .onAppear {
             if locked { unlock() }
             openTodayIfNeeded()
-            container.milestones.refresh()   // 成就检查（天级节奏：进日记页时看看有没有新点亮）
+            deps.milestones.refresh()   // 成就检查（天级节奏：进日记页时看看有没有新点亮）
         }
         .onChange(of: scenePhase) { _, phase in
             // 退后台自动重新上锁（下次回前台需再解锁）
             if phase == .background, JournalSettings.privacyLock { unlocked = false }
         }
-        .onChange(of: container.router.journalRequest) { _, req in
+        .onChange(of: deps.router.journalRequest) { _, req in
             guard req != nil else { return }
             if locked { unlock() }
             today = model.todayEntry()
             loadPrompt()
-            container.router.journalRequest = nil   // 消费掉
+            deps.router.journalRequest = nil   // 消费掉
         }
     }
 
@@ -150,7 +160,7 @@ struct JournalView: View {
         loadPrompt()
     }
     private func loadPrompt() {
-        Task { todayPrompt = await container.reflectionContext.todayPrompt() }
+        Task { todayPrompt = await deps.reflectionContext.todayPrompt() }
     }
 
     // MARK: 复盘头（0.28 提案A：复盘并入日记页，时刻驱动出现——过收工线才展开，白天不打扰）
@@ -172,7 +182,7 @@ struct JournalView: View {
                     }
                     .help("用今天的做成记录自动生成一篇简短日记（可再编辑；与手写内容明显区分）")
                 }
-                ReviewPanel(container: container)
+                ReviewPanel(model: deps.makeReviewModel())
             }
             .padding()
             .background(Color.orange.opacity(0.06))
@@ -194,7 +204,7 @@ struct JournalView: View {
 
     /// 自动日记落笔：正文空 → 填入；已有手写 → 追加在后（空行分隔）；打「自动日记」标签。
     private func applyAutoJournal() async {
-        guard let text = await container.reflectionContext.autoJournalText() else {
+        guard let text = await deps.reflectionContext.autoJournalText() else {
             authFailedHint = nil
             todayPrompt = "今天还没有做成记录——开始一件事，自动日记就有素材了。"
             return
@@ -219,7 +229,7 @@ struct JournalView: View {
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
-                JournalEditor(entry: e, model: model, photoStore: container.photoStore)
+                JournalEditor(entry: e, model: model, photoStore: deps.photoStore)
                 // 功能说明（非提示催写，Jason 2026-07-10 定）：只告知能力存在，绝不出现「你还没写给明天」
                 Text("小知识：写一行「给明天：……」，明早会替你带给明天的自己。")
                     .font(.caption2).foregroundStyle(.tertiary)

@@ -26,8 +26,32 @@ struct ICSDocument: Transferable {
 }
 #endif
 
+/// 首页所需依赖（组装点 AppContainer 构造；View 不见 AppContainer——反向依赖清零 2026-07-12）。
+/// 字段名对齐 AppContainer 属性，方便对照。
+struct HomeDeps {
+    let arrangeDay: ArrangeDayUseCase
+    let refiner: PlanRefining
+    let routingStore: RoutingCalendarStore
+    let routingReminder: RoutingReminderStore
+    let exporter: ICSExporting
+    let planStore: PlanStore
+    let projection: ProjectionService
+    let notifier: NotificationScheduling
+    let longTasks: LongTaskStore
+    let draftSnapshots: DraftSnapshotStore
+    let looseDays: LooseDayStore
+    let startedDays: StartedDayStore
+    let execution: ExecutionViewModel
+    let liveDraft: LiveDraft
+    let journalStore: JournalStore
+    let router: AppRouter
+    let calendarStore: FakeCalendarStore     // 假日历（预览页观察用）
+    let reminderStore: FakeReminderStore
+    let reconcile: ReconcileService
+}
+
 struct HomeView: View {
-    let container: AppContainer
+    let deps: HomeDeps
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
@@ -57,22 +81,22 @@ struct HomeView: View {
         return model.hasUnsavedChanges ? base + " · 同步日历" : "同步日历改动"          // 过：叠加/单做蓝色对账
     }
 
-    init(container: AppContainer) {
-        self.container = container
+    init(deps: HomeDeps) {
+        self.deps = deps
         _model = State(initialValue: HomeViewModel(
-            arrangeDay: container.arrangeDay,
-            refiner: container.refiner,
-            calendarStore: container.routingStore,
-            reminderStore: container.routingReminder,
-            exporter: container.exporter,
-            planStore: container.planStore,
-            projection: container.projection,
-            notifier: container.notifier,
-            longTaskStore: container.longTasks,
-            draftStore: container.draftSnapshots,
-            looseDays: container.looseDays,
-            startedDays: container.startedDays,
-            progress: container.execution))
+            arrangeDay: deps.arrangeDay,
+            refiner: deps.refiner,
+            calendarStore: deps.routingStore,
+            reminderStore: deps.routingReminder,
+            exporter: deps.exporter,
+            planStore: deps.planStore,
+            projection: deps.projection,
+            notifier: deps.notifier,
+            longTaskStore: deps.longTasks,
+            draftStore: deps.draftSnapshots,
+            looseDays: deps.looseDays,
+            startedDays: deps.startedDays,
+            progress: deps.execution))
     }
 
     var body: some View {
@@ -89,7 +113,7 @@ struct HomeView: View {
                 HStack {
                     Text("说说你的一天").font(.headline)
                     Spacer()
-                    let loose = container.looseDays.isLoose(model.targetDay)
+                    let loose = deps.looseDays.isLoose(model.targetDay)
                     Button { model.toggleLoose() } label: {
                         Label(loose ? "结束松散" : "松散一下",
                               systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
@@ -112,7 +136,7 @@ struct HomeView: View {
                 }
 
                 // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
-                if container.looseDays.isLoose(model.targetDay) {
+                if deps.looseDays.isLoose(model.targetDay) {
                     HStack(spacing: 8) {
                         Image(systemName: "moon.stars.fill").foregroundStyle(.purple)
                         Text("松散日 · 已经退场陪你了——不催、不算账。想排还是能排，也可以就好好休息。")
@@ -126,8 +150,8 @@ struct HomeView: View {
 
                 // L3 主动建议（唯一主动·顶部一行）：休息日全静音、可"别再提"永久静音、强度可调
                 let _ = l3Tick   // 让"别再提"后重算（静音集存 UserDefaults、非 @Observable）
-                let l3 = container.longTasks.l3Suggestions(
-                    loose: container.looseDays.isLoose(model.targetDay),
+                let l3 = deps.longTasks.l3Suggestions(
+                    loose: deps.looseDays.isLoose(model.targetDay),
                     intensity: SuggestionSettings.intensity.cap,
                     muted: SuggestionSettings.mutedTaskIDs)
                 ForEach(l3) { s in
@@ -136,14 +160,14 @@ struct HomeView: View {
                         if s.kind == .shelve {
                             Button("先放下") {
                                 BehaviorLog.record("L3建议", "点「先放下」")
-                                if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
-                                    container.longTasks.shelve(t)
+                                if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
+                                    deps.longTasks.shelve(t)
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                         } else {
                             Button("排进今天") {
                                 BehaviorLog.record("L3建议", "点「排进今天」")
-                                if let t = container.longTasks.items.first(where: { $0.id == s.id }) {
+                                if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
                                     model.smartInsertFromLongTask(t)
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
@@ -180,9 +204,9 @@ struct HomeView: View {
                                 .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
                         }
                     }
-                    if model.isWorking, !container.liveDraft.streaming.isEmpty {
+                    if model.isWorking, !deps.liveDraft.streaming.isEmpty {
                         VStack(alignment: .leading, spacing: 3) {
-                            ForEach(container.liveDraft.streaming) { b in
+                            ForEach(deps.liveDraft.streaming) { b in
                                 HStack(spacing: 6) {
                                     Text(b.start.formatted(date: .omitted, time: .shortened))
                                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -246,11 +270,11 @@ struct HomeView: View {
 
                 // 收口卡（0.28 提案A）：常驻复盘入口退役——只在「强结束信号 且 今天还没记录」时出现，
                 // 给一个流畅脱离工作安排、进入收尾的温和出口（红线：措辞绝不出现「还剩 N 件」）。
-                if model.wrapUpSignal, !container.journalStore.hasContentToday() {
+                if model.wrapUpSignal, !deps.journalStore.hasContentToday() {
                     Button {
                         BehaviorLog.record("收口卡", "点击进日记")
-                        container.router.selectedTab = .journal
-                        container.router.journalRequest = .now
+                        deps.router.selectedTab = .journal
+                        deps.router.journalRequest = .now
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "sunset")
@@ -373,7 +397,7 @@ struct HomeView: View {
                         List {
                             ForEach(model.blocks) { item in
                                 EditableRow(block: model.binding(for: item.id),
-                                            poolTasks: container.longTasks.items,
+                                            poolTasks: deps.longTasks.items,
                                             referenceDay: model.targetDay,
                                             parallelCandidates: model.blocks
                                                 .filter { $0.id != item.id && !$0.isAnchor }
@@ -408,7 +432,7 @@ struct HomeView: View {
                                 // 合一（Jason 2026-07-09）：确认写入绿计划（push，有改动才）+ 实时日同步蓝色实际改动（pull）。
                                 // 主动点=用户此刻本机日历最新 → 对账直接信任日历、不弹窗。
                                 if model.hasUnsavedChanges { await model.confirm() }
-                                if model.isLiveTargetDay { await container.execution.reconcileCalendarActuals() }
+                                if model.isLiveTargetDay { await deps.execution.reconcileCalendarActuals() }
                             }
                         } label: {
                             Label(confirmSyncButtonTitle, systemImage: "checkmark.circle")
@@ -462,7 +486,7 @@ struct HomeView: View {
                     List {
                         ForEach(model.blocks) { item in
                             EditableRow(block: model.binding(for: item.id),
-                                        poolTasks: container.longTasks.items,
+                                        poolTasks: deps.longTasks.items,
                                         referenceDay: model.targetDay,
                                         parallelCandidates: model.blocks
                                             .filter { $0.id != item.id && !$0.isAnchor }
@@ -505,11 +529,11 @@ struct HomeView: View {
             #endif
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
-                case .preview: CalendarPreviewView(store: container.calendarStore,
-                                                   reminderStore: container.reminderStore)
+                case .preview: CalendarPreviewView(store: deps.calendarStore,
+                                                   reminderStore: deps.reminderStore)
                 }
             }
-            .onChange(of: container.router.scheduleRequest) { _, req in
+            .onChange(of: deps.router.scheduleRequest) { _, req in
                 guard let req else { return }
                 switch req {
                 case .arrangeToday(let text):
@@ -518,7 +542,7 @@ struct HomeView: View {
                         Task { await model.arrange() }
                     }
                 }
-                container.router.scheduleRequest = nil   // 消费掉
+                deps.router.scheduleRequest = nil   // 消费掉
             }
             .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
             // 双向同步回流后（0.22.2→0.24 C2）：干净视图直接刷新；编辑中亮新鲜度徽标（不打扰、不弹窗）
@@ -530,11 +554,11 @@ struct HomeView: View {
                 model.noteExecutionProgress()
             }
             // 0.20 双向同步 → 0.25.6 改带「不再询问」勾选 sheet（与运行态恢复统一交互）。
-            .sheet(isPresented: Binding(get: { container.reconcile.hasPendingChanges },
-                                        set: { if !$0, container.reconcile.hasPendingChanges {
-                                            container.reconcile.resolveChanges(sync: false, remember: false) } })) {
-                let dels = container.reconcile.pendingDeletions.map(\.title).joined(separator: "、")
-                let adds = container.reconcile.pendingAdditions.map(\.title).joined(separator: "、")
+            .sheet(isPresented: Binding(get: { deps.reconcile.hasPendingChanges },
+                                        set: { if !$0, deps.reconcile.hasPendingChanges {
+                                            deps.reconcile.resolveChanges(sync: false, remember: false) } })) {
+                let dels = deps.reconcile.pendingDeletions.map(\.title).joined(separator: "、")
+                let adds = deps.reconcile.pendingAdditions.map(\.title).joined(separator: "、")
                 RememberableConfirmSheet(
                     title: "日历里有改动，要同步吗？",
                     message: (dels.isEmpty ? "" : "移除了：\(dels)\n")
@@ -545,7 +569,7 @@ struct HomeView: View {
                         .init(label: "保留现状（不同步）", role: nil, appliesRemember: true),
                     ],
                     onChoose: { i, remember in
-                        container.reconcile.resolveChanges(sync: i == 0, remember: remember)
+                        deps.reconcile.resolveChanges(sync: i == 0, remember: remember)
                     })
             }
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
@@ -614,7 +638,7 @@ struct HomeView: View {
     @State private var newOngoingTitle = ""
 
     @ViewBuilder private var ongoingSection: some View {
-        let store = container.longTasks
+        let store = deps.longTasks
         DisclosureGroup(isExpanded: $ongoingExpanded) {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(store.items) { task in
@@ -658,8 +682,8 @@ struct HomeView: View {
                 HStack(spacing: 6) {
                     Text(task.title).font(.callout)
                     // 进度达/超估算 → 标题右边轻声邀请（问句、非断言；点一下才标完成）
-                    if container.longTasks.looksComplete(for: task) {
-                        Button("看起来做完了？") { container.longTasks.complete(task) }
+                    if deps.longTasks.looksComplete(for: task) {
+                        Button("看起来做完了？") { deps.longTasks.complete(task) }
                             .font(.caption2).buttonStyle(.borderless).foregroundStyle(.green)
                             .help("投入已达到你估的总量——做成了就点一下（不点也没关系）")
                     }
@@ -674,13 +698,13 @@ struct HomeView: View {
                         Text("每周约 \(c / 60) 小时").font(.caption2).foregroundStyle(.secondary)
                     }
                     // 进度（A，三红线）：单元优先/无单元退时长；永远锚定"已"
-                    let progress = container.longTasks.progressText(for: task)
+                    let progress = deps.longTasks.progressText(for: task)
                     if !progress.isEmpty {
                         Text(progress).font(.caption2).foregroundStyle(.green)
                     }
                 }
                 // 增长条（只在有总量时；绿色从零长起、无"还剩"）
-                if let f = container.longTasks.progressFraction(for: task) {
+                if let f = deps.longTasks.progressFraction(for: task) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.quaternary).frame(height: 3)
@@ -695,16 +719,16 @@ struct HomeView: View {
                 // 温和三选（D-d 拍板）：不留红色残留、放下也是体面出口
                 Button("排进今天") { model.smartInsertFromLongTask(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                Button("推一周") { container.longTasks.pushDeadline(task) }
+                Button("推一周") { deps.longTasks.pushDeadline(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                Button("先放下") { container.longTasks.shelve(task) }
+                Button("先放下") { deps.longTasks.shelve(task) }
                     .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
             } else {
                 Menu {
                     Button("帮我排进今天（智能插空档）") { model.smartInsertFromLongTask(task) }
-                    Button("做成了 🎉") { container.longTasks.complete(task) }
-                    Button("推一周") { container.longTasks.pushDeadline(task) }
-                    Button("先放下") { container.longTasks.shelve(task) }
+                    Button("做成了 🎉") { deps.longTasks.complete(task) }
+                    Button("推一周") { deps.longTasks.pushDeadline(task) }
+                    Button("先放下") { deps.longTasks.shelve(task) }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.caption)
                 }

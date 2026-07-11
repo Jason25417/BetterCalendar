@@ -499,7 +499,10 @@ final class ExecutionViewModel {
                                                            done: pomoWorkSegmentsDone,
                                                            inWork: phase.kind == .work)
             } else if blk.timingStyle == .light, let planned = activePlannedDuration {
-                endsAt = Date.now.addingTimeInterval(max(0, planned - currentElapsed))
+                // 0.33.0：超时/「继续计时」转往上记后没有终点——此前 max(0,…) 让 endsAt 永远=now
+                // （谎报终点，游戏没法跟正计时）。开放式一律导出 nil，mod 见 light 无终点走官方正计时。
+                let remain = planned - currentElapsed
+                endsAt = remain > 0 ? Date.now.addingTimeInterval(remain) : nil
             }
             return .init(title: blk.title, timingStyle: blk.timingStyle.rawValue, startedAt: blk.start,
                          elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) },

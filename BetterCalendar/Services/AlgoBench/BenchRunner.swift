@@ -177,8 +177,8 @@ final class BenchRunner {
                                                    originalRequest: c.originalRequest ?? "", now: now)
             if variant.id == BenchVariantID.refineCloudGuard || variant.id == BenchVariantID.refineFMGuard {
                 // = 现行线上组合（0.23.1 起防呆三连）：部分返回并回 + 标志防翻 + 固定块时间还原
-                refined = HomeViewModel.mergePartialRefine(original: input, refined: refined, command: command)
-                refined = HomeViewModel.guardRefineFlags(original: input, refined: refined, command: command)
+                refined = RefineGuards.mergePartialRefine(original: input, refined: refined, command: command)
+                refined = RefineGuards.guardRefineFlags(original: input, refined: refined, command: command)
             }
             out.latencyMS = Self.ms(since: t0)
             out.blocks = refined

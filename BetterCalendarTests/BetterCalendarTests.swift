@@ -1520,7 +1520,7 @@ struct LogicTests {
         let c = ScheduledBlock(title: "阅读", start: at(2026,7,9,14), end: at(2026,7,9,15))
         // 模型抽风：让挪阅读，却只回了阅读一块（R1 实锤形态）
         let onlyRead = ScheduledBlock(title: "阅读", start: at(2026,7,9,16), end: at(2026,7,9,17))
-        let merged = HomeViewModel.mergePartialRefine(original: [a, b, c], refined: [onlyRead],
+        let merged = RefineGuards.mergePartialRefine(original: [a, b, c], refined: [onlyRead],
                                                       command: "把阅读挪到16点")
         #expect(merged.count == 3)
         #expect(merged.first { $0.title == "阅读" }?.start == at(2026,7,9,16))   // 改动生效
@@ -1530,7 +1530,7 @@ struct LogicTests {
 
         // 模型新增块保留（"加一件"场景）
         let added = ScheduledBlock(title: "散步", start: at(2026,7,9,18), end: at(2026,7,9,18,30))
-        let withNew = HomeViewModel.mergePartialRefine(original: [a], refined: [a, added], command: "加个散步")
+        let withNew = RefineGuards.mergePartialRefine(original: [a], refined: [a, added], command: "加个散步")
         #expect(withNew.count == 2)
     }
 
@@ -1538,7 +1538,7 @@ struct LogicTests {
     @Test func mergePartialRefineRespectsDeleteIntent() {
         let a = ScheduledBlock(title: "写作", start: at(2026,7,9,9), end: at(2026,7,9,11))
         let c = ScheduledBlock(title: "阅读", start: at(2026,7,9,14), end: at(2026,7,9,15))
-        let merged = HomeViewModel.mergePartialRefine(original: [a, c], refined: [a], command: "删掉阅读")
+        let merged = RefineGuards.mergePartialRefine(original: [a, c], refined: [a], command: "删掉阅读")
         #expect(merged.count == 1)
         #expect(merged.first?.title == "写作")
     }
@@ -1548,11 +1548,11 @@ struct LogicTests {
         let meeting = ScheduledBlock(title: "会议", start: at(2026,7,9,11,30), end: at(2026,7,9,12,30), isFixed: true)
         var moved = meeting; moved.start = at(2026,7,9,12,30); moved.end = at(2026,7,9,13,30)
         // 没点名 → 时间还原
-        let guarded = HomeViewModel.guardRefineFlags(original: [meeting], refined: [moved],
+        let guarded = RefineGuards.guardRefineFlags(original: [meeting], refined: [moved],
                                                      command: "整体往后挪一小时")
         #expect(guarded.first?.start == at(2026,7,9,11,30))
         // 点名了 → 尊重用户（模型改动保留）
-        let named = HomeViewModel.guardRefineFlags(original: [meeting], refined: [moved],
+        let named = RefineGuards.guardRefineFlags(original: [meeting], refined: [moved],
                                                    command: "把会议挪到12点半")
         #expect(named.first?.start == at(2026,7,9,12,30))
     }
@@ -1567,14 +1567,14 @@ struct LogicTests {
         var ra = a; ra.start = at(2026,7,8,10); ra.end = at(2026,7,8,12)
         ra.isFixed = true; ra.priority = .important; ra.timingStyle = .pomodoro
         var rb = b; rb.isFixed = true; rb.priority = .important; rb.timingStyle = .pomodoro
-        let guarded = HomeViewModel.guardRefineFlags(original: [a, b], refined: [ra, rb],
+        let guarded = RefineGuards.guardRefineFlags(original: [a, b], refined: [ra, rb],
                                                      command: "把写代码挪到10点")
         #expect(guarded.first?.start == at(2026,7,8,10))          // 让改的（时间）保留
         #expect(guarded.allSatisfy { !$0.isFixed })               // 没让改的全部还原
         #expect(guarded.allSatisfy { $0.priority == .normal })
         #expect(guarded.allSatisfy { $0.timingStyle == .light })
         // 明说了「番茄」→ timingStyle 允许改，固定/★ 仍还原
-        let allowed = HomeViewModel.guardRefineFlags(original: [a], refined: [ra], command: "写代码改成番茄钟")
+        let allowed = RefineGuards.guardRefineFlags(original: [a], refined: [ra], command: "写代码改成番茄钟")
         #expect(allowed.first?.timingStyle == .pomodoro)
         #expect(allowed.first?.isFixed == false)
     }
@@ -1584,12 +1584,12 @@ struct LogicTests {
         let lunch = ScheduledBlock(title: "午饭", start: at(2026,7,8,12), end: at(2026,7,8,13),
                                    isAnchor: true, timingStyle: .light, priority: .normal)
         var rLunch = lunch; rLunch.isAnchor = false     // 模型抽风：把午饭的锚点标志丢了
-        let guarded = HomeViewModel.guardRefineFlags(original: [lunch], refined: [rLunch],
+        let guarded = RefineGuards.guardRefineFlags(original: [lunch], refined: [rLunch],
                                                      command: "把健身挪到下午")   // 命令根本没提午饭
         #expect(guarded.first?.isAnchor == true)         // 还原：午饭仍是锚点、不进执行列表
         // 模型新加的午饭（原来没有）→ 标题兜底也锚
         let newDinner = ScheduledBlock(title: "晚饭", start: at(2026,7,8,18), end: at(2026,7,8,19), isAnchor: false)
-        let guarded2 = HomeViewModel.guardRefineFlags(original: [], refined: [newDinner], command: "加个晚饭")
+        let guarded2 = RefineGuards.guardRefineFlags(original: [], refined: [newDinner], command: "加个晚饭")
         #expect(guarded2.first?.isAnchor == true)
     }
 

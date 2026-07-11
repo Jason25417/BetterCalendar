@@ -129,4 +129,22 @@ final class AppContainer {
                         arrangeDay: arrangeDay, localStore: reviewStore,
                         longTasks: longTasks, planStore: planStore, looseDays: looseDays)
     }
+
+    // MARK: 页面依赖包（反向依赖清零 2026-07-12：Features 不再见 AppContainer，按页注入所需具体依赖）
+
+    var homeDeps: HomeDeps {
+        HomeDeps(arrangeDay: arrangeDay, refiner: refiner,
+                 routingStore: routingStore, routingReminder: routingReminder,
+                 exporter: exporter, planStore: planStore, projection: projection,
+                 notifier: notifier, longTasks: longTasks, draftSnapshots: draftSnapshots,
+                 looseDays: looseDays, startedDays: startedDays, execution: execution,
+                 liveDraft: liveDraft, journalStore: journalStore, router: router,
+                 calendarStore: calendarStore, reminderStore: reminderStore, reconcile: reconcile)
+    }
+
+    var journalDeps: JournalDeps {
+        JournalDeps(journalStore: journalStore, milestones: milestones, photoStore: photoStore,
+                    reflectionContext: reflectionContext, router: router,
+                    makeReviewModel: { self.reviewModel })
+    }
 }

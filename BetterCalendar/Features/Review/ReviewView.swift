@@ -11,12 +11,10 @@ import SwiftUI
 /// 可嵌入的复盘面板（0.28 提案A：并入日记页「回看今天」头部；独立复盘页已退役）。
 /// 无自己的滚动容器/导航标题——宿主（日记页）提供；内容与原 ReviewView 一致。
 struct ReviewPanel: View {
-    let container: AppContainer
     @State private var model: ReviewViewModel
 
-    init(container: AppContainer) {
-        self.container = container
-        _model = State(initialValue: container.reviewModel)
+    init(model: ReviewViewModel) {
+        _model = State(initialValue: model)
     }
 
     var body: some View {

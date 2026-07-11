@@ -29,7 +29,7 @@ struct ArrangeDayUseCase {
             let (s, e) = Self.clampToDay(start: start, end: end, referenceDate: referenceDate,
                                          backfill: context.isBackfill)
             // 锚点标题兜底（0.22.2，Jason 报模型漏标「午饭」）：明显的作息标题强制 isAnchor=true；只加不减
-            let anchor = pb.isAnchor || Self.isObviousAnchor(pb.title)
+            let anchor = pb.isAnchor || RefineGuards.isObviousAnchor(pb.title)
             return ScheduledBlock(title: pb.title, start: s, end: e,
                                   isFixed: pb.isFixed, isAnchor: anchor, timingStyle: pb.timingStyle,
                                   priority: pb.priority, deadline: pb.deadline, labels: pb.labels)
@@ -49,12 +49,6 @@ struct ArrangeDayUseCase {
         let base = (hour < 6 && !backfill) ? (cal.date(byAdding: .day, value: 1, to: referenceDate) ?? referenceDate) : referenceDate
         let s = cal.date(bySettingHour: hour, minute: sc.minute ?? 0, second: 0, of: base) ?? start
         return (s, s.addingTimeInterval(max(0, end.timeIntervalSince(start))))
-    }
-
-    /// 明显的作息锚点标题（模型漏标时的确定性兜底；只加不减——模型标了的照样是）。纯函数、可单测。
-    static func isObviousAnchor(_ title: String) -> Bool {
-        let anchors = ["午饭", "晚饭", "早饭", "午餐", "晚餐", "早餐", "吃饭", "午休", "通勤", "睡觉", "洗漱"]
-        return anchors.contains { title.contains($0) }
     }
 
     /// 兼容旧调用（复盘回填等只要决策）。

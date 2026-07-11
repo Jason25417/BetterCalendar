@@ -50,7 +50,7 @@ struct BetterCalendarApp: App {
     private func mainTabs() -> some View {
             TabView(selection: Binding(get: { container.router.selectedTab },
                                        set: { container.router.selectedTab = $0 })) {
-                HomeView(container: container)
+                HomeView(deps: container.homeDeps)
                     .tag(AppRouter.Tab.schedule)
                     .tabItem { Label("排日程", systemImage: "calendar") }
                 #if !os(macOS)
@@ -62,7 +62,7 @@ struct BetterCalendarApp: App {
                 .tag(AppRouter.Tab.today)
                 .tabItem { Label("今天", systemImage: "play.circle") }
                 #endif
-                JournalView(container: container)
+                JournalView(deps: container.journalDeps)
                     .tag(AppRouter.Tab.journal)
                     .tabItem { Label("日记", systemImage: "book") }
             }

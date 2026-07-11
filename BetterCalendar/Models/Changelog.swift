@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.32.2", date: "2026-07", changes: [
+            "内部整理：代码分层清理（架构地图反向依赖清零），功能与界面无任何变化",
+        ]),
         ChangelogEntry(version: "0.32.1", date: "2026-07", changes: [
             "修复：设置里打开「自动休息感知」后，关键词输入框立刻出现（此前要重开设置页才显示）",
         ]),
