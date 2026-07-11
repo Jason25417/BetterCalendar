@@ -584,6 +584,10 @@ final class HomeViewModel {
     private var suppressNextDayChangeReload = false
     func targetDayDidChange() {
         if suppressNextDayChangeReload { suppressNextDayChangeReload = false; return }
+        // #29（2026-07-11 审核过）：**没排出去的口述跟人走**——打了一段话才发现目标日选错，
+        // 切过去不该重打。只带「还没变成草稿的输入」（已排出的留在原页=防重复安排），
+        // 且只填**空页**、绝不覆盖目标页已有内容（草稿本页模型不破，0.23 C）。
+        let pendingSay = draftSource == .arranged ? "" : inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         note = nil
         committedCount = nil
         arrangedCount = nil; refinedChangeCount = nil
@@ -600,7 +604,8 @@ final class HomeViewModel {
             }
             hasUnsavedChanges = true
         } else {
-            inputText = draftStore?.load(day: targetDay)?.inputText ?? ""
+            let pageText = draftStore?.load(day: targetDay)?.inputText ?? ""
+            inputText = pageText.isEmpty && !pendingSay.isEmpty ? pendingSay : pageText
             pendingLongTasks = []
             hasUnsavedChanges = false
             blocks = []

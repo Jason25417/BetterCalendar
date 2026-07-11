@@ -444,7 +444,8 @@ struct HomeView: View {
             .navigationTitle("BetterCalendar")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    NavigationLink(value: HomeRoute.preview) { Label("预览", systemImage: "calendar") }
+                    // 「预览（假日历）」入口退役（2026-07-11 Jason 定）：假日历 0.19.1 起已无写入路径，
+                    // 观察页失去意义；CalendarPreviewView 代码保留（单测/开发排查可用），只撤 UI 入口。
                     #if os(macOS)
                     // 开发期：算法试验台（上架前随「可见报错」条款一起撤）
                     Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
@@ -726,12 +727,22 @@ struct HomeView: View {
             Button("昨天（不建议）") { model.targetDay = DayContext.logicalDay(offset: -1) }
         } label: {
             // 口语词 + 具体日期（2026-07-09 Jason 要求「为今天安排」标上是哪天）
-            Label("为 \(Self.relativeDayWord(model.targetDay))（\(Self.dayLabel(model.targetDay))）安排",
+            // #28（2026-07-11 审核定稿）：凌晨窗口给一句口径澄清——逻辑日语义不开开关（口径分叉否决），
+            // 但「今天=昨天的日期」要向真实日心智的人解释清楚（困惑的解药是标注，不是语义分叉）。
+            Label("为 \(Self.relativeDayWord(model.targetDay))（\(Self.dayLabel(model.targetDay))\(Self.smallHoursHint(for: model.targetDay))）安排",
                   systemImage: "calendar")
                 .font(.caption)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+    }
+
+    /// 凌晨口径澄清（#28）：0–4 点且目标日=逻辑今天时，标注「已过午夜·仍算今天」；其余时段为空。
+    static func smallHoursHint(for target: Date, now: Date = .now) -> String {
+        let logicalToday = DayContext.logicalStartOfDay(now)
+        guard Calendar.current.startOfDay(for: now) != logicalToday,   // 现在处于凌晨窗口
+              Calendar.current.isDate(target, inSameDayAs: logicalToday) else { return "" }
+        return " · 已过午夜仍算今天"
     }
 
     static func dayLabel(_ d: Date) -> String {

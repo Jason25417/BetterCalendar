@@ -2081,6 +2081,22 @@ struct LogicTests {
         #expect(!cloudTouched.value)
     }
 
+    @Test func anchorBlocksAlwaysDecodeAsUntimed() {
+        // 锚点不计时（2026-07-11）：模型就算给午饭配番茄，解码也拉回 none（prompt+解码双保险）
+        let json = """
+        {"loose":false,"blocks":[
+          {"title":"午饭","start":"2026-07-11 12:00","end":"2026-07-11 12:30","isFixed":false,"isAnchor":true,"category":"","timingStyle":"pomodoro","priority":"normal","deadline":null},
+          {"title":"写代码","start":"2026-07-11 13:00","end":"2026-07-11 15:00","isFixed":false,"isAnchor":false,"category":"","timingStyle":"pomodoro","priority":"normal","deadline":null}
+        ],"longTasks":[]}
+        """
+        let decoded = ClaudeScheduleParser.decodePlan(json)
+        #expect(decoded != nil)
+        let anchor = decoded!.blocks.first { $0.title == "午饭" }
+        let task = decoded!.blocks.first { $0.title == "写代码" }
+        #expect(anchor?.timingStyle == TimingStyle.none)      // 锚点：番茄被拉回不计时
+        #expect(task?.timingStyle == TimingStyle.pomodoro)    // 普通任务：不受影响
+    }
+
     @Test func refineChangeCountDiffsBySignature() {
         let base = at(2026, 7, 11, 9, 0)
         func blk(_ t: String, h: Int, fixed: Bool = false) -> ScheduledBlock {
