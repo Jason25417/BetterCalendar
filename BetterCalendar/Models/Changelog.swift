@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.30.2", date: "2026-07", changes: [
+            "修复跨午夜排程偶发写错日期（试验台回归发现：0.29 提示词结构调整后，小模型对「次日」的日期推算变弱）——现在把次日日期直接算好告诉模型，不留推理缝",
+        ]),
         ChangelogEntry(version: "0.30.1", date: "2026-07", changes: [
             "作息锚点（吃饭/通勤/午休等）一律不计时：解析时直接产出「不计时」，就算模型抽风也会被拉回来——锚点本来就不进执行列表，这下草稿里也不会再看到午饭挂着番茄图标",
             "凌晨排日程更清楚：0–4 点时目标日标签会注明「已过午夜仍算今天」（4 点日界线语义不变，只是把口径说明白）",

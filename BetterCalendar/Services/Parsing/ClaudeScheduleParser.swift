@@ -178,6 +178,9 @@ struct ClaudeScheduleParser: ScheduleParsing {
         df.timeZone = .current
         df.dateFormat = "yyyy-MM-dd EEEE"
         let target = df.string(from: referenceDate)
+        // 0.30.2 P1 回归修复：静态化后「次日」要模型跨段推（目标日在此、跨午夜规则在静态段）——
+        // Haiku P1 从基线掉到 2/10、错法全是差一天 → 把次日日期**直接算好喂给它**，不留推理缝。
+        let nextDay = df.string(from: referenceDate.addingTimeInterval(24 * 3600))
         df.dateFormat = "yyyy-MM-dd EEEE HH:mm"
         let realNow = df.string(from: .now)
         // 今天排程从「现在+5 分」起（Jason 2026-07-10）：给启动缓冲、且排出的一天永远「从现在起可行」，不生成已落后于钟表的计划。
@@ -208,7 +211,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
         }
         return """
         【今日上下文】
-        现在真实时间：\(realNow)。**目标日：\(target)**。
+        现在真实时间：\(realNow)。**目标日：\(target)**——所有块的日期写 \(String(target.prefix(10)))。
+        **睡前跨过午夜的块：日期写次日 \(String(nextDay.prefix(10)))**（如「到凌晨1点」= \(String(nextDay.prefix(10))) 01:00，绝不写成 \(String(target.prefix(10))) 01:00）。
         \((isToday && !context.isBackfill) ? "**排今天时：没给具体时间的弹性块，最早从 \(earliest5)（现在+5 分、留启动缓冲）起排，不要排在此刻或更早**；用户明确给了时间的块按用户说的（哪怕已过去也照写）。" : "")
         收工时间（软限制）= \(WorkHoursSettings.windDownText)。
         〔池〕：\(poolSection)\(contextSection)
