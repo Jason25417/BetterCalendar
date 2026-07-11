@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.32.1", date: "2026-07", changes: [
+            "修复：设置里打开「自动休息感知」后，关键词输入框立刻出现（此前要重开设置页才显示）",
+        ]),
         ChangelogEntry(version: "0.32.0", date: "2026-07", changes: [
             "番茄钟绝对专注（iOS）：设置里打开后，番茄工作段期间用「屏幕使用时间」屏蔽你自选的分心 App/网站——休息段、结束、取消随即自动解除。名单在系统选择器里自己挑、默认关、随时可关可解除；你的使用情况不被记录、不上传（Apple Family Controls 授权已获批）",
         ]),

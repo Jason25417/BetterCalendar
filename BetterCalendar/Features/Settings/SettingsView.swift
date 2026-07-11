@@ -15,6 +15,7 @@ import FamilyControls   // 番茄钟绝对专注：FamilyActivitySelection / fam
 
 struct SettingsView: View {
     @State private var apiKey: String = ""
+    @State private var distractionOn: Bool = DistractionSettings.enabled   // 0.32.1：静态属性不触发视图重算，输入框曾打开开关也不出现
     @State private var model: String = CloudSettings.model
     @State private var provider: LLMProvider = CloudSettings.provider
     @State private var sfModel: String = CloudSettings.siliconflowModel
@@ -129,10 +130,9 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                     // 分心自动休息（#26 V1，2026-07-11）：默认关；名单自建；检测到=静默转休息（菜单栏 ☕）
-                    Toggle("自动休息感知（去休息了就帮你记休息）", isOn: Binding(
-                        get: { DistractionSettings.enabled },
-                        set: { DistractionSettings.enabled = $0 }))
-                    if DistractionSettings.enabled {
+                    Toggle("自动休息感知（去休息了就帮你记休息）", isOn: $distractionOn)
+                        .onChange(of: distractionOn) { _, v in DistractionSettings.enabled = v }
+                    if distractionOn {
                         TextField("休息信号（逗号分隔）：如 bilibili, youtube, 小红书",
                                   text: Binding(get: { DistractionSettings.keywordsText },
                                                 set: { DistractionSettings.keywordsText = $0 }))
