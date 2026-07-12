@@ -2022,6 +2022,16 @@ struct LogicTests {
         #expect(!s.contains("完成率"))
     }
 
+    @Test func pomodoroAutoSegmentsCeil() {
+        // 0.34（Jason 定向上取整）：2h ÷ (25+5) = 4 段整；110min → 4（向上）；25min → 1；无计划/非正 → nil
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: 2 * 3600) == 4)
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: 110 * 60) == 4)
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: 25 * 60) == 1)
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: 5 * 60) == 1)     // 极短也给足 1 段
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: nil) == nil)      // 计划外 bonus=不限段
+        #expect(ExecutionViewModel.pomodoroAutoSegments(plannedSec: 0) == nil)
+    }
+
     @Test func pomodoroSegmentsRemainingMath() {
         #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: nil, done: 0, inWork: true) == -1)   // 不限段
         #expect(ExecutionViewModel.pomodoroSegmentsRemaining(target: 3, done: 0, inWork: true) == 2)      // 第一段进行中

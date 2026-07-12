@@ -250,6 +250,7 @@ final class ExecutionViewModel {
         self.projection = projection
         // 番茄绝对专注（iOS）：启动即收敛一次——上次崩溃/被杀残留的屏蔽在这里解除
         if persistsRunState { updateScreenTimeShield() }
+        startGuardianTicker()   // 0.34：段界自动推进 + 过日界线收尾（真 App 才启）
     }
 
     /// 番茄绝对专注（iOS，SPEC §5.5）：屏蔽状态=纯函数(运行态)——番茄**工作段**且没在手动休息才屏蔽。
@@ -536,6 +537,61 @@ final class ExecutionViewModel {
         return max(0, target - done - (inWork ? 1 : 0))
     }
 
+    /// 番茄目标段数 = 计划时长 ÷ (工作段+休息段) **向上取整**（2026-07-12 Jason 定向上：番茄要陪到
+    /// 任务收尾，宁多一段的头也不留尾巴没人陪；「段满转正计时/提前完成」权利一直在，不构成强制）。
+    /// 无计划时长（计划外 bonus）/ 非正 → nil（不限段照旧）。纯函数、可单测。
+    static func pomodoroAutoSegments(plannedSec: TimeInterval?) -> Int? {
+        guard let p = plannedSec, p > 0 else { return nil }
+        return max(1, Int(ceil(p / (PomodoroTimer.work + PomodoroTimer.rest))))
+    }
+
+    // MARK: - 执行守护（0.34：番茄段界自动推进 + 过逻辑日自动收尾）
+
+    /// 1 秒守护 ticker——只在真 App 跑（persistsRunState 闸，单测不受扰）。
+    private var guardianTimer: Timer?
+    private func startGuardianTicker() {
+        guard persistsRunState, guardianTimer == nil else { return }
+        guardianTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.guardianTick() }
+        }
+    }
+
+    func guardianTick() async {
+        autoAdvancePomodoroIfDue()
+        await autoCloseAtDayBoundaryIfNeeded()
+    }
+
+    /// 段界自动推进（0.34 Jason 定：番茄自动跑完派生段数才收口，与聪音侧一致）：
+    /// 段满自动 工作⇄休息；手动休息中冻结不推；「提前结束本段/转正计时」手动权照旧；
+    /// 做满目标段走既有「转轻计时续走」温和收口。
+    func autoAdvancePomodoroIfDue() {
+        guard !isOnBreak, let phase = pomodoroPhase, phase.pendingConfirm else { return }
+        confirmPomodoroNext()
+    }
+
+    /// 过逻辑日自动收尾（0.34 Jason 定：忘关的计时不跨天）：现在越过会话所属逻辑日的 4 点尾界 →
+    /// 越界部分按休息扣除（投入诚实截到尾界，睡醒补收也不虚涨）、自动完成全部进行中
+    /// （前台+并行后台，completeCurrent 的接替链会依次收干净）。语气=帮你收好，不是审计。
+    func autoCloseAtDayBoundaryIfNeeded() async {
+        let starts = (active.map { [$0.start] } ?? []) + background.map(\.start)
+        guard let earliest = starts.min() else { return }
+        let boundary = DayContext.endOfPlannableDay(earliest)
+        guard Date.now >= boundary else { return }
+        let over = Date.now.timeIntervalSince(boundary)
+        if over > 1 {   // App 睡过 4 点才醒：越界时间按休息扣，投入截到日界线
+            active?.pausedTotal += over
+            for i in background.indices { background[i].pausedTotal += over }
+        }
+        DevLog.shared.info("执行", "过逻辑日（凌晨 4 点）——挂着的计时已帮你收好，投入截到日界线")
+        if persistsRunState { BehaviorLog.record("完成", "过日界线自动收尾（投入截到 4:00）") }
+        var hop = 0
+        while (active != nil || !background.isEmpty), hop < 20 {
+            hop += 1
+            if active == nil { promoteFirstBackgroundIfAny() }
+            if active != nil { await completeCurrent() }
+        }
+    }
+
     /// 当前这次休息已进行多久（仅休息中有意义）。
     var breakElapsed: TimeInterval {
         guard isOnBreak, let bs = breakStart else { return 0 }
@@ -600,8 +656,10 @@ final class ExecutionViewModel {
             active?.timingStyle = .pomodoro
             pomoSegStart = .now      // 从现在起第一段专注
             pomoIsRest = false
+            // 0.34：没显式给段数 → 按剩余计划时长派生（无计划时长/已超时 → 不限段照旧）
             pomoTargetSegments = pomodoroSegments
-            DevLog.shared.info("执行", "转番茄钟（\(pomodoroSegments.map { "\($0) 段" } ?? "不限段")）")
+                ?? Self.pomodoroAutoSegments(plannedSec: activePlannedDuration.map { max(0, $0 - currentElapsed) })
+            DevLog.shared.info("执行", "转番茄钟（\(pomoTargetSegments.map { "\($0) 段" } ?? "不限段")）")
         case .light, .none:
             if active?.timingStyle == .pomodoro {
                 continueUntimed()    // 净专注折算 + 退出段循环（落到 .light）
@@ -699,7 +757,13 @@ final class ExecutionViewModel {
         pomoIsRest = false
         pomoWorkSegmentsDone = 0
         pomoRestAccumulated = 0
-        pomoTargetSegments = nil
+        // 0.34（Jason 定）：计划自带番茄 → 目标段数按计划时长派生并随运行态持久——跑完这些段才收口
+        //（此前=nil 不限段+段满停等确认，2h 任务跑一段就像「结束」了）
+        pomoTargetSegments = (item.timingStyle == .pomodoro)
+            ? Self.pomodoroAutoSegments(plannedSec: item.end.timeIntervalSince(item.start)) : nil
+        if let n = pomoTargetSegments {
+            DevLog.shared.info("番茄", "「\(item.title)」按计划时长派生 \(n) 段（25+5，向上取整）")
+        }
         breakCount = 0
         persistRunState()
         refreshPreview(enteringLiveMode: true)
