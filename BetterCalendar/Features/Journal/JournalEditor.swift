@@ -47,6 +47,10 @@ struct JournalEditor: View {
             } else {
                 TextEditor(text: $entry.body)
                     .frame(minHeight: 160)
+                    .padding(6)                          // 0.33.1：首行贴边被裁（Jason 截图）→ 给呼吸边距
+                    .scrollContentBackground(.hidden)
+                    .background(Color.secondary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .onChange(of: entry.body) { _, _ in touch() }
             }
 

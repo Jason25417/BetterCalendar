@@ -55,10 +55,15 @@ final class UNNotificationService: NotificationScheduling {
         if let m = morning, m > .now, await add(id: Self.morningID, title: "开始今天", body: summary, at: m) {
             // 埋点口径：本地通知没有「已送达/已看到」回执，用**排定的触发时刻**近似发出时刻
             BehaviorLog.record("通知排定", "早 \(Self.stamp(m)) · \(summary) ·口径=排定时刻(无送达回执)")
+        } else if let m = morning {
+            // 0.33.1 可见化（7-12 凌晨排查教训：跳过静默=通知没来查无对证）
+            DevLog.shared.warn("通知", "早提醒没排：\(Self.stamp(m)) 已过当前时刻")
         }
         if let e = evening, e > .now, await add(id: Self.eveningID, title: "30 秒记录今天",
                                                 body: "给今天收个尾吧——一句话、30 秒。", at: e) {
             BehaviorLog.record("通知排定", "晚 \(Self.stamp(e)) ·口径=排定时刻(无送达回执)")
+        } else if let e = evening {
+            DevLog.shared.warn("通知", "晚提醒没排：\(Self.stamp(e)) 已过当前时刻")
         }
     }
 
