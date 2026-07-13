@@ -35,25 +35,76 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
             cloud: { try await self.fallback.parse(text, referenceDate: referenceDate, context: context) })
     }
 
-    /// 解析链 v2（2026-07-11「只使用端侧」定稿，替代 0.26.19 的端云并行 race——并行会把文字发云，
-    /// 与「端侧=隐私」语义矛盾，随语义升级退役）。纯编排、可单测：
+    /// 解析链 v3（2026-07-13 Jason 定「并行热备+云端优先窗」，替代 v2 顺序兜底。v2 教训：
+    /// 看门狗 10s 常误杀慢而好的云答——实测最慢成功答案 40s——误杀后再顺序跑 FM 反而更慢更差）。
+    /// 注：0.26.19 退役的「端云并行 race」问题有二：先到先得让快而差的 FM 抢跑；「只使用端侧」模式
+    /// 下并行把文字发云违隐私语义。v3 两个都不犯：默认模式文字本就上云（FM 在本地，并行零额外暴露），
+    /// 且云端在优先窗内**绝对优先**（端侧先出也押着等）。onDeviceOnly 语义原封不动。
     /// - onDeviceOnly=true：只走端侧；失败**干净抛错、绝不回云**（绝对隐私承诺的代价，设置里已明示）。
-    /// - false（默认）：云端优先（Haiku 快且强）；云端失败才试端侧 FM 兜底；再失败抛云端原错。
+    /// - false（默认）：云端(3 对冲)与端侧 FM 同时起跑——
+    ///   ①优先窗（默认 20s）内云端出结果 → 一律用云端 ②过窗云端没出而端侧出了 → 端侧接管
+    ///   ③过窗后谁先出用谁；云端半路失败时端侧现货/后到即用 ④总限（默认 30s）都没出 → 干净报错。
     static func chain(onDeviceOnly: Bool,
-                      onDevice: @Sendable () async -> ParsedPlan?,
-                      cloud: @Sendable () async throws -> ParsedPlan) async throws -> ParsedPlan {
+                      cloudPriorityWindow: TimeInterval = 20,
+                      totalDeadline: TimeInterval = 30,
+                      onDevice: @escaping @Sendable () async -> ParsedPlan?,
+                      cloud: @escaping @Sendable () async throws -> ParsedPlan) async throws -> ParsedPlan {
         if onDeviceOnly {
             if let plan = await onDevice() { return plan }
             throw AnthropicError(message: "端侧解析未成功（「只使用端侧」开着，不回退云端——可在设置里关闭）")
         }
-        do {
-            return try await cloud()
-        } catch {
-            if let plan = await onDevice() {
-                DevLog.shared.info("解析", "云端失败 → 端侧 FM 兜底成功")
-                return plan
+        enum Event: Sendable {
+            case cloudPlan(ParsedPlan), cloudFailed(String)
+            case devicePlan(ParsedPlan?)
+            case priorityElapsed, deadline
+        }
+        return try await withThrowingTaskGroup(of: Event.self) { group -> ParsedPlan in
+            group.addTask { do { return .cloudPlan(try await cloud()) } catch { return .cloudFailed(error.localizedDescription) } }
+            group.addTask { .devicePlan(await onDevice()) }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(cloudPriorityWindow * 1_000_000_000)); return .priorityElapsed }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(totalDeadline * 1_000_000_000)); return .deadline }
+            var heldDevice: ParsedPlan?          // 优先窗内端侧先出=押着等云端
+            var deviceFailed = false
+            var cloudFailure: String?
+            var priorityOver = false
+            for try await event in group {
+                switch event {
+                case .cloudPlan(let plan):
+                    group.cancelAll()
+                    return plan
+                case .cloudFailed(let msg):
+                    cloudFailure = msg
+                    if let d = heldDevice {
+                        group.cancelAll()
+                        DevLog.shared.info("解析", "云端失败 → 端侧 FM 热备接管")
+                        return d
+                    }
+                    if deviceFailed { group.cancelAll(); throw AnthropicError(message: msg) }
+                case .devicePlan(let plan):
+                    if let plan {
+                        if priorityOver || cloudFailure != nil {
+                            group.cancelAll()
+                            DevLog.shared.info("解析", cloudFailure != nil ? "云端失败 → 端侧 FM 热备接管" : "云端超优先窗 → 端侧 FM 接管")
+                            return plan
+                        }
+                        heldDevice = plan
+                    } else {
+                        deviceFailed = true
+                        if let msg = cloudFailure { group.cancelAll(); throw AnthropicError(message: msg) }
+                    }
+                case .priorityElapsed:
+                    priorityOver = true
+                    if let d = heldDevice {
+                        group.cancelAll()
+                        DevLog.shared.info("解析", "云端超优先窗（\(Int(cloudPriorityWindow))s）→ 端侧 FM 接管")
+                        return d
+                    }
+                case .deadline:
+                    group.cancelAll()
+                    throw AnthropicError(message: "解析超时：云端与端侧 \(Int(totalDeadline)) 秒内都没出结果")
+                }
             }
-            throw error
+            throw AnthropicError(message: cloudFailure ?? "解析链空转（云端与端侧都未返回）")
         }
     }
 
