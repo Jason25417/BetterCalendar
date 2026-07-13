@@ -1943,7 +1943,10 @@ struct LogicTests {
             .deletingLastPathComponent()   // repo root
             .appendingPathComponent("BetterCalendar")
         let allowed: Set<String> = ["ExecutionViewModel.swift", "ReviewViewModel.swift",
-                                    "ReconcileService.swift"]
+                                    "ReconcileService.swift",
+                                    // 0.35.0：投影对齐前查画面上的外来带章事件（多设备 pass-through），
+                                    // 不是把日历当数据源——语义见 ProjectionService.foreignStampedEvents
+                                    "ProjectionService.swift"]
         var offenders: [String] = []
         let files = FileManager.default.enumerator(at: appRoot, includingPropertiesForKeys: nil)!
         for case let url as URL in files where url.pathExtension == "swift" {

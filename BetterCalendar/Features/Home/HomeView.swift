@@ -932,11 +932,15 @@ struct EditableRow: View {
                                 Image(systemName: block.linkedTaskID != nil ? "tray.full.fill" : "tray")
                                     .foregroundStyle(block.linkedTaskID != nil ? .purple : .secondary)
                                 if let linkedTitle {
-                                    Text(linkedTitle).foregroundStyle(.purple).lineLimit(1)
+                                    // 0.35.0：修 iPhone 行溢出（TestFlight 反馈#4）——长标题截断限宽，
+                                    // 不再把时间胶囊挤出屏幕
+                                    Text(linkedTitle).foregroundStyle(.purple)
+                                        .lineLimit(1).truncationMode(.tail)
+                                        .frame(maxWidth: 150, alignment: .leading)
                                 }
                             }
                         }
-                        .menuStyle(.borderlessButton).fixedSize()
+                        .menuStyle(.borderlessButton)
                         .help("这件属于哪个未来任务——投入会精确记到它名下")
                     }
                     Button(role: .destructive, action: onDelete) {

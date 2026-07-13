@@ -30,11 +30,18 @@ final class ProjectionService {
     func project(label: Date) async throws {
         let window = DayContext.logicalWindow(forLabel: label)
         let blocks = try planStore.plannedBlocks(on: label)
-        let drafts = blocks.map { b in
+        var drafts = blocks.map { b in
             CalendarEventDraft(title: b.title, start: b.start, end: b.end, kind: .planned,
                                alarmLeadMinutes: b.isFixed ? MeetingSettings.leadMinutes : nil,
                                blockID: b.id)
         }
+        // 多设备安全（0.35.0，修 TestFlight 反馈#5「双端画回死循环」）：带章、但**本机真相和
+        // 本机指纹都不认识**的事件 = 多半是另一台设备刚写的（它的 PlanStore 真相还在 CloudKit
+        // 路上）——原样保留（pass-through 进对齐清单），绝不清；真相到了按同 ID 自动接管。
+        // 本机指纹认识而真相已删的照清（本机删计划的正常收敛不受影响）。
+        drafts.append(contentsOf: try await foreignStampedEvents(
+            kind: .planned, window: window,
+            knownIDs: Set(blocks.map(\.id)), fingerprint: ProjectionFingerprints.get(label)))
         if startedDays?.isStarted(label) ?? false {
             // 实时模式（绿色淡出，§5.10 原则6.4）：绿色清空、整日计划投橙色
             try await calendarStore.apply([], kind: .planned, window: window)
@@ -70,6 +77,18 @@ final class ProjectionService {
         }
         DevLog.shared.info("投影", "启动对账完成：今天…+\(days - 1) 天已按真相源对齐/补章"
                            + (skipping.isEmpty ? "" : "（\(skipping.count) 天有待确认新建，暂缓）"))
+    }
+
+    /// 窗口内「带章但本机不认识」的事件（另一台设备的写入）——投影对齐时原样保留。
+    /// ⚠️ 这里读日历不是把它当数据源（真相仍是 PlanStore），是对齐前查画面上有什么——
+    /// 已在真相源守卫单测白名单登记（ProjectionService.swift）。
+    private func foreignStampedEvents(kind: PlanCalendarKind, window: DateInterval,
+                                      knownIDs: Set<UUID>, fingerprint: [String: String]) async throws -> [CalendarEventDraft] {
+        let existing = (try? await calendarStore.read(kind: kind)) ?? []
+        return existing.filter { e in
+            guard window.contains(e.start), let bid = e.blockID else { return false }   // 无章走既有新建策略
+            return !knownIDs.contains(bid) && fingerprint[bid.uuidString] == nil
+        }
     }
 
     private static func dayStr(_ d: Date) -> String {

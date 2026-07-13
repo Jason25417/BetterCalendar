@@ -32,6 +32,9 @@ struct SettingsView: View {
     @State private var journalLock: Bool = JournalSettings.privacyLock
     #if os(iOS)
     // 番茄钟绝对专注（SPEC §5.5，entitlement 已批）：屏蔽开关 + 名单选择器状态
+    #if os(iOS)
+    @State private var shieldMode: ScreenTimeBlockingSettings.Mode = ScreenTimeBlockingSettings.mode
+    #endif
     @State private var shieldEnabled: Bool = ScreenTimeBlockingSettings.enabled
     @State private var shieldSelection: FamilyActivitySelection = ScreenTimeBlockingSettings.selection
     @State private var showShieldPicker = false
@@ -180,12 +183,22 @@ struct SettingsView: View {
                             }
                         }))
                     if shieldEnabled {
-                        Button("选择要屏蔽的 App / 网站（已选：\(ScreenTimeBlockingSettings.selectionSummary)）") {
+                        // 0.35.0（TestFlight 反馈#2）：白名单模式=默认全屏蔽、选中的才放行
+                        Picker("屏蔽模式", selection: $shieldMode) {
+                            Text("屏蔽选中的（黑名单）").tag(ScreenTimeBlockingSettings.Mode.blocklist)
+                            Text("全屏蔽，放行选中的（白名单）").tag(ScreenTimeBlockingSettings.Mode.allowlist)
+                        }
+                        .onChange(of: shieldMode) { _, m in
+                            ScreenTimeBlockingSettings.mode = m
+                            ScreenTimeBlocker.shared.invalidate()   // 工作段进行中改模式也即时生效
+                        }
+                        Button("\(shieldMode == .allowlist ? "选择要放行的" : "选择要屏蔽的") App / 网站（已选：\(ScreenTimeBlockingSettings.selectionSummary)）") {
                             showShieldPicker = true
                         }
                         .familyActivityPicker(isPresented: $showShieldPicker, selection: $shieldSelection)
                         .onChange(of: shieldSelection) { _, sel in
                             ScreenTimeBlockingSettings.selection = sel
+                            ScreenTimeBlocker.shared.invalidate()
                         }
                         Button("立即解除屏蔽", role: .destructive) { ScreenTimeBlocker.shared.liftNow() }
                     }
@@ -193,7 +206,7 @@ struct SettingsView: View {
                         Text("「屏幕使用时间」授权被拒——去 系统设置 → 屏幕使用时间 里允许 BetterCalendar 后再开。")
                             .font(.caption).foregroundStyle(.orange)
                     }
-                    Text("开着它时，番茄工作段期间打开名单里的 App 会被系统屏蔽页拦下；休息段、结束、取消随即自动解除。名单你自己选、随时可关；你的使用情况不被记录、不上传。")
+                    Text("开着它时，番茄工作段期间按所选模式屏蔽（黑名单=拦名单里的；白名单=全拦、只放行名单里的）；休息段、结束、取消随即自动解除。名单你自己选、随时可关；你的使用情况不被记录、不上传。")
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 

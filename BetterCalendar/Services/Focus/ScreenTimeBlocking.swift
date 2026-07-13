@@ -23,6 +23,14 @@ enum ScreenTimeBlockingSettings {
         set { UserDefaults.standard.set(newValue, forKey: "focus.screenTimeShield") }
     }
 
+    /// 屏蔽模式（0.35.0，TestFlight 反馈#2 Jason 提）：
+    /// blocklist=只屏蔽选中的（原行为，默认）；allowlist=**默认全屏蔽，选中的才放行**（绝对专注）。
+    enum Mode: String { case blocklist, allowlist }
+    static var mode: Mode {
+        get { Mode(rawValue: UserDefaults.standard.string(forKey: "focus.screenTimeShieldMode") ?? "") ?? .blocklist }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "focus.screenTimeShieldMode") }
+    }
+
     /// 用户在 FamilyActivityPicker 选的屏蔽对象（App/类别/网站 token，系统不透明令牌，本地持久）。
     static var selection: FamilyActivitySelection {
         get {
@@ -74,15 +82,25 @@ final class ScreenTimeBlocker {
         shielding = want
         if want {
             let sel = ScreenTimeBlockingSettings.selection
-            store.shield.applications = sel.applicationTokens.isEmpty ? nil : sel.applicationTokens
-            store.shield.applicationCategories = sel.categoryTokens.isEmpty ? nil : .specific(sel.categoryTokens)
-            store.shield.webDomains = sel.webDomainTokens.isEmpty ? nil : sel.webDomainTokens
-            DevLog.shared.info("屏蔽", "番茄工作段 → 屏蔽生效（\(ScreenTimeBlockingSettings.selectionSummary)）")
+            switch ScreenTimeBlockingSettings.mode {
+            case .blocklist:   // 黑名单：只屏蔽选中的
+                store.shield.applications = sel.applicationTokens.isEmpty ? nil : sel.applicationTokens
+                store.shield.applicationCategories = sel.categoryTokens.isEmpty ? nil : .specific(sel.categoryTokens)
+                store.shield.webDomains = sel.webDomainTokens.isEmpty ? nil : sel.webDomainTokens
+            case .allowlist:   // 白名单：默认全屏蔽，选中的才放行
+                store.shield.applications = nil
+                store.shield.applicationCategories = .all(except: sel.applicationTokens)
+                store.shield.webDomainCategories = .all(except: sel.webDomainTokens)
+            }
+            DevLog.shared.info("屏蔽", "番茄工作段 → 屏蔽生效（\(ScreenTimeBlockingSettings.mode == .allowlist ? "白名单：全屏蔽，放行 " : "")\(ScreenTimeBlockingSettings.selectionSummary)）")
         } else {
             store.clearAllSettings()
             DevLog.shared.info("屏蔽", "屏蔽解除")
         }
     }
+
+    /// 模式/名单变了 → 下次 sync 重新应用（shielding 缓存作废）。
+    func invalidate() { shielding = nil }
 
     /// 兜底立即解除（设置页按钮/总开关关掉时调）。
     func liftNow() {

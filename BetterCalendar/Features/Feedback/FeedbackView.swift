@@ -97,6 +97,8 @@ struct FeedbackView: View {
             }
         }
         .padding()
+        #if os(macOS)
         .frame(minWidth: 420, minHeight: 360)
+        #endif
     }
 }
