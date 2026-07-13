@@ -539,15 +539,17 @@ struct LogicTests {
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
-        let today = DayContext.logicalDay(offset: 0)
+        // 时钟注入（2026-07-14 根治深夜炸弹）：固定时刻跑，任何真实时间（含凌晨 3 点半）结果一致
+        let fixedNow = at(2026, 7, 10, 10, 0)
+        let today = DayContext.logicalDay(offset: 0, from: fixedNow)
         let doneBlock = ScheduledBlock(title: "已完成的事", start: today.addingTimeInterval(9 * 3600),
                                        end: today.addingTimeInterval(10 * 3600))
-        let futureBlock = ScheduledBlock(title: "还没做的事", start: Date.now.addingTimeInterval(3600),
-                                         end: Date.now.addingTimeInterval(2 * 3600))
+        let futureBlock = ScheduledBlock(title: "还没做的事", start: fixedNow.addingTimeInterval(3600),
+                                         end: fixedNow.addingTimeInterval(2 * 3600))
         try planStore.replacePlanned([doneBlock, futureBlock], on: today)
         started.markStarted(today)
         let vm = Self.makeHomeVM(planStore: planStore, startedDays: started,
-                                 progress: ProgressStub([doneBlock.id]))
+                                 progress: ProgressStub([doneBlock.id]), now: { fixedNow })
         vm.targetDay = today
         vm.loadConfirmedPlan()
         #expect(vm.isLiveTargetDay)
@@ -561,20 +563,22 @@ struct LogicTests {
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
-        let today = DayContext.logicalDay(offset: 0)
+        // 时钟注入：同 liveDayLoadsOnlyRemainingAsBase（固定时刻，深夜跑也稳定）
+        let fixedNow = at(2026, 7, 10, 10, 0)
+        let today = DayContext.logicalDay(offset: 0, from: fixedNow)
         let doneBlock = ScheduledBlock(title: "已完成的事", start: today.addingTimeInterval(9 * 3600),
                                        end: today.addingTimeInterval(9 * 3600 + 1800))
-        let editable = ScheduledBlock(title: "待精修的事", start: Date.now.addingTimeInterval(3600),
-                                      end: Date.now.addingTimeInterval(2 * 3600))
+        let editable = ScheduledBlock(title: "待精修的事", start: fixedNow.addingTimeInterval(3600),
+                                      end: fixedNow.addingTimeInterval(2 * 3600))
         try planStore.replacePlanned([doneBlock, editable], on: today)
         started.markStarted(today)
         let vm = Self.makeHomeVM(planStore: planStore, startedDays: started,
-                                 progress: ProgressStub([doneBlock.id]))
+                                 progress: ProgressStub([doneBlock.id]), now: { fixedNow })
         vm.targetDay = today
         vm.loadConfirmedPlan()
         // 精修：把剩余那件改名 + 挪时间，确认
-        vm.blocks = [EditableBlock(title: "精修后的事", start: Date.now.addingTimeInterval(1800),
-                                   end: Date.now.addingTimeInterval(5400))]
+        vm.blocks = [EditableBlock(title: "精修后的事", start: fixedNow.addingTimeInterval(1800),
+                                   end: fixedNow.addingTimeInterval(5400))]
         await vm.confirm()
         let stored = try planStore.plannedBlocks(on: today)
         #expect(stored.count == 2)
@@ -590,14 +594,20 @@ struct LogicTests {
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
-        let today = DayContext.logicalDay(offset: 0)
-        let b = ScheduledBlock(title: "一件事", start: Date.now.addingTimeInterval(3600),
-                               end: Date.now.addingTimeInterval(2 * 3600))
+        // 时钟注入：固定时刻（根治 2026-07-14 03:20 实爆的深夜炸弹——真实时钟下 23:00–04:00
+        // 窗口内「未来块」跨出逻辑日 → blocks 空 → 下标越界崩整个 test host、连锁全红）。
+        let fixedNow = at(2026, 7, 10, 10, 0)
+        let today = DayContext.logicalDay(offset: 0, from: fixedNow)
+        let b = ScheduledBlock(title: "一件事", start: fixedNow.addingTimeInterval(3600),
+                               end: fixedNow.addingTimeInterval(2 * 3600))
         try planStore.replacePlanned([b], on: today)
         started.markStarted(today)
-        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub())
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub(),
+                                 now: { fixedNow })
         vm.targetDay = today
         vm.loadConfirmedPlan()
+        // 防崩闸保留（防未来同类）：红一个测试可以，绝不允许下标越界崩 host
+        try #require(!vm.blocks.isEmpty)
         // 干净时进展变化 → 直接刷新、不亮标
         vm.noteExecutionProgress()
         #expect(vm.freshness == false)
@@ -1215,7 +1225,8 @@ struct LogicTests {
                                    draftStore: DraftSnapshotStore? = nil,
                                    startedDays: StartedDayStore? = nil,
                                    calendar: FakeCalendarStore = FakeCalendarStore(),
-                                   progress: ExecutionProgressReading? = nil) -> HomeViewModel {
+                                   progress: ExecutionProgressReading? = nil,
+                                   now: @escaping () -> Date = { .now }) -> HomeViewModel {
         struct NoRefine: PlanRefining {
             func refine(_ blocks: [ScheduledBlock], command: String,
                         originalRequest: String, now: Date) async throws -> [ScheduledBlock] { blocks }
@@ -1236,7 +1247,8 @@ struct LogicTests {
             notifier: NoNotify(),
             draftStore: draftStore,
             startedDays: startedDays,
-            progress: progress)
+            progress: progress,
+            now: now)
     }
 
     // MARK: 收工线 / 候补（0.23 B：溢出冲突弹窗退役，语义=候补）
@@ -2173,14 +2185,18 @@ struct LogicTests {
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
-        let today = DayContext.logicalDay(offset: 0)
-        let b = ScheduledBlock(title: "一件事", start: Date.now.addingTimeInterval(3600),
-                               end: Date.now.addingTimeInterval(2 * 3600))
+        // 时钟注入：固定时刻（同 freshnessBadgeLifecycle——本测试就是 2026-07-14 03:20 崩 host 的第一现场）
+        let fixedNow = at(2026, 7, 10, 10, 0)
+        let today = DayContext.logicalDay(offset: 0, from: fixedNow)
+        let b = ScheduledBlock(title: "一件事", start: fixedNow.addingTimeInterval(3600),
+                               end: fixedNow.addingTimeInterval(2 * 3600))
         try planStore.replacePlanned([b], on: today)
         started.markStarted(today)
-        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub())
+        let vm = Self.makeHomeVM(planStore: planStore, startedDays: started, progress: ProgressStub(),
+                                 now: { fixedNow })
         vm.targetDay = today
         vm.loadConfirmedPlan()
+        try #require(!vm.blocks.isEmpty)   // 防崩闸保留（防未来同类）：红可以，崩 host 不行
         vm.blocks[0].title = "改了名"
         vm.delete(id: UUID())   // 只置未保存标记
         vm.noteExecutionProgress()

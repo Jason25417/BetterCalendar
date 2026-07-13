@@ -35,6 +35,10 @@ final class HomeViewModel {
     private let looseDays: LooseDayStore?        // 松散日：LLM 识别"想松散"→标目标日（§5.12）；nil=不标
     private let startedDays: StartedDayStore?    // 绿色淡出：开始今天后进实时模式、绿色从日历淡出；nil=不淡出
     private let progress: ExecutionProgressReading?  // 0.24 C2：精修台"过去只读"边界（已完成/进行中）；nil=不感知
+    /// 时钟注入缝（2026-07-14，根治深夜测试炸弹）：实时日语义（isLive/精修底/收口/过去只读/智能插空）
+    /// 一律从这里取「现在」；产品默认真实时钟（行为不变），测试注入固定时刻与真实时间解耦。
+    /// 通知的过点守卫（fire > .now）保持真实墙钟——通知按墙钟响，不随注入。
+    private let now: () -> Date
 
     var inputText: String = ""
     var refineText: String = ""
@@ -81,7 +85,8 @@ final class HomeViewModel {
          notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
          looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil,
-         progress: ExecutionProgressReading? = nil) {
+         progress: ExecutionProgressReading? = nil,
+         now: @escaping () -> Date = { .now }) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
         self.calendarStore = calendarStore
@@ -95,6 +100,8 @@ final class HomeViewModel {
         self.looseDays = looseDays
         self.startedDays = startedDays
         self.progress = progress
+        self.now = now
+        self.targetDay = DayContext.defaultTargetDay(now())   // 重锚默认目标日到注入时钟（默认闭包下与原值等价）
         restoreDraftIfAny()
     }
 
@@ -166,13 +173,13 @@ final class HomeViewModel {
     /// 强结束信号，收口卡据此出现（还要叠加「今天还没记录」，由视图查日记）。
     var wrapUpSignal: Bool {
         guard isLiveTargetDay else { return false }
-        return blocks.isEmpty || Date.now >= WorkHoursSettings.effectiveWindDown(from: .now)
+        return blocks.isEmpty || now() >= WorkHoursSettings.effectiveWindDown(from: now())
     }
 
     /// 目标日是否处于实时模式（0.24 C2）：已开始 且 是逻辑今天——精修台只对"正在过的这一天"生效。
     var isLiveTargetDay: Bool {
         (startedDays?.isStarted(targetDay) ?? false)
-            && Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 0)
+            && Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 0, from: now())
     }
 
     /// 从真相源读**所选目标日**（逻辑日）的已确认计划 → 可编辑列表。
@@ -207,7 +214,7 @@ final class HomeViewModel {
         guard !stored.isEmpty else { return nil }
         guard isLiveTargetDay else { return stored.map(EditableBlock.init(from:)) }
         let settled = progress?.settledPlannedIDs ?? []
-        let nowT = Date.now
+        let nowT = now()
         let remaining = stored.filter { !settled.contains($0.id) && $0.end > nowT }
         guard !remaining.isEmpty else { return [] }
         let laid = ReflowLayoutV2.layOut(
@@ -319,7 +326,7 @@ final class HomeViewModel {
         var linkByTitle: [String: UUID] = [:]
         for b in blocks where b.linkedTaskID != nil { linkByTitle[b.title] = b.linkedTaskID }
         let raw = (try? await refiner.refine(scheduled, command: cmd,
-                                             originalRequest: inputText, now: .now)) ?? scheduled
+                                             originalRequest: inputText, now: now())) ?? scheduled
         // 防呆三连（模型无关）：①部分返回并回原清单（丢块=未改不是删）②没让改的属性不许批量翻转
         // ③没点名的固定块时间还原（②③在 guardRefineFlags 里）
         let merged = RefineGuards.mergePartialRefine(original: scheduled, refined: raw, command: cmd)
@@ -393,7 +400,7 @@ final class HomeViewModel {
             if isLiveTargetDay {
                 let stored = (try? planStore.plannedBlocks(on: targetLabel)) ?? []
                 let settled = progress?.settledPlannedIDs ?? []
-                let nowT = Date.now
+                let nowT = now()
                 let preserved = stored.filter { settled.contains($0.id) || $0.end <= nowT }
                 let preservedIDs = Set(preserved.map(\.id))
                 let draftPart = (byLabel[targetLabel] ?? []).filter { !preservedIDs.contains($0.id) }
@@ -426,7 +433,7 @@ final class HomeViewModel {
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
             // 第二仪式（0.38，#33 拍板③）：今天已盖收尾章 且 这次确认的是明天 → 「明天也就位了」
-            if Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 1),
+            if Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 1, from: now()),
                WrapUpSeal.isSealedToday {
                 tomorrowReadyCelebration = true
             }
@@ -635,8 +642,8 @@ final class HomeViewModel {
     func smartInsertFromLongTask(_ task: LongTask) {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: targetDay)
-        let isToday = cal.isDateInToday(targetDay)
-        let notBefore = isToday ? max(.now, dayStart) : dayStart.addingTimeInterval(9 * 3600)   // 今天从现在/未来日从9点
+        let isToday = cal.isDate(targetDay, inSameDayAs: now())
+        let notBefore = isToday ? max(now(), dayStart) : dayStart.addingTimeInterval(9 * 3600)   // 今天从现在/未来日从9点
         let windDown = dayStart.addingTimeInterval(TimeInterval(WorkHoursSettings.windDownHour) * 3600)
         let dur = TimeInterval((task.unitMinutes ?? 60) * 60)   // 按单元定长，无单元退 60min
         let existing = blocks.map { (start: $0.start, end: $0.end) }
