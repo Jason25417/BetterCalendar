@@ -40,6 +40,10 @@ struct JournalDeps {
 }
 
 struct JournalView: View {
+    // 收尾分步流程（0.38，#33 过审两红线：步步可关零痕迹；仪式≠保存开关）
+    @State private var wrapUpStep: Int?
+    @State private var wrapUpJustSealed = false
+
     let deps: JournalDeps
     @State private var model: JournalViewModel
     @State private var today: JournalEntry?
@@ -114,7 +118,84 @@ struct JournalView: View {
             today = model.todayEntry()
             loadPrompt()
             deps.router.journalRequest = nil   // 消费掉
+            if deps.router.wrapUpRequest {     // 0.38：进入分步收尾
+                deps.router.wrapUpRequest = false
+                wrapUpStep = 1
+            }
         }
+    }
+
+    // MARK: 收尾分步流程（0.38，#33）
+
+    @ViewBuilder private var wrapUpFlow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let step = wrapUpStep {
+                HStack {
+                    Text("收尾 · \(step)/4").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button { wrapUpStep = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .buttonStyle(.plain)   // 红线①：随时关、零痕迹
+                }
+                switch step {
+                case 1:
+                    Text("今天做成了什么").font(.title3.bold())
+                    if let p = todayPrompt {
+                        Label(p, systemImage: "sparkles").font(.callout).foregroundStyle(.secondary)
+                    }
+                    Text("想细看的话，顶部「回看今天」都在。").font(.caption).foregroundStyle(.tertiary)
+                case 2:
+                    Text("给今天一句话").font(.title3.bold())
+                    Text("选个心情、在下面正文里写一句就够——顺手写一行「给明天：……」，明早会带给你。")
+                        .font(.callout).foregroundStyle(.secondary)
+                case 3:
+                    Text("想多写点就多写点").font(.title3.bold())
+                    Text("下面的正文区随便写——内容随写随存，不用担心丢。")
+                        .font(.callout).foregroundStyle(.secondary)
+                default:
+                    Text("给今天的工作收个尾").font(.title3.bold())
+                    Button { sealWrapUp() } label: {
+                        Label("今天的工作到此为止", systemImage: "checkmark.seal.fill")
+                            .font(.callout.bold()).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(.orange)
+                    Text("内容已随写随存——这一下只是给今天盖个章。").font(.caption).foregroundStyle(.tertiary)
+                }
+                HStack {
+                    if step > 1 {
+                        Button("上一步") { wrapUpStep = step - 1 }.buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if step < 4 { Button("下一步 →") { wrapUpStep = step + 1 }.buttonStyle(.borderedProminent) }
+                }
+            } else if wrapUpJustSealed {
+                VStack(spacing: 8) {
+                    CelebrationBurst()
+                    Text("今天的工作到此为止——你已经很努力了 ✓").font(.headline)
+                    HStack {
+                        Button("就到这里") { wrapUpJustSealed = false }
+                            .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            wrapUpJustSealed = false
+                            deps.router.selectedTab = .schedule
+                            deps.router.scheduleRequest = .planTomorrow
+                        } label: { Label("顺手排一下明天？", systemImage: "calendar.badge.plus").font(.callout) }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func sealWrapUp() {
+        WrapUpSeal.seal()
+        deps.milestones.refresh()
+        wrapUpStep = nil
+        wrapUpJustSealed = true
+        DevLog.shared.info("收尾", "收尾章已盖（内容照旧实时保存）")
     }
 
     // MARK: 隐私锁（R5）
@@ -222,6 +303,7 @@ struct JournalView: View {
     @ViewBuilder private var todayCard: some View {
         if let e = today {
             VStack(alignment: .leading, spacing: 8) {
+                if wrapUpStep != nil || wrapUpJustSealed { wrapUpFlow }
                 Text("写下今天").font(.headline)
                 if let prompt = todayPrompt {
                     Label(prompt, systemImage: "sparkles")

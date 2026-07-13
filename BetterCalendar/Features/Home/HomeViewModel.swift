@@ -425,6 +425,11 @@ final class HomeViewModel {
             }
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
+            // 第二仪式（0.38，#33 拍板③）：今天已盖收尾章 且 这次确认的是明天 → 「明天也就位了」
+            if Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 1),
+               WrapUpSeal.isSealedToday {
+                tomorrowReadyCelebration = true
+            }
             freshness = false           // 本页已成为最新（最后动作赢）
             freshBase = nil
             persistDraft()
@@ -573,6 +578,9 @@ final class HomeViewModel {
         hasUnsavedChanges = true
         arrangedCount = nil; refinedChangeCount = nil   // A/C 状态行仅贴合"刚完成"的瞬间——一编辑即过期
     }
+
+    /// 第二仪式（0.38，#33）：收尾章后顺手排完明天 → 一次性庆祝（视图消费后清）。
+    var tomorrowReadyCelebration = false
 
     func addBlock() {
         let start = blocks.map(\.end).max() ?? Date()

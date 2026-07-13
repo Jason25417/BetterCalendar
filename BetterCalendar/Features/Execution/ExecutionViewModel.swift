@@ -859,7 +859,11 @@ final class ExecutionViewModel {
     }
 
     /// 完成当前块 → 落盘 → 「同时做」队首自动接替（点子 #20）；没有并行块才回空档。
+    /// 收尾信号用（0.38，#33）：最后一次完成的时刻（会话内存态即可——收尾卡只在当天使用中出现）。
+    private(set) var lastCompletionAt: Date?
+
     func completeCurrent() async {
+        lastCompletionAt = .now
         let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
         let doneSec = Int(currentElapsed)
         let wasPromoted = active?.cameFromBackground ?? false   // 埋点：接替块的命运=被完成

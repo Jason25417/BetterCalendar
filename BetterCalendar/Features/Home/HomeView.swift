@@ -51,6 +51,19 @@ struct HomeDeps {
 }
 
 struct HomeView: View {
+    // 收尾卡 v2（0.38）：可见性 = 既有强信号 ∨ 傍晚线后事实性收工；盖章/收起/已有日记则不出现
+    @State private var wrapUpDismissTick = 0   // 「先不收尾」后强制重算
+    private var wrapUpCardVisible: Bool {
+        _ = wrapUpDismissTick
+        guard model.isLiveTargetDay, !WrapUpSeal.isSealedToday, !WrapUpSeal.dismissedToday,
+              !deps.journalStore.hasContentToday() else { return false }
+        if model.wrapUpSignal { return true }
+        // 傍晚线后事实性收工：空档且最后一次完成已过去 ≥45 分钟
+        return Date.now >= WorkHoursSettings.eveningStart(for: .now)
+            && deps.execution.active == nil
+            && (deps.execution.lastCompletionAt.map { Date.now.timeIntervalSince($0) >= 45 * 60 } ?? false)
+    }
+
     // AI 加一项（0.36.0）：一句话 → LLM 定名字/时长/分块；空白项老路保留
     @State private var showSmartAdd = false
     @State private var smartAddText = ""
@@ -277,28 +290,53 @@ struct HomeView: View {
                 // 未来任务/在途：只在"说的时刻"出现（改/看时收起——渐进披露 v2）
                 if !showingPlanArea { ongoingSection }
 
-                // 收口卡（0.28 提案A）：常驻复盘入口退役——只在「强结束信号 且 今天还没记录」时出现，
-                // 给一个流畅脱离工作安排、进入收尾的温和出口（红线：措辞绝不出现「还剩 N 件」）。
-                if model.wrapUpSignal, !deps.journalStore.hasContentToday() {
-                    Button {
-                        BehaviorLog.record("收口卡", "点击进日记")
-                        deps.router.selectedTab = .journal
-                        deps.router.journalRequest = .now
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "sunset")
-                            Text("今天差不多收尾了——去记录今天")
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        .font(.callout)
-                        .padding(10)
-                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+                // 收尾卡 v2（0.38，#33 拍板）：从橙色小横条升级为独立大卡——与报错带视觉彻底分离，
+                // 「先不收尾」一键当天收起。触发新增「傍晚线后事实性收工」（最后完成后空档 ≥45 分钟）。
+                // 红线照旧：措辞绝不出现「还剩 N 件」；已盖章/已收起当天不再出现。
+                if model.tomorrowReadyCelebration {
+                    // 第二仪式（0.38，#33 拍板③）：收尾章后顺手排完明天 → 一次性庆祝
+                    VStack(spacing: 6) {
+                        CelebrationBurst()
+                        Text("明天也就位了——睡个好觉 🌙").font(.headline)
+                        Button("收下") { model.tomorrowReadyCelebration = false }
+                            .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .padding(14)
+                    .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                }
+                if wrapUpCardVisible {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "sunset.fill").font(.title2).foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("今天的工作差不多了").font(.headline)
+                                Text("花 30 秒收个尾——看看做成了什么，给今天写一句话。")
+                                    .font(.callout).foregroundStyle(.secondary)
+                            }
+                        }
+                        HStack {
+                            Button("先不收尾") { WrapUpSeal.dismissToday(); wrapUpDismissTick += 1 }
+                                .buttonStyle(.plain).foregroundStyle(.secondary).font(.callout)
+                            Spacer()
+                            Button {
+                                BehaviorLog.record("收口卡", "点击进收尾流程")
+                                deps.router.selectedTab = .journal
+                                deps.router.journalRequest = .now
+                                deps.router.wrapUpRequest = true
+                            } label: {
+                                Label("进入收尾", systemImage: "arrow.right.circle.fill").font(.callout.bold())
+                            }
+                            .buttonStyle(.borderedProminent).tint(.orange)
+                        }
+                    }
+                    .padding(14)
+                    .background(LinearGradient(colors: [Color.orange.opacity(0.16), Color.pink.opacity(0.10)],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: RoundedRectangle(cornerRadius: 14))
                     .onAppear {   // 埋点（调研 B 组）：出现按天去重 + 触发信号
                         BehaviorLog.recordOncePerDay(key: "收口卡",
-                            "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : "过收工线")")
+                            "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : (Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) ? "过收工线" : "傍晚空档"))")
                     }
                 }
 
@@ -570,6 +608,9 @@ struct HomeView: View {
                         model.inputText = text
                         Task { await model.arrange() }
                     }
+                case .planTomorrow:   // 0.38（#33）：收尾章后「顺手排一下明天」
+                    model.targetDay = DayContext.logicalDay(offset: 1)
+                    model.autoLoadOnAppear()
                 }
                 deps.router.scheduleRequest = nil   // 消费掉
             }

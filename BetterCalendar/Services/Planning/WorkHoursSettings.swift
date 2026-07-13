@@ -39,4 +39,15 @@ enum WorkHoursSettings {
         let line = windDownDate(for: from)
         return from < line ? line : DayContext.endOfPlannableDay(from)
     }
+
+    /// 傍晚线（0.38，#33 拍板）：收尾信号最早生效时刻 = 收工线 − 5 小时，夹在 16:00–20:00。
+    /// **内部参数不进设置**（同 graceMinutes 判例：用户的时间契约只有收工线一条，两个旋钮控一条
+    /// 边界违原则 6）；上架后按调研 B 组数据（收尾卡出现时刻 vs 点击率）再调公式。
+    static func eveningStart(for day: Date) -> Date {
+        let derived = windDownDate(for: day).addingTimeInterval(-5 * 3600)
+        let cal = Calendar.current
+        let floor16 = cal.date(bySettingHour: 16, minute: 0, second: 0, of: derived) ?? derived
+        let cap20 = cal.date(bySettingHour: 20, minute: 0, second: 0, of: derived) ?? derived
+        return min(max(derived, floor16), cap20)
+    }
 }
