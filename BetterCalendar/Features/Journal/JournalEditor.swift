@@ -79,12 +79,7 @@ struct JournalEditor: View {
                     }
                 }
             }
-            HStack {
-                TextField("加标签", text: $newTag).textFieldStyle(.roundedBorder).frame(maxWidth: 160)
-                    .onSubmit { addTag() }
-                Button("加") { addTag() }
-                    .disabled(newTag.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
+            // #38（0.39.0）：token field 模式——回车即成 chip，退役独立「加」按钮
         }
     }
 
@@ -109,7 +104,7 @@ struct JournalEditor: View {
                     }
                 }
             }
-            // 加照片：iOS/Mac 都能从照片库选；Mac 额外能"从文件选"+"粘贴图片"（加照片更广更轻）
+            // #38（0.39.0）：附件动作一行并排（照片 × 标签 × 给明天），省一行空间
             HStack {
                 PhotosPicker(selection: $picked, maxSelectionCount: 5, matching: .images) {
                     Label("从照片库", systemImage: "photo.badge.plus")
@@ -120,12 +115,50 @@ struct JournalEditor: View {
                 Button { pasteImage() } label: { Label("粘贴图片", systemImage: "doc.on.clipboard") }
                     .help("剪贴板里是图片时，直接作为照片加进来（截图/网图复制后点这里）")
                 #endif
+                Button { withAnimation { showTomorrowField.toggle() } } label: {
+                    Label("给明天", systemImage: "sunrise")
+                }
+                TextField("加标签（回车即加）", text: $newTag)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 170)
+                    .onSubmit { addTag() }
             }
             .buttonStyle(.bordered).controlSize(.small)
+            if showTomorrowField {
+                // 给明天专用小框（#38①）：提交=写成正文里的「给明天：…」一行（提取管道原样复用）
+                HStack {
+                    TextField("给明天的自己说一句…", text: $tomorrowText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { commitTomorrowNote() }
+                    Button("放进日记") { commitTomorrowNote() }
+                        .disabled(tomorrowText.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                .controlSize(.small)
+                Text("明早的通知会带上这句话。").font(.caption2).foregroundStyle(.tertiary)
+            }
         }
     }
 
+    // MARK: 给明天（#38①）
+
+    private func commitTomorrowNote() {
+        let t = tomorrowText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        var lines = entry.body.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if let i = lines.firstIndex(where: { $0.hasPrefix("给明天：") || $0.hasPrefix("给明天:") }) {
+            lines[i] = "给明天：" + t
+            entry.body = lines.joined(separator: "\n")
+        } else {
+            entry.body = (entry.body.isEmpty ? "" : entry.body + "\n") + "给明天：" + t
+        }
+        tomorrowText = ""
+        withAnimation { showTomorrowField = false }
+        touch()
+    }
+
     // MARK: 动作
+
+    @State private var showTomorrowField = false
+    @State private var tomorrowText = ""
 
     private func addTag() {
         let t = newTag.trimmingCharacters(in: .whitespacesAndNewlines)

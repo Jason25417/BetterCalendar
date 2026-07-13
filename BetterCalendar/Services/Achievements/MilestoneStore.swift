@@ -260,6 +260,8 @@ final class MilestoneStore {
         }
         if !newly.isEmpty {
             freshlyUnlocked = newly
+            // #36（0.39.0）：解锁改走应用内 toast（顶部 8 秒自动收起）；日记页静默条退役
+            AchievementToastCenter.shared.push(newly)
             save()
         }
     }

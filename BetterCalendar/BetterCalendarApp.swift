@@ -48,6 +48,8 @@ struct BetterCalendarApp: App {
     private func themedRoot() -> some View {
         mainTabs()
             .environment(\.appTheme, ThemeSettings.current)
+            // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
+            .overlay(alignment: .top) { AchievementToastView() }
     }
 
     @ViewBuilder
@@ -101,6 +103,14 @@ struct BetterCalendarApp: App {
             .task {
                 FollowRunState.shared.onChange = { [execution = container.execution] in
                     execution.updateScreenTimeShield()
+                }
+                // #36：执行中不弹 toast（红线①）+ 点击直达成就页
+                AchievementToastCenter.shared.isBusy = { [execution = container.execution] in
+                    execution.active != nil
+                }
+                AchievementToastCenter.shared.onTap = { [router = container.router] in
+                    router.selectedTab = .journal
+                    router.openAchievements = true
                 }
                 await FocusFollow.refreshAndApply(reason: "启动")
             }

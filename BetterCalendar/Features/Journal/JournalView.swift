@@ -43,6 +43,7 @@ struct JournalView: View {
     // 收尾分步流程（0.38，#33 过审两红线：步步可关零痕迹；仪式≠保存开关）
     @State private var wrapUpStep: Int?
     @State private var wrapUpJustSealed = false
+    @State private var showAchievementsSheet = false   // #36：toast 直达成就页
 
     let deps: JournalDeps
     @State private var model: JournalViewModel
@@ -68,16 +69,7 @@ struct JournalView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             reviewHeader
-                            // 成就静默解锁（#27）：零通知——只在日记页安静出一条，点 ✕ 收起；全景在工具栏 🏅
-                            ForEach(deps.milestones.freshlyUnlocked) { m in
-                                MessageStrip(icon: "seal.fill", tint: .orange,
-                                             text: "\(m.title)——\(m.line)") {
-                                    Button { deps.milestones.acknowledgeFresh() } label: {
-                                        Image(systemName: "xmark").font(.caption2)
-                                    }
-                                    .buttonStyle(.plain).foregroundStyle(.secondary)
-                                }
-                            }
+                            // 成就解锁提示已升级为应用内 toast（#36，0.39.0）——静默条退役，全景照旧在 🏅
                             todayCard
                             onThisDayCard
                             Divider()
@@ -122,6 +114,14 @@ struct JournalView: View {
                 deps.router.wrapUpRequest = false
                 wrapUpStep = 1
             }
+        }
+        .onChange(of: deps.router.openAchievements) { _, want in
+            guard want else { return }
+            deps.router.openAchievements = false
+            showAchievementsSheet = true      // #36：toast 点击直达成就页
+        }
+        .sheet(isPresented: $showAchievementsSheet) {
+            NavigationStack { AchievementsView(store: deps.milestones) }
         }
     }
 

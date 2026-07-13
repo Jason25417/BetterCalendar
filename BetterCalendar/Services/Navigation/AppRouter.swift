@@ -23,6 +23,9 @@ final class AppRouter {
     /// 收尾流程请求（0.38，#33）：随 journalRequest 一起置 true → 日记页进入分步收尾；消费后清空。
     var wrapUpRequest = false
 
+    /// 成就 toast 点击 → 日记页打开成就全景（#36）；消费后清空。
+    var openAchievements = false
+
     /// 早通知 deep-link（0.23 A）：打开执行界面、把下一件设为「待开始」（**不自动开始计时**——
     /// 点通知可能是误触，开始必须是明确动作）。BetterCalendarApp 消费后清空。
     var primeNextStart = false
