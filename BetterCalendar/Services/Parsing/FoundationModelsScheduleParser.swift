@@ -187,6 +187,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         - 用户提到的每件事都出一个块、逐一保留不漏。
         - 默认互不重叠；仅当用户明说可并行时，让对应块重叠在同一时段、各自成块，并给同一个 parallel 组名（如 P1）；不并行的块 parallel 留空。
         - 作息（吃饭/通勤/午休/睡觉）isAnchor=true，且 timingStyle 一律 "none"（作息不计时）。
+        - 用户安排的时间范围碰到午餐（约11:30–13:30）/晚餐（约17:30–19:30）时段、而没提那顿饭时，默认补一个「午饭」/「晚饭」锚点块（30–60 分钟，isAnchor=true、timingStyle="none"）；明说不吃则不加，早饭夜宵不补。
         - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
         - priority 默认 normal，要紧/紧急用 important。
         - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks。

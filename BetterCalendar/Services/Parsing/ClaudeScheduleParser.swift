@@ -161,6 +161,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     - **不漏**：用户提到的每件要做的事都出一个块（或 longTasks），逐一保留、数量对得上；真排不下宁可排到收工后，也别省略。
     - 默认**互不重叠**；仅当用户明说可并行/同时（"这几个可并行"）才让对应块**重叠在同一时段**（start/end 大幅重合，不是前后相接）。并行块**各自成块、一个不少、不合并**；标题用**各自任务**的名（可加"并行·"前缀，别把多个名拼进一个标题）；并行不改 isFixed。并行的块给**同一个 parallel 组名**（如 "P1"；第二组用 "P2"）；不并行的块 parallel=null——这个组名让重排时同组保持同时段。
     - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）；**锚点一律 timingStyle="none"**（作息不计时、不进执行）。
+    - **用餐默认补排（「不漏也不多」的唯一例外）**：用户安排的时间范围与午餐（约 11:30–13:30）或晚餐（约 17:30–19:30）时段**有交集**、而用户没提对应那顿饭时，默认插入该顿锚点块——标题就叫「午饭」/「晚饭」，30–60 分钟，isAnchor=true、isFixed=false、timingStyle="none"，放在不与其他块冲突的合理时刻。用户明说不吃/不用安排、或该时段已被排满/占用时不加；只补午/晚两顿，早饭夜宵不补。
     - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
     - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
     - 收工时间（软限制）见【今日上下文】：没指定时间的事尽量排在收工前；只有略超 5–10 分钟正好做完一件大事才可越界。用户明说的晚间/睡前块不受限。
@@ -214,6 +215,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
         现在真实时间：\(realNow)。**目标日：\(target)**——所有块的日期写 \(String(target.prefix(10)))。
         **睡前跨过午夜的块：日期写次日 \(String(nextDay.prefix(10)))**（如「到凌晨1点」= \(String(nextDay.prefix(10))) 01:00，绝不写成 \(String(target.prefix(10))) 01:00）。
         \((isToday && !context.isBackfill) ? "**排今天时：没给具体时间的弹性块，最早从 \(earliest5)（现在+5 分、留启动缓冲）起排，不要排在此刻或更早**；用户明确给了时间的块按用户说的（哪怕已过去也照写）。" : "")
+        \(context.isBackfill ? "**补记过去做的事：只记录用户提到的，不默认补排用餐锚点。**" : "")
         收工时间（软限制）= \(WorkHoursSettings.windDownText)。
         〔池〕：\(poolSection)\(contextSection)
         """

@@ -130,6 +130,15 @@ final class BenchSuiteStore {
                     .init(kind: .anchorFlag, title: "午饭", flag: true),
                     .init(kind: .anchorFlag, title: "写作", flag: false),
                   ]),
+        BenchCase(id: "P8", name: "用餐默认补排", capability: .parse, dimension: "服从性",
+                  text: "上午9点到晚上8点安排：写论文三小时、改代码两小时、健身一小时",
+                  expects: [
+                    .init(kind: .hasBlock, title: "午饭"),
+                    .init(kind: .hasBlock, title: "晚饭"),
+                    .init(kind: .anchorFlag, title: "午饭", flag: true),
+                    .init(kind: .anchorFlag, title: "晚饭", flag: true),
+                    .init(kind: .noOverlaps),
+                  ]),
 
         // ---------- 微调（输入草稿：写作 09:00×2h / 会议 11:30×1h 固定 / 阅读 14:00×1h）----------
         BenchCase(id: "R1", name: "只改提到的块", capability: .refine, dimension: "服从性",
