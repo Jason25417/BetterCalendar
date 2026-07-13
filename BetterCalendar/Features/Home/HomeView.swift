@@ -51,6 +51,15 @@ struct HomeDeps {
 }
 
 struct HomeView: View {
+    // AI 加一项（0.36.0）：一句话 → LLM 定名字/时长/分块；空白项老路保留
+    @State private var showSmartAdd = false
+    @State private var smartAddText = ""
+    private func submitSmartAdd() {
+        let t = smartAddText
+        showSmartAdd = false; smartAddText = ""
+        Task { await model.addBlockSmart(t) }
+    }
+
     let deps: HomeDeps
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
@@ -384,7 +393,27 @@ struct HomeView: View {
                             .font(.caption)
                             .help("把这一整份草稿挪到别的日子（保留时分）")
                         }
-                        Button { model.addBlock() } label: { Label("加一项", systemImage: "plus") }
+                        Button { showSmartAdd = true } label: { Label("加一项", systemImage: "plus") }
+                            .popover(isPresented: $showSmartAdd) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("加一项").font(.headline)
+                                    TextField("一句话描述：如 背单词 45 分钟", text: $smartAddText)
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(minWidth: 240)
+                                        .onSubmit { submitSmartAdd() }
+                                    HStack {
+                                        Button("直接加空白项") {
+                                            showSmartAdd = false; smartAddText = ""
+                                            model.addBlock()
+                                        }
+                                        Spacer()
+                                        Button("AI 加一项") { submitSmartAdd() }
+                                            .buttonStyle(.borderedProminent)
+                                            .disabled(smartAddText.trimmingCharacters(in: .whitespaces).isEmpty)
+                                    }
+                                }
+                                .padding()
+                            }
                             .font(.caption)
                     }
 

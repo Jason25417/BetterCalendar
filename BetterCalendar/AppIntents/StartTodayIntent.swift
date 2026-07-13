@@ -120,6 +120,22 @@ struct OpenReviewIntent: AppIntent {
 
 struct BetterCalendarShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        // 自动休息两枚（0.36.0，TestFlight 反馈#1b）：注册成 App Shortcuts=快捷指令 App 里**零配置就有**，
+        // 建自动化时直接选现成动作——「一键添加自动化」系统做不到（个人自动化无编程创建 API），这是能给到的最少步数。
+        AppShortcut(
+            intent: StartAutoBreakIntent(),
+            phrases: ["在 \(.applicationName) 开始自动休息"],
+            shortTitle: "自动休息开始",
+            systemImageName: "cup.and.saucer"
+        )
+
+        AppShortcut(
+            intent: EndAutoBreakIntent(),
+            phrases: ["在 \(.applicationName) 结束自动休息"],
+            shortTitle: "自动休息结束",
+            systemImageName: "cup.and.saucer.fill"
+        )
+
         AppShortcut(
             intent: ArrangeTodayIntent(),
             phrases: [

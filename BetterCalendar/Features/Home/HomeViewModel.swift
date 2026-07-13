@@ -580,6 +580,32 @@ final class HomeViewModel {
         committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
+    /// AI 加一项（0.36.0，Jason 定：加任务也走 LLM——名字/时长/该怎么分块交给解析，不再只落一个裸名字）。
+    /// 草稿非空 → 复用微调链（「加一项：…」指令，防呆三连全在）；草稿为空 → 走整段解析（等于只说了这一件）。
+    /// LLM 没加上（失败/没 key/零变化）→ 回退老路：按原文落一个 1 小时块，用户的字绝不丢。
+    func addBlockSmart(_ text: String) async {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { addBlock(); return }
+        if blocks.isEmpty {
+            inputText = t
+            await arrange()
+            if blocks.isEmpty {   // 解析也没排出来 → 老路兜底
+                blocks.append(EditableBlock(title: t, start: Date(), end: Date().addingTimeInterval(3600)))
+                committedCount = nil; markEditedIfLoaded(); persistDraft()
+            }
+            return
+        }
+        let before = blocks.count
+        refineText = "加一项：" + t
+        await refine()
+        if blocks.count <= before {   // 模型没加块（失败/拒绝）→ 老路兜底
+            let start = blocks.map(\.end).max() ?? Date()
+            blocks.append(EditableBlock(title: t, start: start, end: start.addingTimeInterval(3600)))
+            committedCount = nil; markEditedIfLoaded(); persistDraft()
+            DevLog.shared.warn("微调", "AI 加一项没生效，已按原文落块（可再用 AI 调整修）")
+        }
+    }
+
     /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
     /// 从未来任务「排进今天」：生成的块精确归属到该任务（linkedTaskID），投入统计锚 id 不靠标题。
     /// 找第一个能容下 duration 的空档起点（不与已排块重叠、落在 notBefore 与 windDown 之间）。

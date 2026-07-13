@@ -160,8 +160,15 @@ struct SettingsView: View {
                     Text("专注中切到名单里的 App 或网页超过半分钟 → 自动开始休息（计时暂停、扣净投入）；切回来自动继续。判定只按你写的名单来；去了哪里绝不记录、绝不出现在复盘里——只会看到「休息了一会儿」。误判可在今天页点「刚才不算休息」算回投入。网页检测需在首次弹出的「自动化」授权里允许控制浏览器。")
                         .font(.caption).foregroundStyle(.secondary)
                     #else
-                    Text("iOS 不提供前台 App 检测——用快捷指令自动化：在快捷指令 App → 自动化 → 新建「当打开〔某 App〕」→ 运行「自动休息开始」；再建「当关闭」→「自动休息结束」。效果与 Mac 相同：去了哪里绝不记录，只记「休息」。")
+                    Text("iOS 不提供前台 App 检测，需要建两条快捷指令自动化（动作已内置零配置）：\n① 快捷指令 App → 自动化 → ＋ → 「App」→ 选分心 App → 「打开时」+ 立即运行 → 动作选「自动休息开始」\n② 同样再建一条「关闭时」→ 动作选「自动休息结束」\n效果与 Mac 相同：去了哪里绝不记录，只记「休息」。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Button("打开快捷指令 App") {
+                        if let url = URL(string: "shortcuts://automation") {
+                            UIApplication.shared.open(url) { ok in
+                                if !ok, let fallback = URL(string: "shortcuts://") { UIApplication.shared.open(fallback) }
+                            }
+                        }
+                    }
                     #endif
 
                     #if os(iOS)
