@@ -325,9 +325,11 @@ struct HomeView: View {
                                 deps.router.journalRequest = .now
                                 deps.router.wrapUpRequest = true
                             } label: {
-                                Label("进入收尾", systemImage: "arrow.right.circle.fill").font(.callout.bold())
+                                Label("进入收尾", systemImage: "arrow.right.circle.fill").font(.callout)
                             }
-                            .buttonStyle(.borderedProminent).tint(.orange)
+                            // S3-P2（2026-07-14）：提议卡内用普通音量——最强音量（borderedProminent）
+                            // 是页面主务「确认写入」的专属；收尾有三重入口兜底（卡+晚通知+menu bar 回看今天）。
+                            .buttonStyle(.bordered)
                         }
                     }
                     .padding(14)
@@ -404,33 +406,11 @@ struct HomeView: View {
                         if model.hasUnsavedChanges {
                             Label("未保存修改 · 点「确认写入」保存", systemImage: "pencil.circle")
                                 .font(.subheadline.bold()).foregroundStyle(.orange)
-                            Button("放弃修改") { model.discardDraft() }
-                                .font(.caption).foregroundStyle(.secondary)
-                                .buttonStyle(.plain).underline()
-                                .help("不保存，回到已保存的计划")
                         } else {
                             Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
                                 .font(.subheadline.bold()).foregroundStyle(.green)
                         }
                         Spacer()
-                        #if !os(macOS)
-                        Button { showDraftExpanded = true } label: {
-                            Label("放大", systemImage: "arrow.up.left.and.arrow.down.right")
-                        }
-                        .font(.caption)
-                        #endif
-                        // 0.23 C：整份草稿显式挪日（取代退役的"切日自动平移"）
-                        if !model.blocks.isEmpty {
-                            Menu {
-                                Button("挪到今天") { model.moveDraft(to: DayContext.logicalDay(offset: 0)) }
-                                Button("挪到明天") { model.moveDraft(to: DayContext.logicalDay(offset: 1)) }
-                                Button("挪到后天") { model.moveDraft(to: DayContext.logicalDay(offset: 2)) }
-                            } label: {
-                                Label("挪到…", systemImage: "arrow.uturn.forward")
-                            }
-                            .font(.caption)
-                            .help("把这一整份草稿挪到别的日子（保留时分）")
-                        }
                         Button { showSmartAdd = true } label: { Label("加一项", systemImage: "plus") }
                             .popover(isPresented: $showSmartAdd) {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -453,6 +433,44 @@ struct HomeView: View {
                                 .padding()
                             }
                             .font(.caption)
+                        // S3 归位（2026-07-14）：草稿低中频动作（放大/挪日/导出/放弃）从三处散排
+                        // 收进一个 ⋯（U2 第二层；破坏性「放弃修改」菜单内隔开，U10）
+                        Menu {
+                            #if !os(macOS)
+                            Button { showDraftExpanded = true } label: {
+                                Label("放大编辑", systemImage: "arrow.up.left.and.arrow.down.right")
+                            }
+                            #endif
+                            // 0.23 C：整份草稿显式挪日（取代退役的"切日自动平移"）
+                            if !model.blocks.isEmpty {
+                                Menu("挪到…") {
+                                    Button("挪到今天") { model.moveDraft(to: DayContext.logicalDay(offset: 0)) }
+                                    Button("挪到明天") { model.moveDraft(to: DayContext.logicalDay(offset: 1)) }
+                                    Button("挪到后天") { model.moveDraft(to: DayContext.logicalDay(offset: 2)) }
+                                }
+                            }
+                            // ICS 导出归"看的时刻"、仅高密皮肤露（渐进披露 v2）
+                            if DisclosureSettings.showsDeepFeatures {
+                                #if os(macOS)
+                                Button { exportICS() } label: {
+                                    Label("导出 ICS", systemImage: "square.and.arrow.up")
+                                }
+                                #else
+                                ShareLink(item: ICSDocument(text: model.currentICS()),
+                                          preview: SharePreview("BetterCalendar 计划.ics")) {
+                                    Label("导出 ICS", systemImage: "square.and.arrow.up")
+                                }
+                                #endif
+                            }
+                            if model.hasUnsavedChanges {
+                                Divider()
+                                Button("放弃修改", role: .destructive) { model.discardDraft() }
+                            }
+                        } label: {
+                            Label("更多", systemImage: "ellipsis.circle")
+                        }
+                        .font(.caption)
+                        .help("草稿与列表的更多操作")
                     }
 
                     if model.blocks.isEmpty {
@@ -506,19 +524,7 @@ struct HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.isWorking || (!model.hasUnsavedChanges && !model.isLiveTargetDay))
-                        // ICS 导出归"看的时刻"、仅高密皮肤露（原皮不出——渐进披露 v2）
-                        if DisclosureSettings.showsDeepFeatures {
-                            #if os(macOS)
-                            Button { exportICS() } label: {
-                                Label("导出 ICS", systemImage: "square.and.arrow.up")
-                            }
-                            #else
-                            ShareLink(item: ICSDocument(text: model.currentICS()),
-                                      preview: SharePreview("BetterCalendar 计划.ics")) {
-                                Label("导出 ICS", systemImage: "square.and.arrow.up")
-                            }
-                            #endif
-                        }
+                        // ICS 导出已收进草稿区 ⋯ 菜单（S3 归位 2026-07-14）——确认行只留主按钮与状态
                         if let c = model.committedCount {
                             Text(model.committedToReal
                                  ? "已写入真日历(Dev) \(c) 项 → 打开 系统日历查看"
@@ -817,8 +823,8 @@ struct HomeView: View {
             Button("今天") { model.targetDay = DayContext.logicalDay(offset: 0) }
             Button("明天") { model.targetDay = DayContext.logicalDay(offset: 1) }
             Button("后天") { model.targetDay = DayContext.logicalDay(offset: 2) }
-            Divider()
-            Button("昨天（不建议）") { model.targetDay = DayContext.logicalDay(offset: -1) }
+            // 「昨天（不建议）」已删（S3-P3，2026-07-14）：回填过去的正道=日记页复盘「补一笔」；
+            // 判例登记兜底——真有直排昨天的需求再按判例复活。
         } label: {
             // 口语词 + 具体日期（2026-07-09 Jason 要求「为今天安排」标上是哪天）
             // #28（2026-07-11 审核定稿）：凌晨窗口给一句口径澄清——逻辑日语义不开开关（口径分叉否决），
