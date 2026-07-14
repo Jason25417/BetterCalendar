@@ -427,11 +427,9 @@ struct HomeView: View {
                                                         $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
                                             parallelPeers: model.parallelPeerTitles(of: item.id),
                                             onToggleParallel: { model.toggleParallel(item.id, with: $0) },
+                                            onDuplicate: { model.duplicate(id: item.id) },
                                             onDelete: { model.delete(id: item.id) })
-                                .contextMenu {
-                                    Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
-                                    Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
-                                }
+                                // 右键菜单已由 EditableRow 内部统一挂载（P4-3：与 ⋯ 同一份内容）
                             }
                             .onMove { model.move($0, $1) }
                             // 「加一项」融进列表（#37/S3 裁决）：最后一行 +，就地输入——
@@ -513,11 +511,9 @@ struct HomeView: View {
                                                     $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
                                         parallelPeers: model.parallelPeerTitles(of: item.id),
                                         onToggleParallel: { model.toggleParallel(item.id, with: $0) },
+                                        onDuplicate: { model.duplicate(id: item.id) },
                                         onDelete: { model.delete(id: item.id) })
-                            .contextMenu {
-                                Button { model.duplicate(id: item.id) } label: { Label("复制", systemImage: "plus.square.on.square") }
-                                Button(role: .destructive) { model.delete(id: item.id) } label: { Label("删除", systemImage: "trash") }
-                            }
+                            // 右键菜单已由 EditableRow 内部统一挂载（P4-3）
                         }
                         .onMove { model.move($0, $1) }
                     }
@@ -898,7 +894,11 @@ struct EditableRow: View {
     var parallelCandidates: [(id: UUID, title: String, inGroup: Bool)] = []
     var parallelPeers: [String] = []
     var onToggleParallel: ((UUID) -> Void)? = nil
+    var onDuplicate: (() -> Void)? = nil
     var onDelete: () -> Void
+    // P4-2（Jason 2026-07-14）：时间点击弹选择器（iOS 滚轮），行内不再常驻步进箭头
+    @State private var editingStart = false
+    @State private var editingEnd = false
 
     private var isNextDay: Bool {
         guard let ref = referenceDay else { return false }
@@ -937,6 +937,11 @@ struct EditableRow: View {
                     if block.deadline == nil { block.deadline = block.end }
                 }
                 Divider()
+                // P4-1（Jason 2026-07-14）：固定并入「排时间」——它与随时/尽早/DDL/锚点同属
+                // 「这件事的时间性质」；行内独立固定按钮退役，固定态显示在标题行 tag 区。
+                Button(block.isFixed ? "✓ 固定（与他人约定，时刻不可改）" : "固定（与他人约定，时刻不可改）") {
+                    block.isFixed.toggle()
+                }
                 // 锚点手动开关（Jason 2026-07-09）：午饭/通勤这类=占时间不催完成；能手动设也能改回任务。
                 Button(block.isAnchor ? "✓ 生活锚点（不催完成）" : "设为生活锚点（午饭/通勤这类）") {
                     block.isAnchor.toggle()
@@ -946,39 +951,19 @@ struct EditableRow: View {
                 Image(systemName: timingLimitIcon).foregroundStyle(timingLimitColor)
             }
             .menuStyle(.borderlessButton).fixedSize()
-            .help("这件事是什么：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）/ 生活锚点")
+            .help("这件事的时间性质：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）/ 固定 / 生活锚点")
 
             VStack(alignment: .leading, spacing: 4) {
-                TextField("标题", text: $block.title)
+                // 标题行（P4-B）：标题 + 可变宽 tags 右对齐——控件行只留定宽件，右端全列表对齐
                 HStack(spacing: 6) {
-                    DatePicker("", selection: $block.start, displayedComponents: .hourAndMinute)
-                        .labelsHidden()
+                    TextField("标题", text: $block.title)
+                    tagStrip
+                }
+                // 控件行：时间胶囊（点击弹选择器，P4-2）· DDL · 计时 · ⋯（P4-3）
+                HStack(spacing: 6) {
+                    timeChip($block.start, "开始时间", $editingStart)
                     Text("–").foregroundStyle(.secondary)
-                    DatePicker("", selection: $block.end, displayedComponents: .hourAndMinute)
-                        .labelsHidden()
-                    if isNextDay {
-                        Text("次日")
-                            .font(.caption2).foregroundStyle(.indigo)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
-                            .help("跨午夜：属同一逻辑日，日历上落在次日凌晨（改时间到 0–4 点会自动归次日）")
-                    } else if crossesMidnight {
-                        Text("至次日")
-                            .font(.caption2).foregroundStyle(.indigo)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
-                            .help("结束时间跨过午夜（如 23:30–01:00）：仍属同一逻辑日")
-                    }
-                    Toggle("固定", isOn: $block.isFixed)
-                        .toggleStyle(.button).controlSize(.small)
-                    Menu {
-                        Button("轻计时") { block.timingStyle = .light }
-                        Button("番茄钟") { block.timingStyle = .pomodoro }
-                        Button("不计时") { block.timingStyle = .none }
-                    } label: {
-                        Text(Self.styleLabel(block.timingStyle))
-                    }
-                    .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
+                    timeChip($block.end, "结束时间", $editingEnd)
                     if block.deadline != nil {
                         HStack(spacing: 2) {
                             Image(systemName: "flag.checkered").foregroundStyle(.red).font(.caption2)
@@ -989,60 +974,150 @@ struct EditableRow: View {
                         }
                         .help("硬截止（DDL）：必须在此之前完成——点时间可调；写进提醒事项、按它提醒。清除请在时限菜单选「随时/尽早」")
                     }
+                    Menu {
+                        Button("轻计时") { block.timingStyle = .light }
+                        Button("番茄钟") { block.timingStyle = .pomodoro }
+                        Button("不计时") { block.timingStyle = .none }
+                    } label: {
+                        Text(Self.styleLabel(block.timingStyle))
+                    }
+                    .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
                     Spacer()
-                    // 并行组（0.22）：链条菜单——选一块结组（同组=同时段、reflow 绑定）；再选已同组的=解除
-                    if let onToggleParallel, !parallelCandidates.isEmpty || block.parallelGroup != nil {
-                        Menu {
-                            ForEach(parallelCandidates, id: \.id) { c in
-                                Button(c.inGroup ? "✓ \(c.title)（点击解除）" : c.title) {
-                                    onToggleParallel(c.id)
-                                }
-                            }
-                            if parallelCandidates.isEmpty { Text("没有可结组的块") }
-                        } label: {
-                            Image(systemName: block.parallelGroup != nil ? "link.circle.fill" : "link")
-                                .foregroundStyle(block.parallelGroup != nil ? .teal : .secondary)
-                        }
-                        .menuStyle(.borderlessButton).fixedSize()
-                        .help(block.parallelGroup != nil
-                              ? "与「\(parallelPeers.joined(separator: "、"))」并行（同时段，重排时绑定）"
-                              : "与别的块并行（同时段进行，重排时保持绑定）")
+                    // P4-3（(a)+(b) 都要）：复制/并行/归属/删除收进一个 ⋯，右键同一份内容
+                    Menu {
+                        rowMenuItems
+                    } label: {
+                        Label("更多", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
                     }
-                    // 归属未来任务：放右侧空位（不破坏左侧标题对齐）；投入精确记到它名下
-                    if !poolTasks.isEmpty || block.linkedTaskID != nil {
-                        Menu {
-                            Button("无归属") { block.linkedTaskID = nil }
-                            if !poolTasks.isEmpty { Divider() }
-                            ForEach(poolTasks) { t in
-                                Button(t.title) { block.linkedTaskID = t.id }
-                            }
-                        } label: {
-                            HStack(spacing: 2) {
-                                Image(systemName: block.linkedTaskID != nil ? "tray.full.fill" : "tray")
-                                    .foregroundStyle(block.linkedTaskID != nil ? .purple : .secondary)
-                                if let linkedTitle {
-                                    // 0.35.0：修 iPhone 行溢出（TestFlight 反馈#4）——长标题截断限宽，
-                                    // 不再把时间胶囊挤出屏幕
-                                    Text(linkedTitle).foregroundStyle(.purple)
-                                        .lineLimit(1).truncationMode(.tail)
-                                        .frame(maxWidth: 150, alignment: .leading)
-                                }
-                            }
-                        }
-                        .menuStyle(.borderlessButton)
-                        .help("这件属于哪个未来任务——投入会精确记到它名下")
-                    }
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityLabel("更多：复制 · 并行 · 归属 · 删除")
                 }
                 .font(.caption)
             }
         }
+        .contextMenu { rowMenuItems }
         // 生活锚点淡显（0.20.3，§5.10 块三角色）：占位不是任务——可看可改时间，但视觉退后一步
         .opacity(block.isAnchor ? 0.55 : 1)
         .help(block.isAnchor ? "生活锚点（午饭/通勤这类）：占时间、塑造节奏，但不是要完成的任务" : "")
+    }
+
+    // MARK: P4 行内重构件（2026-07-14 Jason 四条建议过审落地）
+
+    /// 标题行 tags（P4-4）：状态即入口——并行/归属 tag 可点直改（带 ▾）；次日/固定为陈述 tag。
+    @ViewBuilder private var tagStrip: some View {
+        HStack(spacing: 4) {
+            if isNextDay {
+                tagText("次日").foregroundStyle(.indigo).background(Color.indigo.opacity(0.12), in: Capsule())
+                    .help("跨午夜：属同一逻辑日，日历上落在次日凌晨（改时间到 0–4 点会自动归次日）")
+            } else if crossesMidnight {
+                tagText("至次日").foregroundStyle(.indigo).background(Color.indigo.opacity(0.12), in: Capsule())
+                    .help("结束时间跨过午夜（如 23:30–01:00）：仍属同一逻辑日")
+            }
+            if block.isFixed {
+                tagText("固定").foregroundStyle(.secondary).background(.quaternary.opacity(0.5), in: Capsule())
+                    .help("与他人约定、时刻不可改（重排不动它）——修改在左侧时间性质菜单")
+            }
+            if block.parallelGroup != nil, onToggleParallel != nil {
+                Menu {
+                    parallelMenuItems
+                } label: {
+                    tagText("并行 \(parallelGroupMark) ▾")
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .foregroundStyle(.teal)
+                .background(.teal.opacity(0.12), in: Capsule())
+                .help("与「\(parallelPeers.joined(separator: "、"))」并行（同组同款标记；点击直改结组）")
+            }
+            if block.linkedTaskID != nil {
+                Menu {
+                    linkMenuItems
+                } label: {
+                    tagText("\(linkedTitle ?? "归属") ▾").frame(maxWidth: 140)
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .foregroundStyle(.purple)
+                .background(.purple.opacity(0.12), in: Capsule())
+                .help("归属的未来任务——投入精确记到它名下；点击直改")
+            }
+        }
+    }
+
+    private func tagText(_ s: String) -> some View {
+        Text(s).font(.caption2).lineLimit(1).truncationMode(.tail)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+    }
+
+    /// 并行组标记（P4-4c）：同组同款、异组异款——组名尾数字转 ①②③；无数字取组名末字符。
+    /// 结构线用记号区分（无色觉依赖）；组配色留美术换装。
+    private var parallelGroupMark: String {
+        guard let g = block.parallelGroup else { return "" }
+        let digits = g.filter(\.isNumber)
+        if let n = Int(digits), n >= 1, n <= 9 {
+            return ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"][n - 1]
+        }
+        return g.isEmpty ? "" : String(g.suffix(1))
+    }
+
+    /// 时间胶囊（P4-2）：点击弹选择器（iOS=滚轮；macOS 无 wheel 样式，用紧凑选择器），行内不再常驻步进箭头。
+    private func timeChip(_ selection: Binding<Date>, _ name: String, _ editing: Binding<Bool>) -> some View {
+        Button(Self.hmFormatter.string(from: selection.wrappedValue)) { editing.wrappedValue = true }
+            .buttonStyle(.bordered).controlSize(.small)
+            .monospacedDigit()
+            .accessibilityLabel(name)
+            .popover(isPresented: editing) {
+                DatePicker(name, selection: selection, displayedComponents: .hourAndMinute)
+                    #if !os(macOS)
+                    .datePickerStyle(.wheel)
+                    #endif
+                    .labelsHidden()
+                    .padding(12)
+            }
+    }
+
+    private static let hmFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    // 并行组（0.22 语义不变）：选一块结组（同组=同时段、reflow 绑定）；再选已同组的=解除
+    @ViewBuilder private var parallelMenuItems: some View {
+        ForEach(parallelCandidates, id: \.id) { c in
+            Button(c.inGroup ? "✓ \(c.title)（点击解除）" : c.title) { onToggleParallel?(c.id) }
+        }
+        if parallelCandidates.isEmpty { Text("没有可结组的块") }
+    }
+
+    @ViewBuilder private var linkMenuItems: some View {
+        Button("无归属") { block.linkedTaskID = nil }
+        if !poolTasks.isEmpty { Divider() }
+        ForEach(poolTasks) { t in
+            Button(t.title) { block.linkedTaskID = t.id }
+        }
+    }
+
+    /// ⋯ 与右键共用的一份菜单（P4-3：可见入口+快捷路径，内容永远一致）。
+    @ViewBuilder private var rowMenuItems: some View {
+        if let onDuplicate {
+            Button { onDuplicate() } label: { Label("复制", systemImage: "plus.square.on.square") }
+        }
+        if onToggleParallel != nil, !parallelCandidates.isEmpty || block.parallelGroup != nil {
+            Menu {
+                parallelMenuItems
+            } label: {
+                Label("并行…", systemImage: "link")
+            }
+        }
+        if !poolTasks.isEmpty || block.linkedTaskID != nil {
+            Menu {
+                linkMenuItems
+            } label: {
+                Label("归属…", systemImage: "tray")
+            }
+        }
+        Divider()
+        Button(role: .destructive, action: onDelete) { Label("删除", systemImage: "trash") }
     }
 
     static func styleLabel(_ s: TimingStyle) -> String {
