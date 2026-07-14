@@ -294,7 +294,7 @@ struct JournalView: View {
                 if wrapUpJustSealed { sealedCelebration }
                 Text("写下今天").font(.headline)
                 if wrapUpStage == .writing {
-                    Text("选个心情、写一句就够——顺手写一行「给明天：……」，明早会带给你。")
+                    Text("选个心情、写一句就够——想多写就多写，随写随存。")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 if let prompt = todayPrompt {
@@ -304,12 +304,7 @@ struct JournalView: View {
                         .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 JournalEditor(entry: e, model: model, photoStore: deps.photoStore)
-                // 功能说明（非提示催写，Jason 2026-07-10 定）：只告知能力存在，绝不出现「你还没写给明天」。
-                // 0.34.1（Jason 定）：开写就收起——正文有任何内容时这行说明消失，不占注意力。
-                if e.body.isEmpty {
-                    Text("小知识：写一行「给明天：……」，明早会替你带给明天的自己。")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
+                // 「给明天」入口与小知识提示已退役（批次6，Jason 2026-07-14：没什么用）——管道休眠
                 if wrapUpStage == .writing {
                     // 时刻 B 的唯一主按钮：完成今日 → 盖章+庆祝（时刻 C）
                     Button { sealWrapUp() } label: {
@@ -426,8 +421,9 @@ struct JournalRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.subheadline.bold())
+                // 批次6（Jason 反馈）：历史行降噪——摘要收为一行（识别够用，翻找不吵）
                 Text(entry.body.isEmpty ? "（只记了心情）" : entry.body)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)

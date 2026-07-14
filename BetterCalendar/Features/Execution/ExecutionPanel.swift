@@ -339,9 +339,11 @@ struct ExecutionPanel: View {
                 Label("结束休息，回来", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-        } else if let a = model.active {
+        } else if model.active != nil {
+            // 批次6（Jason 反馈：语义重复）：标题只住 header 事件名（那也是换一件入口），按钮回归通用词
+            //（帧2 线框原案即「完成这件」）
             Button { Task { await model.completeCurrent() } } label: {
-                Label("完成「\(a.title)」", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             // 「换一件」退役（0.21）：事件名按钮已收编；空位给「计时」切换菜单
@@ -355,16 +357,18 @@ struct ExecutionPanel: View {
                 }
                 .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
             }
-        } else if let s = model.selected {
+        } else if model.selected != nil {
+            // 标题展示归 header「待开始」区（语义去重，批次6）
             Button { Task { await model.startSelected() } } label: {
-                Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
+                Label("开始这件", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             if !compact { HStack { switchMenu; alsoMenu; breakButton } }
         } else {
             if let next = model.nextSuggested {
+                // 标题展示归 header「下一件：X」（语义去重，批次6）
                 Button { Task { await model.startBlock(next) } } label: {
-                    Label("开始：\(next.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
+                    Label("开始下一件", systemImage: "play.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
             }

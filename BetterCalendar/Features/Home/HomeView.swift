@@ -130,14 +130,7 @@ struct HomeView: View {
                 HStack {
                     Text("说说你的一天").font(.headline)
                     Spacer()
-                    let loose = deps.looseDays.isLoose(model.targetDay)
-                    Button { model.toggleLoose() } label: {
-                        Label(loose ? "结束松散" : "松散一下",
-                              systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
-                    }
-                    .font(.caption).buttonStyle(.borderless)
-                    .foregroundStyle(loose ? .purple : .secondary)
-                    .help("把这天标为松散：App 退场陪你——不催、不算落后。随时可结束；短时间的小憩直接留白即可，不必标松散")
+                    // 「松散一下」挪进目标日菜单（批次6）：它是这一天的属性，语义归属日选择器而非常驻顶栏
                     targetDayMenu
                     if model.isLiveTargetDay {
                         // 1b 态标识（方案 A，Jason 2026-07-14 裁）：顶栏胶囊，一眼可辨「列表=从现在起的剩余」
@@ -660,12 +653,13 @@ struct HomeView: View {
                     ProgressView().controlSize(.small)
                     Text("模型思考中…").font(.caption2).foregroundStyle(.secondary)
                 }
+                // 批次6（Jason 反馈）：提交钮从裸文字升级为有容器的小按钮——一眼可辨「这能点」
                 Button { submitUnified() } label: {
                     Label(arrangeMode ? "排\(Self.relativeDayWord(model.targetDay))" : "AI 调整",
                           systemImage: arrangeMode ? "wand.and.stars" : "sparkles")
                         .font(.caption)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(model.isWorking)
             }
             .padding(6)
@@ -835,6 +829,15 @@ struct HomeView: View {
             Button("后天") { model.targetDay = DayContext.logicalDay(offset: 2) }
             // 「昨天（不建议）」已删（S3-P3，2026-07-14）：回填过去的正道=日记页复盘「补一笔」；
             // 判例登记兜底——真有直排昨天的需求再按判例复活。
+            Divider()
+            // 松散=这一天的属性（批次6 从顶栏挪入）：App 退场陪你——不催、不算落后；随时可结束
+            Button {
+                model.toggleLoose()
+            } label: {
+                let loose = deps.looseDays.isLoose(model.targetDay)
+                Label(loose ? "结束松散" : "松散一下",
+                      systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
+            }
         } label: {
             // 口语词 + 具体日期（2026-07-09 Jason 要求「为今天安排」标上是哪天）
             // #28（2026-07-11 审核定稿）：凌晨窗口给一句口径澄清——逻辑日语义不开开关（口径分叉否决），
