@@ -40,6 +40,11 @@ struct BetterCalendarApp: App {
             BenchView(runner: container.bench)
                 .environment(\.appTheme, ThemeSettings.current)
         }
+
+        // 皮肤试衣间（开发期，美术样品阶段）：入口=Home 工具栏调色盘 / 窗口菜单。随开发件 M8 摘除。
+        Window("皮肤试衣间", id: "skin-fitting") {
+            SkinFittingView()
+        }
         #endif
     }
 

@@ -490,6 +490,9 @@ struct HomeView: View {
                     // 开发期：算法试验台（上架前随「可见报错」条款一起撤）
                     Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
                         .help("算法试验台（开发期）：解析/微调/reflow 各变体跑分对比")
+                    // 开发期：皮肤试衣间（美术样品阶段；M8 摘除）
+                    Button { openWindow(id: "skin-fitting") } label: { Label("皮肤试衣间", systemImage: "paintpalette") }
+                        .help("皮肤试衣间（开发期）：语义色 4 案 × 数字 2 案 × 明暗并排——样品评审")
                     #else
                     Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
                     #endif
