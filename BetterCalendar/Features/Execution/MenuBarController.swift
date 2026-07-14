@@ -39,7 +39,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             button.image = NSImage(systemSymbolName: "calendar.badge.clock",
                                    accessibilityDescription: "BetterCalendar")
             button.imagePosition = .imageLeading
-            button.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            // 换装批次A：数字字形=Rounded（令牌 digitDesign，条文 8 Jason 裁 b 案）；tabular 恒开
+            let mono = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            if let d = mono.fontDescriptor.withDesign(.rounded), let rounded = NSFont(descriptor: d, size: 0) {
+                button.font = rounded
+            } else {
+                button.font = mono
+            }
             button.target = self
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])   // 左键弹执行面板、右键弹菜单

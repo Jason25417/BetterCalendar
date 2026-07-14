@@ -8,6 +8,34 @@
 //
 
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#else
+import UIKit
+#endif
+
+/// 双模动态色（令牌表 v1，2026-07-14）：light/dark 各一 hex，跟随系统外观。
+/// 值来源=《美术执行Spec》§一（Jason 试衣间裁定：语义色 3A-v2、微暖中性阶 1B、暮色橙 accent）。
+extension Color {
+    init(light: UInt32, dark: UInt32) {
+        func rgb(_ hex: UInt32) -> (CGFloat, CGFloat, CGFloat) {
+            (CGFloat((hex >> 16) & 0xFF) / 255, CGFloat((hex >> 8) & 0xFF) / 255, CGFloat(hex & 0xFF) / 255)
+        }
+        #if canImport(AppKit)
+        self.init(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            let (r, g, b) = rgb(hex)
+            return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+        })
+        #else
+        self.init(uiColor: UIColor { trait in
+            let hex = trait.userInterfaceStyle == .dark ? dark : light
+            let (r, g, b) = rgb(hex)
+            return UIColor(red: r, green: g, blue: b, alpha: 1)
+        })
+        #endif
+    }
+}
 
 struct AppTheme: Identifiable, Equatable {
     let id: String
@@ -19,15 +47,23 @@ struct AppTheme: Identifiable, Equatable {
     var previewTint: Color       // 预览/从现在起（橙系语义）
     var looseTint: Color         // 松散/退场（紫系语义）
     var positiveTint: Color      // 正反馈（做成/兑现）
+    // 中性阶（条文 1B 微暖，换装批次 A 起）
+    var bg: Color = Color(light: 0xF7F4F0, dark: 0x1D1B18)         // 页底
+    var surface: Color = Color(light: 0xFFFDFB, dark: 0x292623)    // 卡面
+    // 计时数字字形（条文 8，Jason 裁=b Rounded；tabular 由使用点 monospacedDigit 恒开）
+    var digitDesign: Font.Design = .rounded
 }
 
 enum ThemeSettings {
-    /// 经典（当前唯一主题=现状配色的语义化命名）。
+    /// 经典 v1（2026-07-14 试衣间裁定落值）：3A-v2 沉稳三色相 + 暮色橙 accent + 微暖中性阶。
+    /// loose 紫沿用系统（微决策区待定）；positive=计划绿同族（做成=计划的兑现）。
     static let classic = AppTheme(id: "classic", name: "经典",
-                                  accent: .accentColor,
-                                  plannedTint: .green, actualTint: .blue,
-                                  previewTint: .orange, looseTint: .purple,
-                                  positiveTint: .green)
+                                  accent: Color(light: 0xC97C4E, dark: 0xD98F5F),
+                                  plannedTint: Color(light: 0x57806B, dark: 0x9FC4AC),
+                                  actualTint: Color(light: 0x4A6B8A, dark: 0x8FAECE),
+                                  previewTint: Color(light: 0xB8823F, dark: 0xC98E4F),
+                                  looseTint: .purple,
+                                  positiveTint: Color(light: 0x57806B, dark: 0x9FC4AC))
 
     /// 可选主题清单：新皮肤设计定稿后在这里加一项即可（设置页 Picker 自动出现）。
     static var all: [AppTheme] { [classic] }

@@ -197,7 +197,7 @@ struct ExecutionPanel: View {
                 .font(.headline).foregroundStyle(.secondary)
             TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Label(Self.hms(model.breakElapsed), systemImage: "timer")
-                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.callout.monospacedDigit()).fontDesign(.rounded).foregroundStyle(.secondary)
             }
             if let a = model.active {
                 Text("回来继续：\(a.title)").font(.caption).foregroundStyle(.secondary)
@@ -232,7 +232,8 @@ struct ExecutionPanel: View {
             .menuStyle(.borderlessButton).fixedSize()
             .help("点击切换到别的事（当前投入自动保留）；已完成的可再来一段（复盘里合并计时）")
             TimelineView(.periodic(from: .now, by: 1)) { _ in
-                activeTiming
+                // 换装批次A：计时数字=Rounded（条文 8，Jason 裁 b 案；tabular 各点位 monospacedDigit 恒开）
+                activeTiming.fontDesign(.rounded)
             }
         } else if let s = model.selected {
             Text("待开始").font(.caption).foregroundStyle(.secondary)
@@ -505,7 +506,7 @@ struct ExecutionPanel: View {
                         Text(run.title).font(.caption).lineLimit(1)
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
                             Text(Self.hms(model.backgroundElapsed(run)))
-                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(.caption2.monospacedDigit()).fontDesign(.rounded).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()

@@ -69,6 +69,7 @@ struct HomeView: View {
     @State private var smartAddText = ""
 
     let deps: HomeDeps
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次A 起逐点消费）
     @State private var model: HomeViewModel
     @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
@@ -481,6 +482,8 @@ struct HomeView: View {
             }
             .padding()
             }
+            // 换装批次A：微暖中性阶页底（条文 1B，令牌 bg）
+            .background(theme.bg.ignoresSafeArea())
             .navigationTitle("BetterCalendar")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {

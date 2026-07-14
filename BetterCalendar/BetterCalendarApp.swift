@@ -53,6 +53,8 @@ struct BetterCalendarApp: App {
     private func themedRoot() -> some View {
         mainTabs()
             .environment(\.appTheme, ThemeSettings.current)
+            // 换装批次A（2026-07-14，令牌表 v1）：全局 accent=暮色橙——所有主按钮/选中态一次换装
+            .tint(ThemeSettings.current.accent)
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
     }

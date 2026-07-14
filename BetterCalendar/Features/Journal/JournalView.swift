@@ -49,6 +49,7 @@ struct JournalView: View {
     @State private var showAchievementsSheet = false   // #36：toast 直达成就页
 
     let deps: JournalDeps
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次A）
     @State private var model: JournalViewModel
     @State private var today: JournalEntry?
     @State private var todayPrompt: String?   // 第一方情境引子（来自当天 PlanComparing）
@@ -80,6 +81,8 @@ struct JournalView: View {
                         }
                         .padding()
                     }
+                    // 换装批次A：微暖中性阶页底（条文 1B）
+                    .background(theme.bg.ignoresSafeArea())
                 }
             }
             .navigationTitle("日记")
