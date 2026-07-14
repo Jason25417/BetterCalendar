@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct CalendarPreviewView: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     let store: FakeCalendarStore
     let reminderStore: FakeReminderStore
 
@@ -42,7 +43,7 @@ struct CalendarPreviewView: View {
                             HStack {
                                 Image(systemName: r.priority == 1 ? "star.fill" : "circle")
                                     .font(.caption2)
-                                    .foregroundStyle(r.priority == 1 ? .orange : .secondary)
+                                    .foregroundStyle(r.priority == 1 ? theme.accent : .secondary)   // 尽早=accent（同行内 tag）
                                 Text(r.title)
                             }
                             Text(label(r))
@@ -57,9 +58,9 @@ struct CalendarPreviewView: View {
 
     private func color(_ kind: PlanCalendarKind) -> Color {
         switch kind {
-        case .planned: return .green
-        case .actual:  return .blue
-        case .preview: return .orange
+        case .planned: return theme.plannedTint
+        case .actual:  return theme.actualTint
+        case .preview: return theme.previewTint
         }
     }
 

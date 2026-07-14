@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct CelebrationBurst: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     @State private var animate = false
     var body: some View {
         ZStack {
@@ -16,7 +17,7 @@ struct CelebrationBurst: View {
                 let angle = Double(i) / 10 * 2 * .pi
                 Image(systemName: i % 3 == 0 ? "sparkles" : "sparkle")
                     .font(.system(size: CGFloat(12 + (i % 3) * 5)))
-                    .foregroundStyle(i % 2 == 0 ? Color.yellow : Color.orange)
+                    .foregroundStyle(i % 2 == 0 ? Color.yellow : theme.accent)   // 星光金+暮色橙（庆祝白名单）
                     .offset(x: animate ? cos(angle) * 52 : 0, y: animate ? sin(angle) * 34 : 0)
                     .opacity(animate ? 0 : 1)
                     .scaleEffect(animate ? 1.5 : 0.3)

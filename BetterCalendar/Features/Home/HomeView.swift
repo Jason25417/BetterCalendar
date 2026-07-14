@@ -147,7 +147,7 @@ struct HomeView: View {
                 // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你——发出者是用户自己，
                 // 不写=不存在；点 ✕ 只收当天（明天有新寄语照常出现）。
                 if let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
-                    MessageStrip(icon: "sunrise", tint: .purple, text: "昨晚的你说：\(tn)") {
+                    MessageStrip(icon: "sunrise", tint: theme.looseTint, text: "昨晚的你说：\(tn)") {
                         Button { TomorrowNote.dismiss(); tnDismissTick = true } label: {
                             Image(systemName: "xmark").font(.caption2)
                         }
@@ -159,13 +159,13 @@ struct HomeView: View {
                 // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
                 if deps.looseDays.isLoose(model.targetDay) {
                     HStack(spacing: 8) {
-                        Image(systemName: "moon.stars.fill").foregroundStyle(.purple)
+                        Image(systemName: "moon.stars.fill").foregroundStyle(theme.looseTint)
                         Text("松散日 · 已经退场陪你了——不催、不算账。想排还是能排，也可以就好好休息。")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.purple.opacity(0.08))
+                    .background(theme.looseTint.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
@@ -177,7 +177,8 @@ struct HomeView: View {
                     muted: SuggestionSettings.mutedTaskIDs)
                 ForEach(l3) { s in
                     // 统一消息条（0.28.1）：L3 建议与 A+B 状态行同一视觉家族（位置各守其位）
-                    MessageStrip(icon: "lightbulb", tint: .orange, text: s.text) {
+                    // 换装 B：建议=提议未确认 → 预览橙族（同「从现在起」语义，让出系统橙）
+                    MessageStrip(icon: "lightbulb", tint: theme.previewTint, text: s.text) {
                         if s.kind == .shelve {
                             Button("先放下") {
                                 BehaviorLog.record("L3建议", "点「先放下」")
@@ -225,26 +226,27 @@ struct HomeView: View {
 
                 // A 状态行（0.26 ABC → 0.28.1 统一消息条）：确定性成功状态「✓ 排好 N 件」——与 note(B) 叠加
                 if let n = model.arrangedCount {
-                    MessageStrip(icon: "checkmark.circle.fill", tint: .green,
+                    MessageStrip(icon: "checkmark.circle.fill", tint: theme.positiveTint,
                                  text: "排好 \(n) 件", textStyle: .primary)
                 }
                 // C 状态行（#15，0.29.0）：微调完成的确定性反馈——N=本地 diff 出的事实，
                 // 非模型自由发挥（自由通道审核未过：可能违措辞红线；模型嗓音只走宪法约束的 note=B）
                 if let c = model.refinedChangeCount {
                     MessageStrip(icon: c > 0 ? "checkmark.circle.fill" : "info.circle",
-                                 tint: c > 0 ? .green : .gray,
+                                 tint: c > 0 ? theme.positiveTint : .gray,
                                  text: c > 0 ? "已按指令调整 \(c) 处" : "没识别出要改的动作——一切保持原样",
                                  textStyle: .primary)
                 }
                 // B：模型 note（宪法约束、温和前向）。防呆：抽风成「1」这种垃圾 → trim 后太短不显
                 if let note = model.note,
                    note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
-                    MessageStrip(icon: "quote.opening", tint: .blue, text: note)
+                    // 换装 B：信息蓝并入 actualTint 族——同屏只保留一种蓝（微决策留档）
+                    MessageStrip(icon: "quote.opening", tint: theme.actualTint, text: note)
                 }
                 if !model.pendingLongTasks.isEmpty {
                     Label("识别到未来事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「未来任务」",
                           systemImage: "tray.and.arrow.down")
-                        .font(.caption).foregroundStyle(.purple)
+                        .font(.caption).foregroundStyle(theme.looseTint)
                 }
                 if let err = model.errorText {
                     Text(err).font(.callout).foregroundStyle(.red)
@@ -255,7 +257,7 @@ struct HomeView: View {
                         Text("上次有未保存的修改（为 \(Self.dayLabel(snap.targetDay)) · 存于 \(snap.savedAt.formatted(date: .omitted, time: .shortened))）")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("恢复") { model.applyPendingRestore() }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(.blue).underline()
+                            .font(.caption).buttonStyle(.plain).foregroundStyle(theme.actualTint).underline()
                         Button("丢弃") { model.dismissPendingRestore() }
                             .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
                         Spacer()
@@ -283,7 +285,7 @@ struct HomeView: View {
                 if wrapUpCardVisible {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
-                            Image(systemName: "sunset.fill").font(.title2).foregroundStyle(.orange)
+                            Image(systemName: "sunset.fill").font(.title2).foregroundStyle(theme.accent)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("今天的工作差不多了").font(.headline)
                                 Text("花 30 秒收个尾——看看做成了什么，给今天写一句话。")
@@ -308,7 +310,8 @@ struct HomeView: View {
                         }
                     }
                     .padding(14)
-                    .background(LinearGradient(colors: [Color.orange.opacity(0.16), Color.pink.opacity(0.10)],
+                    // 换装 B：收口卡=情感时刻场域（条文 11 白名单）→ 暮色橙 accent 打底，粉尾保留暖意
+                    .background(LinearGradient(colors: [theme.accent.opacity(0.16), Color.pink.opacity(0.10)],
                                                startPoint: .topLeading, endPoint: .bottomTrailing),
                                 in: RoundedRectangle(cornerRadius: 14))
                     .onAppear {   // 埋点（调研 B 组）：出现按天去重 + 触发信号
@@ -340,7 +343,7 @@ struct HomeView: View {
                 // 新鲜度徽标（0.24 C2 → v2 两边再选）：中性、不打断——底层变了，
                 // 三个显式出路：对比两版 / 载入最新 / 继续编辑。绝不弹窗打断、绝不自动合并。
                 if model.freshness {
-                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: .blue,
+                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.actualTint,
                                  text: "这天有更新：\(model.freshnessSource.label)") {
                         HStack(spacing: 6) {
                             if model.freshBase != nil {
@@ -740,7 +743,7 @@ struct HomeView: View {
                 .padding(.top, 4)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "tray.full").foregroundStyle(.purple)
+                    Image(systemName: "tray.full").foregroundStyle(theme.looseTint)
                     if store.items.isEmpty {
                         Text("未来任务 · 空").font(.caption).foregroundStyle(.secondary)
                     } else {
@@ -764,7 +767,7 @@ struct HomeView: View {
                     // 进度达/超估算 → 标题右边轻声邀请（问句、非断言；点一下才标完成）
                     if deps.longTasks.looksComplete(for: task) {
                         Button("看起来做完了？") { deps.longTasks.complete(task) }
-                            .font(.caption2).buttonStyle(.borderless).foregroundStyle(.green)
+                            .font(.caption2).buttonStyle(.borderless).foregroundStyle(theme.positiveTint)
                             .help("投入已达到你估的总量——做成了就点一下（不点也没关系）")
                     }
                 }
@@ -780,7 +783,7 @@ struct HomeView: View {
                     // 进度（A，三红线）：单元优先/无单元退时长；永远锚定"已"
                     let progress = deps.longTasks.progressText(for: task)
                     if !progress.isEmpty {
-                        Text(progress).font(.caption2).foregroundStyle(.green)
+                        Text(progress).font(.caption2).foregroundStyle(theme.positiveTint)
                     }
                 }
                 // 增长条（只在有总量时；绿色从零长起、无"还剩"）
@@ -788,7 +791,7 @@ struct HomeView: View {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.quaternary).frame(height: 3)
-                            Capsule().fill(.green).frame(width: geo.size.width * f, height: 3)
+                            Capsule().fill(theme.positiveTint).frame(width: geo.size.width * f, height: 3)
                         }
                     }
                     .frame(height: 3)
@@ -816,7 +819,7 @@ struct HomeView: View {
             }
         }
         .padding(6)
-        .background((overdue ? Color.orange : Color.purple).opacity(0.07))
+        .background((overdue ? Color.orange : theme.looseTint).opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -891,6 +894,7 @@ struct HomeView: View {
 
 /// 单个草稿块的可编辑行。
 struct EditableRow: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     @Binding var block: EditableBlock
     var poolTasks: [LongTask] = []   // 可选归属的未来任务（0.18.2 手动选归属；空=不显归属菜单）
     var referenceDay: Date?          // 目标日：块不在这天（跨午夜落次日凌晨）→ 显「次日」徽章；nil=不显
@@ -1012,8 +1016,9 @@ struct EditableRow: View {
                     tagText("尽早 ▾")
                 }
                 .menuStyle(.borderlessButton).fixedSize()
-                .foregroundStyle(.orange)
-                .background(.orange.opacity(0.12), in: Capsule())
+                // 换装 B 微决策：尽早=自设的情感承诺 → accent（暮色橙）；同时解掉与预览橙的同屏相撞
+                .foregroundStyle(theme.accent)
+                .background(theme.accent.opacity(0.12), in: Capsule())
                 .help("你标了「尽早」：重排时优先靠前；点击可改排时间性质")
             }
             if block.isFixed {
@@ -1045,8 +1050,8 @@ struct EditableRow: View {
                     tagText("\(linkedTitle ?? "归属") ▾").frame(maxWidth: 140)
                 }
                 .menuStyle(.borderlessButton).fixedSize()
-                .foregroundStyle(.purple)
-                .background(.purple.opacity(0.12), in: Capsule())
+                .foregroundStyle(theme.looseTint)
+                .background(theme.looseTint.opacity(0.12), in: Capsule())
                 .help("归属的未来任务——投入精确记到它名下；点击直改")
             }
         }
@@ -1152,6 +1157,7 @@ struct FreshCompareSheet: View {
     var onAdoptFresh: () -> Void
     var onKeepMine: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1159,8 +1165,9 @@ struct FreshCompareSheet: View {
             Text("最新的底来自：\(sourceLabel)。只读对比——选哪版都不丢另一版的事实（真相源只在你确认时改）。")
                 .font(.caption).foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 12) {
-                column(title: "我的编辑（本页）", blocks: mine, accent: .blue)
-                column(title: "最新的底", blocks: fresh, accent: .orange)
+                // 换装 B：按 App 通用色语言重映射——本页未确认的编辑=预览橙、日历里的计划事实=计划绿
+                column(title: "我的编辑（本页）", blocks: mine, accent: theme.previewTint)
+                column(title: "最新的底", blocks: fresh, accent: theme.plannedTint)
             }
             HStack {
                 Spacer()
@@ -1187,7 +1194,7 @@ struct FreshCompareSheet: View {
                             Text(Self.hm(b.start) + "–" + Self.hm(b.end))
                                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             Text(b.title).font(.caption).lineLimit(1)
-                            if b.isFixed { Text("固定").font(.caption2).foregroundStyle(.purple) }
+                            if b.isFixed { Text("固定").font(.caption2).foregroundStyle(.secondary) }   // U7：同行内「固定」tag 同款（灰）
                             if b.isAnchor { Text("锚").font(.caption2).foregroundStyle(.brown) }
                             Spacer(minLength: 0)
                         }

@@ -11,6 +11,7 @@ import SwiftUI
 /// 可嵌入的复盘面板（0.28 提案A：并入日记页「回看今天」头部；独立复盘页已退役）。
 /// 无自己的滚动容器/导航标题——宿主（日记页）提供；内容与原 ReviewView 一致。
 struct ReviewPanel: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     @State private var model: ReviewViewModel
 
     init(model: ReviewViewModel) {
@@ -32,7 +33,7 @@ struct ReviewPanel: View {
                         accomplishedSection(c)
                         if let lp = model.longTaskProgress {
                             Label(lp, systemImage: "tray.full")
-                                .font(.caption).foregroundStyle(.purple)
+                                .font(.caption).foregroundStyle(theme.looseTint)
                         }
                         calibrationSection(c)
                         shareSummaryButton(c)
@@ -66,7 +67,7 @@ struct ReviewPanel: View {
     private func looseAffirmation(_ c: DayComparison) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("今天，你允许自己好好休息了", systemImage: "moon.stars.fill")
-                .font(.title3.bold()).foregroundStyle(.purple)
+                .font(.title3.bold()).foregroundStyle(theme.looseTint)
             Text(c.accomplishedCount > 0
                  ? "顺手还做了 \(c.accomplishedCount) 件——都算数，但今天不必用它们证明什么。"
                  : "什么都没做也很好。休息本身，就是今天的意义。")
@@ -74,7 +75,7 @@ struct ReviewPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.purple.opacity(0.10))
+        .background(theme.looseTint.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -91,7 +92,7 @@ struct ReviewPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.green.opacity(0.10))
+        .background(theme.positiveTint.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -101,11 +102,11 @@ struct ReviewPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.mitAccomplished, id: \.self) { title in
                     Label("想尽早的「\(title)」做成了", systemImage: "target")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.green)
+                        .font(.subheadline.weight(.medium)).foregroundStyle(theme.positiveTint)
                 }
             }
             .padding(10)
-            .background(Color.green.opacity(0.10))
+            .background(theme.positiveTint.opacity(0.10))
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
@@ -115,8 +116,9 @@ struct ReviewPanel: View {
         @Bindable var model = model
         if let mvp = model.mvpTitle {
             VStack(alignment: .leading, spacing: 6) {
+                // 换装 B：MVP=情感时刻 → accent（庆祝金黄底暂留系统 yellow，微决策区）
                 Label("今日最有价值：\(mvp)", systemImage: "trophy.fill")
-                    .font(.subheadline).foregroundStyle(.orange)
+                    .font(.subheadline).foregroundStyle(theme.accent)
                 TextField("想写一句为什么？（可留空）", text: $model.mvpNote)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.saveMVPNote() }
@@ -144,7 +146,7 @@ struct ReviewPanel: View {
         let isMVP = (model.mvpTitle == item.displayTitle)
         return HStack(spacing: 10) {
             // 去对比化：一律绿勾——计划外多做的不再用 sparkles/橙色单标（它和"计划"绑定，一标就把对比引回默认面）
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.positiveTint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayTitle)
                 Text(Self.calmPhrase(item)).font(.caption).foregroundStyle(.secondary)
@@ -180,7 +182,7 @@ struct ReviewPanel: View {
                     // 计划外多做的（正向的一半）
                     ForEach(c.bonus) { item in
                         HStack {
-                            Image(systemName: "plus.circle").foregroundStyle(.green)
+                            Image(systemName: "plus.circle").foregroundStyle(theme.positiveTint)
                             Text(item.displayTitle)
                             Spacer()
                             Text("计划外多做的").font(.caption).foregroundStyle(.secondary)
@@ -250,7 +252,7 @@ struct ReviewPanel: View {
             }
 
             if let n = model.backfillCommitted {
-                Text("已补记 \(n) 项实际").font(.caption).foregroundStyle(.green)
+                Text("已补记 \(n) 项实际").font(.caption).foregroundStyle(theme.positiveTint)
             }
             if let err = model.errorText {
                 Text(err).font(.caption).foregroundStyle(.orange)

@@ -76,6 +76,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				AppIntents/AppIntentRequest.swift,
+				Features/Theme/AppTheme.swift,
 				Services/Execution/ExecutionActivityAttributes.swift,
 				Services/Widget/WidgetSnapshot.swift,
 			);
@@ -377,7 +378,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = BetterCalendarWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterCalendarWidgets/Info.plist;
@@ -389,7 +390,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -410,7 +411,7 @@
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
 				CODE_SIGN_ENTITLEMENTS = BetterCalendarWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = BetterCalendarWidgets/Info.plist;
@@ -422,7 +423,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.BetterCalendarWidgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -567,7 +568,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = BetterCalendar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -584,7 +585,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				OTHER_LDFLAGS = (
 					"-weak_framework",
 					FoundationModels,
@@ -614,7 +615,7 @@
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = BetterCalendar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -631,7 +632,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				OTHER_LDFLAGS = (
 					"-weak_framework",
 					FoundationModels,
@@ -656,11 +657,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -677,11 +678,11 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -697,10 +698,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
@@ -716,10 +717,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 134;
+				CURRENT_PROJECT_VERSION = 135;
 				DEVELOPMENT_TEAM = D2KWHV599Z;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.49.0;
+				MARKETING_VERSION = 0.50.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;

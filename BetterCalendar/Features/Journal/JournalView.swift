@@ -153,7 +153,7 @@ struct JournalView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))   // 收尾庆祝=情感时刻族
     }
 
     /// 「先不收尾」——全程常驻、任一步可退、零痕迹（红线①）。
@@ -226,7 +226,7 @@ struct JournalView: View {
         if wrapUpStage == .writing {
             // 时刻 B：复盘已完成 → 收拢为素材条（这根轴会「呼吸」的那一段）
             HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.positiveTint)
                 Text("已复盘 · 今天做成的都看过了").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("重新展开") { wrapUpStage = .review }
@@ -257,7 +257,7 @@ struct JournalView: View {
                 }
             }
             .padding()
-            .background(Color.orange.opacity(0.06))
+            .background(theme.accent.opacity(0.06))   // 回看今天（收尾流程）=情感时刻族
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .onAppear {   // 埋点（调研 B 组）：复盘头展开方式（自动=过收工线 / 手动提前），按天去重
                 BehaviorLog.recordOncePerDay(key: "复盘头", "复盘头",
@@ -304,7 +304,7 @@ struct JournalView: View {
                     Label(prompt, systemImage: "sparkles")
                         .font(.callout).foregroundStyle(.secondary)
                         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
+                        .background(theme.positiveTint.opacity(0.10)).clipShape(RoundedRectangle(cornerRadius: 8))
                 }
                 JournalEditor(entry: e, model: model, photoStore: deps.photoStore)
                 // 「给明天」入口与小知识提示已退役（批次6，Jason 2026-07-14：没什么用）——管道休眠
@@ -321,7 +321,7 @@ struct JournalView: View {
                 }
             }
             .padding()
-            .background(Color.purple.opacity(0.06))
+            .background(theme.looseTint.opacity(0.06))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -331,7 +331,7 @@ struct JournalView: View {
         if let e = model.onThisDay() {
             NavigationLink(value: e) {
                 HStack(spacing: 10) {
-                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.purple)
+                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(theme.looseTint)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("往年今天 · \(e.date.formatted(date: .abbreviated, time: .omitted)) \(e.mood ?? "")")
                             .font(.subheadline.bold())
@@ -342,7 +342,7 @@ struct JournalView: View {
                     Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                 }
                 .padding(10)
-                .background(Color.purple.opacity(0.08))
+                .background(theme.looseTint.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)

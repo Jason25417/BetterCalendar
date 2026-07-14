@@ -35,6 +35,7 @@ struct TodayProvider: TimelineProvider {
 
 struct TodayWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B；AppTheme.swift 经 membership exception 共享进本 target）
     let entry: TodayEntry
 
     var body: some View {
@@ -42,7 +43,7 @@ struct TodayWidgetView: View {
             header
             if let active = entry.snap.activeTitle {
                 Label(active, systemImage: "play.circle.fill")
-                    .font(.subheadline.bold()).foregroundStyle(.blue).lineLimit(1)
+                    .font(.subheadline.bold()).foregroundStyle(theme.actualTint).lineLimit(1)
             } else if let next = entry.snap.remaining.first {
                 Label(next.title, systemImage: "arrow.right.circle")
                     .font(.subheadline.bold()).lineLimit(1)
@@ -65,7 +66,7 @@ struct TodayWidgetView: View {
             Spacer()
             if entry.snap.doneCount > 0 {
                 Text("今日做成 \(entry.snap.doneCount) 件")
-                    .font(.caption2.bold()).foregroundStyle(.green)
+                    .font(.caption2.bold()).foregroundStyle(theme.positiveTint)
             }
         }
     }

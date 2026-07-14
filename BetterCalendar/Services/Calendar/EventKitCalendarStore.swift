@@ -213,6 +213,7 @@ final class EventKitCalendarStore: CalendarStore {
     private func calendar(for kind: PlanCalendarKind) throws -> EKCalendar {
         let title = titles[kind] ?? "BetterCalendar (Dev)"
         if let existing = store.calendars(for: .event).first(where: { $0.title == title }) {
+            migrateColorIfNeeded(existing, kind: kind)
             return existing
         }
         let cal = EKCalendar(for: .event, eventStore: store)
@@ -224,6 +225,21 @@ final class EventKitCalendarStore: CalendarStore {
         return cal
     }
 
+    /// 换装批次 B（3A-v2）：老用户的绿/蓝/预览日历建于系统色时代——每 kind 一次性迁到令牌色。
+    /// 只迁一次（打标记）：之后用户在日历 App 手改颜色，我们不再抢回来。
+    private func migrateColorIfNeeded(_ cal: EKCalendar, kind: PlanCalendarKind) {
+        let flag = "ek.color.3Av2.\(kind)"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        UserDefaults.standard.set(true, forKey: flag)
+        cal.cgColor = Self.color(kind)
+        do {
+            try store.saveCalendar(cal, commit: true)
+            DevLog.shared.info("日历", "「\(cal.title)」颜色已迁移到经典皮肤 3A-v2")
+        } catch {
+            DevLog.shared.warn("日历", "日历颜色迁移失败（不影响事件读写）：\(error.localizedDescription)")
+        }
+    }
+
     private func writableSource() -> EKSource? {
         if let icloud = store.sources.first(where: {
             $0.sourceType == .calDAV && $0.title.lowercased().contains("icloud")
@@ -233,21 +249,16 @@ final class EventKitCalendarStore: CalendarStore {
         return store.defaultCalendarForNewEvents?.source
     }
 
+    /// 3A-v2 语义色（换装批次 B，值同 ClassicHex）：EK 日历颜色是单值（日历 App 双模共用）→ 取 light 档。
     private static func color(_ kind: PlanCalendarKind) -> CGColor {
-        #if canImport(AppKit)
+        let hex: UInt32
         switch kind {
-        case .planned: return NSColor.systemGreen.cgColor
-        case .actual:  return NSColor.systemBlue.cgColor
-        case .preview: return NSColor.systemOrange.cgColor
+        case .planned: hex = ClassicHex.planned.light
+        case .actual:  hex = ClassicHex.actual.light
+        case .preview: hex = ClassicHex.preview.light
         }
-        #elseif canImport(UIKit)
-        switch kind {
-        case .planned: return UIColor.systemGreen.cgColor
-        case .actual:  return UIColor.systemBlue.cgColor
-        case .preview: return UIColor.systemOrange.cgColor
-        }
-        #else
-        return CGColor(red: 0, green: 0.7, blue: 0.3, alpha: 1)
-        #endif
+        return CGColor(red: CGFloat((hex >> 16) & 0xFF) / 255,
+                       green: CGFloat((hex >> 8) & 0xFF) / 255,
+                       blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 }

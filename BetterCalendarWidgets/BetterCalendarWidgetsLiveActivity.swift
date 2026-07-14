@@ -109,9 +109,11 @@ private func iconName(_ s: ExecutionActivityAttributes.ContentState) -> String {
 }
 
 private func tintColor(_ s: ExecutionActivityAttributes.ContentState) -> Color {
-    if s.pausedAt != nil { return .orange }
-    if s.mode == .pomodoro { return s.phaseIsRest ? .green : .red }
-    return .blue
+    let theme = ThemeSettings.classic
+    if s.pausedAt != nil { return .orange }   // 暂停=状态色（条文 2 附则）
+    // 换装 B：专注红→实际蓝族（U7 同语义同组件：ExecutionPanel 专注即蓝；红=纪律隐喻，违「温柔陪伴」）
+    if s.mode == .pomodoro { return s.phaseIsRest ? .green : theme.actualTint }
+    return theme.actualTint
 }
 
 private func statusLine(_ s: ExecutionActivityAttributes.ContentState) -> String {

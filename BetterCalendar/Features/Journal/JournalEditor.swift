@@ -19,6 +19,7 @@ struct JournalEditor: View {
     @Bindable var entry: JournalEntry
     let model: JournalViewModel
     let photoStore: PhotoStore
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
 
     @State private var previewing = false
     @State private var newTag = ""
@@ -28,7 +29,7 @@ struct JournalEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
                   systemImage: "checkmark.circle.fill")
-                .font(.caption2).foregroundStyle(.green)
+                .font(.caption2).foregroundStyle(theme.positiveTint)
 
             MoodPicker(mood: $entry.mood)
                 .onChange(of: entry.mood) { _, _ in touch() }
@@ -74,7 +75,7 @@ struct JournalEditor: View {
                                 }.buttonStyle(.plain).font(.caption2)
                             }
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.blue.opacity(0.12)).clipShape(Capsule())
+                            .background(theme.actualTint.opacity(0.12)).clipShape(Capsule())
                         }
                     }
                 }

@@ -54,16 +54,25 @@ struct AppTheme: Identifiable, Equatable {
     var digitDesign: Font.Design = .rounded
 }
 
+/// 经典皮肤 hex 真相源（换装批次 B）：SwiftUI 之外的场景（EK 日历 cgColor 等）从这里取值，
+/// 与 ThemeSettings.classic 同源——改色只改这一处。
+enum ClassicHex {
+    static let accent: (light: UInt32, dark: UInt32)  = (0xC97C4E, 0xD98F5F)
+    static let planned: (light: UInt32, dark: UInt32) = (0x57806B, 0x9FC4AC)
+    static let actual: (light: UInt32, dark: UInt32)  = (0x4A6B8A, 0x8FAECE)
+    static let preview: (light: UInt32, dark: UInt32) = (0xB8823F, 0xC98E4F)
+}
+
 enum ThemeSettings {
     /// 经典 v1（2026-07-14 试衣间裁定落值）：3A-v2 沉稳三色相 + 暮色橙 accent + 微暖中性阶。
     /// loose 紫沿用系统（微决策区待定）；positive=计划绿同族（做成=计划的兑现）。
     static let classic = AppTheme(id: "classic", name: "经典",
-                                  accent: Color(light: 0xC97C4E, dark: 0xD98F5F),
-                                  plannedTint: Color(light: 0x57806B, dark: 0x9FC4AC),
-                                  actualTint: Color(light: 0x4A6B8A, dark: 0x8FAECE),
-                                  previewTint: Color(light: 0xB8823F, dark: 0xC98E4F),
+                                  accent: Color(light: ClassicHex.accent.light, dark: ClassicHex.accent.dark),
+                                  plannedTint: Color(light: ClassicHex.planned.light, dark: ClassicHex.planned.dark),
+                                  actualTint: Color(light: ClassicHex.actual.light, dark: ClassicHex.actual.dark),
+                                  previewTint: Color(light: ClassicHex.preview.light, dark: ClassicHex.preview.dark),
                                   looseTint: .purple,
-                                  positiveTint: Color(light: 0x57806B, dark: 0x9FC4AC))
+                                  positiveTint: Color(light: ClassicHex.planned.light, dark: ClassicHex.planned.dark))
 
     /// 可选主题清单：新皮肤设计定稿后在这里加一项即可（设置页 Picker 自动出现）。
     static var all: [AppTheme] { [classic] }

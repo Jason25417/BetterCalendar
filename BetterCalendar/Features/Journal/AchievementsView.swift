@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct AchievementsView: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     let store: MilestoneStore
 
     var body: some View {
@@ -39,7 +40,7 @@ struct AchievementsView: View {
                 ForEach(store.timeline, id: \.milestone.id) { item in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
-                            Image(systemName: "seal.fill").foregroundStyle(.orange)
+                            Image(systemName: "seal.fill").foregroundStyle(theme.accent)   // 成就=情感时刻族
                             Text(item.milestone.title).font(.callout.bold())
                             Spacer()
                             Text(item.date.formatted(date: .abbreviated, time: .omitted))
@@ -49,7 +50,7 @@ struct AchievementsView: View {
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                    .background(theme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                 }
 
                 Text("这里只做加法：每一格都是攒下的，不会清零、没有断签。")

@@ -17,6 +17,7 @@ import AppKit
 #endif
 
 struct ExecutionPanel: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     @Bindable var model: ExecutionViewModel
     /// 回看今天/收尾入口（批次7 F6）：宿主注入跳转闭包——macOS=开主窗+切日记；iOS=router 切 tab。
     /// 帧2 承诺的「收尾入口」由此跨端可用（此前 macOS-only）。
@@ -118,10 +119,11 @@ struct ExecutionPanel: View {
                 ForEach(model.importantItems) { item in
                     if model.isImportantDone(item) {
                         Text("🎯 想尽早的「\(item.title)」做成了")
-                            .font(.caption.weight(.medium)).foregroundStyle(.green)
+                            .font(.caption.weight(.medium)).foregroundStyle(theme.positiveTint)
                     } else {
+                        // 换装 B 微决策：尽早=accent（同行内 tag，让出与预览橙的相撞）
                         Label("尽早：\(item.title)", systemImage: "arrow.up.circle.fill")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(.caption).foregroundStyle(theme.accent)
                     }
                 }
             }
@@ -156,7 +158,7 @@ struct ExecutionPanel: View {
                 }
             }
             .padding(8)
-            .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+            .background(theme.actualTint.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))   // 新事→记入蓝色实际
         }
     }
 
@@ -248,7 +250,7 @@ struct ExecutionPanel: View {
                 // 收口轻入口（0.28 → 批次7 跨端化）：做完即回看=最顺的时机；信号与收口卡同源（全完成）
                 if !model.planned.isEmpty, let onOpenJournal {
                     Button("回看今天 →") { onOpenJournal() }
-                        .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.orange)
+                        .font(.caption).buttonStyle(.plain).underline().foregroundStyle(theme.accent)   // 收尾入口=情感时刻族
                 }
             }
         }
@@ -262,7 +264,7 @@ struct ExecutionPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if isWork {
                         // 工作段满：两选（顶替原「开始休息」）——继续=转不计时逃生舱、再来一段=休息+专注循环
-                        Text("专注完成 🎉").font(.callout).foregroundStyle(.blue)
+                        Text("专注完成 🎉").font(.callout).foregroundStyle(theme.actualTint)
                         HStack(spacing: 8) {
                             Button("继续计时") { model.continueUntimed() }
                                 .buttonStyle(.bordered).controlSize(.small)
@@ -288,7 +290,8 @@ struct ExecutionPanel: View {
                     Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
                           systemImage: isWork ? "timer" : "cup.and.saucer")
                         .font(.callout.monospacedDigit())
-                        .foregroundStyle(isWork ? .blue : .green)
+                        // 换装 B：专注=实际蓝族（执行→回填实际）；休息绿暂跟系统（微决策区待裁）
+                        .foregroundStyle(isWork ? theme.actualTint : .green)
                     if isWork {
                         // 工作段中逃生口：小摩擦确认 + 自设周上限（预先承诺，默认不限；用完=温和禁用）
                         let remaining = PomodoroDiscipline.remaining()
@@ -501,7 +504,7 @@ struct ExecutionPanel: View {
             Text("同时进行（后台）").font(.caption).foregroundStyle(.secondary)
             ForEach(model.background) { run in
                 HStack(spacing: 8) {
-                    Image(systemName: "circle.dotted").foregroundStyle(.purple).font(.caption)
+                    Image(systemName: "circle.dotted").foregroundStyle(theme.looseTint).font(.caption)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(run.title).font(.caption).lineLimit(1)
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -513,7 +516,7 @@ struct ExecutionPanel: View {
                     Button { Task { await model.completeBackground(run.id) } } label: {
                         Image(systemName: "checkmark.circle")
                     }
-                    .buttonStyle(.plain).foregroundStyle(.green)
+                    .buttonStyle(.plain).foregroundStyle(theme.positiveTint)
                     .help("完成这件后台任务")
                     .accessibilityLabel("完成「\(run.title)」")
                 }

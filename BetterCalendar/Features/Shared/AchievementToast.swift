@@ -56,12 +56,13 @@ final class AchievementToastCenter {
 
 /// 顶部浮层（挂在根视图 overlay(alignment: .top)）。
 struct AchievementToastView: View {
+    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
     @State private var center = AchievementToastCenter.shared
 
     var body: some View {
         if let item = center.current {
             HStack(spacing: 10) {
-                Image(systemName: "seal.fill").foregroundStyle(.orange)
+                Image(systemName: "seal.fill").foregroundStyle(theme.accent)   // 成就=情感时刻族
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.title).font(.callout.bold())
                     Text(item.line).font(.caption).foregroundStyle(.secondary).lineLimit(2)
