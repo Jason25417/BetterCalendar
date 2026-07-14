@@ -427,7 +427,6 @@ struct HomeView: View {
                                                         $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
                                             parallelPeers: model.parallelPeerTitles(of: item.id),
                                             onToggleParallel: { model.toggleParallel(item.id, with: $0) },
-                                            onDuplicate: { model.duplicate(id: item.id) },
                                             onDelete: { model.delete(id: item.id) })
                                 // 右键菜单已由 EditableRow 内部统一挂载（P4-3：与 ⋯ 同一份内容）
                             }
@@ -511,7 +510,6 @@ struct HomeView: View {
                                                     $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
                                         parallelPeers: model.parallelPeerTitles(of: item.id),
                                         onToggleParallel: { model.toggleParallel(item.id, with: $0) },
-                                        onDuplicate: { model.duplicate(id: item.id) },
                                         onDelete: { model.delete(id: item.id) })
                             // 右键菜单已由 EditableRow 内部统一挂载（P4-3）
                         }
@@ -894,7 +892,6 @@ struct EditableRow: View {
     var parallelCandidates: [(id: UUID, title: String, inGroup: Bool)] = []
     var parallelPeers: [String] = []
     var onToggleParallel: ((UUID) -> Void)? = nil
-    var onDuplicate: (() -> Void)? = nil
     var onDelete: () -> Void
     // P4-2（Jason 2026-07-14）：时间点击弹选择器（iOS 滚轮），行内不再常驻步进箭头
     @State private var editingStart = false
@@ -913,46 +910,31 @@ struct EditableRow: View {
     /// 当前归属任务的标题（已完成/放下则可能取不到 → 只显图标）。
     private var linkedTitle: String? { poolTasks.first { $0.id == block.linkedTaskID }?.title }
 
-    /// 时限图标：锚点=图钉 / 有硬 DDL=红旗 / 尽早=橙上箭 / 随时=灰钟。
-    private var timingLimitIcon: String {
-        if block.isAnchor { return "pin.fill" }
-        if block.deadline != nil { return "flag.checkered" }
-        return block.priority == .important ? "arrow.up.circle.fill" : "clock"
-    }
-    private var timingLimitColor: Color {
-        if block.isAnchor { return .brown }
-        if block.deadline != nil { return .red }
-        return block.priority == .important ? .orange : .secondary
+    /// 排时间（批次7 从行首菜单迁入 ⋯ 与可点 tag 共用）：随时 / 尽早 / DDL / 固定 / 生活锚点。
+    @ViewBuilder private var timingNatureItems: some View {
+        Button("随时（今天内即可）") { block.priority = .normal; block.deadline = nil; block.isAnchor = false }
+        Button(block.priority == .important ? "✓ 尽早" : "尽早") {
+            block.priority = .important; block.deadline = nil; block.isAnchor = false
+        }
+        Button("有具体截止…") {
+            block.priority = .normal; block.isAnchor = false
+            if block.deadline == nil { block.deadline = block.end }
+        }
+        Divider()
+        Button(block.isFixed ? "✓ 固定（与他人约定，时刻不可改）" : "固定（与他人约定，时刻不可改）") {
+            block.isFixed.toggle()
+        }
+        Button(block.isAnchor ? "✓ 生活锚点（不催完成）" : "设为生活锚点（午饭/通勤这类）") {
+            block.isAnchor.toggle()
+            if block.isAnchor { block.priority = .normal; block.deadline = nil }
+        }
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            // 时限（星标→DDL 统一，2026-07-09）：三态互斥——随时 / 尽早 / 有具体截止。
-            // 复用现成字段：priority==.important 即「尽早」（星标继任、reflow 靠前排），deadline 即硬 DDL。
-            Menu {
-                Button("随时（今天内即可）") { block.priority = .normal; block.deadline = nil; block.isAnchor = false }
-                Button("尽早") { block.priority = .important; block.deadline = nil; block.isAnchor = false }
-                Button("有具体截止…") {
-                    block.priority = .normal; block.isAnchor = false
-                    if block.deadline == nil { block.deadline = block.end }
-                }
-                Divider()
-                // P4-1（Jason 2026-07-14）：固定并入「排时间」——它与随时/尽早/DDL/锚点同属
-                // 「这件事的时间性质」；行内独立固定按钮退役，固定态显示在标题行 tag 区。
-                Button(block.isFixed ? "✓ 固定（与他人约定，时刻不可改）" : "固定（与他人约定，时刻不可改）") {
-                    block.isFixed.toggle()
-                }
-                // 锚点手动开关（Jason 2026-07-09）：午饭/通勤这类=占时间不催完成；能手动设也能改回任务。
-                Button(block.isAnchor ? "✓ 生活锚点（不催完成）" : "设为生活锚点（午饭/通勤这类）") {
-                    block.isAnchor.toggle()
-                    if block.isAnchor { block.priority = .normal; block.deadline = nil }
-                }
-            } label: {
-                Image(systemName: timingLimitIcon).foregroundStyle(timingLimitColor)
-            }
-            .menuStyle(.borderlessButton).fixedSize()
-            .help("这件事的时间性质：随时 / 尽早（优先靠前排）/ 有具体截止（DDL）/ 固定 / 生活锚点")
-
+            // 批次7（Jason 2026-07-14）：行首「排时间」按钮退役——菜单并入 ⋯ 的「排时间…」子菜单
+            //（timingNatureItems）；状态可见性由标签区承担：尽早/固定=可点 tag，DDL=控件行旗+时间，
+            // 锚点=整行淡显。「随时」=默认态零标签（常态零噪音）。
             VStack(alignment: .leading, spacing: 4) {
                 // 标题行（P4-B）：标题 + 可变宽 tags 右对齐——控件行只留定宽件，右端全列表对齐
                 HStack(spacing: 6) {
@@ -996,6 +978,10 @@ struct EditableRow: View {
             }
         }
         .contextMenu { rowMenuItems }
+        // O1-轻（批次7）：行容器化——给每行一个轻底容器（系统材质，不新增直写色），
+        // 回应「太清淡/缺视觉结构」：行与行有了边界与节奏；间距/材质的精调留美术令牌阶段。
+        .padding(10)
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
         // 生活锚点淡显（0.20.3，§5.10 块三角色）：占位不是任务——可看可改时间，但视觉退后一步
         .opacity(block.isAnchor ? 0.55 : 1)
         .help(block.isAnchor ? "生活锚点（午饭/通勤这类）：占时间、塑造节奏，但不是要完成的任务" : "")
@@ -1013,9 +999,27 @@ struct EditableRow: View {
                 tagText("至次日").foregroundStyle(.indigo).background(Color.indigo.opacity(0.12), in: Capsule())
                     .help("结束时间跨过午夜（如 23:30–01:00）：仍属同一逻辑日")
             }
+            if block.priority == .important {
+                Menu {
+                    timingNatureItems
+                } label: {
+                    tagText("尽早 ▾")
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .foregroundStyle(.orange)
+                .background(.orange.opacity(0.12), in: Capsule())
+                .help("你标了「尽早」：重排时优先靠前；点击可改排时间性质")
+            }
             if block.isFixed {
-                tagText("固定").foregroundStyle(.secondary).background(.quaternary.opacity(0.5), in: Capsule())
-                    .help("与他人约定、时刻不可改（重排不动它）——修改在左侧时间性质菜单")
+                Menu {
+                    timingNatureItems
+                } label: {
+                    tagText("固定 ▾")
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .foregroundStyle(.secondary)
+                .background(.quaternary.opacity(0.5), in: Capsule())
+                .help("与他人约定、时刻不可改（重排不动它）；点击可改排时间性质")
             }
             if block.parallelGroup != nil, onToggleParallel != nil {
                 Menu {
@@ -1098,9 +1102,12 @@ struct EditableRow: View {
     }
 
     /// ⋯ 与右键共用的一份菜单（P4-3：可见入口+快捷路径，内容永远一致）。
+    /// 复制已删（批次7 审核：低频且「加一项」一句话可覆盖——判例登记兜底）。
     @ViewBuilder private var rowMenuItems: some View {
-        if let onDuplicate {
-            Button { onDuplicate() } label: { Label("复制", systemImage: "plus.square.on.square") }
+        Menu {
+            timingNatureItems
+        } label: {
+            Label("排时间…", systemImage: "clock")
         }
         if onToggleParallel != nil, !parallelCandidates.isEmpty || block.parallelGroup != nil {
             Menu {

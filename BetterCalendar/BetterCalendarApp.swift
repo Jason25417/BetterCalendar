@@ -62,8 +62,14 @@ struct BetterCalendarApp: App {
                 #if !os(macOS)
                 // iOS 没 menu bar → 执行陪伴单独一个「今天」标签页
                 NavigationStack {
-                    ScrollView { ExecutionPanel(model: container.execution) }
-                        .navigationTitle("今天")
+                    ScrollView {
+                        ExecutionPanel(model: container.execution,
+                                       onOpenJournal: {   // 批次7 F6：帧2 承诺的收尾入口跨端补齐
+                                           container.router.selectedTab = .journal
+                                           container.router.journalRequest = .now
+                                       })
+                    }
+                    .navigationTitle("今天")
                 }
                 .tag(AppRouter.Tab.today)
                 .tabItem { Label("今天", systemImage: "play.circle") }

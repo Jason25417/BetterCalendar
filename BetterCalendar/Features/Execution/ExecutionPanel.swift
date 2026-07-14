@@ -18,6 +18,9 @@ import AppKit
 
 struct ExecutionPanel: View {
     @Bindable var model: ExecutionViewModel
+    /// 回看今天/收尾入口（批次7 F6）：宿主注入跳转闭包——macOS=开主窗+切日记；iOS=router 切 tab。
+    /// 帧2 承诺的「收尾入口」由此跨端可用（此前 macOS-only）。
+    var onOpenJournal: (() -> Void)? = nil
     /// 展开层裁剪（S3-P1，2026-07-14 Jason 修订版）：menu bar 宿主传 true → 默认精简子集
     /// （当前件+主键+同时做+边缘行），底部 chevron 就地展开为全量、再点收回；展开态记住上次选择。
     var compactCapable: Bool = false
@@ -241,16 +244,11 @@ struct ExecutionPanel: View {
             } else if model.loaded {
                 Text(model.planned.isEmpty ? "今天还没排计划" : "今天的计划都做完了 🎉")
                     .font(.caption).foregroundStyle(.secondary)
-                #if os(macOS)
-                // 收口轻入口（0.28）：做完即回看=最顺的时机；信号与排日程页收口卡同源（全完成）
-                if !model.planned.isEmpty {
-                    Button("回看今天 →") {
-                        AppLifecycle.shared?.showMainWindow()
-                        NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
-                    }
-                    .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.orange)
+                // 收口轻入口（0.28 → 批次7 跨端化）：做完即回看=最顺的时机；信号与收口卡同源（全完成）
+                if !model.planned.isEmpty, let onOpenJournal {
+                    Button("回看今天 →") { onOpenJournal() }
+                        .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.orange)
                 }
-                #endif
             }
         }
     }
@@ -558,12 +556,11 @@ struct ExecutionPanel: View {
                 Label("同时做", systemImage: "plus.circle")
             }
             breakButton
-            #if os(macOS)
-            Divider()
-            Button("回看今天") {
-                AppLifecycle.shared?.showMainWindow()
-                NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
+            if let onOpenJournal {
+                Divider()
+                Button("回看今天") { onOpenJournal() }
             }
+            #if os(macOS)
             Button { AppLifecycle.shared?.reallyQuit() } label: { Label("退出", systemImage: "power") }
             #endif
         } label: {
