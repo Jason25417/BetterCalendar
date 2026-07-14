@@ -64,14 +64,9 @@ struct HomeView: View {
             && (deps.execution.lastCompletionAt.map { Date.now.timeIntervalSince($0) >= 45 * 60 } ?? false)
     }
 
-    // AI 加一项（0.36.0）：一句话 → LLM 定名字/时长/分块；空白项老路保留
-    @State private var showSmartAdd = false
+    // 加一项（0.36.0 AI 定名/时长 → 批次3 融进列表尾行）：一句话=addBlockSmart；留空回车=空白项（老路保留）
+    @State private var addRowActive = false
     @State private var smartAddText = ""
-    private func submitSmartAdd() {
-        let t = smartAddText
-        showSmartAdd = false; smartAddText = ""
-        Task { await model.addBlockSmart(t) }
-    }
 
     let deps: HomeDeps
     @State private var model: HomeViewModel
@@ -144,6 +139,15 @@ struct HomeView: View {
                     .foregroundStyle(loose ? .purple : .secondary)
                     .help("把这天标为松散：App 退场陪你——不催、不算落后。随时可结束；短时间的小憩直接留白即可，不必标松散")
                     targetDayMenu
+                    if model.isLiveTargetDay {
+                        // 1b 态标识（方案 A，Jason 2026-07-14 裁）：顶栏胶囊，一眼可辨「列表=从现在起的剩余」
+                        Text("实时 · 从现在起")
+                            .font(.caption2)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(.quaternary.opacity(0.6)))
+                            .foregroundStyle(.secondary)
+                            .help("今天已开始：这里显示并编辑「从现在起」的剩余计划（=橙色预览，改完确认即生效）；已完成/已过去的块在日记页复盘里")
+                    }
                 }
 
                 // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你——发出者是用户自己，
@@ -207,45 +211,20 @@ struct HomeView: View {
                     }
                 }
 
-                // ===== 输入 / 动作区（渐进披露 v2·按时刻，0.26）=====
-                if showSayInput {
-                    // 说的时刻（或点了「重说」）：完整输入 + 排今天
-                    inputEditor
-                    HStack {
-                        Button { reSayExpanded = false; Task { await model.arrange() } } label: {
-                            Label("排\(Self.relativeDayWord(model.targetDay))", systemImage: "wand.and.stars")
-                        }
-                        .disabled(model.isWorking)
-                        if model.isWorking {
-                            ProgressView().controlSize(.small)
-                            Text("模型思考中…").font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if showingPlanArea {   // 重说态：可收起回到草稿
-                            Button("收起") { reSayExpanded = false }
-                                .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                        }
-                    }
-                    if model.isWorking, !deps.liveDraft.streaming.isEmpty {
-                        VStack(alignment: .leading, spacing: 3) {
-                            ForEach(deps.liveDraft.streaming) { b in
-                                HStack(spacing: 6) {
-                                    Text(b.start.formatted(date: .omitted, time: .shortened))
-                                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                    Text(b.title).font(.caption)
-                                }
+                // ===== 统一输入组件（S2 附录A 合并案，批次3）：一框双模 =====
+                // 「说的时刻」（无计划 / ↺ 重说模式）提交=整排；「改/看的时刻」提交=AI 微调（含「再加一项…」）。
+                unifiedInput
+                if model.isWorking, !deps.liveDraft.streaming.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(deps.liveDraft.streaming) { b in
+                            HStack(spacing: 6) {
+                                Text(b.start.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                Text(b.title).font(.caption)
                             }
                         }
-                        .padding(.leading, 2)
                     }
-                } else {
-                    // 改/看的时刻：输入折叠成「重说」入口 + AI 调整（原位替换「排今天」）
-                    Button { reSayExpanded = true } label: {
-                        Label("想重新说一遍今天？", systemImage: "arrow.uturn.backward")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    aiAdjustRow
+                    .padding(.leading, 2)
                 }
 
                 // A 状态行（0.26 ABC → 0.28.1 统一消息条）：确定性成功状态「✓ 排好 N 件」——与 note(B) 叠加
@@ -388,51 +367,14 @@ struct HomeView: View {
                     }
                 }
 
-                // 实时橙色（SPEC §11，2026-07-10）：实时日的底=「从现在起」的橙色现实（与橙色预览同口径）——
-                // 明确告诉用户这页就是可编辑的橙色，reflow 会自动跟进（无编辑）或亮徽标（有编辑）。
-                if model.isLiveTargetDay, !model.blocks.isEmpty {
-                    HStack(spacing: 6) {
-                        Circle().fill(.orange).frame(width: 8, height: 8)
-                        Text("实时 · 从现在起（这就是橙色预览，改完确认即生效）")
-                            .font(.caption).foregroundStyle(.orange)
-                        Spacer()
-                    }
-                }
+                // 实时态标识已升级为顶栏胶囊（1b 方案 A，批次3）——原橙色说明行退役，语义并入胶囊 help
 
                 // 有块、或有未保存修改（含"删到空"）都保留写入区——否则删掉最后一件就没法确认保存
                 if !model.blocks.isEmpty || model.hasUnsavedChanges {
                     Divider()
                     HStack {
-                        if model.hasUnsavedChanges {
-                            Label("未保存修改 · 点「确认写入」保存", systemImage: "pencil.circle")
-                                .font(.subheadline.bold()).foregroundStyle(.orange)
-                        } else {
-                            Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
-                                .font(.subheadline.bold()).foregroundStyle(.green)
-                        }
+                        // 状态陈述已迁区域底部弱字行（U3 落地，批次3）；「加一项」融进列表尾行（#37/S3）
                         Spacer()
-                        Button { showSmartAdd = true } label: { Label("加一项", systemImage: "plus") }
-                            .popover(isPresented: $showSmartAdd) {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("加一项").font(.headline)
-                                    TextField("一句话描述：如 背单词 45 分钟", text: $smartAddText)
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(minWidth: 240)
-                                        .onSubmit { submitSmartAdd() }
-                                    HStack {
-                                        Button("直接加空白项") {
-                                            showSmartAdd = false; smartAddText = ""
-                                            model.addBlock()
-                                        }
-                                        Spacer()
-                                        Button("AI 加一项") { submitSmartAdd() }
-                                            .buttonStyle(.borderedProminent)
-                                            .disabled(smartAddText.trimmingCharacters(in: .whitespaces).isEmpty)
-                                    }
-                                }
-                                .padding()
-                            }
-                            .font(.caption)
                         // S3 归位（2026-07-14）：草稿低中频动作（放大/挪日/导出/放弃）从三处散排
                         // 收进一个 ⋯（U2 第二层；破坏性「放弃修改」菜单内隔开，U10）
                         Menu {
@@ -497,8 +439,11 @@ struct HomeView: View {
                                 }
                             }
                             .onMove { model.move($0, $1) }
+                            // 「加一项」融进列表（#37/S3 裁决）：最后一行 +，就地输入——
+                            // 一句话=AI 定名字/时长/排位（addBlockSmart）；留空回车=空白项（老路保留）
+                            addTailRow
                         }
-                        .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 16, 440)))
+                        .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 60, 480)))
                     }
 
                     // 「尽早」软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都尽早=什么都不尽早
@@ -524,14 +469,20 @@ struct HomeView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(model.isWorking || (!model.hasUnsavedChanges && !model.isLiveTargetDay))
-                        // ICS 导出已收进草稿区 ⋯ 菜单（S3 归位 2026-07-14）——确认行只留主按钮与状态
-                        if let c = model.committedCount {
-                            Text(model.committedToReal
-                                 ? "已写入真日历(Dev) \(c) 项 → 打开 系统日历查看"
-                                 : "已写入假日历 \(c) 项 → 看「预览日历」")
-                                .font(.caption).foregroundStyle(.green)
+                    }
+
+                    // U3 状态行落地（批次3）：陈述句一律住区域底部弱字行，不混操作区
+                    Group {
+                        if model.hasUnsavedChanges {
+                            Label("未保存修改 · 点上方「确认写入」保存", systemImage: "pencil.circle")
+                        } else if let c = model.committedCount {
+                            Label(model.committedToReal ? "已写入真日历(Dev) \(c) 项 · 系统日历可见"
+                                                        : "已写入假日历 \(c) 项", systemImage: "checkmark.seal")
+                        } else {
+                            Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
                         }
                     }
+                    .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 0)
@@ -658,15 +609,27 @@ struct HomeView: View {
 
     // MARK: 渐进披露 v2 抽出的子视图（0.26）
 
-    /// 完整输入编辑器（含占位、拖高把手）——"说的时刻"用。
-    @ViewBuilder private var inputEditor: some View {
+    /// 统一输入组件（S2 附录A，批次3 落地）：同一个框、意图随时刻自动切换——
+    /// 「说的时刻」（无计划 / ↺ 重说模式）提交=整排；「改/看的时刻」提交=AI 微调（可含「再加一项…」）。
+    /// 内嵌提交钮（右下）+ ↺ 重说切换（左下，仅改/看时刻出现）+ 拖高把手照旧。文本双仓不丢字：
+    /// 整排走 model.inputText、微调走 model.refineText——切模式互不覆盖。
+    private var arrangeMode: Bool { !showingPlanArea || reSayExpanded }
+
+    private var unifiedText: Binding<String> {
+        arrangeMode ? $model.inputText : $model.refineText
+    }
+
+    @ViewBuilder private var unifiedInput: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: $model.inputText)
+            TextEditor(text: unifiedText)
                 .font(.body)
                 .scrollContentBackground(.hidden)
                 .padding(6)
-            if model.inputText.isEmpty {
-                Text(PlaceholderSettings.currentText())
+                .padding(.bottom, 24)   // 给底部内嵌控件行让位
+            if unifiedText.wrappedValue.isEmpty {
+                Text(arrangeMode
+                     ? (reSayExpanded ? "重新说一遍这一天——排出的新计划会替换当前草稿" : PlaceholderSettings.currentText())
+                     : "想怎么调？例：把健身挪到上午10点 · 再加一项背单词45分钟")
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 11).padding(.vertical, 14)
                     .allowsHitTesting(false)
@@ -675,6 +638,35 @@ struct HomeView: View {
         .frame(height: CGFloat(inputHeight))
         .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .overlay(alignment: .bottomLeading) {
+            if showingPlanArea {
+                Button { reSayExpanded.toggle() } label: {
+                    Label(reSayExpanded ? "回到微调" : "重说一遍",
+                          systemImage: "arrow.uturn.backward")
+                        .labelStyle(.iconOnly).font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(reSayExpanded ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .padding(8)
+                .help(reSayExpanded ? "回到微调模式（当前草稿原样保留）" : "重新说一遍这一天（排出后替换当前草稿）")
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            HStack(spacing: 6) {
+                if model.isWorking {
+                    ProgressView().controlSize(.small)
+                    Text("模型思考中…").font(.caption2).foregroundStyle(.secondary)
+                }
+                Button { submitUnified() } label: {
+                    Label(arrangeMode ? "排\(Self.relativeDayWord(model.targetDay))" : "AI 调整",
+                          systemImage: arrangeMode ? "wand.and.stars" : "sparkles")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.isWorking)
+            }
+            .padding(6)
+        }
         Capsule().fill(.quaternary)
             .frame(width: 44, height: 5)
             .frame(maxWidth: .infinity)
@@ -690,21 +682,36 @@ struct HomeView: View {
             .help("拖动调整输入框高度")
     }
 
-    /// AI 调整行（"改/看的时刻"原位替换"排今天"）——把已排的草稿用一句话微调。
-    @ViewBuilder private var aiAdjustRow: some View {
-        HStack(alignment: .bottom) {
-            TextField("想微调？告诉 AI，如：把健身挪到上午10点、写代码改成3小时",
-                      text: $model.refineText, axis: .vertical)
-                .lineLimit(1...4)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { Task { await model.refine() } }
-            Button { Task { await model.refine() } } label: {
-                Label("AI 调整", systemImage: "sparkles")
+    private func submitUnified() {
+        if arrangeMode {
+            reSayExpanded = false
+            Task { await model.arrange() }
+        } else {
+            Task { await model.refine() }
+        }
+    }
+
+    /// 列表尾行「+ 加一项」（#37/S3 裁决：不做独立按钮，融进列表交互）。
+    @ViewBuilder private var addTailRow: some View {
+        if addRowActive {
+            HStack(spacing: 6) {
+                TextField("一句话加一项（回车确认；留空回车=空白项）", text: $smartAddText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        let t = smartAddText.trimmingCharacters(in: .whitespaces)
+                        addRowActive = false; smartAddText = ""
+                        if t.isEmpty { model.addBlock() } else { Task { await model.addBlockSmart(t) } }
+                    }
+                Button("取消") { addRowActive = false; smartAddText = "" }
+                    .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
             }
-            .disabled(model.isWorking)
-            if model.isWorking {
-                ProgressView().controlSize(.small)
+        } else {
+            Button { addRowActive = true } label: {
+                Label("加一项", systemImage: "plus")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
         }
     }
 
