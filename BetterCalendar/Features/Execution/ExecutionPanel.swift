@@ -5,6 +5,11 @@
 //  执行陪伴面板（跨平台）：当前块 · 已用时长 · 下一件，单键 完成/下一件/换一件 + 休息toggle + 番茄段确认。
 //  macOS：装进 menu bar 的 NSPopover；iOS：直接嵌进排日程页（没 menu bar）。「记录 = 导航」的入口。
 //
+//  六态主按钮矩阵（S3 状态宪法，2026-07-14 成文——新增任何状态，先回答「它的唯一主按钮是什么」）：
+//  空闲=开始下一件 · 选中=开始任务 · 进行=完成当前 · 休息=结束休息 · 番茄段间=再来一段/回到专注 · 新事项表单=同时开始/开始
+//  三层模型（S2）：缩略层=menu bar label（iOS 将来=Live Activity）· 展开层=popover（compactCapable=true，
+//  默认精简子集+底部 chevron 就地展开，展开态记住上次）· 全屏层=iOS「今天」页（恒全量）。
+//
 
 import SwiftUI
 #if canImport(AppKit)
@@ -13,6 +18,11 @@ import AppKit
 
 struct ExecutionPanel: View {
     @Bindable var model: ExecutionViewModel
+    /// 展开层裁剪（S3-P1，2026-07-14 Jason 修订版）：menu bar 宿主传 true → 默认精简子集
+    /// （当前件+主键+同时做+边缘行），底部 chevron 就地展开为全量、再点收回；展开态记住上次选择。
+    var compactCapable: Bool = false
+    @AppStorage("execPanelExpanded") private var panelExpanded = false
+    private var isCompact: Bool { compactCapable && !panelExpanded }
     @State private var earlyBreakConfirming = false   // 「提前休息」的小摩擦确认（0.20.5）
 
     // 计划外「+ 新事项…」输入态（0.25，点子 #1 过审）：临时冒出的事当场开始 = bonus，不写计划
@@ -42,17 +52,22 @@ struct ExecutionPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             followStrip
-            mitStrip
+            if !isCompact { mitStrip }
             Divider()
             adHocInput
-            actions
-            focusHint
+            actions(compact: isCompact)
+            if !isCompact { focusHint }
             backgroundSection
-            Divider()
-            footer
+            if isCompact {
+                compactEdgeRow
+            } else {
+                Divider()
+                footer
+            }
             if let err = model.lastError {
                 Text(err).font(.caption2).foregroundStyle(.orange).lineLimit(2)
             }
+            if compactCapable { expandToggle }
         }
         .padding(12)
         #if os(macOS)
@@ -318,7 +333,7 @@ struct ExecutionPanel: View {
 
     // MARK: 动作区
 
-    @ViewBuilder private var actions: some View {
+    @ViewBuilder private func actions(compact: Bool) -> some View {
         if model.isOnBreak {
             Button { Task { await model.toggleBreak() } } label: {
                 Label("结束休息，回来", systemImage: "play.fill").frame(maxWidth: .infinity)
@@ -330,9 +345,10 @@ struct ExecutionPanel: View {
             }
             .buttonStyle(.borderedProminent)
             // 「换一件」退役（0.21）：事件名按钮已收编；空位给「计时」切换菜单
-            HStack { timingMenu; alsoMenu; breakButton }
+            // compact：次要排收进边缘 ⋯（S3-P1），主按钮独占
+            if !compact { HStack { timingMenu; alsoMenu; breakButton } }
             // 分心自动休息的撤销口（#26 红线④）：感知误判（其实在查资料）→ 一键把那段算回投入。
-            // 只在自动休息刚结束的 10 分钟内出现；判定权在用户。
+            // 只在自动休息刚结束的 10 分钟内出现；判定权在用户——安全阀，compact 也保留。
             if model.canUndoAutoBreak {
                 Button { model.undoLastAutoBreak() } label: {
                     Label("刚才不算休息（算回投入）", systemImage: "arrow.uturn.backward")
@@ -344,7 +360,7 @@ struct ExecutionPanel: View {
                 Label("开始任务：\(s.title)", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            HStack { switchMenu; alsoMenu; breakButton }
+            if !compact { HStack { switchMenu; alsoMenu; breakButton } }
         } else {
             if let next = model.nextSuggested {
                 Button { Task { await model.startBlock(next) } } label: {
@@ -352,22 +368,27 @@ struct ExecutionPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            HStack { switchMenu; alsoMenu; breakButton }
+            if !compact { HStack { switchMenu; alsoMenu; breakButton } }
         }
     }
 
     /// 实时改当前块计时方式（0.21）：番茄工作段中锁定（预先承诺）、段满/休息中开放；
     /// 转番茄可选段数（做满自动转轻计时续走）；只改运行态，块存的风格不动。
+    /// 菜单内容抽出（S3-P1）：常规排与 compact ⋯ 溢出共用同一份内容，不复制逻辑。
+    @ViewBuilder private var timingMenuItems: some View {
+        Button("轻计时") { model.changeTiming(to: .light) }
+        Button("不计时") { model.changeTiming(to: TimingStyle.none) }
+        Menu("🍅 番茄钟") {
+            Button("1 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
+            Button("2 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
+            Button("3 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
+            Button("不限段") { model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
+        }
+    }
+
     private var timingMenu: some View {
         Menu {
-            Button("轻计时") { model.changeTiming(to: .light) }
-            Button("不计时") { model.changeTiming(to: TimingStyle.none) }
-            Menu("🍅 番茄钟") {
-                Button("1 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
-                Button("2 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
-                Button("3 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
-                Button("不限段") { model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
-            }
+            timingMenuItems
         } label: {
             // 直接显示当前计时状态（轻计时/不计时/🍅番茄），不再是通用「计时」——Jason 2026-07-09
             Label(Self.styleLabel(model.activeStyle ?? .light), systemImage: "stopwatch")
@@ -384,24 +405,28 @@ struct ExecutionPanel: View {
         model.planned.filter { model.isDone($0) && $0.id != model.active?.plannedID }
     }
 
+    @ViewBuilder private var switchMenuItems: some View {
+        if model.remaining.isEmpty {
+            Text("没有其它待做的事")
+        } else {
+            ForEach(model.remaining) { item in
+                Button(item.title) { Task { await model.switchTo(item) } }
+            }
+        }
+        if !redoable.isEmpty {
+            Section("已完成 · 再来一段") {
+                ForEach(redoable) { item in
+                    Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
+                }
+            }
+        }
+        Divider()
+        Button { openAdHoc(.foreground) } label: { Label("新事项…", systemImage: "plus") }
+    }
+
     private var switchMenu: some View {
         Menu {
-            if model.remaining.isEmpty {
-                Text("没有其它待做的事")
-            } else {
-                ForEach(model.remaining) { item in
-                    Button(item.title) { Task { await model.switchTo(item) } }
-                }
-            }
-            if !redoable.isEmpty {
-                Section("已完成 · 再来一段") {
-                    ForEach(redoable) { item in
-                        Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
-                    }
-                }
-            }
-            Divider()
-            Button { openAdHoc(.foreground) } label: { Label("新事项…", systemImage: "plus") }
+            switchMenuItems
         } label: {
             Label("换一件", systemImage: "arrow.triangle.swap")
         }
@@ -409,25 +434,29 @@ struct ExecutionPanel: View {
         // 0.25：即使没有待做的事也不禁用——「+ 新事项…」是空档时临时起意的入口
     }
 
+    @ViewBuilder private var alsoMenuItems: some View {
+        if model.remaining.isEmpty {
+            Text("没有其它待做的事")
+        } else {
+            ForEach(model.remaining) { item in
+                Button(item.title) { model.startAlso(item) }
+            }
+        }
+        if !redoable.isEmpty {
+            Section("已完成 · 再来一段") {
+                ForEach(redoable) { item in
+                    Button("✓ \(item.title)") { model.startAlso(item) }
+                }
+            }
+        }
+        Divider()
+        Button { openAdHoc(.parallel) } label: { Label("新事项…", systemImage: "plus") }
+    }
+
     /// 同时做另一件（后台并行，不打断前台计时）。
     private var alsoMenu: some View {
         Menu {
-            if model.remaining.isEmpty {
-                Text("没有其它待做的事")
-            } else {
-                ForEach(model.remaining) { item in
-                    Button(item.title) { model.startAlso(item) }
-                }
-            }
-            if !redoable.isEmpty {
-                Section("已完成 · 再来一段") {
-                    ForEach(redoable) { item in
-                        Button("✓ \(item.title)") { model.startAlso(item) }
-                    }
-                }
-            }
-            Divider()
-            Button { openAdHoc(.parallel) } label: { Label("新事项…", systemImage: "plus") }
+            alsoMenuItems
         } label: {
             Label("同时做", systemImage: "plus.circle")
         }
@@ -486,6 +515,72 @@ struct ExecutionPanel: View {
                 }
             }
         }
+    }
+
+    // MARK: 紧凑层（展开层子集，S2 帧5 / S3-P1）——边缘行 + ⋯ 溢出 + chevron 展开
+
+    private var compactEdgeRow: some View {
+        HStack(spacing: 6) {
+            Text("今日：完成 \(model.doneCount)").font(.caption).foregroundStyle(.secondary)
+            if model.active != nil, let up = model.remaining.first {
+                Text("· 接下来 \(up.title)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            compactOverflow
+        }
+    }
+
+    /// compact 的 ⋯：常规排的三菜单内容原样复用（不复制逻辑）+ macOS 专属（回看今天/退出——S3 批次1 遗留的收纳）。
+    private var compactOverflow: some View {
+        Menu {
+            if model.active != nil {
+                Menu {
+                    timingMenuItems
+                } label: {
+                    Label(Self.styleLabel(model.activeStyle ?? .light), systemImage: "stopwatch")
+                }
+                .disabled(!model.canChangeTimingNow)
+            } else {
+                Menu {
+                    switchMenuItems
+                } label: {
+                    Label("换一件", systemImage: "arrow.triangle.swap")
+                }
+            }
+            Menu {
+                alsoMenuItems
+            } label: {
+                Label("同时做", systemImage: "plus.circle")
+            }
+            breakButton
+            #if os(macOS)
+            Divider()
+            Button("回看今天") {
+                AppLifecycle.shared?.showMainWindow()
+                NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
+            }
+            Button { AppLifecycle.shared?.reallyQuit() } label: { Label("退出", systemImage: "power") }
+            #endif
+        } label: {
+            Label("更多", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help("计时 · 换一件 · 同时做 · 休息 · 更多")
+    }
+
+    private var expandToggle: some View {
+        Button { withAnimation { panelExpanded.toggle() } } label: {
+            HStack {
+                Spacer()
+                Label(panelExpanded ? "收起为精简面板" : "展开完整面板",
+                      systemImage: panelExpanded ? "chevron.up" : "chevron.down")
+                    .labelStyle(.iconOnly).font(.caption)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(.secondary)
+        .help(panelExpanded ? "收起为精简面板" : "展开完整面板（记住这个选择）")
     }
 
     // MARK: 底部
