@@ -174,7 +174,7 @@ struct JournalView: View {
 
     private var lockedView: some View {
         VStack(spacing: 12) {
-            Image(systemName: "lock.fill").font(.largeTitle).foregroundStyle(.secondary)
+            Image(systemName: "lock.fill").font(.title3).foregroundStyle(.secondary)   // 字阶收敛（C）：largeTitle→title 档
             Text("日记已上锁").font(.headline)
             Button { unlock() } label: {
                 Label("解锁日记", systemImage: "faceid")
@@ -334,7 +334,7 @@ struct JournalView: View {
                     Image(systemName: "clock.arrow.circlepath").foregroundStyle(theme.looseTint)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("往年今天 · \(e.date.formatted(date: .abbreviated, time: .omitted)) \(e.mood ?? "")")
-                            .font(.subheadline.bold())
+                            .font(.headline)   // 字阶收敛（C）：卡标题性 subheadline→headline 档
                         Text(e.body.isEmpty ? "（只记了心情）" : e.body)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
@@ -423,7 +423,7 @@ struct JournalRow: View {
             Text(entry.mood ?? "·").font(.title3).frame(width: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.date.formatted(date: .abbreviated, time: .omitted))
-                    .font(.subheadline.bold())
+                    .font(.headline)   // 字阶收敛（C）：行标题 subheadline→headline 档
                 // 批次6（Jason 反馈）：历史行降噪——摘要收为一行（识别够用，翻找不吵）
                 Text(entry.body.isEmpty ? "（只记了心情）" : entry.body)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)

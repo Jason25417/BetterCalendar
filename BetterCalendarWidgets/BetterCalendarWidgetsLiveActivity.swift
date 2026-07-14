@@ -24,12 +24,12 @@ struct BetterCalendarWidgetsLiveActivity: Widget {
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: iconName(s))
-                        .font(.title2)
+                        .font(.title3)   // 字阶收敛（C）：title 档
                         .foregroundStyle(tintColor(s))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     timerText(s)
-                        .font(.title2).monospacedDigit()
+                        .font(TypeScale.display).monospacedDigit()   // 计时大数字=display 档（圆体，条文 8）
                         .foregroundStyle(tintColor(s))
                         .frame(maxWidth: 96, alignment: .trailing)
                 }
@@ -61,7 +61,7 @@ private struct LockScreenView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: iconName(state))
-                .font(.title)
+                .font(.title3)   // 字阶收敛（C）：title 档
                 .foregroundStyle(tintColor(state))
                 .frame(width: 34)
             VStack(alignment: .leading, spacing: 2) {
@@ -70,7 +70,7 @@ private struct LockScreenView: View {
             }
             Spacer(minLength: 8)
             timerText(state)
-                .font(.system(.title, design: .rounded)).monospacedDigit()
+                .font(TypeScale.display).monospacedDigit()   // 计时大数字=display 档
                 .foregroundStyle(tintColor(state))
         }
     }

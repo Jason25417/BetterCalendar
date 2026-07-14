@@ -43,15 +43,17 @@ struct JournalEditor: View {
                 Text(JournalBody.rendered(entry.body, format: entry.bodyFormat))
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
                     .padding(8)
-                    .background(Color.secondary.opacity(0.06))
+                    .background(theme.surface)   // 换装 C：正文区=surface 纸面
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary.opacity(0.4)))
             } else {
                 TextEditor(text: $entry.body)
                     .frame(minHeight: 160)
                     .padding(6)                          // 0.33.1：首行贴边被裁（Jason 截图）→ 给呼吸边距
                     .scrollContentBackground(.hidden)
-                    .background(Color.secondary.opacity(0.06))
+                    .background(theme.surface)   // 换装 C：正文区=surface 纸面
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary.opacity(0.4)))
                     .onChange(of: entry.body) { _, _ in touch() }
             }
 

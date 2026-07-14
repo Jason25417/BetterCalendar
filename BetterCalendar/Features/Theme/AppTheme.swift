@@ -54,6 +54,19 @@ struct AppTheme: Identifiable, Equatable {
     var digitDesign: Font.Design = .rounded
 }
 
+/// 字阶六档（条文 8，骨架令牌——换皮不换档；收敛表见《美术执行Spec》§二，换装批次 C 落地）。
+/// 存量视图用系统档名但**只允许这六档的值**（display/title/headline/body/caption/caption2）；
+/// 装饰性尺寸（庆祝星光）与开发件（试衣间）豁免。
+enum TypeScale {
+    /// 计时大数字（灵动岛/锁屏/未来的大计时版面）；tabular 由使用点 monospacedDigit 恒开
+    static let display = Font.system(.title2, design: .rounded).weight(.medium)
+    static let title = Font.title3        // 页面/分区标题（收敛自 largeTitle/title/title2/title3）
+    static let headline = Font.headline   // 卡片/行标题（收敛自 headline 及标题性 subheadline）
+    static let body = Font.callout        // 正文/引导句（收敛自 body/callout）
+    static let caption = Font.caption     // 辅助说明/控件文字（收敛自 subheadline/caption）
+    static let caption2 = Font.caption2   // 边缘状态/角注
+}
+
 /// 经典皮肤 hex 真相源（换装批次 B）：SwiftUI 之外的场景（EK 日历 cgColor 等）从这里取值，
 /// 与 ThemeSettings.classic 同源——改色只改这一处。
 enum ClassicHex {

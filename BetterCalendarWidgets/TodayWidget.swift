@@ -43,13 +43,13 @@ struct TodayWidgetView: View {
             header
             if let active = entry.snap.activeTitle {
                 Label(active, systemImage: "play.circle.fill")
-                    .font(.subheadline.bold()).foregroundStyle(theme.actualTint).lineLimit(1)
+                    .font(.headline).foregroundStyle(theme.actualTint).lineLimit(1)   // 字阶收敛（C）
             } else if let next = entry.snap.remaining.first {
                 Label(next.title, systemImage: "arrow.right.circle")
-                    .font(.subheadline.bold()).lineLimit(1)
+                    .font(.headline).lineLimit(1)   // 字阶收敛（C）
             } else {
                 Text(entry.snap.doneCount > 0 ? "今天的计划都做完了 🎉" : "还没排今天")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.secondary)   // 字阶收敛（C）：陈述句→body 档
             }
             if family == .systemMedium {
                 mediumList

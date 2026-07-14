@@ -102,7 +102,7 @@ struct ReviewPanel: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(model.mitAccomplished, id: \.self) { title in
                     Label("想尽早的「\(title)」做成了", systemImage: "target")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(theme.positiveTint)
+                        .font(.headline).foregroundStyle(theme.positiveTint)   // 字阶收敛（C）：特写庆祝→headline 档
                 }
             }
             .padding(10)
@@ -118,7 +118,7 @@ struct ReviewPanel: View {
             VStack(alignment: .leading, spacing: 6) {
                 // 换装 B：MVP=情感时刻 → accent（庆祝金黄底暂留系统 yellow，微决策区）
                 Label("今日最有价值：\(mvp)", systemImage: "trophy.fill")
-                    .font(.subheadline).foregroundStyle(theme.accent)
+                    .font(.headline).foregroundStyle(theme.accent)   // 字阶收敛（C）：卡标题→headline 档
                 TextField("想写一句为什么？（可留空）", text: $model.mvpNote)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.saveMVPNote() }

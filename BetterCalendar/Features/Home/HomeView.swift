@@ -279,13 +279,13 @@ struct HomeView: View {
                             .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(14)
-                    .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(16)   // 换装 C：卡面间距对齐 8pt 网格
+                    .background(theme.looseTint.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))   // 夜/月族归位（C）
                 }
                 if wrapUpCardVisible {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
-                            Image(systemName: "sunset.fill").font(.title2).foregroundStyle(theme.accent)
+                            Image(systemName: "sunset.fill").font(.title3).foregroundStyle(theme.accent)   // 字阶收敛（C）
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("今天的工作差不多了").font(.headline)
                                 Text("花 30 秒收个尾——看看做成了什么，给今天写一句话。")
@@ -309,7 +309,7 @@ struct HomeView: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                    .padding(14)
+                    .padding(16)   // 换装 C：卡面间距对齐 8pt 网格
                     // 换装 B：收口卡=情感时刻场域（条文 11 白名单）→ 暮色橙 accent 打底，粉尾保留暖意
                     .background(LinearGradient(colors: [theme.accent.opacity(0.16), Color.pink.opacity(0.10)],
                                                startPoint: .topLeading, endPoint: .bottomTrailing),
@@ -621,7 +621,7 @@ struct HomeView: View {
     @ViewBuilder private var unifiedInput: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: unifiedText)
-                .font(.body)
+                .font(.callout)   // 字阶收敛（C）：正文档=callout（body 档值）
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .padding(.bottom, 24)   // 给底部内嵌控件行让位
@@ -635,7 +635,7 @@ struct HomeView: View {
             }
         }
         .frame(height: CGFloat(inputHeight))
-        .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(theme.surface))   // 换装 C：输入区=surface 纸面
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
         .overlay(alignment: .bottomLeading) {
             if showingPlanArea {
@@ -988,10 +988,11 @@ struct EditableRow: View {
             }
         }
         .contextMenu { rowMenuItems }
-        // O1-轻（批次7）：行容器化——给每行一个轻底容器（系统材质，不新增直写色），
-        // 回应「太清淡/缺视觉结构」：行与行有了边界与节奏；间距/材质的精调留美术令牌阶段。
+        // O1（批次7 行容器化 → 换装 C 落令牌）：行=surface 白卡浮于微暖页底（条文 6：平面层级=色差，无阴影），
+        // 淡描边补 light 模式下 bg/surface 色差过小的 definition。排日程列表密度=组件级取紧（条文 7 例外通道），padding 保 10。
         .padding(10)
-        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+        .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary.opacity(0.4)))
         // 生活锚点淡显（0.20.3，§5.10 块三角色）：占位不是任务——可看可改时间，但视觉退后一步
         .opacity(block.isAnchor ? 0.55 : 1)
         .help(block.isAnchor ? "生活锚点（午饭/通勤这类）：占时间、塑造节奏，但不是要完成的任务" : "")
@@ -1183,7 +1184,7 @@ struct FreshCompareSheet: View {
     @ViewBuilder private func column(title: String, blocks: [EditableBlock], accent: Color) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(title, systemImage: "list.bullet.rectangle")
-                .font(.subheadline.bold()).foregroundStyle(accent)
+                .font(.headline).foregroundStyle(accent)   // 字阶收敛（C）：列标题→headline 档
             if blocks.isEmpty {
                 Text("（空）").font(.caption).foregroundStyle(.secondary)
             }

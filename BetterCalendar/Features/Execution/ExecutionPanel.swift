@@ -481,7 +481,7 @@ struct ExecutionPanel: View {
         #if os(macOS)
         if model.activeStyle == .pomodoro, !model.isOnBreak {
             HStack(spacing: 6) {
-                Image(systemName: "moon.circle").font(.caption).foregroundStyle(.indigo)
+                Image(systemName: "moon.circle").font(.caption).foregroundStyle(theme.looseTint)   // 夜/月族归位（C）
                 Text("想更沉浸？可顺手开系统专注模式").font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Button("打开设置") {

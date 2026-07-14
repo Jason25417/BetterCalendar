@@ -69,8 +69,9 @@ struct AchievementToastView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16).padding(.vertical, 10)   // 换装 C：8pt 对齐
+            // 换装 C（条文 6）：浮层=系统 Liquid Glass 玻璃族（不自造参数）；toast 属真浮层，阴影在白名单内
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
             .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
             .padding(.horizontal, 16).padding(.top, 8)
             .frame(maxWidth: 460)
