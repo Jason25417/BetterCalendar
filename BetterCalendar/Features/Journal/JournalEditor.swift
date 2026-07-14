@@ -99,6 +99,7 @@ struct JournalEditor: View {
                                 }
                                 Button { deletePhoto(ref) } label: { Image(systemName: "xmark.circle.fill") }
                                     .buttonStyle(.plain).padding(2)
+                                    .accessibilityLabel("删除这张照片")
                             }
                         }
                     }

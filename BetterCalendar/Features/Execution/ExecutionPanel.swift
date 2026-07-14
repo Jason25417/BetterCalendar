@@ -141,7 +141,7 @@ struct ExecutionPanel: View {
                         Menu("计时：\(Self.styleLabel(adHocStyle))") {   // 可选步（高天花板）
                             Button("轻计时") { adHocStyle = .light }
                             Button("不计时") { adHocStyle = TimingStyle.none }
-                            Button("🍅 番茄钟") { adHocStyle = .pomodoro }
+                            Button("番茄钟") { adHocStyle = .pomodoro }
                         }
                         .font(.caption).fixedSize()
                     }
@@ -183,7 +183,7 @@ struct ExecutionPanel: View {
     private func resetAdHoc() { adHocKind = nil; adHocTitle = ""; adHocStyle = .light; setPopoverHold(false) }
 
     static func styleLabel(_ s: TimingStyle) -> String {
-        switch s { case .pomodoro: "🍅番茄"; case .light: "轻计时"; case .none: "不计时" }
+        switch s { case .pomodoro: "番茄"; case .light: "轻计时"; case .none: "不计时" }
     }
 
     // MARK: 头部状态
@@ -378,7 +378,7 @@ struct ExecutionPanel: View {
     @ViewBuilder private var timingMenuItems: some View {
         Button("轻计时") { model.changeTiming(to: .light) }
         Button("不计时") { model.changeTiming(to: TimingStyle.none) }
-        Menu("🍅 番茄钟") {
+        Menu("番茄钟") {
             Button("1 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
             Button("2 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
             Button("3 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
@@ -512,6 +512,7 @@ struct ExecutionPanel: View {
                     }
                     .buttonStyle(.plain).foregroundStyle(.green)
                     .help("完成这件后台任务")
+                    .accessibilityLabel("完成「\(run.title)」")
                 }
             }
         }

@@ -3,7 +3,7 @@
 //  BetterCalendar
 //
 //  菜单栏计时（潮汐式）：用 AppKit NSStatusItem 自管菜单栏项 + 一个 Timer 每秒给 button.title 赋字符串
-//  显示「▶ 12:34」/「☕ 02:10」。这条路绕开了 SwiftUI MenuBarExtra label 那个雷区
+//  显示「(SF符号) 12:34」（批次5 起 emoji 退场，图形走 button.image）。这条路绕开了 SwiftUI MenuBarExtra label 那个雷区
 //  （label 里放 TimelineView/周期刷新会失控卡死+内存溢出）——这里只是给 NSButton 赋文字，轻量稳定。
 //  点击弹 NSPopover，内容仍是 SwiftUI 的 ExecutionPanel（小窗里用 TimelineView 安全）。
 //
@@ -79,27 +79,40 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// 重写为按 active.timingStyle 显式 switch（旧版用 `!= TimingStyle.none` 隐晦比较，轻计时/不计时都错显成不计时）。
     private func updateTitle() {
         guard let button = statusItem.button else { return }
+        // 9A（批次5）：emoji 构件退场——menu bar 是系统场域，状态图形一律 SF Symbols（button.image），
+        // 标题只留文字与数字。🍅 另有哲学层理由：番茄工作法的纪律隐喻与「温柔陪伴」相悖。
+        func symbol(_ name: String, _ desc: String) {
+            button.image = NSImage(systemSymbolName: name, accessibilityDescription: desc)
+        }
         if model.isOnBreak {
-            button.title = " ☕ 休息 " + ExecutionPanel.hms(model.breakElapsed)
+            symbol("cup.and.saucer.fill", "休息中")
+            button.title = " 休息 " + ExecutionPanel.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {
             if phase.pendingConfirm {
-                button.title = phase.kind == .work ? " 🍅 ✓段满" : " ☕ ✓回专注"
+                symbol(phase.kind == .work ? "timer" : "cup.and.saucer.fill", "段满待确认")
+                button.title = phase.kind == .work ? " ✓段满" : " ✓回专注"
             } else {
-                button.title = " 🍅 \(phase.kind == .work ? "专注" : "休息") " + ExecutionPanel.hms(phase.remaining)
+                symbol(phase.kind == .work ? "timer" : "cup.and.saucer.fill", "番茄进行中")
+                button.title = " \(phase.kind == .work ? "专注" : "休息") " + ExecutionPanel.hms(phase.remaining)
             }
         } else if let a = model.active {
             switch a.timingStyle {
             case .pomodoro:   // 兜底（正常走上面 phase 分支）
-                button.title = " 🍅 " + ExecutionPanel.hms(model.currentElapsed)
+                symbol("timer", "番茄计时")
+                button.title = " " + ExecutionPanel.hms(model.currentElapsed)
             case .light:
-                button.title = " ▶ " + model.timerDisplay      // 已 X · 计划 Y（超计划撤计划），到分 XhYm
+                symbol("play.fill", "轻计时进行中")
+                button.title = " " + model.timerDisplay      // 已 X · 计划 Y（超计划撤计划），到分 XhYm
             case .none:
-                button.title = " ● " + model.timerDisplay      // 已 X，到分 XhYm
+                symbol("circle.inset.filled", "进行中（不计时）")
+                button.title = " " + model.timerDisplay      // 已 X，到分 XhYm
             }
         } else if let f = FollowRunState.shared.run {
             // 多端跟随（#30）：本机空档而另一台在做 → 陪伴显示（点开面板可退出跟随）
-            button.title = " ⇄ " + ExecutionPanel.hms(Date.now.timeIntervalSince(f.startedAt))
+            symbol("ipad.and.iphone", "另一台设备进行中")
+            button.title = " " + ExecutionPanel.hms(Date.now.timeIntervalSince(f.startedAt))
         } else {
+            symbol("calendar.badge.clock", "BetterCalendar")
             button.title = ""        // 空档：只显图标
         }
     }

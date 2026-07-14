@@ -158,6 +158,7 @@ struct HomeView: View {
                             Image(systemName: "xmark").font(.caption2)
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .accessibilityLabel("今天先收起")
                     }
                 }
 
@@ -205,6 +206,7 @@ struct HomeView: View {
                             Image(systemName: "xmark").font(.caption2)
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
+                        .accessibilityLabel("别再提这件")
                     }
                     .onAppear {   // 埋点：出现按 (天, 建议) 去重
                         BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现")
@@ -531,6 +533,7 @@ struct HomeView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
                             Button { model.addBlock() } label: { Image(systemName: "plus") }
+                                .accessibilityLabel("加一项")
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button("完成") { showDraftExpanded = false }
@@ -809,7 +812,7 @@ struct HomeView: View {
             } else {
                 Menu {
                     Button("帮我排进今天（智能插空档）") { model.smartInsertFromLongTask(task) }
-                    Button("做成了 🎉") { deps.longTasks.complete(task) }
+                    Button("做成了") { deps.longTasks.complete(task) }
                     Button("推一周") { deps.longTasks.pushDeadline(task) }
                     Button("先放下") { deps.longTasks.shelve(task) }
                 } label: {
@@ -967,7 +970,7 @@ struct EditableRow: View {
                         .toggleStyle(.button).controlSize(.small)
                     Menu {
                         Button("轻计时") { block.timingStyle = .light }
-                        Button("🍅 番茄钟") { block.timingStyle = .pomodoro }
+                        Button("番茄钟") { block.timingStyle = .pomodoro }
                         Button("不计时") { block.timingStyle = .none }
                     } label: {
                         Text(Self.styleLabel(block.timingStyle))
@@ -1042,7 +1045,7 @@ struct EditableRow: View {
     static func styleLabel(_ s: TimingStyle) -> String {
         switch s {
         case .light: return "轻计时"
-        case .pomodoro: return "🍅 番茄"
+        case .pomodoro: return "番茄"
         case .none: return "不计时"
         }
     }
