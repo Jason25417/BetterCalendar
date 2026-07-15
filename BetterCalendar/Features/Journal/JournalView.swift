@@ -243,6 +243,7 @@ struct JournalView: View {
                     Button { Task { await applyAutoJournal() } } label: {
                         Label("自动日记", systemImage: "wand.and.stars")
                     }
+                    .tint(.primary)   // 修正批 D：次要工具收中性（条文 2）
                     .help("用今天的做成记录自动生成一篇简短日记（可再编辑；与手写内容明显区分）")
                     if wrapUpStage == .review { notNowButton }
                 }

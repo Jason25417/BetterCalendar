@@ -411,6 +411,7 @@ struct HomeView: View {
                             Label("更多", systemImage: "ellipsis.circle")
                         }
                         .font(.caption)
+                        .tint(.primary)   // 修正批 D：次要控件收中性（条文 2）
                         .help("草稿与列表的更多操作")
                     }
 
@@ -635,8 +636,8 @@ struct HomeView: View {
             }
         }
         .frame(height: CGFloat(inputHeight))
-        .background(RoundedRectangle(cornerRadius: 8).fill(theme.surface))   // 换装 C：输入区=surface 纸面
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .background(RoundedRectangle(cornerRadius: 12).fill(theme.surface))   // 换装 C：输入区=surface 纸面；D：大容器档=12（条文 5）
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
         .overlay(alignment: .bottomLeading) {
             if showingPlanArea {
                 Button { reSayExpanded.toggle() } label: {
@@ -821,6 +822,7 @@ struct HomeView: View {
         .padding(6)
         .background((overdue ? Color.orange : theme.looseTint).opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .tint(.primary)   // 修正批 D：未来任务行内控件收中性（条文 2）
     }
 
     // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改。
@@ -850,6 +852,7 @@ struct HomeView: View {
                 .font(.caption)
         }
         .menuStyle(.borderlessButton)
+        .tint(.primary)   // 修正批 D：次要控件收中性（条文 2）
         .fixedSize()
     }
 
@@ -993,6 +996,10 @@ struct EditableRow: View {
         .padding(10)
         .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary.opacity(0.4)))
+        // 修正批 D（条文 2+U2）：行内高频控件（时间/计时/⋯）收中性——accent 只留给情感时刻与主按钮；
+        // 行内 tag 等显式着色不受 tint 影响。白卡已承担行边界 → List 分隔线退场（双重边界去其一）。
+        .tint(.primary)
+        .listRowSeparator(.hidden)
         // 生活锚点淡显（0.20.3，§5.10 块三角色）：占位不是任务——可看可改时间，但视觉退后一步
         .opacity(block.isAnchor ? 0.55 : 1)
         .help(block.isAnchor ? "生活锚点（午饭/通勤这类）：占时间、塑造节奏，但不是要完成的任务" : "")

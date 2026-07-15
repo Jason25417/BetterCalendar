@@ -47,6 +47,8 @@ struct AppTheme: Identifiable, Equatable {
     var previewTint: Color       // 预览/从现在起（橙系语义）
     var looseTint: Color         // 松散/退场（紫系语义）
     var positiveTint: Color      // 正反馈（做成/兑现）
+    // 庆祝金（修正批 D，Jason 裁「进颜色系统」）：trophy/MVP 底/星光——庆祝白名单场域专用（轴 10）
+    var celebrationTint: Color = Color(light: ClassicHex.celebration.light, dark: ClassicHex.celebration.dark)
     // 中性阶（条文 1B 微暖，换装批次 A 起）
     var bg: Color = Color(light: 0xF7F4F0, dark: 0x1D1B18)         // 页底
     var surface: Color = Color(light: 0xFFFDFB, dark: 0x292623)    // 卡面
@@ -74,6 +76,8 @@ enum ClassicHex {
     static let planned: (light: UInt32, dark: UInt32) = (0x57806B, 0x9FC4AC)
     static let actual: (light: UInt32, dark: UInt32)  = (0x4A6B8A, 0x8FAECE)
     static let preview: (light: UInt32, dark: UInt32) = (0xB8823F, 0xC98E4F)
+    /// 庆祝金（修正批 D）：与暮色橙同族的低饱和暖金——收编原系统 yellow
+    static let celebration: (light: UInt32, dark: UInt32) = (0xCFA14D, 0xDFB768)
 }
 
 enum ThemeSettings {

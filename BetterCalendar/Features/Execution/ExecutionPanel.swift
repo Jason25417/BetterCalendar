@@ -275,7 +275,7 @@ struct ExecutionPanel: View {
                         }
                     } else {
                         // 休息段满：回到专注 / 转轻计时（段间=可改计时方式的窗口，工作段中锁定——Jason 定 2026-07-08）
-                        Text("休息好了，回到专注？").font(.callout).foregroundStyle(.green)
+                        Text("休息好了，回到专注？").font(.callout).foregroundStyle(theme.positiveTint)   // 休息绿归队（D，Jason 裁）
                         HStack(spacing: 8) {
                             Button("回到专注") { model.confirmPomodoroNext() }
                                 .buttonStyle(.borderedProminent).controlSize(.small)
@@ -290,8 +290,8 @@ struct ExecutionPanel: View {
                     Label("\(isWork ? "专注" : "番茄休息") \(Self.hms(phase.elapsedInPhase)) / \(Self.hms(phase.phaseLength))",
                           systemImage: isWork ? "timer" : "cup.and.saucer")
                         .font(.callout.monospacedDigit())
-                        // 换装 B：专注=实际蓝族（执行→回填实际）；休息绿暂跟系统（微决策区待裁）
-                        .foregroundStyle(isWork ? theme.actualTint : .green)
+                        // 换装 B/D：专注=实际蓝族（执行→回填实际）；休息=positiveTint 归队（Jason 裁）
+                        .foregroundStyle(isWork ? theme.actualTint : theme.positiveTint)
                     if isWork {
                         // 工作段中逃生口：小摩擦确认 + 自设周上限（预先承诺，默认不限；用完=温和禁用）
                         let remaining = PomodoroDiscipline.remaining()

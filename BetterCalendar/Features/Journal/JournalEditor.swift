@@ -44,22 +44,23 @@ struct JournalEditor: View {
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
                     .padding(8)
                     .background(theme.surface)   // 换装 C：正文区=surface 纸面
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary.opacity(0.4)))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))   // 修正批 D：大容器档=12（条文 5）
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary.opacity(0.4)))
             } else {
                 TextEditor(text: $entry.body)
                     .frame(minHeight: 160)
                     .padding(6)                          // 0.33.1：首行贴边被裁（Jason 截图）→ 给呼吸边距
                     .scrollContentBackground(.hidden)
                     .background(theme.surface)   // 换装 C：正文区=surface 纸面
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary.opacity(0.4)))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))   // 修正批 D：大容器档=12（条文 5）
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary.opacity(0.4)))
                     .onChange(of: entry.body) { _, _ in touch() }
             }
 
             tagRow
             photoRow
         }
+        .tint(.primary)   // 修正批 D：编辑器工具行（预览/照片/标签）收中性（条文 2）——正文卡内无主按钮
     }
 
     // MARK: 标签

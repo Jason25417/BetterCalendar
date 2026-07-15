@@ -17,7 +17,7 @@ struct CelebrationBurst: View {
                 let angle = Double(i) / 10 * 2 * .pi
                 Image(systemName: i % 3 == 0 ? "sparkles" : "sparkle")
                     .font(.system(size: CGFloat(12 + (i % 3) * 5)))
-                    .foregroundStyle(i % 2 == 0 ? Color.yellow : theme.accent)   // 星光金+暮色橙（庆祝白名单）
+                    .foregroundStyle(i % 2 == 0 ? theme.celebrationTint : theme.accent)   // 庆祝金+暮色橙（D，全令牌）
                     .offset(x: animate ? cos(angle) * 52 : 0, y: animate ? sin(angle) * 34 : 0)
                     .opacity(animate ? 0 : 1)
                     .scaleEffect(animate ? 1.5 : 0.3)

@@ -116,7 +116,7 @@ struct ReviewPanel: View {
         @Bindable var model = model
         if let mvp = model.mvpTitle {
             VStack(alignment: .leading, spacing: 6) {
-                // 换装 B：MVP=情感时刻 → accent（庆祝金黄底暂留系统 yellow，微决策区）
+                // 换装 B/D：MVP=情感时刻 → 标题 accent+庆祝金底（celebrationTint，Jason 裁进色板）
                 Label("今日最有价值：\(mvp)", systemImage: "trophy.fill")
                     .font(.headline).foregroundStyle(theme.accent)   // 字阶收敛（C）：卡标题→headline 档
                 TextField("想写一句为什么？（可留空）", text: $model.mvpNote)
@@ -124,7 +124,7 @@ struct ReviewPanel: View {
                     .onSubmit { model.saveMVPNote() }
             }
             .padding(10)
-            .background(Color.yellow.opacity(0.10))
+            .background(theme.celebrationTint.opacity(0.12))   // 庆祝金上户口（D，Jason 裁）
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
@@ -155,13 +155,13 @@ struct ReviewPanel: View {
             if let m = item.actualMinutes { Text(Self.hm(m)).font(.caption).foregroundStyle(.secondary) }
             Button { model.toggleMVP(item.displayTitle) } label: {
                 Image(systemName: isMVP ? "trophy.fill" : "trophy")
-                    .foregroundStyle(isMVP ? .yellow : .secondary)
+                    .foregroundStyle(isMVP ? theme.celebrationTint : .secondary)   // 庆祝金（D）
             }
             .buttonStyle(.plain)
             .help("设为今日最有价值的一件")
         }
         .padding(.vertical, 2)
-        .background(isMVP ? Color.yellow.opacity(0.12) : Color.clear)
+        .background(isMVP ? theme.celebrationTint.opacity(0.14) : Color.clear)   // 庆祝金（D）
     }
 
     // MARK: 主动打开的「计划校准洞察」（去对比化：完整对比收这里，措辞朝前=帮下次排得更准，不打分）
