@@ -125,6 +125,9 @@ struct BetterCalendarApp: App {
                     router.selectedTab = .journal
                     router.openAchievements = true
                 }
+                // #35 设置同步后：本机跟随开关可能是「另一台设备打开、同步过来的」→ 启动即补建订阅
+                //（ensureSubscription/refreshAndApply 内部各自查开关，关时是 no-op）。
+                await FocusFollow.ensureSubscription()
                 await FocusFollow.refreshAndApply(reason: "启动")
             }
             .userActivity(BetterCalendarHandoff.activityType, isActive: true) { activity in

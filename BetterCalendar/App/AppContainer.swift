@@ -106,6 +106,7 @@ final class AppContainer {
         self.bench = BenchRunner(client: anthropic)
         self.logSync = LogSyncService()
         logSync.start()
+        SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）
         reconcile.start()
         ExecutionBridge.shared = execution   // Focus Filter 联动直达口（§5.7）
         #if os(macOS)

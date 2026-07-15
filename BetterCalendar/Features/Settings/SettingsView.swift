@@ -217,6 +217,16 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     #endif
 
+                    // 多端跟随（#30）：天生跨端功能——两端都要有入口（0.53 修：曾误置于 #if os(macOS) 块内，iPhone 找不到）。
+                    Toggle("多端跟随专注（Beta）", isOn: $focusFollowOn)
+                        .onChange(of: focusFollowOn) { _, v in
+                            FocusFollowSettings.enabled = v
+                            if v { Task { await FocusFollow.ensureSubscription() } }
+                            else { FollowRunState.shared.exitFollow() }
+                        }
+                    Text("同一 iCloud 的另一台设备开始专注时，这台准实时（秒~十几秒）跟随显示同任务计时；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
+                        .font(.caption).foregroundStyle(.secondary)
+
                     #if os(macOS)
                     Toggle("开机自动启动", isOn: $launchAtLogin)
                         .onChange(of: launchAtLogin) { _, v in
@@ -236,15 +246,6 @@ struct SettingsView: View {
                         get: { MenuBarSettings.keepRunningOnQuit },
                         set: { MenuBarSettings.keepRunningOnQuit = $0 }))
                     Text("打开后 ⌘Q / Dock 右键退出 不会真退——收进菜单栏继续跑（计时不断），Dock 图标消失、防手滑误退。真要退出：点菜单栏图标 → 右键 → 退出 BetterCalendar。")
-                        .font(.caption).foregroundStyle(.secondary)
-
-                    Toggle("多端跟随专注（Beta）", isOn: $focusFollowOn)
-                        .onChange(of: focusFollowOn) { _, v in
-                            FocusFollowSettings.enabled = v
-                            if v { Task { await FocusFollow.ensureSubscription() } }
-                            else { FollowRunState.shared.exitFollow() }
-                        }
-                    Text("同一 iCloud 的另一台设备开始专注时，这台准实时（秒~十几秒）跟随显示同任务计时；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Toggle("聪音联动（把专注状态同步给《放松时光》）", isOn: Binding(
@@ -368,6 +369,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)   // System-Settings 风格分组卡片（修「排版不好看」）
+        // #35：另一台设备改了设置 → iCloud 同步到本地后重读 @State，面板即时反映（面板通常没开着，主要保开着时不显示旧值）
+        .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
+            reloadSyncedState()
+        }
         #if os(macOS)
         // macOS `Settings` 场景的窗口不随内容长高、也不给用户缩放 → **固定尺寸**让 Form 内容超出时**内部滚动**。
         // 别再改成 min/ideal/max 弹性尺寸追「可缩放」：那会让窗口撑到内容高、超屏后无法滚被截断（0.18.22 踩过、0.18.38 回退）。
@@ -413,6 +418,22 @@ struct SettingsView: View {
         }
     }
     #endif
+
+    /// 远程设置同步到本地后重读 @State（#35）：只覆盖白名单同步项，本地未同步项（key/名单等）不动。
+    private func reloadSyncedState() {
+        model = CloudSettings.model
+        provider = CloudSettings.provider
+        sfModel = CloudSettings.siliconflowModel
+        useCloud = CloudSettings.useCloud
+        leadMinutes = ReminderSettings.leadMinutes
+        autoCompleteFixed = MeetingSettings.autoCompleteFixedBlocks
+        pomoLimit = PomodoroDiscipline.weeklyEarlyEndLimit
+        windDownHour = WorkHoursSettings.windDownHour
+        pushIntensity = SuggestionSettings.intensity
+        journalLock = JournalSettings.privacyLock
+        distractionOn = DistractionSettings.enabled
+        focusFollowOn = FocusFollowSettings.enabled
+    }
 
     private func save() {
         if !apiKey.isEmpty {
