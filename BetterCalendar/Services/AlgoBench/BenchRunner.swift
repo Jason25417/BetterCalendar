@@ -32,6 +32,7 @@ final class BenchRunner {
     func run(_ c: BenchCase, variant: BenchVariant, graceMinutes: Int,
              model: String? = nil) async -> BenchCaseResult {
         var result: BenchCaseResult
+        LLMUsageProbe.shared.reset()   // #41：token 成本探针——每条用例单独计量
         switch c.capability {
         case .parse: result = await runParse(c, variant: variant, model: model)
         case .refine: result = await runRefine(c, variant: variant, model: model)
@@ -39,6 +40,10 @@ final class BenchRunner {
         case .arrange: result = await runArrange(c, variant: variant, model: model)
         case .polish: result = await runPolish(c, variant: variant, model: model)
         }
+        let usage = LLMUsageProbe.shared.take()
+        result.output.tokensIn = usage.billedInputEquivalent
+        result.output.tokensOut = usage.outputTokens
+        result.output.llmCalls = usage.calls
         if Self.cloudVariantIDs.contains(variant.id) { result.output.model = model ?? CloudSettings.activeModel }
         return result
     }
@@ -349,6 +354,18 @@ final class BenchRunner {
                 if let reason = gate(variant) { return Self.skipped(reason) }
                 decision = try await LLMPlanningEngine(client: cloudClient(model),
                                                        fallback: BenchFailFastPlanner())
+                    .arrange(r.input, now: r.from)
+                out.model = model ?? CloudSettings.activeModel
+            case BenchVariantID.arrangeMasked:   // #41②：标题不出云
+                if let reason = gate(variant) { return Self.skipped(reason) }
+                decision = try await MaskedArranger(client: cloudClient(model),
+                                                    fallback: BenchFailFastPlanner())
+                    .arrange(r.input, now: r.from)
+                out.model = model ?? CloudSettings.activeModel
+            case BenchVariantID.arrangeHybrid:   // #41③：LLM 语义标注 + 本地排布
+                if let reason = gate(variant) { return Self.skipped(reason) }
+                decision = try await HybridArranger(client: cloudClient(model),
+                                                    fallback: BenchFailFastPlanner())
                     .arrange(r.input, now: r.from)
                 out.model = model ?? CloudSettings.activeModel
             default:

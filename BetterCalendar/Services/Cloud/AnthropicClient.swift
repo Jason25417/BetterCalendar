@@ -96,11 +96,16 @@ struct AnthropicClient {
 
     /// 缓存用量可见化（开发期）：命中/写入才记，一眼看出静态化有没有真吃到缓存。
     private static func logCacheUsage(_ obj: [String: Any], label: String) {
-        guard CloudSettings.logRawResponses, let usage = obj["usage"] as? [String: Any] else { return }
+        guard let usage = obj["usage"] as? [String: Any] else { return }
         let read = usage["cache_read_input_tokens"] as? Int ?? 0
         let write = usage["cache_creation_input_tokens"] as? Int ?? 0
+        let input = usage["input_tokens"] as? Int ?? 0
+        let output = usage["output_tokens"] as? Int ?? 0
+        // #41：token 成本探针（试验台读；生产只是内存计数器）
+        LLMUsageProbe.shared.record(input: input + write, output: output, cacheRead: read)
+        guard CloudSettings.logRawResponses else { return }
         if read > 0 || write > 0 {
-            DevLog.shared.info("云端用量", "\(label) cache_read=\(read) cache_write=\(write) input=\(usage["input_tokens"] as? Int ?? 0)")
+            DevLog.shared.info("云端用量", "\(label) cache_read=\(read) cache_write=\(write) input=\(input)")
         }
     }
 

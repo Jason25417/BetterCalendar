@@ -332,6 +332,35 @@ final class BenchSuiteStore {
                     .init(kind: .blockCountExact, count: 2),
                     .init(kind: .arrayOrderBefore, title: "写周报", title2: "组会"),
                   ]),
+
+        // ===== #41 语义驱动组（2026-07-20）：S1–S4 全是**标记驱动**（★/DDL/固定/锚点），
+        // 脱敏组理应不掉分；S5/S6 的正确答案**只能从标题语义得出**——脱敏组必然掉分。
+        // 两组分差 = 「标题语义到底值多少」的量化答案，也是 #41② 该不该上生产的判据。
+        BenchCase(id: "S5", name: "语义：先后依赖（买菜→做饭）", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "做饭", startHM: "17:00", durationMinutes: 60),
+                    .init(title: "买菜", startHM: "18:30", durationMinutes: 30),
+                    .init(title: "回几封邮件", startHM: "15:00", durationMinutes: 30),
+                  ],
+                  fromHM: "14:00",
+                  expects: [
+                    .init(kind: .blockCountExact, count: 3),
+                    // 无★无DDL：只有懂「做饭需要先买菜」才排得对（标记里没有任何线索）
+                    .init(kind: .arrayOrderBefore, title: "买菜", title2: "做饭"),
+                  ]),
+        BenchCase(id: "S6", name: "语义：脑力活趁早", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "整理下载文件夹", startHM: "09:00", durationMinutes: 30),
+                    .init(title: "啃一篇难论文", startHM: "10:00", durationMinutes: 90),
+                    .init(title: "填报销单", startHM: "11:30", durationMinutes: 30),
+                  ],
+                  fromHM: "08:30",
+                  expects: [
+                    .init(kind: .blockCountExact, count: 3),
+                    // 三块同标记同时长量级：只有懂「啃论文=深度脑力」才知道该趁早
+                    .init(kind: .arrayOrderBefore, title: "啃一篇难论文", title2: "整理下载文件夹"),
+                    .init(kind: .arrayOrderBefore, title: "啃一篇难论文", title2: "填报销单"),
+                  ]),
     ]
 
     private static let refineBase: [BenchBlockSpec] = [

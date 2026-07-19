@@ -220,6 +220,12 @@ final class BenchViewModel {
             let t = ran.compactMap(\.output.firstOutputMS)
             return t.isEmpty ? nil : t.reduce(0, +) / t.count
         }
+        // #41 成本指标：平均 token（计费口径输入等效 / 输出）与平均 LLM 调用次数
+        var avgTokensIn: Int { ran.isEmpty ? 0 : ran.map(\.output.tokensIn).reduce(0, +) / ran.count }
+        var avgTokensOut: Int { ran.isEmpty ? 0 : ran.map(\.output.tokensOut).reduce(0, +) / ran.count }
+        var avgCalls: Double {
+            ran.isEmpty ? 0 : Double(ran.map(\.output.llmCalls).reduce(0, +)) / Double(ran.count)
+        }
         /// 展示哪一次的明细：第一个失败的（信息量最大），全过则最后一次。
         var showcase: BenchCaseResult? { ran.first { !$0.passed } ?? ran.last ?? attempts.first }
     }
@@ -244,7 +250,7 @@ final class BenchViewModel {
     func exportMarkdown() -> String {
         var md = "# 算法试验台 · 跑分（宽限 \(selectedGraces.sorted().map(String.init).joined(separator: "/"))min · 模型 \(activeModels.joined(separator: ", "))）\n\n"
         md += "## 分数矩阵（变体×模型×宽限 × 通过率）\n\n"
-        md += "| 变体 | 模型 | 宽限 | 维度 | 通过 | 平均耗时 | 平均首包 | 解码失败 |\n|---|---|---|---|---|---|---|---|\n"
+        md += "| 变体 | 模型 | 宽限 | 维度 | 通过 | 平均耗时 | 平均首包 | 解码失败 | 均tokIn | 均tokOut | 均调用 |\n|---|---|---|---|---|---|---|---|---|---|---|\n"
         for cap in BenchCapability.allCases {
             let capCases = cases.filter { $0.capability == cap }
             for run in runs(for: cap) {
@@ -260,7 +266,11 @@ final class BenchViewModel {
                     let ttfts = ran.compactMap(\.output.firstOutputMS)
                     let ttft = ttfts.isEmpty ? "—" : "\(ttfts.reduce(0, +) / ttfts.count)ms"
                     let decodeFails = ran.filter { !$0.output.decodeOK }.count
-                    md += "| \(run.variant.name) | \(run.model.map(BenchRun.shortModel) ?? "—") | \(run.grace.map { "\($0)min" } ?? "—") | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(ttft) | \(decodeFails) |\n"
+                    // #41 成本列：脱敏/分步方案的账要能直接读出来
+                    let tin = ran.isEmpty ? 0 : ran.map(\.output.tokensIn).reduce(0, +) / ran.count
+                    let tout = ran.isEmpty ? 0 : ran.map(\.output.tokensOut).reduce(0, +) / ran.count
+                    let calls = ran.isEmpty ? 0.0 : Double(ran.map(\.output.llmCalls).reduce(0, +)) / Double(ran.count)
+                    md += "| \(run.variant.name) | \(run.model.map(BenchRun.shortModel) ?? "—") | \(run.grace.map { "\($0)min" } ?? "—") | \(d) | \(passed)/\(ran.count) | \(avg)ms | \(ttft) | \(decodeFails) | \(tin) | \(tout) | \(String(format: "%.1f", calls)) |\n"
                 }
             }
         }

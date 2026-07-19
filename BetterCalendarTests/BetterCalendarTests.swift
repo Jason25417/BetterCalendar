@@ -757,6 +757,44 @@ struct LogicTests {
         #expect(line?.contains("推进到「第 1 章」") == true)
     }
 
+    // #41③：分步排序的**本地布局层**（纯函数、确定性——LLM 只给标签，排布结果必须可复现）
+    @Test func hybridArrangerLayoutRespectsHardRulesThenSemantics() throws {
+        let base = at(2026, 7, 20, 9)
+        func blk(_ t: String, _ h: Int, important: Bool = false, anchor: Bool = false,
+                 ddl: Date? = nil) -> ScheduledBlock {
+            ScheduledBlock(title: t, start: at(2026, 7, 20, h), end: at(2026, 7, 20, h + 1),
+                           isFixed: false, isAnchor: anchor, timingStyle: .light,
+                           priority: important ? .important : .normal, deadline: ddl)
+        }
+        // 硬规则优先：★ > DDL > 其余 > 锚点垫底——语义标签不得越权
+        let blocks = [blk("杂务", 9), blk("要紧事", 14, important: true),
+                      blk("午饭", 12, anchor: true), blk("有DDL", 15, ddl: at(2026, 7, 21, 9))]
+        let labels = [HybridArranger.Label(index: 0, cognitiveLoad: 3, preferEarly: true, dependsOnIndex: nil)]
+        let out = HybridArranger.layOut(blocks, labels: labels)
+        #expect(out.map(\.title) == ["要紧事", "有DDL", "杂务", "午饭"])
+
+        // 同档内：语义标签说话——宜趁早的在前
+        let same = [blk("轻杂务", 9), blk("深度活", 10)]
+        let l2 = [HybridArranger.Label(index: 1, cognitiveLoad: 3, preferEarly: true, dependsOnIndex: nil)]
+        #expect(HybridArranger.layOut(same, labels: l2).map(\.title) == ["深度活", "轻杂务"])
+
+        // 依赖修正：做饭依赖买菜 → 买菜必须在前（哪怕原时间在后）
+        let dep = [blk("做饭", 17), blk("买菜", 18)]
+        let l3 = [HybridArranger.Label(index: 0, cognitiveLoad: 1, preferEarly: false, dependsOnIndex: 1)]
+        #expect(HybridArranger.layOut(dep, labels: l3).map(\.title) == ["买菜", "做饭"])
+        _ = base
+    }
+
+    // #41②：脱敏排序的索引解码（补齐遗漏/去重/越界丢弃——LLM 抽风也不丢块）
+    @Test func maskedArrangerDecodeOrderIsTotalAndSafe() throws {
+        // 越界 9 丢弃、重复 1 去重、遗漏 3 自动补齐在末尾
+        let order = try MaskedArranger.decodeOrder(#"{"orderedIndexes":[2,1,9,1,0]}"#, count: 4)
+        #expect(order == [2, 1, 0, 3])
+        #expect(Set(order) == Set(0..<4))   // 全覆盖=一块都不丢
+        // 空/垃圾输入 → 退化成原顺序（不崩、不丢块）
+        #expect(try MaskedArranger.decodeOrder(#"{"orderedIndexes":[]}"#, count: 3) == [0, 1, 2])
+    }
+
     // #40 批3：解析器产阶段（JSON 解码 + 脏数据防御）
     @Test func parserDecodesLongTaskCheckpoints() throws {
         let json = """

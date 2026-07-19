@@ -127,6 +127,10 @@ struct BenchOutput: Sendable {
     var model: String? = nil               // 本次运行用的云端模型 ID（多模型对比；本地/端侧 nil）
     var decodeOK: Bool = true              // 约束解码维度的原料：格式/解码是否一次成功
     var errorText: String? = nil
+    // #41 成本指标（云端变体才非零）：计费口径输入等效量 / 输出 token / 本条用例的 LLM 调用次数
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+    var llmCalls: Int = 0
 }
 
 /// 单条断言的判定结果。

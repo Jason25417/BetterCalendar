@@ -28,6 +28,8 @@ enum BenchVariantID {
     static let polishFM = "polish.fm"
     static let arrangeRule = "arrange.rule"
     static let arrangeLLM = "arrange.llm"
+    static let arrangeMasked = "arrange.llm.masked"   // #41②：脱敏 ID 化
+    static let arrangeHybrid = "arrange.hybrid"       // #41③：LLM 语义标注 + 本地排布
     static let reflowNaiveV1 = "reflow.naive.v1"
     static let reflowLLMV1 = "reflow.llm.v1"
     static let reflowNaiveV2 = "reflow.naive.v2"
@@ -56,6 +58,12 @@ enum BenchVariants {
                      name: "规则排序（候选固化）", detail: "RuleBasedArranger：尽早★→DDL 升序→原时间；note=本地文案库。零网络确定性", frozen: false),
         BenchVariant(id: BenchVariantID.arrangeLLM, capability: .arrange,
                      name: "LLM 排序（现行）", detail: "LLMPlanningEngine.arrange（服务商/模型=当前设置，无回退）", frozen: false),
+        BenchVariant(id: BenchVariantID.arrangeMasked, capability: .arrange,
+                     name: "脱敏排序（#41②）",
+                     detail: "MaskedArranger：**标题不出云**，只发结构（时长/★/DDL/固定/锚点）→ LLM 回索引 → 本地绑回。note 走本地文案库", frozen: false),
+        BenchVariant(id: BenchVariantID.arrangeHybrid, capability: .arrange,
+                     name: "分步排序（#41③）",
+                     detail: "HybridArranger：LLM 只做语义标注（认知负荷/宜趁早/先后依赖）→ **本地确定性算法**排布。约束天生不可违、结果可复现", frozen: false),
         BenchVariant(id: BenchVariantID.reflowNaiveV1, capability: .reflow,
                      name: "本地 V1（旧现行 @0.22.x）", detail: "原顺序 + ReflowLayout；收工线不执法、铺到深夜（冻结快照）", frozen: true),
         BenchVariant(id: BenchVariantID.reflowLLMV1, capability: .reflow,
