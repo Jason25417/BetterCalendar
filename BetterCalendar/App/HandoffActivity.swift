@@ -67,6 +67,8 @@ enum BetterCalendarHandoff {
                 return "BetterCalendar - 正在做：\(activeTitle)"
             }
             return "BetterCalendar - 今天"
+        case .longterm:
+            return "BetterCalendar - 长期"
         case .journal:
             return "BetterCalendar - 日记"
         }

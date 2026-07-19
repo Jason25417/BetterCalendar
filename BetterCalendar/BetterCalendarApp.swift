@@ -81,6 +81,10 @@ struct BetterCalendarApp: App {
                 .tag(AppRouter.Tab.today)
                 .tabItem { Label("今天", systemImage: "play.circle") }
                 #endif
+                // #40 长期 tab（2026-07-15 S1 修订四 tab 终局）：第二时间尺度——跨日周期的排程态
+                LongTermView(store: container.longTasks, router: container.router)
+                    .tag(AppRouter.Tab.longterm)
+                    .tabItem { Label("长期", systemImage: "tray.full") }
                 JournalView(deps: container.journalDeps)
                     .tag(AppRouter.Tab.journal)
                     .tabItem { Label("日记", systemImage: "book") }
@@ -181,6 +185,8 @@ struct BetterCalendarApp: App {
             container.router.selectedTab = .schedule
         case .today:
             selectTodayTab()
+        case .longterm:   // #40：Handoff 带长期页则直达（跨端语义等价）
+            container.router.selectedTab = .longterm
         case .journal:
             container.router.selectedTab = .journal
             container.router.journalRequest = .now

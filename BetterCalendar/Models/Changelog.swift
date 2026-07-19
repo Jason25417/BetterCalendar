@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.54.0", date: "2026-07", changes: [
+            "新增「长期」标签页（第一批）：长期任务从排日程页的抽屉搬进自己的家——在途、先放下（随时捞回）、做成了三个分组，每件事一张卡看进度和投入",
+            "任务详情页上线：DDL、每周投入节奏、总量估算终于有地方改了（之前只能靠说话时带上）；一键排进今天、做成、先放下",
+            "修 TestFlight 审核被拒（Guideline 2.3）：iOS 安装最低版本被 beta 工具链误设为 27.0，导致审核设备装不上——已锁定回 iOS 26.0",
+            "检查点（分阶段管理）的数据地基已就位，下一批上界面：给任务分「第 1 章 / 第 2 章」这样的命名阶段，排进今天时自动带上下一阶段",
+        ]),
         ChangelogEntry(version: "0.53.0", date: "2026-07", changes: [
             "设置跨端同步：AI 模型、通知/提醒偏好、皮肤、隐私锁、主动建议强度、多端跟随开关等偏好现在通过 iCloud 在 Mac 和 iPhone 之间自动一致——一端改，另一端跟上",
             "修：「多端跟随专注（Beta）」开关此前只在 Mac 设置里出现，iPhone 上找不到——现在两端都有（它本就是跨端功能）",

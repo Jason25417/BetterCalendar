@@ -94,6 +94,80 @@ final class LongTaskStore {
         reload()
     }
 
+    // MARK: 长期页（#40 批1）：分组查询 / 捞回 / 三量编辑 / 检查点
+
+    /// 「先放下」的任务（长期页折叠区，捞回入口）——按放下时间近的在前。
+    func shelved() -> [LongTask] {
+        let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
+        return all.filter { $0.status == .shelved }.sorted { $0.modifiedAt > $1.modifiedAt }
+    }
+
+    /// 「做成了」的任务（长期页折叠区，正反馈存档）——按做成时间近的在前。
+    func doneItems() -> [LongTask] {
+        let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
+        return all.filter { $0.status == .done }.sorted { ($0.doneAt ?? $0.modifiedAt) > ($1.doneAt ?? $1.modifiedAt) }
+    }
+
+    /// 捞回（先放下 → 在途）：放下是体面出口，捞回同样零成本。
+    func unshelve(_ task: LongTask) {
+        task.status = .active
+        task.modifiedAt = .now
+        try? context.save()
+        reload()
+    }
+
+    /// 三量编辑（详情页；nil 语义=清空该量——与 add 的「nil=不改」不同，这里是显式表单）。
+    func update(_ task: LongTask, title: String? = nil, note: String? = nil,
+                deadline: Date??, cadenceMinutesPerWeek: Int??, totalMinutes: Int??, unitMinutes: Int??) {
+        if let t = title { task.title = t }
+        if let n = note { task.note = n }
+        if let d = deadline { task.deadline = d }
+        if let c = cadenceMinutesPerWeek { task.cadenceMinutesPerWeek = c }
+        if let tm = totalMinutes { task.totalMinutes = tm }
+        if let um = unitMinutes { task.unitMinutes = um }
+        task.modifiedAt = .now
+        try? context.save()
+        reload()
+    }
+
+    /// 加检查点（追加到末尾；空标题不加）。
+    @discardableResult
+    func addCheckpoint(to task: LongTask, title: String, estimatedMinutes: Int? = nil) -> LongTaskCheckpoint? {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        let order = (task.sortedCheckpoints.last?.order ?? -1) + 1
+        let cp = LongTaskCheckpoint(title: t, estimatedMinutes: estimatedMinutes, order: order)
+        cp.task = task
+        context.insert(cp)
+        task.modifiedAt = .now
+        try? context.save()
+        reload()
+        return cp
+    }
+
+    /// 勾/取消勾检查点（勾=doneAt 盖章；取消=清章，零惩罚可反悔）。
+    func toggleCheckpoint(_ cp: LongTaskCheckpoint) {
+        cp.doneAt = cp.doneAt == nil ? .now : nil
+        cp.task?.modifiedAt = .now
+        try? context.save()
+        reload()
+    }
+
+    func deleteCheckpoint(_ cp: LongTaskCheckpoint) {
+        cp.task?.modifiedAt = .now
+        context.delete(cp)
+        try? context.save()
+        reload()
+    }
+
+    /// 拖动重排：整组重写 order（0…n）。
+    func reorderCheckpoints(_ task: LongTask, ordered: [LongTaskCheckpoint]) {
+        for (i, cp) in ordered.enumerated() { cp.order = i }
+        task.modifiedAt = .now
+        try? context.save()
+        reload()
+    }
+
     // MARK: 累计投入（M10-3，正反馈口径：只算做了多少，不算剩多少）
 
     private func sessions() -> [ExecutionSession] {
@@ -124,6 +198,14 @@ final class LongTaskStore {
             .reduce(0, +)
     }
 
+    /// 最近 7 个逻辑日的投入分钟（长期页卡「本周已投入」；口径=滚动 7 天，只陈述不判达标）。
+    func investedThisWeek(for task: LongTask, now: Date = .now) -> Int {
+        (0..<7).reduce(0) { sum, offset in
+            let day = Calendar.current.date(byAdding: .day, value: -offset, to: now) ?? now
+            return sum + investedMinutes(for: task, on: day)
+        }
+    }
+
     /// 进度是否已达/超估算（有总量且投入≥总量）——UI 出"看起来做完了？"邀请、并淡掉分数。
     func looksComplete(for task: LongTask) -> Bool {
         guard let total = task.totalMinutes, total > 0 else { return false }
@@ -134,6 +216,15 @@ final class LongTaskStore {
     /// 超/达估算（投入≥总量）：淡掉"N/M 单元"分数、只显已投入——估算安静地不再重要，绝不显"你超了"。
     func progressText(for task: LongTask) -> String {
         let invested = investedMinutes(for: task)
+        // 清单型（#40）：设了检查点 → 进度按「已推进 m/n · 下一个」口径（计数不百分比，红线）
+        let cps = task.sortedCheckpoints
+        if !cps.isEmpty {
+            let done = cps.filter { $0.doneAt != nil }.count
+            var s = "已推进 \(done)/\(cps.count)"
+            if let next = task.nextCheckpoint { s += " · 下一个：\(next.title)" }
+            if invested > 0 { s += " · 已投入 \(ReviewSummaryText.hm(invested))" }
+            return s
+        }
         if let total = task.totalMinutes, total > 0, invested >= total {
             return "已投入 \(ReviewSummaryText.hm(invested))"
         }

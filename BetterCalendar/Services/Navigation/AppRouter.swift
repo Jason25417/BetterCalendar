@@ -10,14 +10,16 @@ import Observation
 
 @Observable
 final class AppRouter {
-    enum Tab: String, Hashable { case schedule, today, journal }   // today 仅 iOS（macOS 走 menu bar）
+    // today 仅 iOS（macOS 走 menu bar）；longterm=#40 周期态（2026-07-15 S1 修订四 tab 终局）
+    enum Tab: String, Hashable { case schedule, today, longterm, journal }
     var selectedTab: Tab = .schedule
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。
     var journalRequest: Date?
 
     /// 通知 deep-link 请求；HomeView 消费后清空。
     /// （.startToday 已退役 0.23 A；.review 已退役 0.28：晚通知直达日记页复盘头。）
-    enum ScheduleRequest: Equatable { case arrangeToday(String?), planTomorrow }
+    /// insertLongTask（#40 批1）：长期页「排进今天」→ 切排日程页智能插空档。
+    enum ScheduleRequest: Equatable { case arrangeToday(String?), planTomorrow, insertLongTask(UUID) }
     var scheduleRequest: ScheduleRequest?
 
     /// 收尾流程请求（0.38，#33）：随 journalRequest 一起置 true → 日记页进入分步收尾；消费后清空。

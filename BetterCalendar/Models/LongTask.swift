@@ -30,6 +30,10 @@ final class LongTask {
     var createdAt: Date = Date.now
     var doneAt: Date?
     var modifiedAt: Date = Date.now
+    /// 检查点（#40，2026-07-15 M10 管辖域修订后放开的「有限一层」）：只此一层、只有顺序、
+    /// 无各自 DDL（检查点无期限红线）。CloudKit 约束：关系 optional。空=沿用计数/时长型进度。
+    @Relationship(deleteRule: .cascade, inverse: \LongTaskCheckpoint.task)
+    var checkpoints: [LongTaskCheckpoint]? = []
 
     init(id: UUID = UUID(), title: String, note: String = "",
          deadline: Date? = nil, cadenceMinutesPerWeek: Int? = nil,
@@ -47,5 +51,41 @@ final class LongTask {
         self.createdAt = createdAt
         self.doneAt = doneAt
         self.modifiedAt = modifiedAt
+    }
+
+    /// 检查点按手排顺序（order）返回。
+    var sortedCheckpoints: [LongTaskCheckpoint] {
+        (checkpoints ?? []).sorted { ($0.order, $0.createdAt) < ($1.order, $1.createdAt) }
+    }
+    /// 「下一个」＝第一个未勾的检查点（排进今天的块副标题、L3 建议都用它）。
+    var nextCheckpoint: LongTaskCheckpoint? {
+        sortedCheckpoints.first { $0.doneAt == nil }
+    }
+}
+
+/// 检查点（#40）：命名阶段——「第 3 章 测度论」这种。铁律：无嵌套（下面没有子项）、
+/// 无期限（只有顺序，绝不带各自 DDL）、无百分比（进度口径=已推进 m/n 计数）。
+/// CloudKit 约束：非 optional 带默认值、关系 optional、无 unique。
+@Model
+final class LongTaskCheckpoint {
+    var id: UUID = UUID()
+    var title: String = ""
+    var note: String = ""
+    var estimatedMinutes: Int?      // 可选预估时长（排进今天时作块长参考）
+    var doneAt: Date?               // 勾选盖章（nil=未推进到）
+    var order: Int = 0              // 手排顺序（拖动重排写它）
+    var createdAt: Date = Date.now
+    var task: LongTask?
+
+    init(id: UUID = UUID(), title: String, note: String = "",
+         estimatedMinutes: Int? = nil, doneAt: Date? = nil,
+         order: Int = 0, createdAt: Date = .now) {
+        self.id = id
+        self.title = title
+        self.note = note
+        self.estimatedMinutes = estimatedMinutes
+        self.doneAt = doneAt
+        self.order = order
+        self.createdAt = createdAt
     }
 }

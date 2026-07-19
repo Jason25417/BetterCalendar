@@ -12,7 +12,8 @@ enum SharedModelContainer {
     static let shared: ModelContainer = {
         let schema = Schema([PlanDay.self, PlanBlock.self, CompletionLink.self,
                              ExecutionSession.self, AppSettings.self, JournalEntry.self,
-                             DayRecord.self, JournalPhoto.self, LongTask.self, DeviceLog.self])
+                             DayRecord.self, JournalPhoto.self, LongTask.self,
+                             LongTaskCheckpoint.self, DeviceLog.self])
         // M7：优先 iCloud 同步（需 iCloud + CloudKit capability + container）。
         // 配好 entitlement → 自动用 CloudKit 跨端同步；没配好 → 回退本地库，绝不崩。
         if let cloud = try? ModelContainer(

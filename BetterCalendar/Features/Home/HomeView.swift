@@ -568,6 +568,10 @@ struct HomeView: View {
                 case .planTomorrow:   // 0.38（#33）：收尾章后「顺手排一下明天」
                     model.targetDay = DayContext.logicalDay(offset: 1)
                     model.autoLoadOnAppear()
+                case .insertLongTask(let id):   // #40 批1：长期页「排进今天」→ 智能插空档
+                    if let t = deps.longTasks.items.first(where: { $0.id == id }) {
+                        model.smartInsertFromLongTask(t)
+                    }
                 }
                 deps.router.scheduleRequest = nil   // 消费掉
             }

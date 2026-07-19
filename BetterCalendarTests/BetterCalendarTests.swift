@@ -701,6 +701,47 @@ struct LogicTests {
         #expect(store.active().isEmpty)
     }
 
+    // #40 批1：检查点（有限一层）+ 三量编辑 + 捞回
+    @Test func longTaskCheckpointsAndTriadEditing() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let t = store.add(title: "量化学习")
+        // 检查点：追加保序、next=第一个未勾、toggle 可反悔
+        store.addCheckpoint(to: t, title: "第 1 章")
+        store.addCheckpoint(to: t, title: "第 2 章")
+        store.addCheckpoint(to: t, title: "第 3 章")
+        #expect(t.sortedCheckpoints.map(\.title) == ["第 1 章", "第 2 章", "第 3 章"])
+        #expect(t.nextCheckpoint?.title == "第 1 章")
+        store.toggleCheckpoint(t.sortedCheckpoints[0])
+        #expect(t.nextCheckpoint?.title == "第 2 章")
+        // 清单型进度口径：已推进 m/n + 下一个（计数不百分比）
+        let progress = store.progressText(for: t)
+        #expect(progress.contains("已推进 1/3"))
+        #expect(progress.contains("下一个：第 2 章"))
+        store.toggleCheckpoint(t.sortedCheckpoints[0])   // 反悔零惩罚
+        #expect(t.nextCheckpoint?.title == "第 1 章")
+        // 重排 + 删除
+        store.reorderCheckpoints(t, ordered: [t.sortedCheckpoints[2], t.sortedCheckpoints[0], t.sortedCheckpoints[1]])
+        #expect(t.sortedCheckpoints.first?.title == "第 3 章")
+        store.deleteCheckpoint(t.sortedCheckpoints[0])
+        #expect(t.sortedCheckpoints.count == 2)
+        // 三量编辑：设值与显式清空（double-optional 表单语义）
+        store.update(t, deadline: at(2026,8,1,0), cadenceMinutesPerWeek: 300, totalMinutes: 600, unitMinutes: nil)
+        #expect(t.deadline == at(2026,8,1,0))
+        #expect(t.cadenceMinutesPerWeek == 300)
+        store.update(t, deadline: .some(nil), cadenceMinutesPerWeek: .some(nil), totalMinutes: .some(nil), unitMinutes: .some(nil))
+        #expect(t.deadline == nil && t.cadenceMinutesPerWeek == nil && t.totalMinutes == nil)
+        // 先放下 → 捞回
+        store.shelve(t)
+        #expect(store.active().isEmpty && store.shelved().count == 1)
+        store.unshelve(t)
+        #expect(store.active().count == 1 && store.shelved().isEmpty)
+        // 做成 → 存档分组
+        store.complete(t)
+        #expect(store.doneItems().count == 1)
+    }
+
     @Test func longTaskProgressUnitsAndFraction() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
