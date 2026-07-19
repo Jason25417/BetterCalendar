@@ -720,43 +720,29 @@ struct HomeView: View {
         }
     }
 
-    // MARK: 「在途」（M10）：跨日任务池——收起一行，点开轻抽屉；不做管理界面，只做决策现场的入口
-
-    @State private var ongoingExpanded = false
-    @State private var newOngoingTitle = ""
+    // MARK: 「在途」（M10 → #40 批2 降级）：管理已搬进「长期」tab，这里只留**决策现场的入口**——
+    // 一行状态（几件 + 最近 DDL）+ 点击跳长期页。排日程页的主务是排今天，长期任务的管理不该在这里争地盘（U1）。
 
     @ViewBuilder private var ongoingSection: some View {
         let store = deps.longTasks
-        DisclosureGroup(isExpanded: $ongoingExpanded) {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.items) { task in
-                        ongoingRow(task, overdue: (task.deadline ?? .distantFuture) < .now)
-                    }
-                    HStack {
-                        TextField("手动加一件（主路径是直接在上面说）", text: $newOngoingTitle)
-                            .textFieldStyle(.roundedBorder)
-                        Button("加入") {
-                            let t = newOngoingTitle.trimmingCharacters(in: .whitespaces)
-                            guard !t.isEmpty else { return }
-                            store.add(title: t)
-                            newOngoingTitle = ""
-                        }
-                        .disabled(newOngoingTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    .font(.caption)
+        Button {
+            deps.router.selectedTab = .longterm
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "tray.full").foregroundStyle(theme.looseTint)
+                if store.items.isEmpty {
+                    Text("未来任务 · 空").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("未来任务 \(store.items.count) 件"
+                         + nearestDDLLabel(store.items)).font(.caption)
                 }
-                .padding(.top, 4)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "tray.full").foregroundStyle(theme.looseTint)
-                    if store.items.isEmpty {
-                        Text("未来任务 · 空").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("未来任务 \(store.items.count) 件"
-                             + nearestDDLLabel(store.items)).font(.caption)
-                    }
-                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
             }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("到「长期」页管理：分阶段、时间设定、捞回放下的")
     }
 
     private func nearestDDLLabel(_ items: [LongTask]) -> String {
@@ -764,70 +750,6 @@ struct HomeView: View {
         return " · 最近：\(next.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated)))"
     }
 
-    private func ongoingRow(_ task: LongTask, overdue: Bool) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(task.title).font(.callout)
-                    // 进度达/超估算 → 标题右边轻声邀请（问句、非断言；点一下才标完成）
-                    if deps.longTasks.looksComplete(for: task) {
-                        Button("看起来做完了？") { deps.longTasks.complete(task) }
-                            .font(.caption2).buttonStyle(.borderless).foregroundStyle(theme.positiveTint)
-                            .help("投入已达到你估的总量——做成了就点一下（不点也没关系）")
-                    }
-                }
-                HStack(spacing: 6) {
-                    if let d = task.deadline {
-                        Text((overdue ? "原定 " : "DDL ") + d.formatted(.dateTime.month(.defaultDigits).day()))
-                            .font(.caption2)
-                            .foregroundStyle(overdue ? .orange : .secondary)
-                    }
-                    if let c = task.cadenceMinutesPerWeek {
-                        Text("每周约 \(c / 60) 小时").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    // 进度（A，三红线）：单元优先/无单元退时长；永远锚定"已"
-                    let progress = deps.longTasks.progressText(for: task)
-                    if !progress.isEmpty {
-                        Text(progress).font(.caption2).foregroundStyle(theme.positiveTint)
-                    }
-                }
-                // 增长条（只在有总量时；绿色从零长起、无"还剩"）
-                if let f = deps.longTasks.progressFraction(for: task) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.quaternary).frame(height: 3)
-                            Capsule().fill(theme.positiveTint).frame(width: geo.size.width * f, height: 3)
-                        }
-                    }
-                    .frame(height: 3)
-                }
-            }
-            Spacer()
-            if overdue {
-                // 温和三选（D-d 拍板）：不留红色残留、放下也是体面出口
-                Button("排进今天") { model.smartInsertFromLongTask(task) }
-                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                Button("推一周") { deps.longTasks.pushDeadline(task) }
-                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                Button("先放下") { deps.longTasks.shelve(task) }
-                    .font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-            } else {
-                Menu {
-                    Button("帮我排进今天（智能插空档）") { model.smartInsertFromLongTask(task) }
-                    Button("做成了") { deps.longTasks.complete(task) }
-                    Button("推一周") { deps.longTasks.pushDeadline(task) }
-                    Button("先放下") { deps.longTasks.shelve(task) }
-                } label: {
-                    Image(systemName: "ellipsis.circle").font(.caption)
-                }
-                .menuStyle(.borderlessButton).fixedSize()
-            }
-        }
-        .padding(6)
-        .background((overdue ? Color.orange : theme.looseTint).opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .tint(.primary)   // 修正批 D：未来任务行内控件收中性（条文 2）
-    }
 
     // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改。
     // 用**逻辑日**（凌晨 0–4 点「今天」=心智上的今天=日历昨天），与 PlanStore 归桶/defaultTargetDay 一致。

@@ -645,11 +645,15 @@ final class HomeViewModel {
         let isToday = cal.isDate(targetDay, inSameDayAs: now())
         let notBefore = isToday ? max(now(), dayStart) : dayStart.addingTimeInterval(9 * 3600)   // 今天从现在/未来日从9点
         let windDown = dayStart.addingTimeInterval(TimeInterval(WorkHoursSettings.windDownHour) * 3600)
-        let dur = TimeInterval((task.unitMinutes ?? 60) * 60)   // 按单元定长，无单元退 60min
+        // #40 批2：有检查点则按「下一个」定块——时长优先取该检查点的预估，标题带上阶段名
+        //（执行时知道具体干什么）；用户在草稿里照常可改可删。
+        let next = task.nextCheckpoint
+        let dur = TimeInterval((next?.estimatedMinutes ?? task.unitMinutes ?? 60) * 60)
         let existing = blocks.map { (start: $0.start, end: $0.end) }
         let fit = Self.firstFreeStart(existing: existing, duration: dur, notBefore: notBefore, windDown: windDown)
         let start = fit ?? (blocks.map(\.end).max() ?? notBefore)
-        var eb = EditableBlock(title: task.title, start: start, end: start.addingTimeInterval(dur),
+        let blockTitle = next.map { "\(task.title) · \($0.title)" } ?? task.title
+        var eb = EditableBlock(title: blockTitle, start: start, end: start.addingTimeInterval(dur),
                                linkedTaskID: task.id)
         eb.fromPool = true
         blocks.append(eb)
@@ -657,7 +661,7 @@ final class HomeViewModel {
         committedCount = nil; markEditedIfLoaded()
         if draftSource == .empty { draftSource = .arranged }
         note = fit != nil
-            ? "已把「\(task.title)」排进空档（\(start.formatted(.dateTime.hour().minute()))）——微调后确认写入。"
+            ? "已把「\(blockTitle)」排进空档（\(start.formatted(.dateTime.hour().minute()))）——微调后确认写入。"
             : "今天收工前空档不够了，先接在末尾——你可以改期或挪到明天。"
         persistDraft()
     }

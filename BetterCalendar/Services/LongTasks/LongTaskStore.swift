@@ -244,9 +244,16 @@ final class LongTaskStore {
     func progressLine(now: Date = .now) -> String? {
         let parts: [String] = active().compactMap { task in
             let today = investedMinutes(for: task, on: now)
-            guard today > 0 else { return nil }
+            // #40 批2：今天勾了检查点的也上榜（哪怕投入未记到——推进本身就是事实）
+            let cpToday = task.sortedCheckpoints.filter {
+                $0.doneAt.map { DayContext.isSameLogicalDay($0, now) } ?? false
+            }
+            guard today > 0 || !cpToday.isEmpty else { return nil }
             let total = investedMinutes(for: task)
-            return "\(task.title) +\(ReviewSummaryText.hm(today))（累计 \(ReviewSummaryText.hm(total))）"
+            var s = task.title
+            if let last = cpToday.last { s += " 推进到「\(last.title)」" }   // 阶段名比时长更有推进感
+            if today > 0 { s += " +\(ReviewSummaryText.hm(today))（累计 \(ReviewSummaryText.hm(total))）" }
+            return s
         }
         return parts.isEmpty ? nil : "长线推进：" + parts.joined(separator: " · ")
     }

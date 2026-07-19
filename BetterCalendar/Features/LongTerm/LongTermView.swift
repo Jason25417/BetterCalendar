@@ -175,6 +175,8 @@ struct LongTaskDetailView: View {
     @State private var cadenceMinutes = 300
     @State private var hasTotal = false
     @State private var totalMinutes = 600
+    @State private var newCheckpoint = ""
+    @State private var celebratingCheckpoint: String?
 
     var body: some View {
         Form {
@@ -221,7 +223,70 @@ struct LongTaskDetailView: View {
                 }
             }
 
-            // 检查点清单（批 2 落地 UI；数据层已就位——先给一句预告避免「功能去哪了」）
+            // ===== 检查点（批 2）：命名阶段——只此一层、只有顺序、无各自 DDL（红线）=====
+            Section {
+                let cps = task.sortedCheckpoints
+                ForEach(cps) { cp in
+                    HStack(spacing: 10) {
+                        Button {
+                            let wasDone = cp.doneAt != nil
+                            store.toggleCheckpoint(cp)
+                            if !wasDone { celebrate(cp) }   // 勾上=轻庆祝（庆祝白名单）；取消勾不庆祝也不惩罚
+                        } label: {
+                            Image(systemName: cp.doneAt != nil ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(cp.doneAt != nil ? theme.positiveTint : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(cp.doneAt != nil ? "取消「\(cp.title)」的推进标记" : "标记推进到「\(cp.title)」")
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(cp.title)
+                                .foregroundStyle(cp.doneAt != nil ? .secondary : .primary)
+                            if let m = cp.estimatedMinutes {
+                                Text("约 \(ReviewSummaryText.hm(m))").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if cp.id == task.nextCheckpoint?.id {
+                            Text("下一个").font(.caption2).foregroundStyle(theme.accent)
+                        }
+                    }
+                }
+                .onDelete { idx in
+                    idx.map { cps[$0] }.forEach { store.deleteCheckpoint($0) }
+                }
+                .onMove { from, to in
+                    var arr = cps
+                    arr.move(fromOffsets: from, toOffset: to)
+                    store.reorderCheckpoints(task, ordered: arr)
+                }
+                HStack {
+                    TextField("加一个阶段（如「第 3 章 测度论」）", text: $newCheckpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { addCheckpoint() }
+                    Button("加入") { addCheckpoint() }
+                        .disabled(newCheckpoint.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if celebratingCheckpoint != nil {
+                    HStack(spacing: 8) {
+                        CelebrationBurst()
+                        Text("推进到「\(celebratingCheckpoint ?? "")」了").font(.callout)
+                    }
+                }
+            } header: {
+                Text("分阶段（可不分）")
+            } footer: {
+                Text("阶段只有顺序、不设各自的截止——排进今天时会自动带上「下一个」，做完点一下就好。")
+            }
+
+            // ===== 联动推算（批 2）：只填空缺的格子——用户设了的量以用户为准（Jason 2026-07-15 定）=====
+            if let line = projectionLine {
+                Section {
+                    Text(line).font(.callout).foregroundStyle(.secondary)
+                } header: {
+                    Text("按现在的设定")
+                }
+            }
+
             Section {
                 Button {
                     router.scheduleRequest = .insertLongTask(task.id)
@@ -247,6 +312,54 @@ struct LongTaskDetailView: View {
         .onChange(of: hasTotal) { _, _ in save() }
         .onChange(of: totalMinutes) { _, _ in save() }
         .onChange(of: note) { _, _ in save() }
+    }
+
+    private func addCheckpoint() {
+        store.addCheckpoint(to: task, title: newCheckpoint)
+        newCheckpoint = ""
+    }
+
+    /// 勾上检查点 → 轻庆祝（2.5s 自动收；庆祝白名单内，无音无通知）。
+    private func celebrate(_ cp: LongTaskCheckpoint) {
+        celebratingCheckpoint = cp.title
+        let name = cp.title
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if celebratingCheckpoint == name { celebratingCheckpoint = nil }
+        }
+    }
+
+    /// 联动推算（**只填空缺的格子**，Jason 2026-07-15 裁）：三量知二推一；
+    /// 用户显式设了的量以用户为准、不替他推。措辞红线：只说可行路径，绝不说差距（禁「落后/还差」）。
+    private var projectionLine: String? {
+        let invested = store.investedMinutes(for: task)
+        let remaining = max(0, (task.totalMinutes ?? 0) - invested)
+        // ① 有 DDL + 总量、缺配额 → 推「每周约需」
+        if let ddl = task.deadline, task.totalMinutes != nil, task.cadenceMinutesPerWeek == nil {
+            let weeks = max(0.2, ddl.timeIntervalSince(.now) / (7 * 24 * 3600))
+            guard remaining > 0 else { return "总量已经投够了——想收尾就点「做成了」。" }
+            let perWeek = Int(Double(remaining) / weeks)
+            return "想在 \(ddl.formatted(.dateTime.month().day())) 前完成，每周约需 \(ReviewSummaryText.hm(perWeek))。"
+        }
+        // ② 有配额 + 总量、缺 DDL → 推「大约何时完成」
+        if let cadence = task.cadenceMinutesPerWeek, cadence > 0, task.totalMinutes != nil, task.deadline == nil {
+            guard remaining > 0 else { return "总量已经投够了——想收尾就点「做成了」。" }
+            let weeks = Double(remaining) / Double(cadence)
+            let eta = Calendar.current.date(byAdding: .day, value: Int(weeks * 7), to: .now) ?? .now
+            return "按每周 \(ReviewSummaryText.hm(cadence)) 的节奏，大约到 \(eta.formatted(.dateTime.month().day())) 做完。"
+        }
+        // ③ 三量都设了 → 不推算（用户说了算），只在「按这个节奏会晚于 DDL」时给一条可行路径
+        if let ddl = task.deadline, let cadence = task.cadenceMinutesPerWeek, cadence > 0,
+           task.totalMinutes != nil, remaining > 0 {
+            let weeksNeeded = Double(remaining) / Double(cadence)
+            let eta = Calendar.current.date(byAdding: .day, value: Int(weeksNeeded * 7), to: .now) ?? .now
+            if eta > ddl {
+                let weeksLeft = max(0.2, ddl.timeIntervalSince(.now) / (7 * 24 * 3600))
+                let need = Int(Double(remaining) / weeksLeft)
+                return "按现在的节奏大约到 \(eta.formatted(.dateTime.month().day()))——想赶上 \(ddl.formatted(.dateTime.month().day())) 的话，每周约需 \(ReviewSummaryText.hm(need))；也可以改期或先放下。"
+            }
+        }
+        return nil
     }
 
     private func load() {

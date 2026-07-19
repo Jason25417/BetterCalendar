@@ -742,6 +742,21 @@ struct LogicTests {
         #expect(store.doneItems().count == 1)
     }
 
+    // #40 批2：复盘「长线推进」带阶段名（勾了检查点即使没记投入也上榜）
+    @Test func longTaskProgressLineIncludesCheckpointAdvance() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
+        let store = LongTaskStore(context: container.mainContext)
+        let t = store.add(title: "量化学习")
+        store.addCheckpoint(to: t, title: "第 1 章")
+        // 没有任何投入记录时：无推进=不上榜（不无中生有）
+        #expect(store.progressLine(now: .now) == nil)
+        // 勾上检查点（doneAt=现在）→ 上榜且带阶段名
+        store.toggleCheckpoint(t.sortedCheckpoints[0])
+        let line = store.progressLine(now: .now)
+        #expect(line?.contains("推进到「第 1 章」") == true)
+    }
+
     @Test func longTaskProgressUnitsAndFraction() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
