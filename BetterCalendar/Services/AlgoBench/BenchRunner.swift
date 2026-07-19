@@ -123,6 +123,7 @@ final class BenchRunner {
                     return BenchCaseResult(output: out, checks: checks)
                 }
                 out.blocks = decoded.blocks.compactMap { Self.scheduled(from: $0) }
+                out.longTasks = decoded.longTasks   // #40 批3：护航 checkpoints 解析
                 if decoded.dropped > 0 {
                     out.decodeOK = false
                     out.note = "\(decoded.dropped) 个损坏条目被丢弃（解码不完整）"
@@ -132,6 +133,7 @@ final class BenchRunner {
                 let plan = try await parser.parse(text, referenceDate: referenceDay, context: ParseContext())
                 out.latencyMS = Self.ms(since: t0)
                 out.blocks = plan.blocks.compactMap { Self.scheduled(from: $0) }
+                out.longTasks = plan.longTasks   // #40 批3
                 let dropped = plan.blocks.count - out.blocks.count
                 if dropped > 0 {
                     out.decodeOK = false

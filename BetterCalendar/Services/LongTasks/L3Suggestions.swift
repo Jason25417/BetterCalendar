@@ -22,6 +22,10 @@ struct L3Suggestion: Identifiable, Sendable {
 enum L3Phrases {
     static func deadline(_ t: String, _ d: String) -> String { "「\(t)」\(d)要交，今天留一小段给它就很稳。" }
     static func invite(_ t: String) -> String { "要不要给「\(t)」留 20 分钟？开个头往往就顺了。" }
+    /// 有阶段时的邀请（#40 批3）：说清下一步是什么——比笼统的任务名更容易起步（措辞照旧问句、不催）。
+    static func inviteWithCheckpoint(_ t: String, _ cp: String) -> String {
+        "「\(t)」的下一步是「\(cp)」——要不要留 20 分钟开个头？"
+    }
     static func shelve(_ t: String) -> String { "「\(t)」放了挺久了——要不要先放下？随时能在历史里捞回来，不是放弃。" }
 }
 
@@ -42,7 +46,9 @@ extension LongTaskStore {
                     out.append(L3Suggestion(id: t.id, text: L3Phrases.deadline(t.title, dtext), kind: .deadline))
                 }
             } else if t.cadenceMinutesPerWeek != nil, investedMinutes(for: t, on: now) == 0 {
-                out.append(L3Suggestion(id: t.id, text: L3Phrases.invite(t.title), kind: .invite))
+                let text = t.nextCheckpoint.map { L3Phrases.inviteWithCheckpoint(t.title, $0.title) }
+                    ?? L3Phrases.invite(t.title)
+                out.append(L3Suggestion(id: t.id, text: text, kind: .invite))
             }
             if out.count >= intensity { break }
         }

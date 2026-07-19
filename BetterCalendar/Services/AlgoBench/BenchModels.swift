@@ -83,6 +83,8 @@ nonisolated struct BenchExpectation: Codable, Sendable {
         case deferredNotContains   // title：候补里绝不能有它（★/晚间豁免）
         case deferredEmpty         // 候补必须为空
         case flagsUnchangedExcept  // title=逗号分隔的可改标题；其余块 固定/★/计时 必须与输入一致
+        case hasLongTask           // title：解析出的长期事项里必须有它（标题匹配）
+        case longTaskCheckpoints   // title + title2=逗号分隔的阶段名：该长期事项的阶段须**按序**等于它
     }
 
     var kind: Kind
@@ -115,6 +117,7 @@ nonisolated struct BenchCase: Codable, Identifiable, Sendable {
 struct BenchOutput: Sendable {
     var blocks: [ScheduledBlock] = []      // 排定/解析/微调结果
     var deferred: [ScheduledBlock] = []    // 候补（reflow v2 才有）
+    var longTasks: [ParsedLongTask] = []   // 解析出的长期事项（#40 批3：护航 checkpoints 解析）
     var note: String? = nil
     var raw: String? = nil                 // LLM 原始返回（可看）
     var promptSystem: String? = nil        // 实际发送的 system prompt（可看）

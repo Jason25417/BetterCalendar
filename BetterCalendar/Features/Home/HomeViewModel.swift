@@ -118,7 +118,8 @@ final class HomeViewModel {
             blocks: blocks.map(DraftSnapshot.Block.init(from:)),
             pendingLongTasks: pendingLongTasks.map {
                 DraftSnapshot.PendingLongTask(title: $0.title, deadline: $0.deadline,
-                                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+                                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek,
+                                              checkpoints: $0.checkpoints)
             },
             savedAt: .now,
             dirty: hasUnsavedChanges), day: targetDay)
@@ -143,7 +144,8 @@ final class HomeViewModel {
         draftSource = DraftSource(rawValue: snap.draftSourceRaw) ?? .arranged
         pendingLongTasks = snap.pendingLongTasks.map {
             ParsedLongTask(title: $0.title, deadline: $0.deadline,
-                           cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+                           cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek,
+                           checkpoints: $0.checkpoints)
         }
         hasUnsavedChanges = true
         pendingRestore = nil
@@ -252,7 +254,8 @@ final class HomeViewModel {
             // 在途摘要给排程大脑（M10-2：LLM 可建议 0–2 块，标来源、删除零成本）
             let pool = (longTaskStore?.active() ?? []).map {
                 LongTaskBrief(title: $0.title, deadline: $0.deadline,
-                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
+                              cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek,
+                              nextCheckpoint: $0.nextCheckpoint?.title)   // #40 批3：块名可带阶段
             }
             // 现实上下文（0.13.1）：目标日已有日程 + 到期提醒 → 排程避开/纳入考虑
             async let busy = calendarStore.existingEvents(on: targetDay)
@@ -426,9 +429,16 @@ final class HomeViewModel {
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
             for p in pendingLongTasks {
-                longTaskStore?.add(title: p.title, deadline: p.deadline,
-                                   cadenceMinutesPerWeek: p.cadenceMinutesPerWeek,
-                                   totalMinutes: p.totalMinutes, unitMinutes: p.unitMinutes)
+                let task = longTaskStore?.add(title: p.title, deadline: p.deadline,
+                                              cadenceMinutesPerWeek: p.cadenceMinutesPerWeek,
+                                              totalMinutes: p.totalMinutes, unitMinutes: p.unitMinutes)
+                // #40 批3：解析出的阶段落库（幂等——已有同名阶段不重复加，重复确认/两端并发都安全）
+                if let task, !p.checkpoints.isEmpty {
+                    let existing = Set(task.sortedCheckpoints.map(\.title))
+                    for name in p.checkpoints where !existing.contains(name) {
+                        longTaskStore?.addCheckpoint(to: task, title: name)
+                    }
+                }
             }
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）

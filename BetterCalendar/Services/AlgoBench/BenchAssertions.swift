@@ -187,6 +187,23 @@ enum BenchAssertions {
             }
             return check(wrong.isEmpty,
                          wrong.isEmpty ? "未提到的标志全部保持" : "被擅翻：\(wrong.joined(separator: "、"))")
+
+        // #40 批3：长期事项维度（护航 checkpoints 解析——改 prompt 必须有回归用例）
+        case .hasLongTask:
+            let hit = output.longTasks.filter { titleMatch(e.title ?? "", $0.title) }
+            return check(!hit.isEmpty,
+                         hit.isEmpty ? "长期事项里没找到「\(e.title ?? "")」（实得：\(output.longTasks.map(\.title).joined(separator: "、"))）"
+                                     : "找到「\(hit[0].title)」")
+
+        case .longTaskCheckpoints:
+            guard let task = output.longTasks.first(where: { titleMatch(e.title ?? "", $0.title) }) else {
+                return check(false, "长期事项里没找到「\(e.title ?? "")」")
+            }
+            let want = (e.title2 ?? "").split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+            let got = task.checkpoints
+            let ok = got.count == want.count && zip(got, want).allSatisfy { titleMatch($1, $0) }
+            return check(ok, ok ? "阶段按序命中：\(got.joined(separator: "→"))"
+                               : "阶段期望 [\(want.joined(separator: "→"))]，实得 [\(got.joined(separator: "→"))]")
         }
     }
 

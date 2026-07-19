@@ -757,6 +757,36 @@ struct LogicTests {
         #expect(line?.contains("推进到「第 1 章」") == true)
     }
 
+    // #40 批3：解析器产阶段（JSON 解码 + 脏数据防御）
+    @Test func parserDecodesLongTaskCheckpoints() throws {
+        let json = """
+        {"loose":false,"blocks":[],"longTasks":[
+          {"title":"准备 GRE","deadline":"2026-10-08 09:00","cadenceMinutesPerWeek":300,
+           "totalMinutes":null,"unitMinutes":null,"checkpoints":["背单词"," 做填空 ","","练写作"]},
+          {"title":"读测度论","deadline":null,"cadenceMinutesPerWeek":180,
+           "totalMinutes":null,"unitMinutes":null,"checkpoints":[]}]}
+        """
+        let d = try #require(ClaudeScheduleParser.decodePlan(json))
+        #expect(d.longTasks.count == 2)
+        // 去空、去首尾空白、保序
+        #expect(d.longTasks[0].checkpoints == ["背单词", "做填空", "练写作"])
+        #expect(d.longTasks[0].cadenceMinutesPerWeek == 300)
+        // 没提阶段 → 空（不自创）
+        #expect(d.longTasks[1].checkpoints.isEmpty)
+    }
+
+    @Test func parserIgnoresMalformedCheckpoints() throws {
+        // 模型抽风给了对象数组 → 整体忽略（宁缺勿脏），不崩、不产垃圾阶段
+        let json = """
+        {"loose":false,"blocks":[],"longTasks":[
+          {"title":"写论文","deadline":null,"cadenceMinutesPerWeek":null,
+           "totalMinutes":null,"unitMinutes":null,"checkpoints":[{"name":"第一章"},123]}]}
+        """
+        let d = try #require(ClaudeScheduleParser.decodePlan(json))
+        #expect(d.longTasks.count == 1)
+        #expect(d.longTasks[0].checkpoints.isEmpty)
+    }
+
     @Test func longTaskProgressUnitsAndFraction() throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)

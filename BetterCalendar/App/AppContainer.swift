@@ -146,6 +146,7 @@ final class AppContainer {
     var journalDeps: JournalDeps {
         JournalDeps(journalStore: journalStore, milestones: milestones, photoStore: photoStore,
                     reflectionContext: reflectionContext, router: router,
-                    makeReviewModel: { self.reviewModel })
+                    makeReviewModel: { self.reviewModel },
+                    longTasks: longTasks)   // #40 批3：收尾轻问「推进到哪了？」
     }
 }

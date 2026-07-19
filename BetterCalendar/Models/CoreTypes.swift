@@ -96,6 +96,9 @@ struct ParsedLongTask: Sendable, Identifiable {
     var cadenceMinutesPerWeek: Int?
     var totalMinutes: Int?
     var unitMinutes: Int?
+    /// 命名阶段（#40 批3）：用户说「分三个阶段：A、B、C」时解析出来，按给出顺序。
+    /// 红线：只是名字的有序列表——无嵌套、无各自 DDL（检查点无期限）。没说阶段就空。
+    var checkpoints: [String] = []
 }
 
 struct ParsedPlan: Sendable {
@@ -149,6 +152,8 @@ struct LongTaskBrief: Sendable {
     var title: String
     var deadline: Date?
     var cadenceMinutesPerWeek: Int?
+    /// 下一个未完成阶段名（#40 批3）：排程大脑据此把块名写成「任务 · 阶段」——执行时知道具体干什么。
+    var nextCheckpoint: String?
 }
 
 /// 排程大脑输出：排好序的块 + 温和措辞（正反馈/前向 nudge）+（reflow 时）候补。

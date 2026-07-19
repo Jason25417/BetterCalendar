@@ -131,8 +131,10 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
             let blocks = (final.blocks ?? []).compactMap { Self.parsed(from: $0) }
             let longTasks = (final.longTasks ?? []).compactMap { lt -> ParsedLongTask? in
                 guard let t = lt.title, !t.isEmpty else { return nil }
+                let cps = (lt.checkpoints ?? []).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
                 return ParsedLongTask(title: t, deadline: nil, cadenceMinutesPerWeek: nil,
-                                      totalMinutes: nil, unitMinutes: nil)
+                                      totalMinutes: nil, unitMinutes: nil, checkpoints: cps)
             }
             let loose = final.loose ?? false
             guard !blocks.isEmpty || !longTasks.isEmpty || loose else {
@@ -190,7 +192,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         - 用户安排的时间范围碰到午餐（约11:30–13:30）/晚餐（约17:30–19:30）时段、而没提那顿饭时，默认补一个「午饭」/「晚饭」锚点块（30–60 分钟，isAnchor=true、timingStyle="none"）；明说不吃则不加，早饭夜宵不补。
         - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
         - priority 默认 normal，要紧/紧急用 important。
-        - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks。
+        - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks；用户明确列出阶段（"分三个阶段：A、B、C"）时把阶段名按序放进该任务的 checkpoints，只给名字、不给日期、不自创，没提就空。
         - 用户明说"想松散/放松/摆烂"才 loose=true。
         """
     }
@@ -232,4 +234,7 @@ struct FMBlock {
 struct FMLongTask {
     @Guide(description: "远期/长线任务的标题")
     var title: String
+    /// #40 批3：端侧只取用户**明确列出**的阶段名（不自创、不给日期）；没提就空数组。
+    @Guide(description: "用户明确列出的阶段名，按用户给的顺序；没提阶段就空数组")
+    var checkpoints: [String]
 }

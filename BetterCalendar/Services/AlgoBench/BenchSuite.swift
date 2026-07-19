@@ -140,6 +140,20 @@ final class BenchSuiteStore {
                     .init(kind: .noOverlaps),
                   ]),
 
+        // #40 批3 护航：长期事项的阶段解析（改了 longTasks prompt/schema 必须有回归用例）
+        BenchCase(id: "P9", name: "长期事项分阶段", capability: .parse, dimension: "服从性",
+                  text: "准备 GRE，10月8号考，每周大概5小时，分三个阶段：背单词、做填空、练写作",
+                  expects: [
+                    .init(kind: .hasLongTask, title: "GRE"),
+                    .init(kind: .longTaskCheckpoints, title: "GRE", title2: "背单词,做填空,练写作"),
+                  ]),
+        BenchCase(id: "P10", name: "没提阶段就不自创", capability: .parse, dimension: "服从性",
+                  text: "这学期要读完《测度论》，每周三小时",
+                  expects: [
+                    .init(kind: .hasLongTask, title: "测度论"),
+                    .init(kind: .longTaskCheckpoints, title: "测度论", title2: ""),   // 期望空=不许自创阶段
+                  ]),
+
         // ---------- 微调（输入草稿：写作 09:00×2h / 会议 11:30×1h 固定 / 阅读 14:00×1h）----------
         BenchCase(id: "R1", name: "只改提到的块", capability: .refine, dimension: "服从性",
                   command: "把阅读挪到16点",

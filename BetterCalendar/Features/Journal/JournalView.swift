@@ -37,6 +37,7 @@ struct JournalDeps {
     let reflectionContext: ReflectionContextProvider
     let router: AppRouter
     let makeReviewModel: () -> ReviewViewModel   // 复盘头 VM 工厂（每次进视图新建，同原 container.reviewModel）
+    var longTasks: LongTaskStore? = nil          // #40 批3：收尾轻问「推进到哪了？」；nil=不问（旧测试兼容）
 }
 
 struct JournalView: View {
@@ -292,6 +293,40 @@ struct JournalView: View {
         BehaviorLog.record("自动日记", "生成 \(text.count) 字")
     }
 
+    /// 收尾轻问（#40 批3）：今天动过的长期任务里，若有未勾的下一阶段 → 一行轻问「推进到哪了？」。
+    /// 红线：可跳过、跳过零后果、不弹窗、不催（问句不断言）；没动过长期任务的日子完全不出现。
+    @ViewBuilder private var checkpointAsk: some View {
+        if let store = deps.longTasks {
+            let touched = store.items.filter {
+                store.investedMinutes(for: $0, on: .now) > 0 && $0.nextCheckpoint != nil
+            }
+            if !touched.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("今天推进到哪了？（不点也行）").font(.caption).foregroundStyle(.secondary)
+                    ForEach(touched) { task in
+                        if let next = task.nextCheckpoint {
+                            Button {
+                                store.toggleCheckpoint(next)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "circle").foregroundStyle(.secondary)
+                                    Text("「\(task.title)」做到「\(next.title)」了")
+                                        .font(.callout).foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(theme.surface, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary.opacity(0.4)))
+            }
+        }
+    }
+
     @ViewBuilder private var todayCard: some View {
         if let e = today {
             VStack(alignment: .leading, spacing: 8) {
@@ -309,6 +344,7 @@ struct JournalView: View {
                 }
                 JournalEditor(entry: e, model: model, photoStore: deps.photoStore)
                 // 「给明天」入口与小知识提示已退役（批次6，Jason 2026-07-14：没什么用）——管道休眠
+                if wrapUpStage == .writing { checkpointAsk }
                 if wrapUpStage == .writing {
                     // 时刻 B 的唯一主按钮：完成今日 → 盖章+庆祝（时刻 C）
                     Button { sealWrapUp() } label: {

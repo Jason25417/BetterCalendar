@@ -45,6 +45,8 @@ nonisolated struct DraftSnapshot: Codable {
         var title: String
         var deadline: Date?
         var cadenceMinutesPerWeek: Int?
+        /// #40 批3：解析出的阶段随草稿一起存——重启恢复草稿后阶段不丢。老快照无此键=解码成 []。
+        var checkpoints: [String] = []
     }
 
     var inputText: String = ""

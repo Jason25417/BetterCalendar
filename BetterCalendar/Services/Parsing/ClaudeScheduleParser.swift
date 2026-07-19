@@ -49,11 +49,16 @@ struct ClaudeScheduleParser: ScheduleParsing {
             let cadence = (t["cadenceMinutesPerWeek"] as? Int)
                 ?? (t["cadenceMinutesPerWeek"] as? String).flatMap(Int.init)
             func intOf(_ k: String) -> Int? { (t[k] as? Int) ?? (t[k] as? String).flatMap(Int.init) }
+            // 阶段（#40 批3）：字符串数组，去空去空白；模型抽风给非字符串则整体忽略（宁缺勿脏）
+            let cps = ((t["checkpoints"] as? [Any]) ?? []).compactMap { $0 as? String }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
             longTasks.append(ParsedLongTask(title: title,
                                             deadline: DateParsing.parse(t["deadline"] as? String),
                                             cadenceMinutesPerWeek: cadence,
                                             totalMinutes: intOf("totalMinutes"),
-                                            unitMinutes: intOf("unitMinutes")))
+                                            unitMinutes: intOf("unitMinutes"),
+                                            checkpoints: cps))
         }
         return (blocks, longTasks, loose, dropped)
     }
@@ -153,7 +158,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     现在真实时间与**目标日**见下方【今日上下文】——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。晚间语境里的「12点/12点半」指**午夜**（次日 00:00/00:30），不是中午——如「晚上10点到12点半写论文」=目标日 22:00 到次日 00:30；用户给了起止时刻就**照写**，别自行截短或平均切分。用户话里的「明天/明早/明晚」**同样指目标日本身**（排哪天已由目标日决定；凌晨排「明天」尤其如此=睡醒后的那一天）——绝不因「明天」二字把日期再 +1。
     目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
     只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
-    {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null}]}
+    {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null,"checkpoints":[]}]}
     start/end 用 24 小时制本地时间。
 
     【块规则】
@@ -168,8 +173,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
 
     【松散 / 长期】
     - loose：**仅当用户明说"想松散/放松/休息一下/摆烂"这类整段放松意愿**时设 true（解析他明说的意愿，不替他判断）；普通排程或只提某段小憩=false。loose=true 仍照常解析块。
-    - longTasks：截止在目标日之后的远期任务（"下周五交论文"）或多天长线（"这学期学完 X""每周健身三次"）放 longTasks、**不放 blocks**——除非用户明说今天也做一段（则两边都出）。cadenceMinutesPerWeek=每周投入分钟（"每天 1h"≈420），没提就 null；说了总量（"共9单元每40min"→total=360,unit=40；"共150小时"→total=9000,unit=null）就填，否则 null。没有长期事项 longTasks 给 []。
-    - 委托：用户说"今天做X小时长期任务/干哪个看你"这类委托，从【今日上下文】的〔池〕按时长挑合适的生成**具体 blocks**（块名=池中任务名），并把整件事也放 longTasks。
+    - longTasks：截止在目标日之后的远期任务（"下周五交论文"）或多天长线（"这学期学完 X""每周健身三次"）放 longTasks、**不放 blocks**——除非用户明说今天也做一段（则两边都出）。cadenceMinutesPerWeek=每周投入分钟（"每天 1h"≈420），没提就 null；说了总量（"共9单元每40min"→total=360,unit=40；"共150小时"→total=9000,unit=null）就填，否则 null。没有长期事项 longTasks 给 []。checkpoints=用户**明确列出的阶段名**（"分三个阶段：读文献、写初稿、改"→["读文献","写初稿","改"]；"先看完第1章再第2章"→["第 1 章","第 2 章"]），按用户给的顺序、原话为准不自创不扩写；**只给名字**，绝不给各自的日期；没提阶段就给 []。
+    - 委托：用户说"今天做X小时长期任务/干哪个看你"这类委托，从【今日上下文】的〔池〕按时长挑合适的生成**具体 blocks**（块名=池中任务名；该任务若标了"下一阶段"，块名写"任务名 · 阶段名"），并把整件事也放 longTasks。
     """)
 
     /// 动态上下文段（每次请求都变，跟在静态前缀后面的第二个 system 块）。
@@ -192,6 +197,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
             var parts = [t.title]
             if let d = t.deadline { parts.append("DDL " + { let f = DateFormatter(); f.dateFormat = "MM-dd"; return f.string(from: d) }()) }
             if let c = t.cadenceMinutesPerWeek { parts.append("每周约\(c)分钟") }
+            if let cp = t.nextCheckpoint { parts.append("下一阶段：\(cp)") }   // #40 批3
             return "「" + parts.joined(separator: "·") + "」"
         }.joined(separator: "、")
         var contextSection = ""
@@ -256,13 +262,15 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 "type": "array",
                 "items": [
                     "type": "object", "additionalProperties": false,
-                    "required": ["title", "deadline", "cadenceMinutesPerWeek", "totalMinutes", "unitMinutes"],
+                    "required": ["title", "deadline", "cadenceMinutesPerWeek", "totalMinutes", "unitMinutes",
+                                 "checkpoints"],
                     "properties": [
                         "title": ["type": "string"],
                         "deadline": ["type": ["string", "null"]],
                         "cadenceMinutesPerWeek": ["type": ["integer", "null"]],
                         "totalMinutes": ["type": ["integer", "null"]],
                         "unitMinutes": ["type": ["integer", "null"]],
+                        "checkpoints": ["type": "array", "items": ["type": "string"]],
                     ],
                 ],
             ],

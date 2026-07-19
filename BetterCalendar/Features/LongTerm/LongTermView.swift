@@ -14,10 +14,17 @@ struct LongTermView: View {
     @Environment(\.appTheme) private var theme
     let store: LongTaskStore
     let router: AppRouter
+    /// 解析器（#40 批3）：长期任务的**主入口=说一句**（同排日程 tab 的逻辑）；nil=只留手动兜底。
+    var parser: ScheduleParsing?
 
     @State private var newTitle = ""
     @State private var showShelved = false
     @State private var showDone = false
+    // LLM 输入口状态：说 → 出草稿 → 用户逐条裁决 → 收下（工作台保留完整调整权，Jason 2026-07-15 定）
+    @State private var sayText = ""
+    @State private var parsing = false
+    @State private var draft: [ParsedLongTask] = []
+    @State private var parseError: String?
 
     var body: some View {
         NavigationStack {
@@ -37,16 +44,71 @@ struct LongTermView: View {
                             taskCard(task)
                         }
                     }
-                    HStack {
-                        TextField("加一件长期的事…", text: $newTitle)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit { addNew() }
-                        Button("加入") { addNew() }
-                            .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    .padding(.vertical, 2)
                 } header: {
                     Text("在途 \(store.items.isEmpty ? "" : "\(store.items.count) 件")")
+                }
+
+                // ===== 说一句（#40 批3）：主入口=LLM 解析，工作台保留完整裁决权 =====
+                Section {
+                    if draft.isEmpty {
+                        TextField("说说这件长期的事…例：准备 GRE，10 月 8 号考，每周约 5 小时，分三个阶段：词汇、填空、写作",
+                                  text: $sayText, axis: .vertical)
+                            .lineLimit(1...4)
+                            .textFieldStyle(.roundedBorder)
+                        HStack {
+                            if parsing { ProgressView().controlSize(.small); Text("正在理解…").font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                            Button { Task { await parseSaid() } } label: {
+                                Label("理解一下", systemImage: "wand.and.stars")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(parsing || sayText.trimmingCharacters(in: .whitespaces).isEmpty || parser == nil)
+                        }
+                        if let parseError {
+                            Text(parseError).font(.caption).foregroundStyle(.orange)
+                        }
+                        DisclosureGroup("或者直接手打一件") {
+                            HStack {
+                                TextField("加一件长期的事…", text: $newTitle)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit { addNew() }
+                                Button("加入") { addNew() }
+                                    .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+                            }
+                        }
+                        .font(.caption)
+                    } else {
+                        // 草稿：每条可删；确认前不落库（代理而不代权——写入永远是用户的动作）
+                        Text("理解成这样，对吗？").font(.headline)
+                        ForEach(draft) { d in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(d.title).font(.callout.weight(.medium))
+                                    Spacer()
+                                    Button {
+                                        draft.removeAll { $0.id == d.id }
+                                    } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("不要「\(d.title)」这条")
+                                }
+                                Text(draftSummary(d)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        HStack {
+                            Button("重说") { draft = []; parseError = nil }
+                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                commitDraft()
+                            } label: { Label("收下（\(draft.count) 件）", systemImage: "checkmark.circle") }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        Text("收下之后还能改：进详情页调时间、加减阶段。")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("加一件")
                 }
 
                 // ===== 先放下（捞回入口） =====
@@ -102,7 +164,11 @@ struct LongTermView: View {
                     Text("这件事已不在途").foregroundStyle(.secondary)
                 }
             }
-            .onAppear { store.reload() }
+            .onAppear {
+                store.reload()
+                // 埋点（调研）：长期页访问频率——按天去重，用于观察第二尺度的真实使用强度
+                BehaviorLog.recordOncePerDay(key: "长期页", "长期页", "打开（在途 \(store.items.count) 件）")
+            }
         }
     }
 
@@ -111,6 +177,56 @@ struct LongTermView: View {
         guard !t.isEmpty else { return }
         store.add(title: t)
         newTitle = ""
+    }
+
+    /// 说一句 → 解析成长期任务草稿（#40 批3）。复用排日程同一条解析链：
+    /// 长期语义天然落 `longTasks`（prompt 既有规则），这里只取 longTasks、丢弃当日块。
+    private func parseSaid() async {
+        guard let parser else { return }
+        let text = sayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        parsing = true; parseError = nil
+        defer { parsing = false }
+        do {
+            let plan = try await parser.parse(text, referenceDate: .now, context: ParseContext())
+            if plan.longTasks.isEmpty {
+                // 一件长期事项都没识别出来 → 兜底成一条纯标题（不让用户白说一遍）
+                parseError = "没太听出时间设定——先按一件事收着，你可以在详情页补。"
+                draft = [ParsedLongTask(title: text)]
+            } else {
+                draft = plan.longTasks
+            }
+        } catch {
+            parseError = "没能理解（\(error.localizedDescription)）——可以再说一遍，或用下面的手打入口。"
+            DevLog.shared.warn("长期", "解析失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 草稿收下：逐条入池（幂等）+ 阶段落库；写入是用户的动作（代理而不代权）。
+    private func commitDraft() {
+        for d in draft {
+            let task = store.add(title: d.title, deadline: d.deadline,
+                                 cadenceMinutesPerWeek: d.cadenceMinutesPerWeek,
+                                 totalMinutes: d.totalMinutes, unitMinutes: d.unitMinutes)
+            let existing = Set(task.sortedCheckpoints.map(\.title))
+            for name in d.checkpoints where !existing.contains(name) {
+                store.addCheckpoint(to: task, title: name)
+            }
+        }
+        DevLog.shared.info("长期", "说一句入池 \(draft.count) 件")
+        BehaviorLog.record("长期页", "说一句收下 \(draft.count) 件"
+                           + (draft.contains { !$0.checkpoints.isEmpty } ? "（含阶段）" : ""))
+        draft = []; sayText = ""; parseError = nil
+    }
+
+    /// 草稿摘要行：把解析到的三量与阶段摊开给用户核对。
+    private func draftSummary(_ d: ParsedLongTask) -> String {
+        var parts: [String] = []
+        if let dl = d.deadline { parts.append("DDL \(dl.formatted(.dateTime.month().day()))") }
+        if let c = d.cadenceMinutesPerWeek { parts.append("每周约 \(ReviewSummaryText.hm(c))") }
+        if let t = d.totalMinutes { parts.append("共约 \(ReviewSummaryText.hm(t))") }
+        if !d.checkpoints.isEmpty { parts.append("阶段：" + d.checkpoints.joined(separator: " → ")) }
+        return parts.isEmpty ? "没有时间设定（之后可在详情页补）" : parts.joined(separator: " · ")
     }
 
     // 任务卡：标题 + 进度（三模式各自口径）+ 增长条 + DDL/配额（中性陈述）
@@ -231,7 +347,10 @@ struct LongTaskDetailView: View {
                         Button {
                             let wasDone = cp.doneAt != nil
                             store.toggleCheckpoint(cp)
-                            if !wasDone { celebrate(cp) }   // 勾上=轻庆祝（庆祝白名单）；取消勾不庆祝也不惩罚
+                            if !wasDone {
+                                celebrate(cp)   // 勾上=轻庆祝（庆祝白名单）；取消勾不庆祝也不惩罚
+                                BehaviorLog.record("长期页", "勾选阶段")
+                            }
                         } label: {
                             Image(systemName: cp.doneAt != nil ? "checkmark.circle.fill" : "circle")
                                 .foregroundStyle(cp.doneAt != nil ? theme.positiveTint : .secondary)
