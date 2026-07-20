@@ -187,11 +187,13 @@ struct HomeView: View {
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                         } else {
-                            Button("排进今天") {
+                            Button {
                                 BehaviorLog.record("L3建议", "点「排进今天」")
                                 if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
                                     model.smartInsertFromLongTask(t)
                                 }
+                            } label: {
+                                Label("排进今天", systemImage: "calendar.badge.plus")   // 审计 #13：同动作同文案同图标（U7）
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
                         }
                         Button {

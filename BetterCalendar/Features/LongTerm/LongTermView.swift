@@ -2,10 +2,13 @@
 //  LongTermView.swift
 //  BetterCalendar
 //
-//  长期 tab（#40 批1，2026-07-15）：第二时间尺度的家——跨日周期的排程态。
-//  U1 主务=看长期任务的健康 + 把下一步排进今天。三分组：在途（展开）/先放下（折叠，捞回）/做成了（折叠，存档）。
-//  红线（M10 管辖域修订后仍全周期生效）：无逾期红标/无百分比/无剩余量导向；投入只显 burnup。
-//  批 2 待接：检查点清单 UI/联动推算/收尾轻问；批 3：LLM 解析入口（主入口=说一句，工作台=本页）。
+//  长期 tab（#40 批1–3，2026-07-15；审计修正 2026-07-20）：第二时间尺度的家——跨日周期的任务管理页。
+//  U1 主务=**说一句把长期的事收进来**（单一主务，2026-07-20 Jason 裁 D1-B）：本页是跨周期任务的
+//  录入与整理现场；「排进今天」是次要动作（U2 论证：把任务排进今天的高频现场在排日程页，
+//  那侧经「未来任务」行随时可达本页——本页的小音量 bordered small 与其频率相称）。
+//  三分组：未来任务（展开）/先放下（折叠，捞回）/做成了（折叠，存档）。
+//  红线（M10 管辖域修订后仍全周期生效）：无逾期红标/无百分比/无剩余量导向；投入只显 burnup；
+//  主列表永不显差距（配额住详情页，不与投入并排——审计 #15，羞辱铁律）。
 //
 
 import SwiftUI
@@ -19,7 +22,6 @@ struct LongTermView: View {
     /// 说一句的「改现有」能力（2026-07-20 Jason 要求）：同一个框，模型判断是新增还是改现有；nil=只能新增。
     var refiner: LongTaskRefining?
 
-    @State private var newTitle = ""
     @State private var showShelved = false
     @State private var showDone = false
     // LLM 输入口状态：说 → 出草稿 → 用户逐条裁决 → 收下（工作台保留完整调整权，Jason 2026-07-15 定）
@@ -37,7 +39,8 @@ struct LongTermView: View {
                     if store.items.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("长期的事放这里").font(.headline)
-                            Text("考试、论文、想练的技能——不占今天的格子，但一直有人记得。在排日程页说一句「我要准备 GRE，10 月考」就会自动进来；也可以在下面直接添加。")
+                            // 审计 #16：空状态指向本页主入口（下方「说一句」），不再把人引去别的页
+                            Text("考试、论文、想练的技能——不占今天的格子，但一直有人记得。在下面说一句「我要准备 GRE，10 月 8 号考」就会进来；在排日程页顺口说也一样。")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 6)
@@ -48,49 +51,56 @@ struct LongTermView: View {
                         }
                     }
                 } header: {
-                    Text("在途 \(store.items.isEmpty ? "" : "\(store.items.count) 件")")
+                    // 审计 #17：术语统一「未来任务」（v0.16.2 已裁气质词「在途」不进 UI）
+                    Text("未来任务 \(store.items.isEmpty ? "" : "\(store.items.count) 件")")
                 }
 
                 // ===== 说一句（#40 批3）：主入口=LLM 解析，工作台保留完整裁决权 =====
                 Section {
                     if draft.isEmpty && draftUpdates.isEmpty {
-                        TextField(store.items.isEmpty
-                                  ? "说说这件长期的事…例：准备 GRE，10 月 8 号考，每周约 5 小时，分三个阶段：词汇、填空、写作"
-                                  : "说一句——加新的，或改现有的。例：GRE 改到 11 月考 · 给论文加一个阶段：改格式",
-                                  text: $sayText, axis: .vertical)
-                            .lineLimit(1...4)
-                            .textFieldStyle(.roundedBorder)
-                        HStack {
-                            if parsing { ProgressView().controlSize(.small); Text("正在理解…").font(.caption).foregroundStyle(.secondary) }
-                            Spacer()
+                        // 审计 #3：与排日程页同语义的「对 AI 说话」口 → 同款 surface 纸面卡（12 圆角+描边），
+                        // 提交钮内嵌右下；#14：进行中指示收进按钮自身，操作行不摆状态文字（U3）
+                        VStack(alignment: .trailing, spacing: 8) {
+                            TextField(store.items.isEmpty
+                                      ? "说说这件长期的事…例：准备 GRE，10 月 8 号考，每周约 5 小时，分三个阶段：词汇、填空、写作"
+                                      : "说一句——加新的，或改现有的。例：GRE 改到 11 月考 · 给论文加一个阶段：改格式",
+                                      text: $sayText, axis: .vertical)
+                                .lineLimit(2...5)
+                                .textFieldStyle(.plain)
                             Button { Task { await parseSaid() } } label: {
-                                Label("理解一下", systemImage: "wand.and.stars")
+                                if parsing {
+                                    Label { Text("理解中…") } icon: { ProgressView().controlSize(.small) }
+                                        .font(.caption)
+                                } else {
+                                    Label("理解一下", systemImage: "wand.and.stars").font(.caption)
+                                }
                             }
                             .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
                             .disabled(parsing || sayText.trimmingCharacters(in: .whitespaces).isEmpty || parser == nil)
                         }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(theme.surface))
+                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
                         if let parseError {
                             Text(parseError).font(.caption).foregroundStyle(.orange)
                         }
-                        DisclosureGroup("或者直接手打一件") {
-                            HStack {
-                                TextField("加一件长期的事…", text: $newTitle)
-                                    .textFieldStyle(.roundedBorder)
-                                    .onSubmit { addNew() }
-                                Button("加入") { addNew() }
-                                    .disabled(newTitle.trimmingCharacters(in: .whitespaces).isEmpty)
-                            }
-                        }
-                        .font(.caption)
+                        // 审计 #11：手打兜底走全 App 统一的「＋ 加一项」尾行（InlineAddRow，登记件）
+                        InlineAddRow(prompt: "手动加一件", placeholder: "这件长期的事叫…") { store.add(title: $0) }
                     } else {
                         // 草稿：每条可删；确认前不落库（代理而不代权——写入永远是用户的动作）
                         Text("理解成这样，对吗？").font(.headline)
+                        // 审计 #19：兜底/提示在草稿分支也要可见——否则「替你兜底成纯标题」这个自动决定用户永远看不到
+                        if let parseError {
+                            Text(parseError).font(.caption).foregroundStyle(.secondary)
+                        }
                         // 对现有任务的修改（与新增分开列，一眼看清「这是要改哪件」）
                         ForEach(draftUpdates) { u in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
+                                    // 审计 #4/#5：行标题=headline 档（不自造字重）；diff 标记非情感时刻，不吃 accent
                                     Label("改「\(u.targetTitle)」", systemImage: "pencil")
-                                        .font(.callout.weight(.medium)).foregroundStyle(theme.accent)
+                                        .font(.headline).foregroundStyle(.primary)
                                     Spacer()
                                     Button {
                                         draftUpdates.removeAll { $0.id == u.id }
@@ -105,7 +115,7 @@ struct LongTermView: View {
                         ForEach(draft) { d in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
-                                    Text(d.title).font(.callout.weight(.medium))
+                                    Text(d.title).font(.headline)   // 审计 #4：行标题=headline 档
                                     Spacer()
                                     Button {
                                         draft.removeAll { $0.id == d.id }
@@ -134,7 +144,7 @@ struct LongTermView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("加一件")
+                    Text("说一句")   // 审计 #20：标题覆盖真实能力（加新的＋改现有的），与排日程页一框双模同族
                 }
 
                 // ===== 先放下（捞回入口） =====
@@ -148,6 +158,7 @@ struct LongTermView: View {
                                     Spacer()
                                     Button("捞回来") { store.unshelve(task) }
                                         .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                                        .tint(.primary)   // 审计 #2：次要动作收中性
                                 }
                             }
                         } label: {
@@ -182,12 +193,14 @@ struct LongTermView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(theme.bg.ignoresSafeArea())   // 审计 #1（条文1）：微暖页底——此前是四 tab 里唯一漏掉的
             .navigationTitle("长期")
             .navigationDestination(for: UUID.self) { id in
                 if let task = store.items.first(where: { $0.id == id }) {
                     LongTaskDetailView(store: store, router: router, task: task)
                 } else {
-                    Text("这件事已不在途").foregroundStyle(.secondary)
+                    Text("这件事已不在列表里").foregroundStyle(.secondary)   // 审计 #17：术语
                 }
             }
             .onAppear {
@@ -196,13 +209,6 @@ struct LongTermView: View {
                 BehaviorLog.recordOncePerDay(key: "长期页", "长期页", "打开（在途 \(store.items.count) 件）")
             }
         }
-    }
-
-    private func addNew() {
-        let t = newTitle.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return }
-        store.add(title: t)
-        newTitle = ""
     }
 
     /// 说一句 → 解析成长期任务草稿（#40 批3）。复用排日程同一条解析链：
@@ -238,7 +244,8 @@ struct LongTermView: View {
         }
 
         guard let parser else {
-            parseError = "现在只能手打添加（云端未配置）。"
+            // 审计 #23：禁「只」+ 给下一步（前向措辞）
+            parseError = "云端还没配置——先用下面的手动入口加进来；配好之后说一句就能自动理解了。"
             return
         }
         do {
@@ -299,37 +306,36 @@ struct LongTermView: View {
         return parts.isEmpty ? "没有时间设定（之后可在详情页补）" : parts.joined(separator: " · ")
     }
 
-    // 任务卡：标题 + 进度（三模式各自口径）+ 增长条 + DDL/配额（中性陈述）
+    // 任务卡：标题 + 进度（三模式各自口径）+ 增长条 + DDL（中性陈述）
+    // 审计 #15（羞辱铁律）：配额不进主列表——「每周约 Y · 已投入 X」并排=让用户自己算缺口；
+    // 卡上只留 burnup 事实，配额住详情页「时间设定」区。
     @ViewBuilder private func taskCard(_ task: LongTask) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(task.title).font(.headline)
                 Spacer()
-                Button("排进今天") { insertToToday(task) }
-                    .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                // 审计 #2/#13：次要动作收中性（条文2 橙音量）；文案图标与详情面/L3 条同族（U7）
+                Button { insertToToday(task) } label: {
+                    Label("排进今天", systemImage: "calendar.badge.plus").font(.caption)
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .tint(.primary)
             }
             let progress = store.progressText(for: task)
             if !progress.isEmpty {
                 Text(progress).font(.caption).foregroundStyle(theme.positiveTint)
             }
             if let f = store.progressFraction(for: task) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.quaternary).frame(height: 3)
-                        Capsule().fill(theme.positiveTint).frame(width: geo.size.width * f, height: 3)
-                    }
-                }
-                .frame(height: 3)
+                InvestedBar(fraction: f)   // 审计 #6/#12：burnup 条统一为登记件
             }
             HStack(spacing: 8) {
                 if let d = task.deadline {
                     Text("DDL \(d.formatted(.dateTime.month(.defaultDigits).day()))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                if let c = task.cadenceMinutesPerWeek {
-                    let week = store.investedThisWeek(for: task)
-                    Text("每周约 \(ReviewSummaryText.hm(c))"
-                         + (week > 0 ? " · 近 7 天已投入 \(ReviewSummaryText.hm(week))" : ""))
+                let week = store.investedThisWeek(for: task)
+                if week > 0 {
+                    Text("近 7 天已投入 \(ReviewSummaryText.hm(week))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -361,7 +367,6 @@ struct LongTaskDetailView: View {
     @State private var cadenceMinutes = 300
     @State private var hasTotal = false
     @State private var totalMinutes = 600
-    @State private var newCheckpoint = ""
     @State private var celebratingCheckpoint: String?
 
     var body: some View {
@@ -387,7 +392,7 @@ struct LongTaskDetailView: View {
                 if hasTotal {
                     Stepper("大约共 \(ReviewSummaryText.hm(totalMinutes))",
                             value: $totalMinutes, in: 60...30000, step: 60)
-                    Text("估个初值就够——我们是闭环系统，边做边准。")
+                    Text("估个初值就够——做起来自然会准。")   // 审计 #18：实现术语不进用户文案
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -399,13 +404,7 @@ struct LongTaskDetailView: View {
                      + (week > 0 ? " · 近 7 天 \(ReviewSummaryText.hm(week))" : ""))
                     .font(.callout).foregroundStyle(theme.positiveTint)
                 if let f = store.progressFraction(for: task) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.quaternary).frame(height: 4)
-                            Capsule().fill(theme.positiveTint).frame(width: geo.size.width * f, height: 4)
-                        }
-                    }
-                    .frame(height: 4)
+                    InvestedBar(fraction: f)   // 审计 #6/#12：burnup 条统一为登记件
                 }
             }
 
@@ -436,8 +435,16 @@ struct LongTaskDetailView: View {
                         }
                         Spacer()
                         if cp.id == task.nextCheckpoint?.id {
-                            Text("下一个").font(.caption2).foregroundStyle(theme.accent)
+                            // 审计 #5：accent=尽早 tag 专用（微决策区），「下一个」是计划语义 → plannedTint
+                            Text("下一个").font(.caption2).foregroundStyle(theme.plannedTint)
                         }
+                    }
+                    // 审计 #24（U9）：删除必须有可达控件——contextMenu 双端可用、带完整标签；
+                    // .onDelete 保留作 iOS 侧滑快捷方式（macOS 上手势不可达，曾是全项目唯一无控件删除）
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            store.deleteCheckpoint(cp)
+                        } label: { Label("删除阶段「\(cp.title)」", systemImage: "trash") }
                     }
                 }
                 .onDelete { idx in
@@ -448,12 +455,9 @@ struct LongTaskDetailView: View {
                     arr.move(fromOffsets: from, toOffset: to)
                     store.reorderCheckpoints(task, ordered: arr)
                 }
-                HStack {
-                    TextField("加一个阶段（如「第 3 章 测度论」）", text: $newCheckpoint)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { addCheckpoint() }
-                    Button("加入") { addCheckpoint() }
-                        .disabled(newCheckpoint.trimmingCharacters(in: .whitespaces).isEmpty)
+                // 审计 #11：就地新增走统一「＋ 加一项」尾行（InlineAddRow 登记件）
+                InlineAddRow(prompt: "加一个阶段", placeholder: "如「第 3 章 测度论」") {
+                    store.addCheckpoint(to: task, title: $0)
                 }
                 if celebratingCheckpoint != nil {
                     HStack(spacing: 8) {
@@ -482,11 +486,13 @@ struct LongTaskDetailView: View {
                     router.selectedTab = .schedule
                     dismiss()
                 } label: {
-                    Label("排进今天（智能插空档）", systemImage: "calendar.badge.plus")
+                    Label("排进今天", systemImage: "calendar.badge.plus")   // 审计 #21：同一动作同一文案；实现口径不进标签
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                Button("做成了 🎉") { store.complete(task); dismiss() }
+                Button { store.complete(task); dismiss() } label: {
+                    Label("做成了", systemImage: "checkmark.seal.fill")   // 审计 #22：Form 系统场域不用 emoji（条文9）
+                }
                 Button("先放下（随时捞回）") { store.shelve(task); dismiss() }
                     .foregroundStyle(.secondary)
             }
@@ -501,11 +507,6 @@ struct LongTaskDetailView: View {
         .onChange(of: hasTotal) { _, _ in save() }
         .onChange(of: totalMinutes) { _, _ in save() }
         .onChange(of: note) { _, _ in save() }
-    }
-
-    private func addCheckpoint() {
-        store.addCheckpoint(to: task, title: newCheckpoint)
-        newCheckpoint = ""
     }
 
     /// 勾上检查点 → 轻庆祝（2.5s 自动收；庆祝白名单内，无音无通知）。
