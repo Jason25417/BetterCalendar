@@ -204,6 +204,44 @@ enum BenchAssertions {
             let ok = got.count == want.count && zip(got, want).allSatisfy { titleMatch($1, $0) }
             return check(ok, ok ? "阶段按序命中：\(got.joined(separator: "→"))"
                                : "阶段期望 [\(want.joined(separator: "→"))]，实得 [\(got.joined(separator: "→"))]")
+
+        // #43 长期任务「说一句」：意图判断 + 字段抽取
+        case .editUpdatesTarget:
+            let ups = output.edit?.updates ?? []
+            let hit = ups.filter { titleMatch(e.title ?? "", $0.targetTitle) }
+            return check(!hit.isEmpty,
+                         hit.isEmpty ? "没有针对「\(e.title ?? "")」的修改（实得改：\(ups.map(\.targetTitle).joined(separator: "、"))；新增：\((output.edit?.creates ?? []).map(\.title).joined(separator: "、"))）"
+                                     : "改对了「\(hit[0].targetTitle)」：\(hit[0].summary)")
+
+        case .editAddsCheckpoint:
+            let ups = output.edit?.updates ?? []
+            guard let u = ups.first(where: { titleMatch(e.title ?? "", $0.targetTitle) }) else {
+                return check(false, "没有针对「\(e.title ?? "")」的修改")
+            }
+            let want = e.title2 ?? ""
+            let ok = u.addCheckpoints.contains { titleMatch(want, $0) }
+            return check(ok, ok ? "加了阶段「\(want)」"
+                                : "期望加阶段「\(want)」，实得 [\(u.addCheckpoints.joined(separator: "、"))]")
+
+        case .editSetsDeadline:
+            let ups = output.edit?.updates ?? []
+            guard let u = ups.first(where: { titleMatch(e.title ?? "", $0.targetTitle) }) else {
+                return check(false, "没有针对「\(e.title ?? "")」的修改")
+            }
+            let set = (u.deadline ?? nil) != nil
+            return check(set, set ? "改了截止" : "没改截止（\(u.summary)）")
+
+        case .editCreatesOnly:
+            let creates = output.edit?.creates ?? []
+            let ups = output.edit?.updates ?? []
+            return check(!creates.isEmpty && ups.isEmpty,
+                         "新增 \(creates.count) 件 · 修改 \(ups.count) 件（期望：只新增）")
+
+        case .editNoCreates:
+            let creates = output.edit?.creates ?? []
+            return check(creates.isEmpty,
+                         creates.isEmpty ? "零新增（正确：这是改现有）"
+                                         : "误判成新增：\(creates.map(\.title).joined(separator: "、"))")
         }
     }
 

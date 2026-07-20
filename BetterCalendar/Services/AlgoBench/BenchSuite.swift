@@ -82,7 +82,9 @@ final class BenchSuiteStore {
 
     // MARK: - 内置用例（P=解析 R=微调 F=reflow）
 
-    static let defaultCases: [BenchCase] = [
+    static let defaultCases: [BenchCase] = coreCases + longTaskEditCases
+
+    private static let coreCases: [BenchCase] = [
         // ---------- 解析 ----------
         BenchCase(id: "P1", name: "跨午夜归属", capability: .parse, dimension: "理解力",
                   text: "晚上10点到12点半写论文，然后睡前看书到凌晨1点",
@@ -333,6 +335,22 @@ final class BenchSuiteStore {
                     .init(kind: .arrayOrderBefore, title: "写周报", title2: "组会"),
                   ]),
 
+        // ===== #43 长期 tab 的排程侧覆盖（2026-07-20）：池上下文此前从未测过 =====
+        BenchCase(id: "S7", name: "委托排块带阶段名", capability: .arrange, dimension: "执行力",
+                  blocks: [
+                    .init(title: "量化学习", startHM: "10:00", durationMinutes: 120),
+                    .init(title: "回邮件", startHM: "14:00", durationMinutes: 30),
+                  ],
+                  fromHM: "09:00",
+                  pool: [
+                    .init(title: "量化学习", cadenceMinutesPerWeek: 300,
+                          checkpoints: ["第 3 章 测度论", "第 4 章 积分"]),
+                  ],
+                  expects: [
+                    .init(kind: .blockCountAtLeast, count: 2),
+                    .init(kind: .noOverlaps),
+                  ]),
+
         // ===== #41 语义驱动组（2026-07-20）：S1–S4 全是**标记驱动**（★/DDL/固定/锚点），
         // 脱敏组理应不掉分；S5/S6 的正确答案**只能从标题语义得出**——脱敏组必然掉分。
         // 两组分差 = 「标题语义到底值多少」的量化答案，也是 #41② 该不该上生产的判据。
@@ -360,6 +378,40 @@ final class BenchSuiteStore {
                     // 三块同标记同时长量级：只有懂「啃论文=深度脑力」才知道该趁早
                     .init(kind: .arrayOrderBefore, title: "啃一篇难论文", title2: "整理下载文件夹"),
                     .init(kind: .arrayOrderBefore, title: "啃一篇难论文", title2: "填报销单"),
+                  ]),
+    ]
+
+    /// #43 长期任务「说一句」：加新的 vs 改现有的意图判断（现有池固定，便于逐题对照）。
+    private static let longTaskBase: [BenchPoolSpec] = [
+        .init(title: "准备 GRE", deadlineYMD: "2026-10-08", cadenceMinutesPerWeek: 300,
+              checkpoints: ["背单词", "做填空"]),
+        .init(title: "写毕业论文", cadenceMinutesPerWeek: 600),
+    ]
+
+    private static let longTaskEditCases: [BenchCase] = [
+        BenchCase(id: "L1", name: "改截止（别误判成新增）", capability: .longTaskEdit, dimension: "服从性",
+                  text: "GRE 改到 11 月 8 号考",
+                  pool: longTaskBase,
+                  expects: [
+                    .init(kind: .editNoCreates),                       // 最常见的错：把改说成加
+                    .init(kind: .editUpdatesTarget, title: "准备 GRE"),
+                    .init(kind: .editSetsDeadline, title: "准备 GRE"),
+                  ]),
+        BenchCase(id: "L2", name: "给现有任务加阶段", capability: .longTaskEdit, dimension: "服从性",
+                  text: "给毕业论文加一个阶段：改格式",
+                  pool: longTaskBase,
+                  expects: [
+                    .init(kind: .editNoCreates),
+                    .init(kind: .editUpdatesTarget, title: "写毕业论文"),
+                    .init(kind: .editAddsCheckpoint, title: "写毕业论文", title2: "改格式"),
+                  ]),
+        BenchCase(id: "L3", name: "真·新增（别误判成修改）", capability: .longTaskEdit, dimension: "理解力",
+                  text: "我想开始学 Rust，每周三小时，分两个阶段：所有权、并发",
+                  pool: longTaskBase,
+                  expects: [
+                    .init(kind: .editCreatesOnly),                     // 池里没有 Rust → 只能是新增
+                    .init(kind: .hasLongTask, title: "Rust"),
+                    .init(kind: .longTaskCheckpoints, title: "Rust", title2: "所有权,并发"),
                   ]),
     ]
 

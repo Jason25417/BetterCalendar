@@ -39,6 +39,7 @@ final class BenchRunner {
         case .reflow: result = await runReflow(c, variant: variant, graceMinutes: graceMinutes, model: model)
         case .arrange: result = await runArrange(c, variant: variant, model: model)
         case .polish: result = await runPolish(c, variant: variant, model: model)
+        case .longTaskEdit: result = await runLongTaskEdit(c, variant: variant, model: model)
         }
         let usage = LLMUsageProbe.shared.take()
         result.output.tokensIn = usage.billedInputEquivalent
@@ -345,28 +346,30 @@ final class BenchRunner {
         guard let r = reflowInputs(c) else { return Self.skipped("用例缺 blocks/fromHM 或时间无效") }
         var out = BenchOutput()
         let t0 = Date()
+        // #43：池上下文（长期任务+下一阶段）——用例带 pool 才非空，老用例行为不变
+        let pool = (c.pool ?? []).map(\.brief)
         do {
             let decision: PlanDecision
             switch variant.id {
             case BenchVariantID.arrangeRule:
-                decision = try await RuleBasedArranger().arrange(r.input, now: r.from)
+                decision = try await RuleBasedArranger().arrange(r.input, pool: pool, now: r.from)
             case BenchVariantID.arrangeLLM:
                 if let reason = gate(variant) { return Self.skipped(reason) }
                 decision = try await LLMPlanningEngine(client: cloudClient(model),
                                                        fallback: BenchFailFastPlanner())
-                    .arrange(r.input, now: r.from)
+                    .arrange(r.input, pool: pool, now: r.from)
                 out.model = model ?? CloudSettings.activeModel
             case BenchVariantID.arrangeMasked:   // #41②：标题不出云
                 if let reason = gate(variant) { return Self.skipped(reason) }
                 decision = try await MaskedArranger(client: cloudClient(model),
                                                     fallback: BenchFailFastPlanner())
-                    .arrange(r.input, now: r.from)
+                    .arrange(r.input, pool: pool, now: r.from)
                 out.model = model ?? CloudSettings.activeModel
             case BenchVariantID.arrangeHybrid:   // #41③：LLM 语义标注 + 本地排布
                 if let reason = gate(variant) { return Self.skipped(reason) }
                 decision = try await HybridArranger(client: cloudClient(model),
                                                     fallback: BenchFailFastPlanner())
-                    .arrange(r.input, now: r.from)
+                    .arrange(r.input, pool: pool, now: r.from)
                 out.model = model ?? CloudSettings.activeModel
             default:
                 return Self.skipped("未知排序变体")
@@ -383,6 +386,32 @@ final class BenchRunner {
                                                              inputBlocks: r.input,
                                                              windDown: r.windDown,
                                                              graceMinutes: 0))
+        return BenchCaseResult(output: out, checks: checks)
+    }
+
+    // MARK: - 长期任务「说一句」（#43，2026-07-20：加新的/改现有的意图判断）
+
+    private func runLongTaskEdit(_ c: BenchCase, variant: BenchVariant, model: String?) async -> BenchCaseResult {
+        guard let text = c.text else { return Self.skipped("用例缺 text") }
+        if let reason = gate(variant) { return Self.skipped(reason) }
+        var out = BenchOutput()
+        let t0 = Date()
+        do {
+            let refiner = ClaudeLongTaskRefiner(client: cloudClient(model))
+            let edit = try await refiner.refine(text: text,
+                                                existing: (c.pool ?? []).map(\.context),
+                                                now: referenceDay)
+            out.latencyMS = Self.ms(since: t0)
+            out.edit = edit
+            out.longTasks = edit.creates   // 让 hasLongTask 等既有断言也能用在新增上
+            out.model = model ?? CloudSettings.activeModel
+        } catch {
+            out.latencyMS = Self.ms(since: t0)
+            out.errorText = error.localizedDescription
+            out.decodeOK = false
+        }
+        let checks = BenchAssertions.evaluate(c.expects, output: out,
+                                              context: .init(referenceDay: referenceDay))
         return BenchCaseResult(output: out, checks: checks)
     }
 

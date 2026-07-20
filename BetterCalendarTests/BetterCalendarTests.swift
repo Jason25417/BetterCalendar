@@ -831,6 +831,24 @@ struct LogicTests {
         _ = base
     }
 
+    // M10-2 池建议在分步排序里必须保住（2026-07-20 切生产前发现的静默倒退风险）
+    @Test func hybridArrangerKeepsPoolSuggestions() throws {
+        let existing = [ScheduledBlock(title: "写论文", start: at(2026,7,20,9), end: at(2026,7,20,11),
+                                       isFixed: false, isAnchor: false, timingStyle: .light,
+                                       priority: .normal, deadline: nil)]
+        let pool = [LongTaskBrief(title: "量化学习", deadline: nil, cadenceMinutesPerWeek: 300,
+                                  nextCheckpoint: "第 3 章"),
+                    LongTaskBrief(title: "写论文", deadline: nil, cadenceMinutesPerWeek: nil,
+                                  nextCheckpoint: nil)]
+        let raw = [HybridArranger.PoolSuggestion(poolIndex: 0, start: at(2026,7,20,14), end: at(2026,7,20,15)),
+                   HybridArranger.PoolSuggestion(poolIndex: 1, start: at(2026,7,20,16), end: at(2026,7,20,17)),
+                   HybridArranger.PoolSuggestion(poolIndex: 9, start: at(2026,7,20,18), end: at(2026,7,20,19))]
+        let out = HybridArranger.suggestionBlocks(raw, pool: pool, existing: existing)
+        // 只留第一条：第二条与今日已有「写论文」同名（不重复建议）、第三条索引越界
+        #expect(out.count == 1)
+        #expect(out[0].title == "量化学习 · 第 3 章")   // 有下一阶段则块名带上
+    }
+
     // #41②：脱敏排序的索引解码（补齐遗漏/去重/越界丢弃——LLM 抽风也不丢块）
     @Test func maskedArrangerDecodeOrderIsTotalAndSafe() throws {
         // 越界 9 丢弃、重复 1 去重、遗漏 3 自动补齐在末尾

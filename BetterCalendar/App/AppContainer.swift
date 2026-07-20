@@ -62,9 +62,14 @@ final class AppContainer {
         let cloudParser = ClaudeScheduleParser(client: anthropic, fallback: FailedScheduleParser(),
                                                liveDraft: liveDraft)
         self.parser = FoundationModelsScheduleParser(fallback: cloudParser, liveDraft: liveDraft)
-        // 排程大脑：默认=云端 LLM（失败回退 Naive）；「只使用端侧」开=直接 Naive（隐私闸，见 PrivacyGatedPlanningEngine）
+        // 排程大脑（#41 跑分定案，2026-07-20 Jason 拍板切换）：默认=**分步排序** HybridArranger——
+        // LLM 只做语义标注（认知负荷/宜趁早/先后依赖），排布交本地确定性算法。
+        // 跑分实证（10 轮 × 6 题）：分步 50/60 > 规则 40/60 > 现行单步 LLM 33/60；
+        // 现行单步在 S3 锚点 0/10、S4 ★序 3/10 稳定翻车（给标题反而让模型自作主张覆盖机械规则）。
+        // 失败回退 Naive；「只使用端侧」开 → 直接 Naive（隐私闸，见 PrivacyGatedPlanningEngine）。
+        // 脱敏变体（#41②）跑分被规则组严格支配（同分更慢更贵隐私更弱）→ 留在试验台不进生产。
         self.planner = PrivacyGatedPlanningEngine(
-            llm: LLMPlanningEngine(client: anthropic, fallback: NaivePlanningEngine()),
+            llm: HybridArranger(client: anthropic, fallback: NaivePlanningEngine()),
             local: NaivePlanningEngine())
         // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))

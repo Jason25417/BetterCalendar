@@ -17,6 +17,7 @@ nonisolated enum BenchCapability: String, Codable, CaseIterable, Sendable {
     case reflow   // 剩余块从此刻重排
     case arrange  // 排序+note（0.28.1：RuleBased 固化 vs LLM 对照）
     case polish   // 日记润色（0.28.2：云端 vs 端侧对照——合成样例文集，真日记绝不进）
+    case longTaskEdit  // 长期任务「说一句」（#43，2026-07-20：加新的/改现有的意图判断+字段抽取）
 
     var label: String {
         switch self {
@@ -25,6 +26,7 @@ nonisolated enum BenchCapability: String, Codable, CaseIterable, Sendable {
         case .reflow: "reflow"
         case .arrange: "排序"
         case .polish: "润色"
+        case .longTaskEdit: "长期"
         }
     }
 }
@@ -85,6 +87,12 @@ nonisolated struct BenchExpectation: Codable, Sendable {
         case flagsUnchangedExcept  // title=逗号分隔的可改标题；其余块 固定/★/计时 必须与输入一致
         case hasLongTask           // title：解析出的长期事项里必须有它（标题匹配）
         case longTaskCheckpoints   // title + title2=逗号分隔的阶段名：该长期事项的阶段须**按序**等于它
+        // #43 长期任务「说一句」：加新的 vs 改现有的意图判断
+        case editUpdatesTarget     // title：updates 里必须有针对它的修改（改对了人）
+        case editAddsCheckpoint    // title + title2=阶段名：对该任务的修改须包含加这个阶段
+        case editSetsDeadline      // title：对该任务的修改须改了截止（有值）
+        case editCreatesOnly       // 必须只产生新增、零修改（防把「加新的」误判成「改现有」）
+        case editNoCreates         // 必须零新增（防把「改现有」误判成「加新的」——最常见的错）
     }
 
     var kind: Kind
@@ -109,8 +117,35 @@ nonisolated struct BenchCase: Codable, Identifiable, Sendable {
     var blocks: [BenchBlockSpec]? = nil  // refine/reflow：输入块
     var fromHM: String? = nil          // reflow：从几点起重排
     var windDownHM: String? = nil      // reflow：收工线（缺省 23:00；用例自带保证确定性，不读用户设置）
+    /// 长期任务池（#43，2026-07-20）：arrange 的池上下文 / longTaskEdit 的「现有任务」。
+    var pool: [BenchPoolSpec]? = nil
     var expects: [BenchExpectation]
     var rev: Int? = nil                // 内置修订号：本地同 id 且 rev 落后 → 新内置覆盖下发（会盖手改；删除仍不复活）
+}
+
+/// 长期任务的用例输入（#43）：喂给 arrange 当池上下文，或当 longTaskEdit 的「现有任务」。
+nonisolated struct BenchPoolSpec: Codable, Sendable {
+    var title: String
+    var deadlineYMD: String? = nil          // "yyyy-MM-dd"
+    var cadenceMinutesPerWeek: Int? = nil
+    var totalMinutes: Int? = nil
+    var checkpoints: [String]? = nil        // 阶段名（有序）；第一个未完成的即「下一阶段」
+
+    var brief: LongTaskBrief {
+        LongTaskBrief(title: title, deadline: Self.date(deadlineYMD),
+                      cadenceMinutesPerWeek: cadenceMinutesPerWeek,
+                      nextCheckpoint: checkpoints?.first)
+    }
+    var context: LongTaskContext {
+        LongTaskContext(title: title, deadline: Self.date(deadlineYMD),
+                        cadenceMinutesPerWeek: cadenceMinutesPerWeek,
+                        totalMinutes: totalMinutes, checkpoints: checkpoints ?? [])
+    }
+    private static func date(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: s)
+    }
 }
 
 /// 单次运行的产出（所有变体统一出口；断言引擎只认它）。
@@ -118,6 +153,7 @@ struct BenchOutput: Sendable {
     var blocks: [ScheduledBlock] = []      // 排定/解析/微调结果
     var deferred: [ScheduledBlock] = []    // 候补（reflow v2 才有）
     var longTasks: [ParsedLongTask] = []   // 解析出的长期事项（#40 批3：护航 checkpoints 解析）
+    var edit: LongTaskPlanEdit? = nil      // 长期任务「说一句」的产物（#43：creates + updates）
     var note: String? = nil
     var raw: String? = nil                 // LLM 原始返回（可看）
     var promptSystem: String? = nil        // 实际发送的 system prompt（可看）

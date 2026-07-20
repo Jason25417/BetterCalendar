@@ -126,31 +126,76 @@ struct HybridArranger: PlanningEngine {
     func arrange(_ blocks: [ScheduledBlock], pool: [LongTaskBrief], now: Date) async throws -> PlanDecision {
         guard !blocks.isEmpty else { return try await fallback.arrange(blocks, now: now) }
         do {
-            let labels = try await label(blocks)
-            let ordered = Self.layOut(blocks, labels: labels)
-            return PlanDecision(orderedBlocks: ordered,
+            let result = try await label(blocks, pool: pool, now: now)
+            let ordered = Self.layOut(blocks, labels: result.labels)
+            // M10-2 池建议（≤2）：附在排定块之后，标题记入 poolSuggestedTitles 供 UI 标 🗂 来源。
+            // 切分步排序时**必须保住这个能力**——否则是静默功能倒退（2026-07-20 切换前发现）。
+            let suggested = Self.suggestionBlocks(result.suggestions, pool: pool, existing: blocks)
+            return PlanDecision(orderedBlocks: ordered + suggested,
                                 note: RuleBasedArranger.note(for: ordered),
-                                poolSuggestedTitles: [])
+                                poolSuggestedTitles: suggested.map(\.title))
         } catch {
             DevLog.shared.warn("分步排序", "失败回退：\(error.localizedDescription)")
             return try await fallback.arrange(blocks, pool: pool, now: now)
         }
     }
 
+    /// 池建议 → 真实块（纯函数、可单测）：索引越界丢弃、与今日已有同名事去重（不重复建议）、至多 2 件。
+    static func suggestionBlocks(_ raw: [PoolSuggestion], pool: [LongTaskBrief],
+                                 existing: [ScheduledBlock]) -> [ScheduledBlock] {
+        var out: [ScheduledBlock] = []
+        for s in raw {
+            guard out.count < 2, s.poolIndex >= 0, s.poolIndex < pool.count else { continue }
+            let t = pool[s.poolIndex]
+            // 今日块里已有同名事 → 不重复建议（宁缺毋滥）
+            if existing.contains(where: { TitleMatch.similarity($0.title, t.title) >= 0.6 }) { continue }
+            if out.contains(where: { TitleMatch.similarity($0.title, t.title) >= 0.6 }) { continue }
+            guard s.end > s.start else { continue }
+            // 有「下一阶段」则块名带上（与「排进今天」口径一致：执行时知道具体干什么）
+            let title = t.nextCheckpoint.map { "\(t.title) · \($0)" } ?? t.title
+            out.append(ScheduledBlock(title: title, start: s.start, end: s.end,
+                                      isFixed: false, isAnchor: false, timingStyle: .light,
+                                      priority: .normal, deadline: t.deadline))
+        }
+        return out
+    }
+
+    struct PoolSuggestion: Sendable {
+        var poolIndex: Int
+        var start: Date
+        var end: Date
+    }
+
     func reflow(_ blocks: [ScheduledBlock], from startTime: Date, now: Date) async throws -> PlanDecision {
         try await fallback.reflow(blocks, from: startTime, now: now)
     }
 
-    /// 第一步：LLM 语义标注（输出极小 → token 与延迟都比整排便宜）。
-    private func label(_ blocks: [ScheduledBlock]) async throws -> [Label] {
+    /// 第一步：LLM 语义标注（输出极小 → token 与延迟都比整排便宜）+ M10-2 池建议。
+    private func label(_ blocks: [ScheduledBlock], pool: [LongTaskBrief],
+                       now: Date) async throws -> (labels: [Label], suggestions: [PoolSuggestion]) {
         let listing = blocks.enumerated().map { "\($0): \($1.title)" }.joined(separator: "\n")
+        let poolSection = pool.isEmpty ? "" : """
+
+        用户的长期任务池（跨日在做的事）：
+        \(pool.enumerated().map { i, t -> String in
+            var parts = ["P\(i): \(t.title)"]
+            if let d = t.deadline { parts.append("DDL \(Self.ymdhm(d))") }
+            if let c = t.cadenceMinutesPerWeek { parts.append("每周约 \(c) 分钟") }
+            if let cp = t.nextCheckpoint { parts.append("下一阶段：\(cp)") }
+            return parts.joined(separator: " · ")
+        }.joined(separator: "\n"))
+        今日若有空档且合适，可从池里挑 **0–2 件** 建议排入（DDL 近的优先、节奏欠账的优先；
+        今日块里已有的同名事不要重复建议；不合适就不建议——宁缺毋滥）。放进 poolSuggestions。
+        """
         let user = """
-        给下面每件事标注性质（**不要排序、不要给时间**）：
+        现在 \(Self.hm(now))。给下面每件事标注性质（**不要排序、不要改时间**）：
         \(listing)
         cognitiveLoad：1=杂务/机械，2=一般，3=深度脑力（写作/编程/啃论文/背书）。
         preferEarly：精力好时做更划算 = true。
         dependsOnIndex：**必须在另一件之后**才能做的（如「做饭」依赖「买菜」）填那件的索引，否则 null。
-        只输出 JSON：{"labels":[{"index":0,"cognitiveLoad":2,"preferEarly":false,"dependsOnIndex":null}]}
+        \(poolSection)
+        只输出 JSON：{"labels":[{"index":0,"cognitiveLoad":2,"preferEarly":false,"dependsOnIndex":null}],"poolSuggestions":[{"poolIndex":0,"start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm"}]}
+        没有建议时 poolSuggestions 给 []。
         """
         let raw = try await LLMWatchdog.run {
             try await client.complete(system: "", user: user, maxTokens: 1500,
@@ -158,11 +203,12 @@ struct HybridArranger: PlanningEngine {
                                       cachedSystemPrefix: Self.systemPrompt)
         }
         struct WireLabel: Decodable { let index: Int; let cognitiveLoad: Int?; let preferEarly: Bool?; let dependsOnIndex: Int? }
-        struct Wire: Decodable { let labels: [WireLabel]? }
+        struct WireSuggestion: Decodable { let poolIndex: Int; let start: String; let end: String }
+        struct Wire: Decodable { let labels: [WireLabel]?; let poolSuggestions: [WireSuggestion]? }
         let json = JSONText.extractObject(raw)
         guard let data = json.data(using: .utf8) else { throw AnthropicError(message: "JSON 编码失败") }
         let wire = try JSONDecoder().decode(Wire.self, from: data)
-        return (wire.labels ?? []).compactMap { l in
+        let labels: [Label] = (wire.labels ?? []).compactMap { l in
             guard l.index >= 0 && l.index < blocks.count else { return nil }
             let dep = l.dependsOnIndex.flatMap { $0 >= 0 && $0 < blocks.count && $0 != l.index ? $0 : nil }
             return Label(index: l.index,
@@ -170,6 +216,11 @@ struct HybridArranger: PlanningEngine {
                          preferEarly: l.preferEarly ?? false,
                          dependsOnIndex: dep)
         }
+        let suggestions: [PoolSuggestion] = (wire.poolSuggestions ?? []).compactMap { s in
+            guard let st = DateParsing.parse(s.start), let en = DateParsing.parse(s.end) else { return nil }
+            return PoolSuggestion(poolIndex: s.poolIndex, start: st, end: en)
+        }
+        return (labels, suggestions)
     }
 
     /// 第二步（**纯本地、确定性、可单测**）：硬规则优先，语义标签只在同档内做次序微调；
@@ -213,12 +264,22 @@ struct HybridArranger: PlanningEngine {
         return order.map { blocks[$0] }
     }
 
+    private static func hm(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"
+        return f.string(from: d)
+    }
+    private static func ymdhm(_ d: Date) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.string(from: d)
+    }
+
     private static let systemPrompt = """
-    你是任务性质标注器。只标注每件事的性质，绝不排序、绝不给时间。只输出 JSON，不要解释。
+    你是任务性质标注器。只标注每件事的性质（绝不排序、绝不改已有块的时间），并在有空档时从长期任务池挑 0–2 件建议排入。
+    只输出 JSON，不要解释。
     """
     private static let schema: [String: Any] = [
         "type": "object", "additionalProperties": false,
-        "required": ["labels"],
+        "required": ["labels", "poolSuggestions"],
         "properties": [
             "labels": [
                 "type": "array",
@@ -230,6 +291,18 @@ struct HybridArranger: PlanningEngine {
                         "cognitiveLoad": ["type": "integer"],
                         "preferEarly": ["type": "boolean"],
                         "dependsOnIndex": ["type": ["integer", "null"]],
+                    ],
+                ],
+            ],
+            "poolSuggestions": [
+                "type": "array",
+                "items": [
+                    "type": "object", "additionalProperties": false,
+                    "required": ["poolIndex", "start", "end"],
+                    "properties": [
+                        "poolIndex": ["type": "integer"],
+                        "start": ["type": "string"],
+                        "end": ["type": "string"],
                     ],
                 ],
             ],
