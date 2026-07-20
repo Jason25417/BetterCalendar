@@ -215,7 +215,10 @@ struct HomeView: View {
                 unifiedInput
                 if model.isWorking, !deps.liveDraft.streaming.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
-                        ForEach(deps.liveDraft.streaming) { b in
+                        // #42 流式跳动修复（2026-07-20）：块 UUID 每次增量 decode 都重新生成 →
+                        // 按 id 的 ForEach 每帧全量重建（闪烁）。流式区已改追加序（不排序），
+                        // 用 offset 做稳定 identity——旧行内容不变、新行只在尾部出现，一次冒一块、不再跳。
+                        ForEach(Array(deps.liveDraft.streaming.enumerated()), id: \.offset) { _, b in
                             HStack(spacing: 6) {
                                 Text(b.start.formatted(date: .omitted, time: .shortened))
                                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -224,6 +227,7 @@ struct HomeView: View {
                         }
                     }
                     .padding(.leading, 2)
+                    .animation(Motion.standard, value: deps.liveDraft.streaming.count)   // 新块淡入（条文10）
                 }
 
                 // A 状态行（0.26 ABC → 0.28.1 统一消息条）：确定性成功状态「✓ 排好 N 件」——与 note(B) 叠加

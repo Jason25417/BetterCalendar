@@ -40,16 +40,16 @@ final class AchievementToastCenter {
         let item: Item = batch.count == 1
             ? Item(title: batch[0].title, line: batch[0].line)
             : Item(title: "点亮了 \(batch.count) 枚成就", line: batch.map(\.title).joined(separator: "、"))
-        withAnimation(.spring(duration: 0.35)) { current = item }
+        withAnimation(Motion.toastIn) { current = item }   // 白名单件（条文10）
         let id = item.id
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 8_000_000_000)
-            if current?.id == id { withAnimation(.easeOut(duration: 0.3)) { current = nil }; pump() }
+            if current?.id == id { withAnimation(Motion.emphasis) { current = nil }; pump() }
         }
     }
 
     func dismiss() {
-        withAnimation(.easeOut(duration: 0.2)) { current = nil }
+        withAnimation(Motion.standard) { current = nil }
         pump()
     }
 }

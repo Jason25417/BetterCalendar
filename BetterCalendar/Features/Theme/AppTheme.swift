@@ -69,6 +69,20 @@ enum TypeScale {
     static let caption2 = Font.caption2   // 边缘状态/角注
 }
 
+/// 动效令牌（条文 10 执行层，2026-07-20 Jason 批）：常规=缓出、不弹跳、0.35s 上限。
+/// 庆祝白名单（条文 10 例外）**逐件登记于此**——新增庆祝动效先登记再用，别散落字面量。
+enum Motion {
+    /// 小状态变化：勾选、显隐、行内收展、toast 手动收
+    static let standard = Animation.easeOut(duration: 0.2)
+    /// 布局级变化：面板展开、列表重排、大元素移出（=条文上限值）
+    static let emphasis = Animation.easeOut(duration: 0.35)
+    // —— 庆祝白名单（允许超上限/轻弹跳；件名与时长即登记）——
+    /// 星光（CelebrationBurst，1.2s）
+    static let starlight = Animation.easeOut(duration: 1.2)
+    /// 成就 toast 滑入（spring 轻弹=「递到眼前」的手感；toast 整件在白名单）
+    static let toastIn = Animation.spring(duration: 0.35)
+}
+
 /// 经典皮肤 hex 真相源（换装批次 B）：SwiftUI 之外的场景（EK 日历 cgColor 等）从这里取值，
 /// 与 ThemeSettings.classic 同源——改色只改这一处。
 enum ClassicHex {

@@ -575,7 +575,7 @@ struct ExecutionPanel: View {
     }
 
     private var expandToggle: some View {
-        Button { withAnimation { panelExpanded.toggle() } } label: {
+        Button { withAnimation(Motion.emphasis) { panelExpanded.toggle() } } label: {   // 动效令牌（条文10）
             HStack {
                 Spacer()
                 Label(panelExpanded ? "收起为精简面板" : "展开完整面板",

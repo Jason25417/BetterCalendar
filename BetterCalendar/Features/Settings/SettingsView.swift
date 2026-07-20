@@ -120,7 +120,7 @@ struct SettingsView: View {
 
             // 进阶设置（渐进披露，§5.9）：手动折叠（DisclosureGroup 在 macOS Form 里收不回）
             Section("进阶设置") {
-                Button { withAnimation(.easeInOut(duration: 0.2)) { showAdvanced.toggle() } } label: {
+                Button { withAnimation(Motion.standard) { showAdvanced.toggle() } } label: {   // 动效令牌（条文10）
                     HStack {
                         Text(showAdvanced ? "收起" : "展开进阶设置")
                         Spacer()

@@ -133,7 +133,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                     let blocks = Self.liveBlocks(fromPartial: partial)
                     if blocks.count != lastCount {
                         lastCount = blocks.count
-                        live.streaming = blocks.sorted { $0.start < $1.start }
+                        live.streaming = blocks   // #42：流式期不排序——排序会让新块插中间、下方全跳；最终草稿自会重排
                     }
                 }
             } else {

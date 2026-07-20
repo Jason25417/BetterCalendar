@@ -703,7 +703,7 @@ final class HomeViewModel {
             }
         }
         // 填完时间按 start 排序（与 #5 一致：时间决定最终顺序，落到该在的位置）
-        withAnimation { blocks.sort { $0.start < $1.start } }
+        withAnimation(Motion.emphasis) { blocks.sort { $0.start < $1.start } }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
@@ -748,7 +748,7 @@ final class HomeViewModel {
                 }
             }
         }
-        withAnimation { blocks.sort { $0.start < $1.start } }
+        withAnimation(Motion.emphasis) { blocks.sort { $0.start < $1.start } }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
     }
 
@@ -777,7 +777,7 @@ final class HomeViewModel {
                     self.blocks[i] = nv
                     self.markEditedIfLoaded()   // 内联改标题/时间/星标 → 变未确认草稿
                     // #5：改了开始时间 → 按 start 自动重排（动画滑到该去的位置）；只在 start 变时排，改标题/结束/星标不动位
-                    if startChanged { withAnimation { self.blocks.sort { $0.start < $1.start } } }
+                    if startChanged { withAnimation(Motion.emphasis) { self.blocks.sort { $0.start < $1.start } } }
                     self.persistDraft()
                 }
             }

@@ -740,6 +740,10 @@ struct LogicTests {
         // 做成 → 存档分组
         store.complete(t)
         #expect(store.doneItems().count == 1)
+        // D2-C（2026-07-20 Jason 裁）：做成了可逆——拿回在途、doneAt 清掉、投入记录不动
+        store.reopen(t)
+        #expect(store.active().count == 1 && store.doneItems().isEmpty)
+        #expect(t.doneAt == nil)
     }
 
     // #40 批2：复盘「长线推进」带阶段名（勾了检查点即使没记投入也上榜）

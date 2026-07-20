@@ -184,6 +184,12 @@ struct LongTermView: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
+                                    // D2-C（2026-07-20 Jason 裁）：做成了可逆——与「先放下」的捞回对齐，
+                                    // 详情面的「做成了」按钮因此不再是破坏性动作（U10 距离不需要了）
+                                    Button("拿回来") { store.reopen(task) }
+                                        .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                                        .tint(.primary)
+                                        .help("误标了、或还想继续做——拿回在途，投入记录都还在")
                                 }
                             }
                         } label: {

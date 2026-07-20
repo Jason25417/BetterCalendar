@@ -24,7 +24,7 @@ struct CelebrationBurst: View {
             }
         }
         .frame(height: 44)
-        .onAppear { withAnimation(.easeOut(duration: 1.2)) { animate = true } }
+        .onAppear { withAnimation(Motion.starlight) { animate = true } }   // 白名单件（条文10）
         .allowsHitTesting(false)
     }
 }

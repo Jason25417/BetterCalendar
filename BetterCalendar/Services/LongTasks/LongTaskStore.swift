@@ -116,6 +116,17 @@ final class LongTaskStore {
         reload()
     }
 
+    /// 捞回（做成了 → 在途）：D2-C（2026-07-20 Jason 裁）——「做成了」可逆化后破坏性消失，
+    /// U10 距离不再需要（误触无所谓＞防误触）；也补上「误标做成/做成后还要继续」的真实缺口。
+    /// 清 doneAt；已投入记录不动（做过的都算数）。
+    func reopen(_ task: LongTask) {
+        task.status = .active
+        task.doneAt = nil
+        task.modifiedAt = .now
+        try? context.save()
+        reload()
+    }
+
     /// 三量编辑（详情页；nil 语义=清空该量——与 add 的「nil=不改」不同，这里是显式表单）。
     func update(_ task: LongTask, title: String? = nil, note: String? = nil,
                 deadline: Date??, cadenceMinutesPerWeek: Int??, totalMinutes: Int??, unitMinutes: Int??) {

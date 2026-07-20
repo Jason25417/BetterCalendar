@@ -124,7 +124,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
                 let partial = snapshot.content   // FMPlan.PartiallyGenerated
                 last = partial
                 let live = (partial.blocks ?? []).compactMap { Self.scheduled(from: $0) }
-                liveDraft?.streaming = live.sorted { $0.start < $1.start }
+                liveDraft?.streaming = live   // #42：同云端路——流式期保持到达顺序
             }
             liveDraft?.clear()
             guard let final = last else { return nil }
