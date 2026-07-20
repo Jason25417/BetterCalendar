@@ -16,6 +16,8 @@ struct LongTermView: View {
     let router: AppRouter
     /// 解析器（#40 批3）：长期任务的**主入口=说一句**（同排日程 tab 的逻辑）；nil=只留手动兜底。
     var parser: ScheduleParsing?
+    /// 说一句的「改现有」能力（2026-07-20 Jason 要求）：同一个框，模型判断是新增还是改现有；nil=只能新增。
+    var refiner: LongTaskRefining?
 
     @State private var newTitle = ""
     @State private var showShelved = false
@@ -24,6 +26,7 @@ struct LongTermView: View {
     @State private var sayText = ""
     @State private var parsing = false
     @State private var draft: [ParsedLongTask] = []
+    @State private var draftUpdates: [LongTaskUpdate] = []   // 对现有任务的修改草稿
     @State private var parseError: String?
 
     var body: some View {
@@ -50,8 +53,10 @@ struct LongTermView: View {
 
                 // ===== 说一句（#40 批3）：主入口=LLM 解析，工作台保留完整裁决权 =====
                 Section {
-                    if draft.isEmpty {
-                        TextField("说说这件长期的事…例：准备 GRE，10 月 8 号考，每周约 5 小时，分三个阶段：词汇、填空、写作",
+                    if draft.isEmpty && draftUpdates.isEmpty {
+                        TextField(store.items.isEmpty
+                                  ? "说说这件长期的事…例：准备 GRE，10 月 8 号考，每周约 5 小时，分三个阶段：词汇、填空、写作"
+                                  : "说一句——加新的，或改现有的。例：GRE 改到 11 月考 · 给论文加一个阶段：改格式",
                                   text: $sayText, axis: .vertical)
                             .lineLimit(1...4)
                             .textFieldStyle(.roundedBorder)
@@ -80,6 +85,23 @@ struct LongTermView: View {
                     } else {
                         // 草稿：每条可删；确认前不落库（代理而不代权——写入永远是用户的动作）
                         Text("理解成这样，对吗？").font(.headline)
+                        // 对现有任务的修改（与新增分开列，一眼看清「这是要改哪件」）
+                        ForEach(draftUpdates) { u in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Label("改「\(u.targetTitle)」", systemImage: "pencil")
+                                        .font(.callout.weight(.medium)).foregroundStyle(theme.accent)
+                                    Spacer()
+                                    Button {
+                                        draftUpdates.removeAll { $0.id == u.id }
+                                    } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("不要改「\(u.targetTitle)」这条")
+                                }
+                                Text(u.summary).font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 2)
+                        }
                         ForEach(draft) { d in
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
@@ -96,13 +118,17 @@ struct LongTermView: View {
                             .padding(.vertical, 2)
                         }
                         HStack {
-                            Button("重说") { draft = []; parseError = nil }
+                            Button("重说") { draft = []; draftUpdates = []; parseError = nil }
                                 .buttonStyle(.plain).foregroundStyle(.secondary)
                             Spacer()
                             Button {
                                 commitDraft()
-                            } label: { Label("收下（\(draft.count) 件）", systemImage: "checkmark.circle") }
-                                .buttonStyle(.borderedProminent)
+                            } label: {
+                                Label("收下（\(draft.count + draftUpdates.count) 项）",
+                                      systemImage: "checkmark.circle")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(draft.isEmpty && draftUpdates.isEmpty)
                         }
                         Text("收下之后还能改：进详情页调时间、加减阶段。")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -181,12 +207,40 @@ struct LongTermView: View {
 
     /// 说一句 → 解析成长期任务草稿（#40 批3）。复用排日程同一条解析链：
     /// 长期语义天然落 `longTasks`（prompt 既有规则），这里只取 longTasks、丢弃当日块。
+    /// 说一句 → 草稿（2026-07-20 起**双模**：有 refiner 且池非空 → 走「加新的/改现有的」链；
+    /// 否则退回纯解析链（只新增）。与排日程页「一框双模」对称。
     private func parseSaid() async {
-        guard let parser else { return }
         let text = sayText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         parsing = true; parseError = nil
         defer { parsing = false }
+
+        if let refiner, !store.items.isEmpty {
+            let existing = store.items.map {
+                LongTaskContext(title: $0.title, deadline: $0.deadline,
+                                cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek,
+                                totalMinutes: $0.totalMinutes,
+                                checkpoints: $0.sortedCheckpoints.map(\.title))
+            }
+            do {
+                let edit = try await refiner.refine(text: text, existing: existing, now: .now)
+                if edit.isEmpty {
+                    parseError = "没太听懂想加什么或改什么——换句话再说一遍？"
+                } else {
+                    draft = edit.creates
+                    draftUpdates = edit.updates
+                }
+                return
+            } catch {
+                DevLog.shared.warn("长期", "AI 调整失败，回退纯解析：\(error.localizedDescription)")
+                // 不 return：落到下面的纯解析链兜底（至少还能新增）
+            }
+        }
+
+        guard let parser else {
+            parseError = "现在只能手打添加（云端未配置）。"
+            return
+        }
         do {
             let plan = try await parser.parse(text, referenceDate: .now, context: ParseContext())
             if plan.longTasks.isEmpty {
@@ -202,7 +256,7 @@ struct LongTermView: View {
         }
     }
 
-    /// 草稿收下：逐条入池（幂等）+ 阶段落库；写入是用户的动作（代理而不代权）。
+    /// 草稿收下：新增逐条入池（幂等）+ 修改逐条应用 + 阶段落库；写入是用户的动作（代理而不代权）。
     private func commitDraft() {
         for d in draft {
             let task = store.add(title: d.title, deadline: d.deadline,
@@ -213,10 +267,26 @@ struct LongTermView: View {
                 store.addCheckpoint(to: task, title: name)
             }
         }
-        DevLog.shared.info("长期", "说一句入池 \(draft.count) 件")
-        BehaviorLog.record("长期页", "说一句收下 \(draft.count) 件"
+        // 修改现有任务（按标题相似匹配；匹配不到就跳过——绝不误改别的任务）
+        var appliedUpdates = 0
+        for u in draftUpdates {
+            guard let task = store.items.first(where: { TitleMatch.similarity($0.title, u.targetTitle) >= 0.6 })
+            else { continue }
+            store.update(task, title: u.newTitle, note: nil,
+                         deadline: u.deadline,
+                         cadenceMinutesPerWeek: u.cadenceMinutesPerWeek,
+                         totalMinutes: u.totalMinutes,
+                         unitMinutes: nil)
+            let have = Set(task.sortedCheckpoints.map(\.title))
+            for name in u.addCheckpoints where !have.contains(name) {
+                store.addCheckpoint(to: task, title: name)
+            }
+            appliedUpdates += 1
+        }
+        DevLog.shared.info("长期", "说一句：新增 \(draft.count) 件 · 修改 \(appliedUpdates) 件")
+        BehaviorLog.record("长期页", "说一句收下 新增\(draft.count)/改\(appliedUpdates)"
                            + (draft.contains { !$0.checkpoints.isEmpty } ? "（含阶段）" : ""))
-        draft = []; sayText = ""; parseError = nil
+        draft = []; draftUpdates = []; sayText = ""; parseError = nil
     }
 
     /// 草稿摘要行：把解析到的三量与阶段摊开给用户核对。

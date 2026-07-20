@@ -757,6 +757,46 @@ struct LogicTests {
         #expect(line?.contains("推进到「第 1 章」") == true)
     }
 
+    // 长期任务「说一句」的改现有链（2026-07-20）：解码层——双 optional 语义 + 幻觉防御
+    @Test func longTaskRefinerDecodesCreatesAndUpdates() throws {
+        let existing = [LongTaskContext(title: "准备 GRE", deadline: nil,
+                                        cadenceMinutesPerWeek: 300, totalMinutes: nil,
+                                        checkpoints: ["背单词"])]
+        let json = """
+        {"creates":[{"title":"学 Rust","deadline":null,"cadenceMinutesPerWeek":120,
+          "totalMinutes":null,"unitMinutes":null,"checkpoints":["所有权","并发"]}],
+         "updates":[
+          {"targetTitle":"准备 GRE","newTitle":null,"deadline":"2026-11-08 09:00",
+           "cadenceMinutesPerWeek":"clear","totalMinutes":null,"addCheckpoints":["做填空"," "]},
+          {"targetTitle":"根本不存在的任务","newTitle":"哈","deadline":null,
+           "cadenceMinutesPerWeek":null,"totalMinutes":null,"addCheckpoints":[]}]}
+        """
+        let edit = ClaudeLongTaskRefiner.decode(json, existing: existing)
+        // 新增照常
+        #expect(edit.creates.count == 1)
+        #expect(edit.creates[0].checkpoints == ["所有权", "并发"])
+        // 幻觉防御：不存在的目标被丢弃 → 只剩一条有效修改
+        #expect(edit.updates.count == 1)
+        let u = try #require(edit.updates.first)
+        #expect(u.targetTitle == "准备 GRE")
+        #expect(u.deadline ?? nil != nil)                    // 有值=改截止
+        #expect(u.cadenceMinutesPerWeek == .some(nil))       // "clear"=显式清空
+        #expect(u.totalMinutes == nil)                       // null=不改
+        #expect(u.addCheckpoints == ["做填空"])               // 空白项被剔除
+    }
+
+    @Test func longTaskRefinerRejectsEmptyAndGarbage() throws {
+        let existing = [LongTaskContext(title: "写论文", deadline: nil, cadenceMinutesPerWeek: nil,
+                                        totalMinutes: nil)]
+        // 空修改（什么都没改）不进草稿——免得用户点了个寂寞
+        let empty = ClaudeLongTaskRefiner.decode(
+            #"{"creates":[],"updates":[{"targetTitle":"写论文","newTitle":null,"deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"addCheckpoints":[]}]}"#,
+            existing: existing)
+        #expect(empty.isEmpty)
+        // 垃圾输入不崩、不产脏数据
+        #expect(ClaudeLongTaskRefiner.decode("这不是 JSON", existing: existing).isEmpty)
+    }
+
     // #41③：分步排序的**本地布局层**（纯函数、确定性——LLM 只给标签，排布结果必须可复现）
     @Test func hybridArrangerLayoutRespectsHardRulesThenSemantics() throws {
         let base = at(2026, 7, 20, 9)

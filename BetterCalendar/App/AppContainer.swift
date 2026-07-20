@@ -16,6 +16,8 @@ final class AppContainer {
     let parser: ScheduleParsing
     let planner: PlanningEngine
     let refiner: PlanRefining
+    /// 长期任务的「说一句」（2026-07-20）：同一个框既能加新的、也能改现有的。
+    let longTaskRefiner: LongTaskRefining
     let calendarStore: FakeCalendarStore       // 假日历（预览页观察用）
     let routingStore: RoutingCalendarStore     // 写日历走它：按设置转发 假/真
     let reminderStore: FakeReminderStore
@@ -103,6 +105,7 @@ final class AppContainer {
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore(),
                                             startedDays: startedDays, projection: projection)
+        self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)
         self.logSync = LogSyncService()
         logSync.start()

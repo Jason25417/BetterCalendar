@@ -83,7 +83,8 @@ struct BetterCalendarApp: App {
                 #endif
                 // #40 长期 tab（2026-07-15 S1 修订四 tab 终局）：第二时间尺度——跨日周期的排程态
                 LongTermView(store: container.longTasks, router: container.router,
-                             parser: container.parser)   // #40 批3：主入口=说一句
+                             parser: container.parser,          // #40 批3：主入口=说一句
+                             refiner: container.longTaskRefiner) // 2026-07-20：同一个框也能改现有
                     .tag(AppRouter.Tab.longterm)
                     .tabItem { Label("长期", systemImage: "tray.full") }
                 JournalView(deps: container.journalDeps)
