@@ -782,6 +782,12 @@ struct LogicTests {
         let dep = [blk("做饭", 17), blk("买菜", 18)]
         let l3 = [HybridArranger.Label(index: 0, cognitiveLoad: 1, preferEarly: false, dependsOnIndex: 1)]
         #expect(HybridArranger.layOut(dep, labels: l3).map(\.title) == ["买菜", "做饭"])
+
+        // 跨档依赖**不得越权**（2026-07-20 跑分实锤修复）：模型说「写周报(★)依赖组会(普通)」，
+        // 但 ★ 是用户显式标记、依赖是模型推断——★ 必须仍在最前（代理而不代权）。
+        let cross = [blk("写周报", 13, important: true), blk("组会", 10)]
+        let l4 = [HybridArranger.Label(index: 0, cognitiveLoad: 2, preferEarly: false, dependsOnIndex: 1)]
+        #expect(HybridArranger.layOut(cross, labels: l4).map(\.title) == ["写周报", "组会"])
         _ = base
     }
 

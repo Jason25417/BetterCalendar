@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.57.1", date: "2026-07", changes: [
+            "（开发期）修排程实验组的一个判断越权：模型推断出的「这件事得先做那件」不再能把你亲手标的「尽早」挤到后面——你标的永远算数，模型的推断只在同一档内起作用",
+        ]),
         ChangelogEntry(version: "0.57.0", date: "2026-07", changes: [
             "（开发期功能）算法试验台新增两个排程实验组：「脱敏排序」把任务标题完全不发给云端、只发结构；「分步排序」让模型只做语义判断、排布交给本地算法——为「隐私更强 / 更快更省」两条路线做数据决策",
             "试验台跑分表新增 token 成本三列（输入/输出/调用次数），质量、延迟、成本三个指标现在一次看全",

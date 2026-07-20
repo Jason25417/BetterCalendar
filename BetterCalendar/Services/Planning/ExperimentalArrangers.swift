@@ -194,11 +194,15 @@ struct HybridArranger: PlanningEngine {
             if ca != cb { return ca > cb }
             return blocks[a].start < blocks[b].start
         }
-        // 依赖修正：被依赖者必须在前（稳定、最多 n 轮、无环风险）
+        // 依赖修正：被依赖者必须在前（稳定、最多 n 轮、无环风险）。
+        // ⚠️ **同档内才修正**（2026-07-20 跑分实锤：S4 分步组 5/10——模型把「写周报」标成依赖「组会」，
+        // 于是推断出的依赖把 ★要紧事 挤到了固定块之后）。产品哲学「代理而不代权」：
+        // 用户**显式**标的 ★/DDL 永远赢过模型**推断**的依赖；跨档依赖只忽略、不报错（宁可不修正也不越权）。
         for _ in 0..<blocks.count {
             var moved = false
             for (pos, i) in order.enumerated() {
                 guard let dep = byIndex[i]?.dependsOnIndex,
+                      rank(dep) == rank(i),                       // 跨档不修正（★ 不被推断挤走）
                       let depPos = order.firstIndex(of: dep), depPos > pos else { continue }
                 order.remove(at: depPos)
                 order.insert(dep, at: pos)
