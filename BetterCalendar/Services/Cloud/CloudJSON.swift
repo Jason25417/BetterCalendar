@@ -67,7 +67,24 @@ enum DateParsing {
         "yyyy-MM-dd HH:mm:ss",
         "yyyy-MM-dd'T'HH:mm",
         "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd",   // 纯日期（2026-07-20 跑分实锤：L1「GRE 改到 11 月 8 号考」→ 模型给 "2026-11-08"，
+                        // 原来解析不出 → 整条修改被当空值丢弃 → App 里静默无反应）。解析到当日 00:00。
     ]
+
+    /// 截止日专用：纯日期（"2026-11-08"）解析到**当天 23:59**——DDL 语义是「那天结束前」，
+    /// 落 00:00 会让整个截止日当天都被判成「已过期」、提前一天触发温和三选（不制造无谓压力）。
+    /// 带时分的照常按字面解析。
+    static func parseDeadline(_ raw: String?) -> Date? {
+        guard let d = parse(raw) else { return nil }
+        guard let s = raw?.trimmingCharacters(in: .whitespaces), isDateOnly(s) else { return d }
+        let cal = Calendar.current
+        return cal.date(bySettingHour: 23, minute: 59, second: 0, of: d) ?? d
+    }
+
+    /// 只有年月日、没有时间部分（宽松判定：不含 ':' 且不含 'T'）。
+    private static func isDateOnly(_ s: String) -> Bool {
+        !s.contains(":") && !s.uppercased().contains("T")
+    }
 
     static func parse(_ raw: String?) -> Date? {
         guard let s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }

@@ -785,6 +785,29 @@ struct LogicTests {
         #expect(u.addCheckpoints == ["做填空"])               // 空白项被剔除
     }
 
+    // 跑分 L1 实锤 bug（2026-07-20）：模型对「11 月 8 号考」给纯日期 "2026-11-08"，
+    // 原 DateParsing 解不出 → 整条修改被当空值丢弃 → App 里静默无反应。
+    @Test func deadlineAcceptsDateOnlyAndLandsAtDayEnd() throws {
+        // 纯日期 → 当天 23:59（DDL 语义：那天结束前，不提前一天判过期）
+        let d = try #require(DateParsing.parseDeadline("2026-11-08"))
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: d)
+        #expect(c.year == 2026 && c.month == 11 && c.day == 8)
+        #expect(c.hour == 23 && c.minute == 59)
+        // 带时分的照字面来，不改
+        let exact = try #require(DateParsing.parseDeadline("2026-11-08 09:30"))
+        let c2 = Calendar.current.dateComponents([.hour, .minute], from: exact)
+        #expect(c2.hour == 9 && c2.minute == 30)
+
+        // 端到端：L1 那句话的模型输出现在能解出修改（此前 updates 为空）
+        let existing = [LongTaskContext(title: "准备 GRE", deadline: nil,
+                                        cadenceMinutesPerWeek: 300, totalMinutes: nil)]
+        let edit = ClaudeLongTaskRefiner.decode(
+            #"{"creates":[],"updates":[{"targetTitle":"准备 GRE","newTitle":null,"deadline":"2026-11-08","cadenceMinutesPerWeek":null,"totalMinutes":null,"addCheckpoints":[]}]}"#,
+            existing: existing)
+        #expect(edit.updates.count == 1)
+        #expect((edit.updates.first?.deadline ?? nil) != nil)
+    }
+
     @Test func longTaskRefinerRejectsEmptyAndGarbage() throws {
         let existing = [LongTaskContext(title: "写论文", deadline: nil, cadenceMinutesPerWeek: nil,
                                         totalMinutes: nil)]

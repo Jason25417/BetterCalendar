@@ -54,7 +54,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             longTasks.append(ParsedLongTask(title: title,
-                                            deadline: DateParsing.parse(t["deadline"] as? String),
+                                            deadline: DateParsing.parseDeadline(t["deadline"] as? String),
                                             cadenceMinutesPerWeek: cadence,
                                             totalMinutes: intOf("totalMinutes"),
                                             unitMinutes: intOf("unitMinutes"),

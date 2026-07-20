@@ -94,12 +94,14 @@ struct ClaudeLongTaskRefiner: LongTaskRefining {
 
         判断这句话是**新增**一件长期的事，还是**修改现有**的某一件（也可能两者都有）。
         - 修改：targetTitle 必须**原样抄**上面列表里的标题；只填要改的字段，不改的给 null。
+          日期一律写 "YYYY-MM-DD"（只到天，别带时间）。
           清空某个设定（"不设截止了"）用 "clear"。加阶段放 addCheckpoints（只给名字、不给日期）。
         - 新增：整件事放 creates。
         - 都不像（比如在问问题）：两个数组都给空。
         绝不提议删除任何任务或阶段。
         """
-        let raw = try await LLMWatchdog.run {
+        // 看门狗放宽到 20s（跑分：p95 6.8s / max 7.0s，10s 曾误杀一次 L3）
+        let raw = try await LLMWatchdog.run(seconds: 20) {
             try await client.complete(system: "", user: user, maxTokens: 2000,
                                       jsonMode: true, jsonSchema: Self.schema,
                                       cachedSystemPrefix: Self.systemPrompt)
@@ -122,7 +124,7 @@ struct ClaudeLongTaskRefiner: LongTaskRefining {
             let cps = ((c["checkpoints"] as? [Any]) ?? []).compactMap { $0 as? String }
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             edit.creates.append(ParsedLongTask(title: title,
-                                               deadline: DateParsing.parse(c["deadline"] as? String),
+                                               deadline: DateParsing.parseDeadline(c["deadline"] as? String),
                                                cadenceMinutesPerWeek: intOf(c["cadenceMinutesPerWeek"]),
                                                totalMinutes: intOf(c["totalMinutes"]),
                                                unitMinutes: intOf(c["unitMinutes"]),
@@ -152,7 +154,8 @@ struct ClaudeLongTaskRefiner: LongTaskRefining {
     private static func dateField(_ v: Any?) -> Date?? {
         guard let s = v as? String else { return nil }
         if s.lowercased() == "clear" { return .some(nil) }
-        return DateParsing.parse(s).map { .some($0) }
+        // 截止语义：纯日期落当天 23:59（跑分 L1 实锤修复）
+        return DateParsing.parseDeadline(s).map { .some($0) }
     }
     private static func intField(_ v: Any?) -> Int?? {
         if let s = v as? String {
