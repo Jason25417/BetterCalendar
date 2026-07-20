@@ -361,6 +361,11 @@ final class BenchViewModel {
 struct BenchView: View {
     @State private var model: BenchViewModel
     @State private var showModelEditor = false
+    // 多选面板（2026-07-20 Jason：菜单勾一个就关、每次重新点开太麻烦）：
+    // macOS 没有 .menuActionDismissBehavior(.disabled)，改用 popover——面板不会自己关，可连勾。
+    // 与既有「模型」多选同款（U7 同语义同组件）。
+    @State private var showVariantPicker = false
+    @State private var showGracePicker = false
 
     init(runner: BenchRunner) {
         _model = State(initialValue: BenchViewModel(runner: runner))
@@ -588,19 +593,29 @@ struct BenchView: View {
             }
             .pickerStyle(.segmented)
 
-            Menu {
-                ForEach([10, 20, 30], id: \.self) { g in
-                    Toggle("宽限 \(g) 分钟", isOn: Binding(
-                        get: { model.selectedGraces.contains(g) },
-                        set: { on in
-                            if on { model.selectedGraces.insert(g) }
-                            else if model.selectedGraces.count > 1 { model.selectedGraces.remove(g) }
-                        }))
-                }
+            Button {
+                showGracePicker.toggle()
             } label: {
                 Label("宽限×\(model.selectedGraces.count)", systemImage: "clock.badge.questionmark")
             }
             .help("收工线宽限多选（只作用于 reflow V2）：勾几个矩阵乘几份；实验定值后写死进软件")
+            .popover(isPresented: $showGracePicker) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("收工线宽限（可多选）").font(.caption).foregroundStyle(.secondary)
+                    ForEach([10, 20, 30], id: \.self) { g in
+                        Toggle("宽限 \(g) 分钟", isOn: Binding(
+                            get: { model.selectedGraces.contains(g) },
+                            set: { on in
+                                if on { model.selectedGraces.insert(g) }
+                                else if model.selectedGraces.count > 1 { model.selectedGraces.remove(g) }
+                            }))
+                    }
+                    Text("勾几个，矩阵就乘几份（只作用于 reflow V2）")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(minWidth: 220, alignment: .leading)
+            }
 
             Picker("轮数", selection: Binding(get: { model.repeatCount },
                                              set: { model.repeatCount = $0 })) {
@@ -608,21 +623,48 @@ struct BenchView: View {
             }
             .help("每格重复跑 N 轮看稳定性（模型有方差，单轮说了不算）；跳过的格子只跑一次")
 
-            Menu {
-                ForEach(BenchCapability.allCases, id: \.self) { cap in
-                    Section(cap.label) {
-                        ForEach(BenchVariants.of(cap)) { v in
-                            Toggle(v.name, isOn: Binding(
-                                get: { model.enabledVariants.contains(v.id) },
-                                set: { on in
-                                    if on { model.enabledVariants.insert(v.id) }
-                                    else { model.enabledVariants.remove(v.id) }
-                                }))
+            Button {
+                showVariantPicker.toggle()
+            } label: {
+                Label("变体×\(model.enabledVariants.count)", systemImage: "square.stack.3d.up")
+            }
+            .help("勾选参赛变体：面板不会自动关，可一次连勾多个")
+            .popover(isPresented: $showVariantPicker) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(BenchCapability.allCases, id: \.self) { cap in
+                            let vs = BenchVariants.of(cap)
+                            if !vs.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(cap.label).font(.caption.bold()).foregroundStyle(.secondary)
+                                        Spacer()
+                                        // 按能力整组开关：跑单一能力时一键切换，最省点击
+                                        let allOn = vs.allSatisfy { model.enabledVariants.contains($0.id) }
+                                        Button(allOn ? "全不选" : "全选") {
+                                            for v in vs {
+                                                if allOn { model.enabledVariants.remove(v.id) }
+                                                else { model.enabledVariants.insert(v.id) }
+                                            }
+                                        }
+                                        .font(.caption2).buttonStyle(.plain).foregroundStyle(.tint)
+                                    }
+                                    ForEach(vs) { v in
+                                        Toggle(v.name, isOn: Binding(
+                                            get: { model.enabledVariants.contains(v.id) },
+                                            set: { on in
+                                                if on { model.enabledVariants.insert(v.id) }
+                                                else { model.enabledVariants.remove(v.id) }
+                                            }))
+                                        .font(.callout)
+                                    }
+                                }
+                            }
                         }
                     }
+                    .padding(12)
                 }
-            } label: {
-                Label("变体", systemImage: "square.stack.3d.up")
+                .frame(minWidth: 320, maxHeight: 460)
             }
 
             Button {

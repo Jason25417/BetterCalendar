@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.59.2", date: "2026-07", changes: [
+            "（开发期）试验台的「变体」「宽限」改成面板式多选：勾一个不再自动关闭，可以一次连勾好几个；变体面板还按能力分组加了「全选/全不选」",
+        ]),
         ChangelogEntry(version: "0.59.1", date: "2026-07", changes: [
             "修：在长期页说「GRE 改到 11 月 8 号考」这类只带日期的改期，之前会静默没反应——现在能正常识别并改期了（跑分抓出来的）",
             "截止日只写到某一天时，按「那天结束前」算——不会在截止当天就把它当成已过期",
