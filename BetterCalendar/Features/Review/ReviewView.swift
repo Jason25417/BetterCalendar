@@ -41,7 +41,8 @@ struct ReviewPanel: View {
                 } else if model.isWorking {
                     ProgressView("正在读取今天…")
                 } else {
-                    Text("今天还没有可复盘的记录。先在 menu bar 流过一天，或在下面补一笔。")
+                    // 体检 #12（U7）：执行入口名跨端各表——macOS=menu bar，iOS=「今天」页
+                    Text("今天还没有可复盘的记录。先在\(Self.executionEntryName)流过一天，或在下面补一笔。")
                         .foregroundStyle(.secondary)
                 }
 
@@ -59,7 +60,7 @@ struct ReviewPanel: View {
         return ShareLink(item: text, preview: SharePreview("BetterCalendar 今日小结")) {
             Label("分享今日小结", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.bordered).tint(.primary)   // 体检 #10：次要动作收中性（条文2）
     }
 
     // MARK: 松散日「休息肯定」（退场+见证：不算账、赋义措辞；做了就平权庆祝、没做也不愧疚）
@@ -214,17 +215,22 @@ struct ReviewPanel: View {
         @Bindable var model = model
         return VStack(alignment: .leading, spacing: 8) {
             Text("补一笔今天做了什么").font(.headline)
-            Text("menu bar 没抓到的、或临时多做的，说一句补进蓝色「实际」。会合并、不覆盖已记录的。")
+            Text("\(Self.executionEntryName)没抓到的、或临时多做的，说一句补进蓝色「实际」。会合并、不覆盖已记录的。")   // 体检 #12
                 .font(.caption).foregroundStyle(.secondary)
 
             HStack {
+                // 体检 #18：「对 AI 说话」的口统一穿 surface 纸面卡（同首页/长期页，条文5）
                 TextField("例：下午临时读了篇论文一小时、晚上跑步半小时",
                           text: $model.backfillText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
                     .lineLimit(1...3)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
                 Button { Task { await model.parseBackfill() } } label: {
                     Label("解析", systemImage: "wand.and.stars")
                 }
+                .tint(.primary)   // 体检 #10
                 .disabled(model.isWorking)
             }
 
@@ -241,7 +247,7 @@ struct ReviewPanel: View {
 
                 HStack {
                     Button { model.addBackfillBlock() } label: { Label("加一项", systemImage: "plus") }
-                        .font(.caption)
+                        .font(.caption).tint(.primary)   // 体检 #10
                     Spacer()
                     Button { Task { await model.confirmBackfill() } } label: {
                         Label("写入实际日历", systemImage: "checkmark.circle")
@@ -258,6 +264,15 @@ struct ReviewPanel: View {
                 Text(err).font(.caption).foregroundStyle(.orange)
             }
         }
+    }
+
+    /// 体检 #12：执行陪伴入口的跨端称呼（同一语义，两端载体不同）。
+    static var executionEntryName: String {
+        #if os(macOS)
+        "menu bar "
+        #else
+        "「今天」页"
+        #endif
     }
 
     // 分钟 → 「H 小时 M 分」/「M 分钟」

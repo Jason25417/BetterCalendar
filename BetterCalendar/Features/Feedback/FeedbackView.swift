@@ -48,6 +48,7 @@ enum FeedbackComposer {
 
 /// 反馈表单（设置页 sheet）。发送 = 系统分享面板（邮件/信息/存文件由用户自选）。
 struct FeedbackView: View {
+    @Environment(\.appTheme) private var theme   // 体检 #25：设置 scene 已注入主题（体检 #9）
     @Environment(\.dismiss) private var dismiss
     @State private var type = "问题"
     @State private var text = ""
@@ -65,11 +66,17 @@ struct FeedbackView: View {
                 Text("建议").tag("建议")
             }
             .pickerStyle(.segmented)
+            // 体检 #25：正文输入区穿 surface 纸面卡（与日记编辑器同族，条文5大容器档12）
             TextEditor(text: $text)
                 .frame(minHeight: 120)
+                .padding(6)
+                .scrollContentBackground(.hidden)
+                .background(theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary.opacity(0.4)))
                 .overlay(alignment: .topLeading) {
                     if text.isEmpty {
-                        Text("说说遇到的问题或想法…").foregroundStyle(.tertiary).padding(6).allowsHitTesting(false)
+                        Text("说说遇到的问题或想法…").foregroundStyle(.tertiary).padding(10).allowsHitTesting(false)
                     }
                 }
             Toggle("附上诊断信息（版本 / 系统 / 最近日志）", isOn: $attach)
@@ -81,7 +88,7 @@ struct FeedbackView: View {
                 }
                 .frame(maxHeight: 140)
                 .padding(6)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))   // 体检 #4：圆角归三档
                 Text("以上就是会附上的全部内容（已剔除行为通道；日记与日历内容不会进入反馈）。")
                     .font(.caption).foregroundStyle(.secondary)
             }

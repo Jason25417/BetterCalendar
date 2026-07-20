@@ -54,13 +54,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.delegate = self
         // 展开层（三层模型，S3-P1）：menu bar 宿主开 compactCapable——默认精简子集，chevron 就地展开
+        // 全局体检 #5（2026-07-20）：popover 是独立 SwiftUI 宿主，不吃主窗根级注入——
+        // 换装 A–D 四批全漏了它（用户最高频界面吃了一周系统蓝）。theme+tint 双注入补齐。
         popover.contentViewController = NSHostingController(rootView: ExecutionPanel(
             model: model,
             onOpenJournal: {   // 批次7 F6：回看今天闭包化（跨端统一入口）
                 AppLifecycle.shared?.showMainWindow()
                 NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
             },
-            compactCapable: true))
+            compactCapable: true)
+            .environment(\.appTheme, ThemeSettings.current)
+            .tint(ThemeSettings.current.accent))
 
         // AppKit Timer + 字符串赋值：轻量、不失控（与 SwiftUI label 的周期重绘本质不同）
         timer = Timer.scheduledTimer(timeInterval: 1, target: self,

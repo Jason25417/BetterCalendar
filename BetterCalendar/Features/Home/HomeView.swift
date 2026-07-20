@@ -186,6 +186,7 @@ struct HomeView: View {
                                     deps.longTasks.shelve(t)
                                 }
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                            .tint(.primary)   // 体检 #8
                         } else {
                             Button {
                                 BehaviorLog.record("L3建议", "点「排进今天」")
@@ -195,6 +196,7 @@ struct HomeView: View {
                             } label: {
                                 Label("排进今天", systemImage: "calendar.badge.plus")   // 审计 #13：同动作同文案同图标（U7）
                             }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                            .tint(.primary)   // 体检 #8：建议条内动作收中性
                         }
                         Button {
                             BehaviorLog.record("L3建议", "静音（别再提）")
@@ -280,7 +282,7 @@ struct HomeView: View {
                     // 第二仪式（0.38，#33 拍板③）：收尾章后顺手排完明天 → 一次性庆祝
                     VStack(spacing: 6) {
                         CelebrationBurst()
-                        Text("明天也就位了——睡个好觉 🌙").font(.headline)
+                        Text("明天也就位了——睡个好觉").font(.headline)   // 体检 #15：emoji 清理（星光已承载庆祝）
                         Button("收下") { model.tomorrowReadyCelebration = false }
                             .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
                     }
@@ -674,6 +676,9 @@ struct HomeView: View {
                         .font(.caption)
                 }
                 .buttonStyle(.bordered).controlSize(.small)
+                // 体检 #11（条文2）：说的时刻=事实主键（确认写入不在屏）保留 accent；
+                // 改/看时刻与「确认写入」主键同屏 → 收中性，全页 accent 恒 ≤1
+                .tint(arrangeMode ? ThemeSettings.current.accent : Color.primary)
                 .disabled(model.isWorking)
             }
             .padding(6)
@@ -752,7 +757,9 @@ struct HomeView: View {
     }
 
     private func nearestDDLLabel(_ items: [LongTask]) -> String {
-        guard let next = items.compactMap(\.deadline).min() else { return "" }
+        // 体检 #1（U5）：只报未来的 DDL——过期的属「债务」，不进首页默认视图（逾期处理在长期页温和三选）
+        guard let next = items.compactMap(\.deadline)
+            .filter({ $0 >= DayContext.logicalStartOfDay(.now) }).min() else { return "" }
         return " · 最近：\(next.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated)))"
     }
 

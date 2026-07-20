@@ -96,7 +96,7 @@ struct ClaudeLongTaskRefiner: LongTaskRefining {
         - 修改：targetTitle 必须**原样抄**上面列表里的标题；只填要改的字段，不改的给 null。
           日期一律写 "YYYY-MM-DD"（只到天，别带时间）。
           清空某个设定（"不设截止了"）用 "clear"。加阶段放 addCheckpoints（只给名字、不给日期）。
-        - 新增：整件事放 creates。
+        - 新增：整件事放 creates。title=干净短名（2-8 字）——数量/时长等元数据只进字段、不复读进标题。
         - 都不像（比如在问问题）：两个数组都给空。
         绝不提议删除任何任务或阶段。
         """

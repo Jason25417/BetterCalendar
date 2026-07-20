@@ -192,7 +192,7 @@ struct FoundationModelsScheduleParser: ScheduleParsing {
         - 用户安排的时间范围碰到午餐（约11:30–13:30）/晚餐（约17:30–19:30）时段、而没提那顿饭时，默认补一个「午饭」/「晚饭」锚点块（30–60 分钟，isAnchor=true、timingStyle="none"）；明说不吃则不加，早饭夜宵不补。
         - timingStyle 默认 light，只有背书/写卷子/啃论文这类高摩擦才 pomodoro。
         - priority 默认 normal，要紧/紧急用 important。
-        - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks；用户明确列出阶段（"分三个阶段：A、B、C"）时把阶段名按序放进该任务的 checkpoints，只给名字、不给日期、不自创，没提就空。
+        - 截止在目标日之后的远期/长线任务放 longTasks、不放 blocks；标题=干净短名（数量/时长等元数据不复读进标题）；用户明确列出阶段（"分三个阶段：A、B、C"）时把阶段名按序放进该任务的 checkpoints，只给名字、不给日期、不自创，没提就空。
         - 用户明说"想松散/放松/摆烂"才 loose=true。
         """
     }

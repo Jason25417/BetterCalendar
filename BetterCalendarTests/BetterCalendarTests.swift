@@ -400,7 +400,7 @@ struct LogicTests {
     // MARK: 跨端日志（DeviceLog：追加/保留7天）
 
     @Test func logSyncFlushAppendsAndPrunesOldDays() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: DeviceLog.self, configurations: config)
         let sync = LogSyncService(context: container.mainContext)
         sync.dumpEnabled = false
@@ -428,7 +428,7 @@ struct LogicTests {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("bc-draft-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let store = DraftSnapshotStore(directory: tmp)
@@ -498,7 +498,7 @@ struct LogicTests {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("bc-draftswitch-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let store = DraftSnapshotStore(directory: tmp)
@@ -535,7 +535,7 @@ struct LogicTests {
 
     /// 精修台（0.24 C2「过去只读、未来可编」）：实时日只加载未尘埃落定的块，从现在起铺排。
     @Test func liveDayLoadsOnlyRemainingAsBase() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
@@ -559,7 +559,7 @@ struct LogicTests {
 
     /// 精修台确认只替换未来：已完成/进行中/已流逝的块原样保留（复盘基线不被中途改写）。
     @Test func liveDayConfirmPreservesSettledAndPast() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
@@ -590,7 +590,7 @@ struct LogicTests {
 
     /// 新鲜度徽标：编辑中底层变了 → 亮标不打扰；载入最新 → 清标回到干净底；确认 → 清标（最后动作赢）。
     @Test func freshnessBadgeLifecycle() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
@@ -644,7 +644,7 @@ struct LogicTests {
     // MARK: 锚点块（午饭/通勤：占日程但不计完成度、不进执行列表）
 
     @Test func anchorBlockExcludedFromExecutionPlanned() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -679,7 +679,7 @@ struct LogicTests {
     }
 
     @Test func longTaskStoreAddsDedupsAndLifecycles() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         let ddl = at(2026,7,11,22)
@@ -703,7 +703,7 @@ struct LogicTests {
 
     // #40 批1：检查点（有限一层）+ 三量编辑 + 捞回
     @Test func longTaskCheckpointsAndTriadEditing() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         let t = store.add(title: "量化学习")
@@ -748,7 +748,7 @@ struct LogicTests {
 
     // #40 批2：复盘「长线推进」带阶段名（勾了检查点即使没记投入也上榜）
     @Test func longTaskProgressLineIncludesCheckpointAdvance() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         let t = store.add(title: "量化学习")
@@ -917,7 +917,7 @@ struct LogicTests {
     }
 
     @Test func longTaskProgressUnitsAndFraction() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         let sessions = ExecutionSessionStore(context: container.mainContext)
@@ -936,7 +936,7 @@ struct LogicTests {
     }
 
     @Test func longTaskInvestedMinutesAggregatesSessionsByTitle() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self,
                                            configurations: config)
         let store = LongTaskStore(context: container.mainContext)
@@ -958,7 +958,7 @@ struct LogicTests {
 
     // MARK: 0.18.2 精确归属：会话所属块显式归属 → 不靠标题、不串味
     @Test func investedMinutesPrefersLinkedTaskOverTitle() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, PlanBlock.self,
                                            configurations: config)
         let ctx = container.mainContext
@@ -979,7 +979,7 @@ struct LogicTests {
 
     // MARK: 0.18.2 超估算 → 淡掉 N/M 单元、只显已投入 + looksComplete 出邀请
     @Test func progressDropsFractionWhenOverEstimate() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         let sessions = ExecutionSessionStore(context: container.mainContext)
@@ -993,7 +993,7 @@ struct LogicTests {
 
     // MARK: L3 主动建议引擎（0.18.14）：触发 + 休息日静音 + 强度 + 静音集
     @Test func l3SuggestsDeadlineAndRespectsLooseIntensityMute() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, ExecutionSession.self, PlanBlock.self,
                                            configurations: config)
         let store = LongTaskStore(context: container.mainContext)
@@ -1009,7 +1009,7 @@ struct LogicTests {
     }
 
     @Test func longTaskOverdueQuery() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: LongTask.self, configurations: config)
         let store = LongTaskStore(context: container.mainContext)
         store.add(title: "早该交的", deadline: at(2026,7,1,22))
@@ -1023,7 +1023,7 @@ struct LogicTests {
     // MARK: 标记完成（MarkDone Intent → ExecutionViewModel.markDone）
 
     @Test func markDoneRecordsActualForMatchingPlannedBlock() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1057,7 +1057,7 @@ struct LogicTests {
     /// 蓝对账 A2：完成的实际落 PlanStore 真相源；换一个「日历全空」的新 VM 仍能从真相源读回 done。
     /// 证明蓝色实际真相已从日历迁到 PlanStore（这是后续「删日历事件也 stick」的前置：真相不再只在日历）。
     @Test func actualPersistsToPlanStoreTruthAndReloadsWithoutCalendar() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1096,7 +1096,7 @@ struct LogicTests {
             func write(_ drafts: [ReminderDraft]) async throws {}
             func completedBlockIDs() async -> Set<UUID> { completed }
         }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1130,7 +1130,7 @@ struct LogicTests {
             func write(_ drafts: [ReminderDraft]) async throws {}
             func completedBlockIDs() async -> Set<UUID> { completed }
         }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1162,7 +1162,7 @@ struct LogicTests {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("bc-photo-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: JournalPhoto.self, configurations: config)
 
         // 预置一张「旧版本只存了本地文件」的照片 → init 时应迁入 DB
@@ -1198,7 +1198,7 @@ struct LogicTests {
     }
 
     @Test func journalOnThisDayFindsSameMonthDayInPastYears() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: JournalEntry.self, configurations: config)
         let store = JournalStore(context: container.mainContext)
         let vm = JournalViewModel(store: store)
@@ -1214,7 +1214,7 @@ struct LogicTests {
     // MARK: 执行会话落库（ExecutionSession，趋势统计数据源）
 
     @Test func executionSessionStoreRecordsAndQueriesByLogicalDay() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: ExecutionSession.self, configurations: config)
         let store = ExecutionSessionStore(context: container.mainContext)
         store.record(blockID: UUID(), title: "写代码", start: at(2026,7,4,9), end: at(2026,7,4,10,30),
@@ -1308,7 +1308,7 @@ struct LogicTests {
     // MARK: 活跃天数 / 今日 MVP（DayRecord，跨端同步的复盘小数据）
 
     @Test func dayRecordStoreCountsDistinctActiveDaysAndIsIdempotent() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: DayRecord.self, configurations: config)
         let store = ReviewLocalStore(context: container.mainContext)
         #expect(store.activeDayCount == 0)
@@ -1321,7 +1321,7 @@ struct LogicTests {
     }
 
     @Test func dayRecordStoreMVPRoundTripsAndDedupsByLatest() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: DayRecord.self, configurations: config)
         let store = ReviewLocalStore(context: container.mainContext)
         store.todayMVP = "写代码"
@@ -1338,7 +1338,7 @@ struct LogicTests {
     }
 
     @Test func planStoreRoundTripsMetadataAndReplaces() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let day = at(2026,6,30,12)
@@ -1361,7 +1361,7 @@ struct LogicTests {
     /// 排日程页自动加载目标日已确认计划（2026-07-01 Jason 定）：
     /// 进页/切目标日加载真相源；未确认的新草稿不被覆盖；切到空的一天清掉加载视图。
     @Test func homeAutoLoadsConfirmedPlanForTargetDay() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let vm = Self.makeHomeVM(planStore: store)
@@ -1394,7 +1394,7 @@ struct LogicTests {
 
     /// 修复回归：编辑「已加载的确认计划」后未点确认 → 切 tab / 再次进页不能静默丢弃编辑。
     @Test func homeFileModelKeepsEditsUnsavedUntilConfirm() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let vm = Self.makeHomeVM(planStore: store)
@@ -1520,7 +1520,7 @@ struct LogicTests {
 
     /// 逻辑日归桶：凌晨 0:30 的「睡前看书」归前一逻辑日——当天读回包含它、次日不含（根治"少几项"）。
     @Test func planStoreBucketsByLogicalDay() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let label = at(2026, 7, 7, 0)   // 逻辑日标签 7/7 = [7/7 4:00, 7/8 4:00)
@@ -1543,7 +1543,7 @@ struct LogicTests {
 
     /// 投影：常规日 → 绿色带章；实时模式（开始今天）→ 绿清空、整日转橙。
     @Test func projectionPaintsGreenThenFadesToOrangeWhenStarted() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let fake = FakeCalendarStore()
@@ -1603,7 +1603,7 @@ struct LogicTests {
 
     /// 显式挪日（0.23 C，取代自动平移）：凌晨块（0–4 点）落到新逻辑日的**次日日历日**，归属跟着逻辑日走。
     @Test func homeMoveDraftKeepsCrossMidnightAttribution() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let vm = Self.makeHomeVM(planStore: PlanStore(context: container.mainContext))
         vm.blocks = [
@@ -1619,7 +1619,7 @@ struct LogicTests {
 
     /// 完成判定按 ID：同名两块做完一件，另一件不被连坐标完成、仍在「换一件」列表（menu bar 误标完成的根治）。
     @Test func executionSameTitleBlocksDoNotCrossContaminate() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1648,7 +1648,7 @@ struct LogicTests {
             func write(_ drafts: [ReminderDraft]) async throws {}
             func completedBlockIDs() async -> Set<UUID> { completed }
         }
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1670,7 +1670,7 @@ struct LogicTests {
     /// 计划外「+ 新事项…」（0.25，点子 #1）：临时事项直接开始 = bonus——不进 planned、
     /// 完成即记蓝色实际、复盘里无匹配计划（extra）；同时做的进后台。
     @Test func adHocBonusStartsWithoutTouchingPlan() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -1704,7 +1704,7 @@ struct LogicTests {
     /// 实时模式合并（0.23 A）：某逻辑日**第一次真正开始一件事**即进实时模式——
     /// markStarted + 绿色淡出；完成动作不触发；同日第二次开始幂等。
     @Test func firstStartOfDayEntersLiveModeAndFadesGreen() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
@@ -1964,7 +1964,7 @@ struct LogicTests {
     /// 防线：确认过的并行计划经全天连续 reflow（PlanStore→continuousReflow→layOut）绑定不散、标签不丢。
     /// （0.23 A：morningReflow 已退役，这条防线改守连续 reflow——它现在是唯一重排路径。）
     @Test func continuousReflowPreservesParallelBinding() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let g = ScheduledBlock.parallelPrefix + "P1"
@@ -1985,7 +1985,7 @@ struct LogicTests {
 
     /// labels 全链路存活：PlanStore 往返 + 解析 parallel 字段 → parallel: 标签。
     @Test func parallelLabelsSurviveStoreAndParse() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let g = ScheduledBlock.parallelPrefix + "洗衣组"
@@ -2004,7 +2004,7 @@ struct LogicTests {
 
     /// 计时方式实时改（0.21）：番茄工作段中锁定；转番茄带目标段数、做满自动转轻计时续走。
     @Test func executionTimingChangeRespectsPomodoroLockAndTarget() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -2062,7 +2062,7 @@ struct LogicTests {
     // MARK: 并行接替（0.26.15 点子 #20）：前台完成 → 同时做队首顶上；被换走 → 回同时做不误结束
 
     @Test func parallelTakeoverPromotesFirstBackgroundOnComplete() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -2103,7 +2103,7 @@ struct LogicTests {
     }
 
     @Test func parallelTakeoverDemotesBackOnSwitchInsteadOfEnding() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -2142,7 +2142,7 @@ struct LogicTests {
     // MARK: 日记第一方情境读真相源（0.26.15 补迁移：实时模式绿色淡出，从日历读会全算计划外）
 
     @Test func reflectionPromptReadsTruthStoreNotCalendarProjection() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -2187,7 +2187,7 @@ struct LogicTests {
     // MARK: 聪音待办投影 + 回流（SPEC §11 过审，0.26.16）
 
     @Test func chiyneCompleteByPlanIDMarksDoneIdempotently() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let day = DayContext.logicalStartOfDay(.now)
@@ -2396,7 +2396,7 @@ struct LogicTests {
 
     /// 徽标 v2：亮标时算最新底但不套用（freshBase 快照）；保留我的编辑 → 熄标、本页不动。
     @Test func freshnessCompareSnapshotAndChoices() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let planStore = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
@@ -2535,7 +2535,7 @@ struct LogicTests {
     // MARK: M9/R1 日记
 
     @Test func journalStoreTodayIsSingletonAndSearchable() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: JournalEntry.self, configurations: config)
         let store = JournalStore(context: container.mainContext)
         let e1 = store.entryForToday()

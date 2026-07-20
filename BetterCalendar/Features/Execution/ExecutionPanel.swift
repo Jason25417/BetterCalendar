@@ -45,10 +45,10 @@ struct ExecutionPanel: View {
                     .font(.caption)
                 Spacer()
                 Button("退出跟随") { FollowRunState.shared.exitFollow() }
-                    .font(.caption)
+                    .font(.caption).tint(.primary)   // 体检 #6
             }
             .padding(6)
-            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 6))
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))   // 体检 #4：圆角归三档
         }
     }
 
@@ -118,7 +118,8 @@ struct ExecutionPanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(model.importantItems) { item in
                     if model.isImportantDone(item) {
-                        Text("🎯 想尽早的「\(item.title)」做成了")
+                        // 体检 #13：与 ReviewView 同语义句同款（target Symbol，条文9 emoji 构件退场）
+                        Label("想尽早的「\(item.title)」做成了", systemImage: "target")
                             .font(.caption.weight(.medium)).foregroundStyle(theme.positiveTint)
                     } else {
                         // 换装 B 微决策：尽早=accent（同行内 tag，让出与预览橙的相撞）
@@ -245,7 +246,8 @@ struct ExecutionPanel: View {
             if let next = model.nextSuggested {
                 Text("下一件：\(next.title)").font(.caption).foregroundStyle(.secondary)
             } else if model.loaded {
-                Text(model.planned.isEmpty ? "今天还没排计划" : "今天的计划都做完了 🎉")
+                // 体检 #14：四页唯一无前向指引的空态 → 补「现状+下一步」句式；#15：文案 emoji 按 0.60 先例清理
+                Text(model.planned.isEmpty ? "今天还没排计划——去排日程页说说今天" : "今天的计划都做完了")
                     .font(.caption).foregroundStyle(.secondary)
                 // 收口轻入口（0.28 → 批次7 跨端化）：做完即回看=最顺的时机；信号与收口卡同源（全完成）
                 if !model.planned.isEmpty, let onOpenJournal {
@@ -264,7 +266,7 @@ struct ExecutionPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if isWork {
                         // 工作段满：两选（顶替原「开始休息」）——继续=转不计时逃生舱、再来一段=休息+专注循环
-                        Text("专注完成 🎉").font(.callout).foregroundStyle(theme.actualTint)
+                        Text("专注完成").font(.callout).foregroundStyle(theme.actualTint)   // 体检 #15：emoji 清理（庆祝感由段间卡与星光承载）
                         HStack(spacing: 8) {
                             Button("继续计时") { model.continueUntimed() }
                                 .buttonStyle(.bordered).controlSize(.small)
@@ -344,13 +346,22 @@ struct ExecutionPanel: View {
         } else if model.active != nil {
             // 批次6（Jason 反馈：语义重复）：标题只住 header 事件名（那也是换一件入口），按钮回归通用词
             //（帧2 线框原案即「完成这件」）
-            Button { Task { await model.completeCurrent() } } label: {
-                Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+            // 体检 #7（U1）：番茄段间确认态时，段间卡的「再来一段/回到专注」才是当刻主键——
+            // 「完成这件」降为 bordered，六态「互斥各持一颗 prominent」在渲染层真实成立
+            if model.pomodoroPhase?.pendingConfirm == true {
+                Button { Task { await model.completeCurrent() } } label: {
+                    Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered).tint(.primary)
+            } else {
+                Button { Task { await model.completeCurrent() } } label: {
+                    Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
             // 「换一件」退役（0.21）：事件名按钮已收编；空位给「计时」切换菜单
             // compact：次要排收进边缘 ⋯（S3-P1），主按钮独占
-            if !compact { HStack { timingMenu; alsoMenu; breakButton } }
+            if !compact { HStack { timingMenu; alsoMenu; breakButton }.tint(.primary) }   // 体检 #6：次要排收中性
             // 分心自动休息的撤销口（#26 红线④）：感知误判（其实在查资料）→ 一键把那段算回投入。
             // 只在自动休息刚结束的 10 分钟内出现；判定权在用户——安全阀，compact 也保留。
             if model.canUndoAutoBreak {
@@ -365,7 +376,7 @@ struct ExecutionPanel: View {
                 Label("开始这件", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            if !compact { HStack { switchMenu; alsoMenu; breakButton } }
+            if !compact { HStack { switchMenu; alsoMenu; breakButton }.tint(.primary) }   // 体检 #6
         } else {
             if let next = model.nextSuggested {
                 // 标题展示归 header「下一件：X」（语义去重，批次6）
@@ -374,7 +385,7 @@ struct ExecutionPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-            if !compact { HStack { switchMenu; alsoMenu; breakButton } }
+            if !compact { HStack { switchMenu; alsoMenu; breakButton }.tint(.primary) }   // 体检 #6
         }
     }
 

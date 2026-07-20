@@ -496,10 +496,14 @@ struct LongTaskDetailView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                // 视觉轮 V1（2026-07-20 dark 截图实锤）：审计 #2 漏网点位——这两颗曾被全局 tint 染橙，
+                // 同屏三橙违条文2。做成了=绿族语义（不占彩色预算），先放下=中性。
                 Button { store.complete(task); dismiss() } label: {
                     Label("做成了", systemImage: "checkmark.seal.fill")   // 审计 #22：Form 系统场域不用 emoji（条文9）
                 }
+                .tint(theme.positiveTint)
                 Button("先放下（随时捞回）") { store.shelve(task); dismiss() }
+                    .tint(.primary)
                     .foregroundStyle(.secondary)
             }
         }

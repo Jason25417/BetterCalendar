@@ -47,6 +47,7 @@ struct JournalView: View {
     enum WrapUpStage { case review, writing }
     @State private var wrapUpStage: WrapUpStage?
     @State private var wrapUpJustSealed = false
+    @State private var justCheckedCPs: [UUID: LongTaskCheckpoint] = [:]   // 体检 #3：收尾轻问的确认反馈（会话内）
     @State private var showAchievementsSheet = false   // #36：toast 直达成就页
 
     let deps: JournalDeps
@@ -153,8 +154,8 @@ struct JournalView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(12)
-        .background(theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))   // 收尾庆祝=情感时刻族
+        .padding(16)   // 体检 #24：情感时刻族统一 16/14（与首页收口卡/就位卡同档）
+        .background(theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
     }
 
     /// 「先不收尾」——全程常驻、任一步可退、零痕迹（红线①）。
@@ -298,15 +299,35 @@ struct JournalView: View {
     @ViewBuilder private var checkpointAsk: some View {
         if let store = deps.longTasks {
             let touched = store.items.filter {
-                store.investedMinutes(for: $0, on: .now) > 0 && $0.nextCheckpoint != nil
+                // 刚勾过的也留着（勾掉最后一个阶段后 nextCheckpoint=nil，确认行不能跟着消失——体检 #3）
+                (store.investedMinutes(for: $0, on: .now) > 0 && $0.nextCheckpoint != nil)
+                    || justCheckedCPs[$0.id] != nil
             }
             if !touched.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("今天推进到哪了？（不点也行）").font(.caption).foregroundStyle(.secondary)
                     ForEach(touched) { task in
-                        if let next = task.nextCheckpoint {
+                        // 体检 #3：点完不再「文本瞬变/行消失」——留一行确认态（再点=撤销），轻问有回音
+                        if let just = justCheckedCPs[task.id] {
+                            Button {
+                                store.toggleCheckpoint(just)   // 撤销（toggle 回未勾）
+                                justCheckedCPs[task.id] = nil
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.positiveTint)
+                                    Text("记下了：「\(task.title)」做到「\(just.title)」")
+                                        .font(.callout).foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("再点一下可以撤销")
+                        } else if let next = task.nextCheckpoint {
                             Button {
                                 store.toggleCheckpoint(next)
+                                justCheckedCPs[task.id] = next
+                                BehaviorLog.record("长期页", "勾选阶段（收尾轻问）")   // 体检 #3：补齐两侧埋点口径
                             } label: {
                                 HStack(spacing: 8) {
                                     Image(systemName: "circle").foregroundStyle(.secondary)
@@ -423,7 +444,7 @@ struct JournalView: View {
             if model.history.isEmpty {
                 Text(model.entries.isEmpty
                      ? "还没有日记。在上面「写下今天」就好。"
-                     : "今天的日记在上面 ✏️ · 改动自动保存；往后每天的会按时间出现在这里。")
+                     : "今天的日记在上面 · 改动自动保存；往后每天的会按时间出现在这里。")   // 体检 #15：emoji 清理
                     .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
             } else {
                 ForEach(model.history) { e in

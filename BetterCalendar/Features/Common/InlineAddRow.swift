@@ -5,7 +5,8 @@
 //  列表尾行「加一项」（2026-07-20 长期页审计 #11 抽出，进组件登记表）：
 //  与排日程页 addTailRow 同形态——默认一行低调的「＋ 文案」，点开变行内输入，
 //  回车提交、Escape/失焦取消。U7：全 App 的「就地新增」都长这样。
-//  （HomeView 原实现耦合其局部状态，暂未迁移到本件——登记表已注明「待迁移」。）
+//  体检 #17：提交后去留原是两处各自硬编码的分歧（长期页留、排日程页关）→ 参数化收进本件，
+//  两种都是合法形态（连续加多项 vs 加一件即收）；HomeView 迁移到本件时传 false 即可（登记表「待迁移」）。
 //
 
 import SwiftUI
@@ -13,6 +14,7 @@ import SwiftUI
 struct InlineAddRow: View {
     let prompt: String            // 收起态文案，如「手动加一件」
     let placeholder: String       // 输入态占位
+    var keepsOpenAfterSubmit = true   // 体检 #17：true=提交后保持输入态连续加（长期页）；false=加一件即收（排日程页族）
     let onSubmit: (String) -> Void
 
     @State private var active = false
@@ -56,6 +58,6 @@ struct InlineAddRow: View {
         guard !t.isEmpty else { return }
         onSubmit(t)
         text = ""
-        // 保持输入态，方便连续加多项（同排日程页行为）
+        if !keepsOpenAfterSubmit { active = false }
     }
 }

@@ -27,10 +27,6 @@ struct JournalEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
-                  systemImage: "checkmark.circle.fill")
-                .font(.caption2).foregroundStyle(theme.positiveTint)
-
             MoodPicker(mood: $entry.mood)
                 .onChange(of: entry.mood) { _, _ in touch() }
 
@@ -59,6 +55,11 @@ struct JournalEditor: View {
 
             tagRow
             photoRow
+
+            // 体检 #19：保存状态=边缘信息 → 底部弱行（caption2/secondary）；positiveTint 留给「做成」语义
+            Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
+                  systemImage: "checkmark.circle")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .tint(.primary)   // 修正批 D：编辑器工具行（预览/照片/标签）收中性（条文 2）——正文卡内无主按钮
     }

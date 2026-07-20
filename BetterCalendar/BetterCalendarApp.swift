@@ -33,6 +33,7 @@ struct BetterCalendarApp: App {
         Settings {
             SettingsView()
                 .environment(\.appTheme, ThemeSettings.current)
+                .tint(ThemeSettings.current.accent)   // 体检 #9：独立 scene 不吃主窗 tint，跨端选中态一致
         }
 
         // 算法试验台（开发期）：入口=Home 工具栏烧瓶按钮 / 系统「窗口」菜单。上架前撤入口。
