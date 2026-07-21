@@ -18,7 +18,7 @@ enum BehaviorLog {
         var detail: String   // 简短明细（件数/标题等）
     }
 
-    private static var isTestHost: Bool { NSClassFromString("XCTestCase") != nil }
+    private static var isTestHost: Bool { TestHost.isActive }   // 2026-07-21：原 XCTestCase 检测在 Swift Testing 下失效 → 统一到 [[TestHost]]
 
     private static var fileURL: URL? {
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

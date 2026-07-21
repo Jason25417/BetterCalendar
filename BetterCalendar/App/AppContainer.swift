@@ -52,8 +52,8 @@ final class AppContainer {
 
     init() {
         // 假日历退役（2026-07-07 Jason 定）：设置页不再提供切换、一律写真 Apple 日历。
-        // Fake 仅供单测/预览页；老设备存的 fake 选项在此收敛（tests 不建 AppContainer、不受影响）。
-        CalendarSettings.backend = .eventKit
+        // 收敛已移到 CalendarSettings.backend getter（生产恒 eventKit、无视历史存储 fake）——
+        // 原本这里 `= .eventKit` 依赖 container 早于任何读取的时序，对已存 fake 的老设备失效（2026-07-21 实锤根因）。删。
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
         // 解析链 v2（2026-07-11「只使用端侧」定稿）：默认=云端 Claude（Haiku·三路对冲）优先、

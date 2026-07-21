@@ -81,8 +81,7 @@ struct HomeView: View {
     @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
     @State private var showDraftExpanded = false   // iOS 草稿全屏浏览/编辑（小窗太挤）
     #endif
-    // 实时跟随设置里的日历后端开关（按钮文字热切换）
-    @AppStorage("calendar.backend") private var calendarBackendRaw: String = "fake"
+    // （日历后端 @AppStorage 已删——后端退役恒 eventKit，按钮文案不再依赖它，2026-07-21）
     @AppStorage("home.inputHeight") private var inputHeight: Double = 96   // 输入框高度（拖拽可调，记忆）
     @State private var dragBaseHeight: Double?
     // 渐进披露 v2（0.26）：有草稿/计划 = 改/看的时刻，输入折叠成"重说"入口；点开临时展开重排。
@@ -94,9 +93,11 @@ struct HomeView: View {
     /// 「确认写入 + 同步」合一按钮的标题（Jason 2026-07-09）：绿(计划)与蓝(实际)是一天里错开的两相、
     /// 并集覆盖整天——"改/看"时刻是确认写入绿计划，"过"时刻叠加同步蓝色实际的日历改动。
     private var confirmSyncButtonTitle: String {
-        let base = calendarBackendRaw == "eventKit" ? "确认写入真日历(Dev)" : "确认写入（假）日历"
-        guard model.isLiveTargetDay else { return base }                              // 说/改/看：仅确认写入（绿）
-        return model.hasUnsavedChanges ? base + " · 同步日历" : "同步日历改动"          // 过：叠加/单做蓝色对账
+        // 后端退役后清理（2026-07-21）：原文案按 @AppStorage("calendar.backend") 猜「真/假日历」——
+        // 该开关已恒 eventKit，「（假）日历」分支是死代码、且 @AppStorage 的初始时序会误显「假」误导用户
+        // （本次 bug 的可见症状之一）。直接写死为「写入日历」，不再判断真/假、去掉 (Dev) 遗留后缀。
+        guard model.isLiveTargetDay else { return "确认写入日历" }                        // 说/改/看：仅确认写入（绿）
+        return model.hasUnsavedChanges ? "确认写入 · 同步日历" : "同步日历改动"            // 过：叠加/单做蓝色对账
     }
 
     init(deps: HomeDeps) {

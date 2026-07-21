@@ -10,7 +10,8 @@ import Foundation
 import EventKit
 
 final class EventKitReminderStore: ReminderStore {
-    private let store = EKEventStore()
+    // 懒加载（2026-07-21，同 EventKitCalendarStore）：init 不同步创建 EKEventStore（TCC 阻塞会挂 test host）。
+    private lazy var store = EKEventStore()
     private static let listTitle = "BetterCalendar · 要紧事 (Dev)"
 
     func write(_ drafts: [ReminderDraft]) async throws {

@@ -21,7 +21,10 @@ struct CalendarError: Error, LocalizedError {
 }
 
 final class EventKitCalendarStore: CalendarStore {
-    private let store = EKEventStore()
+    // 懒加载（2026-07-21）：EKEventStore() 在 init 同步创建会在某些 TCC 状态下阻塞——无头 test host 里
+    // new 出这个 store（如路由测试）就挂死 runner（本次「test runner hung before connection」根因）。
+    // 改 lazy → init 零副作用，仅真正 read/write（各自先 ensureAccess）时才建；生产行为等价。
+    private lazy var store = EKEventStore()
     private let titles: [PlanCalendarKind: String] = [
         .planned: "BetterCalendar · 计划 (Dev)",
         .actual: "BetterCalendar · 实际 (Dev)",

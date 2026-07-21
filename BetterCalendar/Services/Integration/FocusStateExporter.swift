@@ -13,7 +13,7 @@ import Foundation
 enum FocusStateExporter {
     /// 测试 host 探测：CLI 单测与真 App 共享 UserDefaults/容器——测试绝不碰桥文件
     /// （否则联动开着时跑单测会把测试数据推给正在运行的游戏）。集中在此，所有读写口都过这道闸。
-    private static var isTestHost: Bool { NSClassFromString("XCTestCase") != nil }
+    private static var isTestHost: Bool { TestHost.isActive }   // 2026-07-21：原 XCTestCase 检测在 Swift Testing 下失效 → 统一到 [[TestHost]]
 
     /// 联动总开关（热切换）。关掉时顺手删掉状态文件——mod 靠文件在不在判断是否驱动。
     static var isEnabled: Bool {

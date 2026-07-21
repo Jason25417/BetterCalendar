@@ -228,7 +228,7 @@ struct LogicTests {
     // MARK: 日历后端路由
 
     @Test func routingWritesToFakeWhenBackendFake() async throws {
-        CalendarSettings.backend = .fake
+        CalendarSettings.backend = .fake   // test host 下 getter 本就恒 fake（isTestHost 闸），这里冗余显式无害
         let fake = FakeCalendarStore()
         let routing = RoutingCalendarStore(fake: fake, eventKit: EventKitCalendarStore())
         let now = Date()
