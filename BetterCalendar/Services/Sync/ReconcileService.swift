@@ -152,8 +152,7 @@ final class ReconcileService {
 
     /// 对账 逻辑今天…+7 天（与启动对账同窗）；实时模式（已开始）的日子跳过（橙色归执行层）。
     func reconcileWindow() async {
-        guard CalendarSettings.backend == .eventKit,
-              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         let events = (try? await calendarStore.read(kind: .planned)) ?? []
         for offset in 0..<8 {
             let label = DayContext.logicalDay(offset: offset)
@@ -165,8 +164,7 @@ final class ReconcileService {
     /// 启动同步（App 打开时调，取代直接投影）：先对账（把日历里攒的手改/新建/删除都识别出来），
     /// 再投影补章自愈——**跳过有待确认新建的日子**（先投影会把用户新建的事件当无主清掉，问都没问）。
     func startupSync() async {
-        guard CalendarSettings.backend == .eventKit,
-              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         await reconcileWindow()
         let skip = Set(pendingAdditions.map { Calendar.current.startOfDay(for: $0.label) })
         await projection.projectUpcomingWindow(skipping: skip)

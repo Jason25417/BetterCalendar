@@ -28,11 +28,6 @@ enum BlockPriority: String, Codable, CaseIterable, Sendable {
 }
 
 /// 谁指派的（用于复盘措辞；外部硬 DDL 的处理与自设不同）。
-enum AssignedBy: String, Codable, CaseIterable, Sendable {
-    case selfAssigned = "self"
-    case external
-}
-
 enum CompletionStatus: String, Codable, CaseIterable, Sendable {
     case done, partial, missed, over
     case extra   // 计划外 bonus
@@ -45,18 +40,7 @@ enum PlanCalendarKind: String, Codable, CaseIterable, Sendable {
 }
 
 /// 反思层（日记）条目来源（数据预留，功能后做）。
-enum JournalSource: String, Codable, CaseIterable, Sendable {
-    case written
-    case importedFromAppleJournal   // Apple 手记一次性导入（只进不出，见反思层文档 §7）
-    case fromSuggestion
-}
-
 // MARK: - 设置用枚举
-
-enum CalendarBackend: String, Codable, CaseIterable, Sendable {
-    case fake      // 开发期：写进 App 内、画预览，不碰系统日历
-    case eventKit  // 真接系统日历（逻辑稳了再切）
-}
 
 enum NotifyMode: String, Codable, CaseIterable, Sendable {
     case minimal           // 早晚各一条
@@ -167,7 +151,7 @@ struct PlanDecision: Sendable {
     var poolSuggestedTitles: [String] = []
 }
 
-/// 写日历用的事件草稿：FakeCalendarStore / 未来 EventKitCalendarStore 都消费它。
+/// 写日历用的事件草稿：EventKitCalendarStore 消费（测试用 FakeCalendarStore 同款协议）。
 struct CalendarEventDraft: Sendable, Identifiable {
     var id = UUID()
     var title: String

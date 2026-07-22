@@ -20,7 +20,7 @@ final class ReviewLocalStore {
             self.context = context
         } else {
             self.context = SharedModelContainer.shared.mainContext
-            migrateFromUserDefaultsIfNeeded()
+            purgeLegacyUserDefaultsKeysOnce()
         }
     }
 
@@ -101,36 +101,19 @@ final class ReviewLocalStore {
 
     private static let migratedFlag = "review.migratedToSwiftData"
 
-    private func migrateFromUserDefaultsIfNeeded() {
-        let d = UserDefaults.standard
-        guard !d.bool(forKey: Self.migratedFlag) else { return }
-        var imported = 0
-        // ① 活跃日数组
-        for key in d.stringArray(forKey: "review.activeDays") ?? [] where record(forDayKey: key) == nil {
-            context.insert(DayRecord(dayKey: key, isActive: true))
-            imported += 1
+    /// 死代码审计（2026-07-22）：UserDefaults→SwiftData 的一次性迁移已完成历史使命（写方 v0.6 已删、
+    /// 所有设备均已跑过 ≥v0.6）→ 迁移函数退役，换成一次性清掉躺在 defaults plist 里的三族源键
+    /// （"review.activeDays" / "review.mvp.<日期>"×N / "review.mvpNote.<日期>"×N）与旧迁移旗标。
+    private func purgeLegacyUserDefaultsKeysOnce() {
+        let ud = UserDefaults.standard
+        guard !ud.bool(forKey: "review.legacyPurged") else { return }
+        ud.removeObject(forKey: "review.activeDays")
+        ud.removeObject(forKey: "review.migratedToSwiftData")
+        for key in ud.dictionaryRepresentation().keys
+        where key.hasPrefix("review.mvp.") || key.hasPrefix("review.mvpNote.") {
+            ud.removeObject(forKey: key)
         }
-        // ② 历史 MVP（键形如 review.mvp.yyyy-MM-dd / review.mvpNote.yyyy-MM-dd）
-        for (key, value) in d.dictionaryRepresentation() {
-            if key.hasPrefix("review.mvp."), let title = value as? String, !title.isEmpty {
-                let dayKey = String(key.dropFirst("review.mvp.".count))
-                let r = record(forDayKey: dayKey) ?? {
-                    let n = DayRecord(dayKey: dayKey); context.insert(n); return n
-                }()
-                if r.mvpTitle == nil { r.mvpTitle = title; imported += 1 }
-            }
-            if key.hasPrefix("review.mvpNote."), let note = value as? String, !note.isEmpty {
-                let dayKey = String(key.dropFirst("review.mvpNote.".count))
-                let r = record(forDayKey: dayKey) ?? {
-                    let n = DayRecord(dayKey: dayKey); context.insert(n); return n
-                }()
-                if r.mvpNote.isEmpty { r.mvpNote = note; imported += 1 }
-            }
-        }
-        try? context.save()
-        d.set(true, forKey: Self.migratedFlag)
-        if imported > 0 {
-            DevLog.shared.info("复盘", "旧活跃天/MVP 数据已迁入 SwiftData（\(imported) 项，随 iCloud 同步）")
-        }
+        ud.set(true, forKey: "review.legacyPurged")
+        DevLog.shared.info("复盘", "旧 UserDefaults 复盘键已一次性清理")
     }
 }

@@ -11,11 +11,10 @@ import Foundation
 enum MeetingSettings {
     private static let defaults = UserDefaults.standard
 
-    /// 固定块会前多少分钟提醒（提醒你收尾当前事、准备赴会）。默认 5 分钟。0 = 准点。
-    static var leadMinutes: Int {
-        get { defaults.object(forKey: "meeting.lead") as? Int ?? 5 }
-        set { defaults.set(newValue, forKey: "meeting.lead") }
-    }
+    /// 固定块会前提醒分钟数（提醒你收尾当前事、准备赴会）。
+    /// 死代码审计（2026-07-22）：原 UserDefaults 键 "meeting.lead" 从未有 UI、任何设备从未写过 → 收成常量；
+    /// 日后真要做设置再开缝（届时进 SettingsSync 白名单）。
+    static let leadMinutes = 5
 
     /// 固定块（会议等）时间过了是否自动记为完成（§5.13 收窄：工作块坚持手动、固定块=外部承诺按墙钟真实发生、可自动）。
     /// 默认开；关掉则固定块也彻底手动。删掉自动记的会议蓝块会 stick（对账 tombstone），与本开关正交。

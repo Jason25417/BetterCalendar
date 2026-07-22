@@ -1,12 +1,13 @@
 //
 //  FakeReminderStore.swift
-//  BetterCalendar
+//  BetterCalendarTests
 //
-//  开发期假提醒：记录草稿供预览，不碰系统「提醒事项」。
+//  测试替身假提醒（2026-07-22 迁入测试 target）：记录草稿供断言，不碰系统「提醒事项」。
 //
 
 import Foundation
 import Observation
+@testable import BetterCalendar
 
 @Observable
 final class FakeReminderStore: ReminderStore {

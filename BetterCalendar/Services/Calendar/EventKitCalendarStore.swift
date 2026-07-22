@@ -164,18 +164,6 @@ final class EventKitCalendarStore: CalendarStore {
     }
 
     /// 清空某一天某一类（删光当天所有块后确认写入 → 清该日绿色事件；不碰别天）。
-    func clear(kind: PlanCalendarKind, on day: Date) async throws {
-        try await ensureAccess()
-        guard let title = titles[kind],
-              let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return }
-        let cal0 = Calendar.current
-        let lo = cal0.startOfDay(for: day)
-        guard let hi = cal0.date(byAdding: .day, value: 1, to: lo) else { return }
-        let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
-        var removed = 0
-        for ev in store.events(matching: pred) { try? store.remove(ev, span: .thisEvent, commit: false); removed += 1 }
-        if removed > 0 { try store.commit() }
-    }
 
     /// 目标日系统里已有的安排（所有事件日历，排除本 App 的三本 Dev 日历）。
     /// 权限没给/读失败 → 空（上下文缺失不挡排程）。

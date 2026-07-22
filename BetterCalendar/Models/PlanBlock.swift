@@ -19,15 +19,12 @@ final class PlanBlock {
     var end: Date = Date.now
     var isFixed: Bool = false
     var isAnchor: Bool = false
-    var category: String = ""
     var kind: BlockKind = BlockKind.planned
     var timingStyle: TimingStyle = TimingStyle.light
     var priority: BlockPriority = BlockPriority.normal
     var deadline: Date?
-    var assignedBy: AssignedBy = AssignedBy.selfAssigned
     var labels: [String] = []       // 扩展接口
     var linkedTaskID: UUID?         // 精确归属：本块属于哪个未来任务(LongTask.id)；nil=不属于池任务（0.18.2）
-    var externalEventID: String?
     var completion: CompletionStatus?
 
     init(id: UUID = UUID(),
@@ -36,15 +33,12 @@ final class PlanBlock {
          end: Date,
          isFixed: Bool = false,
          isAnchor: Bool = false,
-         category: String = "",
          kind: BlockKind = .planned,
          timingStyle: TimingStyle = .light,
          priority: BlockPriority = .normal,
          deadline: Date? = nil,
-         assignedBy: AssignedBy = .selfAssigned,
          labels: [String] = [],
          linkedTaskID: UUID? = nil,
-         externalEventID: String? = nil,
          completion: CompletionStatus? = nil) {
         self.id = id
         self.title = title
@@ -52,15 +46,12 @@ final class PlanBlock {
         self.end = end
         self.isFixed = isFixed
         self.isAnchor = isAnchor
-        self.category = category
         self.kind = kind
         self.timingStyle = timingStyle
         self.priority = priority
         self.deadline = deadline
-        self.assignedBy = assignedBy
         self.labels = labels
         self.linkedTaskID = linkedTaskID
-        self.externalEventID = externalEventID
         self.completion = completion
     }
 }

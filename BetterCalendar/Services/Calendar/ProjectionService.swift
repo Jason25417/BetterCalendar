@@ -65,8 +65,7 @@ final class ProjectionService {
     /// 只在 真日历后端 且 已授权 时跑：不让冷启动弹权限框（权限首次确认写入时才请求）。
     /// skipping：有待确认「日历新建」的日子先不投影（投影会把无主新建事件清掉，问都没问——0.20.2）。
     func projectUpcomingWindow(days: Int = 8, skipping: Set<Date> = []) async {
-        guard CalendarSettings.backend == .eventKit,
-              EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }   // 后端恒真日历（假日历族已删）
         for offset in 0..<days {
             let label = DayContext.logicalDay(offset: offset)
             if skipping.contains(Calendar.current.startOfDay(for: label)) { continue }

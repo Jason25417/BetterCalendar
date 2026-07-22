@@ -40,10 +40,9 @@ enum CloudSettings {
 
     /// 开发期：把云端**原始返回**（stop_reason + 前 2000 字）记进 DevLog，排查「成功返回但解析 0 块 / 截断」。
     /// 默认开；上架前关或删。
-    static var logRawResponses: Bool {
-        get { defaults.object(forKey: "cloud.logRaw") as? Bool ?? true }
-        set { defaults.set(newValue, forKey: "cloud.logRaw") }
-    }
+    // 死代码审计（2026-07-22）：原 UserDefaults 键 "cloud.logRaw" 零写入、无 UI → 收成常量。
+    // 开发期恒开（失败可见铁律）；上架前改 false（M8 清单已有）。
+    static let logRawResponses = true
 
     /// **只使用端侧**（2026-07-11 Jason 定，原「优先端侧」语义升级）：开=解析/AI 调整/排序全部只在
     /// 设备上运行（Apple Foundation Models + 本地排序），**文字绝不出云**——选它的唯一理由是绝对隐私，

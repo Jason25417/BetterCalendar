@@ -3,7 +3,7 @@
 //  BetterCalendar
 //
 //  反思层（日记）标签页：上面「写下今天」、下面历史时间轴、点开编辑（套 BetterTranscribe 的 实时+历史 模式）。
-//  正文格式走接口（AppSettings.defaultEditorFormat）：开发期 Markdown（TextEditor 纯文本编辑）；
+//  正文格式走接口（JournalEntry.bodyFormat）：开发期 Markdown（TextEditor 纯文本编辑）；
 //  上线再加富文本分支，见 SPEC §9。
 //
 

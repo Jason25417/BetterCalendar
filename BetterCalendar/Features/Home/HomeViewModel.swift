@@ -50,7 +50,6 @@ final class HomeViewModel {
     var isWorking: Bool = false
     var errorText: String?
     var committedCount: Int?
-    var committedToReal: Bool = false
     /// 状态行 A（0.26 ABC）：排今天成功后的确定性状态「排好 N 件」（与模型 note=B 叠加显示）；编辑/确认/切日即清。
     private(set) var arrangedCount: Int?
     /// 状态行 C（#15，2026-07-11 审核定稿）：AI 微调完成后的**确定性**反馈——N=本地 diff 出的事实。
@@ -425,7 +424,6 @@ final class HomeViewModel {
             }
             committedCount = sorted.count
             BehaviorLog.record("确认写入", "\(sorted.count) 件")
-            committedToReal = (CalendarSettings.backend == .eventKit)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
             for p in pendingLongTasks {
@@ -631,7 +629,7 @@ final class HomeViewModel {
         }
     }
 
-    /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 抽屉「排进今天」）：加 1 小时块到尾部。
+    /// 把一件「在途」排进当前草稿（过期三选的「今天排上」/ 长期页「排进今天」）：加 1 小时块到尾部。
     /// 从未来任务「排进今天」：生成的块精确归属到该任务（linkedTaskID），投入统计锚 id 不靠标题。
     /// 找第一个能容下 duration 的空档起点（不与已排块重叠、落在 notBefore 与 windDown 之间）。
     /// 纯函数、可单测；返回 nil = 收工前排不下。

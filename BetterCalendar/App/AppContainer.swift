@@ -2,8 +2,8 @@
 //  AppContainer.swift
 //  BetterCalendar
 //
-//  唯一组装点：在这里创建所有 Service 实现并注入。换实现（假→真、本地→云端）只改这里。
-//  原型期：解析/排程走本地兜底；日历/提醒走假 Store（不碰系统）。
+//  唯一组装点：在这里创建所有 Service 实现并注入。换实现（本地→云端等）只改这里。
+//  日历/提醒 = 真 EventKit（假日历族 2026-07-22 删除）；解析/排程 = 云端优先、本地兜底。
 //
 
 import Foundation
@@ -18,11 +18,10 @@ final class AppContainer {
     let refiner: PlanRefining
     /// 长期任务的「说一句」（2026-07-20）：同一个框既能加新的、也能改现有的。
     let longTaskRefiner: LongTaskRefining
-    let calendarStore: FakeCalendarStore       // 假日历（预览页观察用）
-    let routingStore: RoutingCalendarStore     // 写日历走它：按设置转发 假/真
-    let reminderStore: FakeReminderStore
-    let routingReminder: RoutingReminderStore  // 写提醒走它：同一开关，假/真
-    let focus: TimerOnlyFocusService
+    // 假日历族退役删除（2026-07-22 Jason 拍板「直接删掉」）：Routing/Fake/CalendarSettings/预览页全删——
+    // 生产只有一条路=真 EventKit；Fake 仅测试注入（文件已挪 BetterCalendarTests/）。
+    let calendarStore: CalendarStore           // 写/读真 Apple 日历（EventKit）
+    let reminderStore: ReminderStore           // 写真提醒事项（EventKit VTODO）
     let exporter: ICSExporting
     let comparer: PlanComparing                // 计划 × 实际 → 完成度（本地启发式）
     let router = AppRouter()                    // 跨标签页导航（复盘「写下今天」→ 日记页）
@@ -51,9 +50,7 @@ final class AppContainer {
     #endif
 
     init() {
-        // 假日历退役（2026-07-07 Jason 定）：设置页不再提供切换、一律写真 Apple 日历。
-        // 收敛已移到 CalendarSettings.backend getter（生产恒 eventKit、无视历史存储 fake）——
-        // 原本这里 `= .eventKit` 依赖 container 早于任何读取的时序，对已存 fake 的老设备失效（2026-07-21 实锤根因）。删。
+        // 日历后端唯一实现=EventKit（假日历族 2026-07-22 全删，历史见 handoff/记忆 calendar-backend-retired-force-eventkit）。
         // 原型期：解析/排程大脑/微调走云端 Claude；未配 key / 离线 / 失败时各自回退本地。
         let anthropic = AnthropicClient()
         // 解析链 v2（2026-07-11「只使用端侧」定稿）：默认=云端 Claude（Haiku·三路对冲）优先、
@@ -73,11 +70,8 @@ final class AppContainer {
             local: NaivePlanningEngine())
         // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
-        self.calendarStore = FakeCalendarStore()
-        self.routingStore = RoutingCalendarStore(fake: calendarStore, eventKit: EventKitCalendarStore())
-        self.reminderStore = FakeReminderStore()
-        self.routingReminder = RoutingReminderStore(fake: reminderStore, eventKit: EventKitReminderStore())
-        self.focus = TimerOnlyFocusService()
+        self.calendarStore = EventKitCalendarStore()
+        self.reminderStore = EventKitReminderStore()
         self.exporter = ICSExporter()
         self.comparer = OverlapTitleComparer()
         self.notificationDelegate = NotificationDelegate(router: router)
@@ -91,11 +85,11 @@ final class AppContainer {
         self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
-        self.projection = ProjectionService(planStore: planStore, calendarStore: routingStore,
+        self.projection = ProjectionService(planStore: planStore, calendarStore: calendarStore,
                                             startedDays: startedDays)
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
-                                          calendarStore: routingStore, projection: projection,
+                                          calendarStore: calendarStore, projection: projection,
                                           startedDays: startedDays)
         // L2 固化（2026-07-10 拍板）：reflow 默认走本地 V2（试验台 50/50 满分、瞬时、零出云）；
         // LLM reflow 保留在试验台作对照。arrange 仍走 LLM（self.planner），待试验台跑分后再议。
@@ -105,8 +99,8 @@ final class AppContainer {
         #else
         self.liveActivity = NoLiveActivity()            // macOS：无 Live Activity → no-op
         #endif
-        self.execution = ExecutionViewModel(calendarStore: routingStore, reschedule: reschedule,
-                                            planStore: planStore, reminderStore: routingReminder,
+        self.execution = ExecutionViewModel(calendarStore: calendarStore, reschedule: reschedule,
+                                            planStore: planStore, reminderStore: reminderStore,
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore(),
                                             startedDays: startedDays, projection: projection)
@@ -134,7 +128,7 @@ final class AppContainer {
 
     /// 复盘 VM（每次进视图新建一份；依赖从容器取）。
     var reviewModel: ReviewViewModel {
-        ReviewViewModel(calendarStore: routingStore, comparer: comparer,
+        ReviewViewModel(calendarStore: calendarStore, comparer: comparer,
                         arrangeDay: arrangeDay, localStore: reviewStore,
                         longTasks: longTasks, planStore: planStore, looseDays: looseDays)
     }
@@ -143,12 +137,12 @@ final class AppContainer {
 
     var homeDeps: HomeDeps {
         HomeDeps(arrangeDay: arrangeDay, refiner: refiner,
-                 routingStore: routingStore, routingReminder: routingReminder,
+                 calendarStore: calendarStore, reminderStore: reminderStore,
                  exporter: exporter, planStore: planStore, projection: projection,
                  notifier: notifier, longTasks: longTasks, draftSnapshots: draftSnapshots,
                  looseDays: looseDays, startedDays: startedDays, execution: execution,
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
-                 calendarStore: calendarStore, reminderStore: reminderStore, reconcile: reconcile)
+                 reconcile: reconcile)
     }
 
     var journalDeps: JournalDeps {

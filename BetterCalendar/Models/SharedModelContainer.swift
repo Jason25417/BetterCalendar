@@ -10,8 +10,9 @@ import SwiftData
 
 enum SharedModelContainer {
     static let shared: ModelContainer = {
-        let schema = Schema([PlanDay.self, PlanBlock.self, CompletionLink.self,
-                             ExecutionSession.self, AppSettings.self, JournalEntry.self,
+        // PlanDay/CompletionLink 已删（2026-07-22 死代码审计：零实例化的 M0 骨架 model，云端 record type 留着无害）
+        let schema = Schema([PlanBlock.self,
+                             ExecutionSession.self, JournalEntry.self,   // AppSettings 已删（2026-07-22：M0 骨架遗产，从未实例化——设置全走 UserDefaults；云端 record type 留着无害）
                              DayRecord.self, JournalPhoto.self, LongTask.self,
                              LongTaskCheckpoint.self, DeviceLog.self])
         // M7：优先 iCloud 同步（需 iCloud + CloudKit capability + container）。

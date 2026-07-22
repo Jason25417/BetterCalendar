@@ -2,7 +2,7 @@
 //  HomeView.swift
 //  BetterCalendar
 //
-//  首页：说一天 → 排今天 → 可编辑草稿（拖/改/标/删加）→ 自然语言微调 → 确认写入（假）日历。
+//  首页：说一天 → 排今天 → 可编辑草稿（拖/改/标/删加）→ 自然语言微调 → 确认写入日历。
 //
 
 import SwiftUI
@@ -10,8 +10,6 @@ import UniformTypeIdentifiers
 #if canImport(AppKit)
 import AppKit
 #endif
-
-enum HomeRoute: Hashable { case preview }   // .review 已退役（0.28：复盘并入日记页）
 
 #if !os(macOS)
 /// iOS 分享用：把当前计划的 ICS 文本包成可分享的 .ics 文件（ShareLink）。
@@ -31,8 +29,8 @@ struct ICSDocument: Transferable {
 struct HomeDeps {
     let arrangeDay: ArrangeDayUseCase
     let refiner: PlanRefining
-    let routingStore: RoutingCalendarStore
-    let routingReminder: RoutingReminderStore
+    let calendarStore: CalendarStore       // 真 EventKit（假日历族已删，2026-07-22）
+    let reminderStore: ReminderStore
     let exporter: ICSExporting
     let planStore: PlanStore
     let projection: ProjectionService
@@ -45,8 +43,6 @@ struct HomeDeps {
     let liveDraft: LiveDraft
     let journalStore: JournalStore
     let router: AppRouter
-    let calendarStore: FakeCalendarStore     // 假日历（预览页观察用）
-    let reminderStore: FakeReminderStore
     let reconcile: ReconcileService
 }
 
@@ -71,7 +67,6 @@ struct HomeView: View {
     let deps: HomeDeps
     @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次A 起逐点消费）
     @State private var model: HomeViewModel
-    @State private var navPath: [HomeRoute] = []   // 程序化导航（通知 deep-link → 复盘）
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
     @State private var showFreshCompare = false    // 徽标 v2：两版只读对比 sheet
     @State private var tnDismissTick = false       // 寄语条「今天先收起」即时刷新（存储在 TomorrowNote）
@@ -88,8 +83,6 @@ struct HomeView: View {
     @State private var reSayExpanded = false
     /// 有草稿或已加载计划 = 进入"改/看"时刻（写入区显示、输入折叠）。
     private var showingPlanArea: Bool { !model.blocks.isEmpty || model.hasUnsavedChanges }
-    /// 是否展示"说"的完整输入（无计划 或 主动点了重说）。
-    private var showSayInput: Bool { !showingPlanArea || reSayExpanded }
     /// 「确认写入 + 同步」合一按钮的标题（Jason 2026-07-09）：绿(计划)与蓝(实际)是一天里错开的两相、
     /// 并集覆盖整天——"改/看"时刻是确认写入绿计划，"过"时刻叠加同步蓝色实际的日历改动。
     private var confirmSyncButtonTitle: String {
@@ -105,8 +98,8 @@ struct HomeView: View {
         _model = State(initialValue: HomeViewModel(
             arrangeDay: deps.arrangeDay,
             refiner: deps.refiner,
-            calendarStore: deps.routingStore,
-            reminderStore: deps.routingReminder,
+            calendarStore: deps.calendarStore,
+            reminderStore: deps.reminderStore,
             exporter: deps.exporter,
             planStore: deps.planStore,
             projection: deps.projection,
@@ -120,7 +113,7 @@ struct HomeView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationStack(path: $navPath) {
+        NavigationStack {
             ScrollView {   // 页面过长可整页滚动（0.16.3）
             VStack(alignment: .leading, spacing: 12) {
                 // 版本/构建标签移到左上（2026-07-09 Jason）：平台·渠道·版本(build)，点开看更新日志
@@ -482,8 +475,7 @@ struct HomeView: View {
                         if model.hasUnsavedChanges {
                             Label("未保存修改 · 点上方「确认写入」保存", systemImage: "pencil.circle")
                         } else if let c = model.committedCount {
-                            Label(model.committedToReal ? "已写入真日历(Dev) \(c) 项 · 系统日历可见"
-                                                        : "已写入假日历 \(c) 项", systemImage: "checkmark.seal")
+                            Label("已写入日历 \(c) 项 · 系统日历可见", systemImage: "checkmark.seal")
                         } else {
                             Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
                         }
@@ -560,12 +552,6 @@ struct HomeView: View {
                 }
             }
             #endif
-            .navigationDestination(for: HomeRoute.self) { route in
-                switch route {
-                case .preview: CalendarPreviewView(store: deps.calendarStore,
-                                                   reminderStore: deps.reminderStore)
-                }
-            }
             .onChange(of: deps.router.scheduleRequest) { _, req in
                 guard let req else { return }
                 switch req {

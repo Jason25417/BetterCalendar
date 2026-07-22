@@ -70,19 +70,16 @@ final class LongTask {
 final class LongTaskCheckpoint {
     var id: UUID = UUID()
     var title: String = ""
-    var note: String = ""
     var estimatedMinutes: Int?      // 可选预估时长（排进今天时作块长参考）
     var doneAt: Date?               // 勾选盖章（nil=未推进到）
     var order: Int = 0              // 手排顺序（拖动重排写它）
     var createdAt: Date = Date.now
     var task: LongTask?
 
-    init(id: UUID = UUID(), title: String, note: String = "",
-         estimatedMinutes: Int? = nil, doneAt: Date? = nil,
+    init(id: UUID = UUID(), title: String, estimatedMinutes: Int? = nil, doneAt: Date? = nil,
          order: Int = 0, createdAt: Date = .now) {
         self.id = id
         self.title = title
-        self.note = note
         self.estimatedMinutes = estimatedMinutes
         self.doneAt = doneAt
         self.order = order

@@ -40,8 +40,6 @@ protocol PlanWriting: AnyObject {
 @MainActor
 protocol ActualReading: AnyObject {
     func actualBlocks(on day: Date) throws -> [ActualBlock]
-    /// 某计划块的完成闩（nil=尚未决定，固定块可自动完成；一旦置值=已决定，永不再推断）。
-    func completionLatch(plannedID: UUID) throws -> CompletionStatus?
     /// 某逻辑日被用户「清掉完成」的计划块 id（tombstone=completion .missed）——一次批量读，
     /// 供 loadToday 跳过自动重推断（对账删除后不再重建=stick）。绝不逐项在循环里 fetch。
     func clearedPlannedIDs(on day: Date) throws -> Set<UUID>
@@ -151,10 +149,6 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     }
 
     /// 某计划块的完成闩（读 planned 行的 completion；kind 过滤避免撞同 UUID 的实际行）。
-    func completionLatch(plannedID: UUID) throws -> CompletionStatus? {
-        try context.fetch(FetchDescriptor<PlanBlock>())
-            .first(where: { $0.id == plannedID && $0.kind == .planned })?.completion
-    }
 
     /// 某逻辑日被清掉完成的计划块 id（tombstone）——一次批量读，供 loadToday 用 Set 查跳过。
     func clearedPlannedIDs(on day: Date) throws -> Set<UUID> {
