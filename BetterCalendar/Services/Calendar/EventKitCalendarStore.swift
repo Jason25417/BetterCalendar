@@ -20,7 +20,10 @@ struct CalendarError: Error, LocalizedError {
     var errorDescription: String? { message }
 }
 
-final class EventKitCalendarStore: CalendarStore {
+// actor（2026-07-22 修 build 151 启动卡死）：EventKit 的 events(matching:)/save/commit 都是同步阻塞 API，
+// 此前 final class=MainActor 隔离 → 启动 startupSync 约 16 轮全库扫描全压主线程 → beachball。
+// 改 actor 后跑协作线程池、脱离主线程；调用方已全 await 走协议，零改动透明获益。见 [[eventkit-store-actor-not-mainactor]]。
+actor EventKitCalendarStore: CalendarStore {
     // 懒加载（2026-07-21）：EKEventStore() 在 init 同步创建会在某些 TCC 状态下阻塞——无头 test host 里
     // new 出这个 store（如路由测试）就挂死 runner（本次「test runner hung before connection」根因）。
     // 改 lazy → init 零副作用，仅真正 read/write（各自先 ensureAccess）时才建；生产行为等价。
@@ -36,7 +39,7 @@ final class EventKitCalendarStore: CalendarStore {
         guard !drafts.isEmpty else { return }
         var changed = 0
         for (kind, group) in Dictionary(grouping: drafts, by: \.kind) {
-            let cal = try calendar(for: kind)
+            let cal = try await calendar(for: kind)
             let cal0 = Calendar.current
             let lo = cal0.startOfDay(for: group.map(\.start).min() ?? Date())
             let hi = cal0.date(byAdding: .day, value: 1,
@@ -44,17 +47,17 @@ final class EventKitCalendarStore: CalendarStore {
             changed += try syncEvents(group, calendar: cal, from: lo, to: hi)
         }
         if changed > 0 { try store.commit() }
-        DevLog.shared.info("日历", "写真日历 \(drafts.count) 项 · 实际变更 \(changed)")
+        await DevLog.shared.info("日历", "写真日历 \(drafts.count) 项 · 实际变更 \(changed)")
     }
 
     func apply(_ drafts: [CalendarEventDraft], kind: PlanCalendarKind, window: DateInterval) async throws {
         try await ensureAccess()
         // 空草稿 + 日历本就不存在 → 无事可清，别为了清空去创建日历
         if drafts.isEmpty, existingCalendar(for: kind) == nil { return }
-        let cal = try calendar(for: kind)
+        let cal = try await calendar(for: kind)
         let changed = try syncEvents(drafts, calendar: cal, from: window.start, to: window.end)
         if changed > 0 { try store.commit() }
-        DevLog.shared.info("投影", "对齐「\(titles[kind] ?? "?")」\(drafts.count) 项 · 实际变更 \(changed)")
+        await DevLog.shared.info("投影", "对齐「\(titles[kind] ?? "?")」\(drafts.count) 项 · 实际变更 \(changed)")
     }
 
     /// 差量对齐核心（write / apply 共用）：范围内该日历的事件与 drafts 对齐。
@@ -116,23 +119,23 @@ final class EventKitCalendarStore: CalendarStore {
 
     /// blockID → 事件 URL 章（bettercalendar://block/UUID）：随 iCloud 日历同步到所有设备，
     /// 任何设备匹配都按它；日后可注册 URL scheme 做 deep link（点事件跳回 App 对应块）。
-    static func stampURL(_ id: UUID) -> URL? {
+    nonisolated static func stampURL(_ id: UUID) -> URL? {
         URL(string: "bettercalendar://block/\(id.uuidString)")
     }
 
     /// 事件 URL → blockID（非本 App 的章 → nil）。
-    static func blockID(from url: URL?) -> UUID? {
+    nonisolated static func blockID(from url: URL?) -> UUID? {
         guard let url, url.scheme == "bettercalendar", url.host == "block" else { return nil }
         return UUID(uuidString: url.lastPathComponent)
     }
 
     /// 事件去重键：标题 + 起始分钟（无章旧事件的认领键）。
-    private static func eventKey(_ title: String, _ start: Date) -> String {
+    nonisolated private static func eventKey(_ title: String, _ start: Date) -> String {
         "\(title)#\(Int(start.timeIntervalSinceReferenceDate / 60))"
     }
 
     /// 会前提醒（⑤会议自动化）：lead 分钟前响一次；nil/负 → 无提醒（普通块）。
-    private static func alarms(lead: Int?) -> [EKAlarm] {
+    nonisolated private static func alarms(lead: Int?) -> [EKAlarm] {
         guard let lead, lead >= 0 else { return [] }
         return [EKAlarm(relativeOffset: TimeInterval(-lead * 60))]
     }
@@ -201,10 +204,10 @@ final class EventKitCalendarStore: CalendarStore {
         return store.calendars(for: .event).first { $0.title == title }
     }
 
-    private func calendar(for kind: PlanCalendarKind) throws -> EKCalendar {
+    private func calendar(for kind: PlanCalendarKind) async throws -> EKCalendar {
         let title = titles[kind] ?? "BetterCalendar (Dev)"
         if let existing = store.calendars(for: .event).first(where: { $0.title == title }) {
-            migrateColorIfNeeded(existing, kind: kind)
+            await migrateColorIfNeeded(existing, kind: kind)
             return existing
         }
         let cal = EKCalendar(for: .event, eventStore: store)
@@ -218,16 +221,16 @@ final class EventKitCalendarStore: CalendarStore {
 
     /// 换装批次 B（3A-v2）：老用户的绿/蓝/预览日历建于系统色时代——每 kind 一次性迁到令牌色。
     /// 只迁一次（打标记）：之后用户在日历 App 手改颜色，我们不再抢回来。
-    private func migrateColorIfNeeded(_ cal: EKCalendar, kind: PlanCalendarKind) {
+    private func migrateColorIfNeeded(_ cal: EKCalendar, kind: PlanCalendarKind) async {
         let flag = "ek.color.3Av2.\(kind)"
         guard !UserDefaults.standard.bool(forKey: flag) else { return }
         UserDefaults.standard.set(true, forKey: flag)
         cal.cgColor = Self.color(kind)
         do {
             try store.saveCalendar(cal, commit: true)
-            DevLog.shared.info("日历", "「\(cal.title)」颜色已迁移到经典皮肤 3A-v2")
+            await DevLog.shared.info("日历", "「\(cal.title)」颜色已迁移到经典皮肤 3A-v2")
         } catch {
-            DevLog.shared.warn("日历", "日历颜色迁移失败（不影响事件读写）：\(error.localizedDescription)")
+            await DevLog.shared.warn("日历", "日历颜色迁移失败（不影响事件读写）：\(error.localizedDescription)")
         }
     }
 
@@ -241,7 +244,7 @@ final class EventKitCalendarStore: CalendarStore {
     }
 
     /// 3A-v2 语义色（换装批次 B，值同 ClassicHex）：EK 日历颜色是单值（日历 App 双模共用）→ 取 light 档。
-    private static func color(_ kind: PlanCalendarKind) -> CGColor {
+    nonisolated private static func color(_ kind: PlanCalendarKind) -> CGColor {
         let hex: UInt32
         switch kind {
         case .planned: hex = ClassicHex.planned.light

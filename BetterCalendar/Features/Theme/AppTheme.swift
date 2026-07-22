@@ -85,7 +85,7 @@ enum Motion {
 
 /// 经典皮肤 hex 真相源（换装批次 B）：SwiftUI 之外的场景（EK 日历 cgColor 等）从这里取值，
 /// 与 ThemeSettings.classic 同源——改色只改这一处。
-enum ClassicHex {
+nonisolated enum ClassicHex {
     static let accent: (light: UInt32, dark: UInt32)  = (0xC97C4E, 0xD98F5F)
     static let planned: (light: UInt32, dark: UInt32) = (0x57806B, 0x9FC4AC)
     static let actual: (light: UInt32, dark: UInt32)  = (0x4A6B8A, 0x8FAECE)

@@ -14,7 +14,7 @@
 
 import Foundation
 
-enum DayContext {
+nonisolated enum DayContext {   // 2026-07-22：纯日期计算，标 nonisolated 供 actor(EventKit store) 的同步闭包调用
     /// 日界线小时：本地时间 [0:00, 4:00) 仍算「前一天」。
     static let dayBoundaryHour = 4
     /// 晚上从几点起默认排「明天」（前一晚规划场景）。

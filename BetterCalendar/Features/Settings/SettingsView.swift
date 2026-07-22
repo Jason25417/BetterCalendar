@@ -316,7 +316,8 @@ struct SettingsView: View {
                         set: { DisclosureSettings.style = $0 })) {
                         ForEach(DisclosureStyle.allCases) { Text($0.label).tag($0) }
                     }
-                    Text("排日程页信息密度（渐进披露 v2）：原皮「向导」按时刻只显当刻所需；控制台/禅暂未实现（选了暂回退向导）。")
+                    // 死代码审计 2026-07-22 Jason 裁：选项保留（等将来实现），但「没效果」必须一眼可见——提前单说
+                    Text("「控制台」「禅」目前还没有效果（选了暂时等同「向导」）。向导＝排日程页按时刻只显当刻所需（渐进披露 v2）。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Picker("日历里删除计划块时", selection: Binding(

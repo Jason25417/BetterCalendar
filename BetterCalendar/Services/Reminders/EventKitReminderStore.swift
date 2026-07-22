@@ -9,7 +9,8 @@
 import Foundation
 import EventKit
 
-final class EventKitReminderStore: ReminderStore {
+// actor（2026-07-22 修启动卡死，同 EventKitCalendarStore）：EventKit 同步 API 脱离主线程。
+actor EventKitReminderStore: ReminderStore {
     // 懒加载（2026-07-21，同 EventKitCalendarStore）：init 不同步创建 EKEventStore（TCC 阻塞会挂 test host）。
     private lazy var store = EKEventStore()
     private static let listTitle = "BetterCalendar · 要紧事 (Dev)"
@@ -39,7 +40,7 @@ final class EventKitReminderStore: ReminderStore {
             try store.save(r, commit: false)
         }
         try store.commit()
-        DevLog.shared.info("提醒", "写入提醒事项 \(drafts.count) 项 → 「\(Self.listTitle)」列表")
+        await DevLog.shared.info("提醒", "写入提醒事项 \(drafts.count) 项 → 「\(Self.listTitle)」列表")
     }
 
     /// 找/建专用提醒列表（同日历的 Dev 专用思路）。
@@ -89,7 +90,7 @@ final class EventKitReminderStore: ReminderStore {
         }
         if changed {
             try? store.commit()
-            DevLog.shared.info("提醒", "回勾完成的提醒事项（App→提醒事项）")
+            await DevLog.shared.info("提醒", "回勾完成的提醒事项（App→提醒事项）")
         }
     }
 
