@@ -46,6 +46,13 @@ struct BetterCalendarApp: App {
         Window("皮肤试衣间", id: "skin-fitting") {
             SkinFittingView()
         }
+
+        // 引擎观察窗（开发期，统一时间线 P1 配套）：窗口菜单打开。逐批扩节，M8 摘除。
+        Window("引擎观察窗", id: "engine-window") {
+            EngineWindowView()
+                .environment(\.appTheme, ThemeSettings.current)
+                .tint(ThemeSettings.current.accent)
+        }
         #endif
     }
 

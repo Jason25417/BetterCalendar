@@ -29,8 +29,9 @@ enum WorkHoursSettings {
     static let graceMinutes = 10
 
     /// 收工线时刻：锚到 reference 所在**逻辑日**（hour=24 → 次日零点）。
+    /// P1a（图钉体系）：= 该逻辑日的收工图钉（数学在 PinSchedule；原 addingTimeInterval 在 DST 切换日差 1h，已修正）。
     static func windDownDate(for reference: Date) -> Date {
-        DayContext.logicalStartOfDay(reference).addingTimeInterval(TimeInterval(windDownHour) * 3600)
+        PinSchedule.workEnd(forLabel: DayContext.logicalStartOfDay(reference))
     }
 
     /// 生效收工线：还没到线 → 用线；**已过线仍在开工 = 用户自己选择的加班**（原则7：软件不夺权），
@@ -44,10 +45,6 @@ enum WorkHoursSettings {
     /// **内部参数不进设置**（同 graceMinutes 判例：用户的时间契约只有收工线一条，两个旋钮控一条
     /// 边界违原则 6）；上架后按调研 B 组数据（收尾卡出现时刻 vs 点击率）再调公式。
     static func eveningStart(for day: Date) -> Date {
-        let derived = windDownDate(for: day).addingTimeInterval(-5 * 3600)
-        let cal = Calendar.current
-        let floor16 = cal.date(bySettingHour: 16, minute: 0, second: 0, of: derived) ?? derived
-        let cap20 = cal.date(bySettingHour: 20, minute: 0, second: 0, of: derived) ?? derived
-        return min(max(derived, floor16), cap20)
+        PinSchedule.eveningStart(forLabel: DayContext.logicalStartOfDay(day))   // P1a：= 该逻辑日的傍晚图钉
     }
 }

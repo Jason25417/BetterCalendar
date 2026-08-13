@@ -15,18 +15,17 @@
 import Foundation
 
 nonisolated enum DayContext {   // 2026-07-22：纯日期计算，标 nonisolated 供 actor(EventKit store) 的同步闭包调用
-    /// 日界线小时：本地时间 [0:00, 4:00) 仍算「前一天」。
-    static let dayBoundaryHour = 4
+    /// 日界线小时：本地时间 [0:00, 4:00) 仍算「前一天」。真相源=PinSchedule.dayBoundaryHour（P1a 起）。
+    static let dayBoundaryHour = PinSchedule.dayBoundaryHour
     /// 晚上从几点起默认排「明天」（前一晚规划场景）。
     static let eveningStartHour = 18
 
     private static var cal: Calendar { Calendar.current }
 
     /// 给定时刻所属「逻辑日」的零点（日历日，已含凌晨 4 点偏移）。
+    /// P1a（图钉体系）：数学迁到 PinSchedule——label = ≤now 最近一根跨日图钉所在日历日的零点。
     static func logicalStartOfDay(_ now: Date) -> Date {
-        let base = cal.startOfDay(for: now)
-        let hour = cal.component(.hour, from: now)
-        return hour < dayBoundaryHour ? cal.date(byAdding: .day, value: -1, to: base)! : base
+        cal.startOfDay(for: PinSchedule.dayBoundary(atOrBefore: now))
     }
 
     /// 两个时刻是否属同一逻辑日（复盘/streak 判断"是今天的事"用）。
@@ -37,11 +36,7 @@ nonisolated enum DayContext {   // 2026-07-22：纯日期计算，标 nonisolate
     /// 某逻辑日（label = 该日零点，logicalStartOfDay 的返回值）的时间窗：[label 4:00, 次日 4:00)。
     /// 块/事件归属 = start 落在窗内（半开区间）。投影/日历谓词用；PlanStore 归桶用 logicalStartOfDay 等值即可。
     static func logicalWindow(forLabel label: Date) -> DateInterval {
-        let base = cal.startOfDay(for: label)
-        let start = cal.date(byAdding: .hour, value: dayBoundaryHour, to: base) ?? base
-        let nextBase = cal.date(byAdding: .day, value: 1, to: base) ?? base
-        let end = cal.date(byAdding: .hour, value: dayBoundaryHour, to: nextBase) ?? start
-        return DateInterval(start: start, end: end)
+        PinSchedule.dayInterval(forLabel: label)   // P1a：窗口 = 相邻两根跨日图钉之间
     }
 
     /// 智能默认排哪天（重构后按**逻辑日**，用户以逻辑日生活）：
@@ -54,10 +49,9 @@ nonisolated enum DayContext {   // 2026-07-22：纯日期计算，标 nonisolate
         return hour >= eveningStartHour ? (cal.date(byAdding: .day, value: 1, to: today) ?? today) : today
     }
 
-    /// 逻辑日的可排尾界 = 次日日界线（凌晨 4 点）。块结束超过它＝真排不下（reflow 冲突判定）。
+    /// 逻辑日的可排尾界 = 次日日界线（凌晨 4 点）＝下一根跨日图钉。
     static func endOfPlannableDay(_ now: Date = .now) -> Date {
-        let nextDayStart = cal.date(byAdding: .day, value: 1, to: logicalStartOfDay(now)) ?? now
-        return nextDayStart.addingTimeInterval(TimeInterval(dayBoundaryHour * 3600))
+        PinSchedule.dayBoundary(after: now)   // P1a：原 addingTimeInterval 算式在 DST 切换日差 1h，图钉版按日历运算恒对
     }
 
     /// 逻辑今天偏移 offset 天的标签（offset=-1 昨天 / 0 今天 / 1 明天 / 2 后天）。
