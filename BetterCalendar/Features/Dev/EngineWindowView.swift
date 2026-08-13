@@ -6,6 +6,7 @@
 //  把统一时间线引擎的内部状态直接画出来，每完成一批（P1a–P1e）往里加一节——
 //  正式时间线 UI（P2）之前，用它亲眼验收引擎行为。
 //  P1a：图钉序列 ±2 天 + 现在指针 + 当前逻辑日区间。
+//  P1b：流动性排布试算（合成场景演示 FluidLayoutEngine：钉死/软锚/队列/溢出；真实数据接线=P1e）。
 //  刷新=手动按钮 + 打开时（不做周期刷新——menu bar TimelineView 卡死教训，保守起见观察窗同守）。
 //
 
@@ -63,6 +64,22 @@ struct EngineWindowView: View {
                     .opacity(pin.time <= now ? 0.5 : 1)   // 过去的钉凝固变淡
                 }
             }
+            Section("排布试算（P1b 合成场景：收工 18:00）") {
+                let demo = Self.demoLayout()
+                ForEach(Array(demo.placed.enumerated()), id: \.offset) { _, p in
+                    HStack {
+                        Text(Self.demoTitles[p.id] ?? "?").frame(width: 70, alignment: .leading)
+                        Text("\(Self.hm(p.start)) – \(Self.hm(p.end))")
+                            .font(.system(.body, design: .monospaced))
+                    }
+                }
+                ForEach(Array(demo.overflow.enumerated()), id: \.offset) { _, id in
+                    HStack {
+                        Text(Self.demoTitles[id] ?? "?").frame(width: 70, alignment: .leading)
+                        Text("→ 溢出（去向策略 P1c）").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
         }
         .toolbar {
             ToolbarItem {
@@ -71,5 +88,42 @@ struct EngineWindowView: View {
         }
         .onAppear { now = .now }
         .frame(minWidth: 380, minHeight: 420)
+    }
+
+    // MARK: P1b 排布试算的合成场景（固定 UUID → 标题映射，演示引擎行为）
+
+    private static let demoIDs = (meeting: UUID(), writing: UUID(), reading: UUID(),
+                                  lunch: UUID(), star: UUID(), extra: UUID())
+    static let demoTitles: [UUID: String] = [
+        demoIDs.meeting: "会议(钉死)", demoIDs.writing: "写作", demoIDs.reading: "阅读",
+        demoIDs.lunch: "午饭(±60)", demoIDs.star: "★要紧事", demoIDs.extra: "杂务",
+    ]
+
+    static func demoLayout() -> FluidLayoutResult {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: .now)
+        func t(_ h: Int, _ mi: Int = 0) -> Date {
+            cal.date(byAdding: .minute, value: h * 60 + mi, to: day)!
+        }
+        let modules = [
+            FluidModule(id: demoIDs.meeting, title: "会议", duration: 3600,
+                        fluidity: .pinned, plannedStart: t(12)),
+            FluidModule(id: demoIDs.lunch, title: "午饭", duration: 1800,
+                        fluidity: .soft(60), plannedStart: t(12)),
+            FluidModule(id: demoIDs.writing, title: "写作", duration: 2 * 3600,
+                        fluidity: .free, plannedStart: t(9)),
+            FluidModule(id: demoIDs.reading, title: "阅读", duration: 90 * 60,
+                        fluidity: .free, plannedStart: t(14)),
+            FluidModule(id: demoIDs.star, title: "要紧事", duration: 90 * 60,
+                        fluidity: .free, priority: .important, plannedStart: t(15)),
+            FluidModule(id: demoIDs.extra, title: "杂务", duration: 2 * 3600,
+                        fluidity: .free, plannedStart: t(16)),
+        ]
+        return FluidLayoutEngine.layOut(modules: modules, from: t(9), hardEnd: t(18))
+    }
+
+    static func hm(_ d: Date) -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
     }
 }
