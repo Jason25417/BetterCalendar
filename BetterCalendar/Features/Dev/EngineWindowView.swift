@@ -7,6 +7,7 @@
 //  正式时间线 UI（P2）之前，用它亲眼验收引擎行为。
 //  P1a：图钉序列 ±2 天 + 现在指针 + 当前逻辑日区间。
 //  P1b：流动性排布试算（合成场景演示 FluidLayoutEngine：钉死/软锚/队列/溢出；真实数据接线=P1e）。
+//  P1c：溢出裁决（SpillResolver：顺延/回池/溶解/升提议——含 DDL 挡路与连续顺延升级演示）。
 //  刷新=手动按钮 + 打开时（不做周期刷新——menu bar TimelineView 卡死教训，保守起见观察窗同守）。
 //
 
@@ -76,7 +77,16 @@ struct EngineWindowView: View {
                 ForEach(Array(demo.overflow.enumerated()), id: \.offset) { _, id in
                     HStack {
                         Text(Self.demoTitles[id] ?? "?").frame(width: 70, alignment: .leading)
-                        Text("→ 溢出（去向策略 P1c）").font(.caption).foregroundStyle(.orange)
+                        Text("→ 溢出：\(Self.spillText(for: id))")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+            Section("溢出裁决演示（P1c 合成候选）") {
+                ForEach(Array(Self.spillDemo().enumerated()), id: \.offset) { _, row in
+                    HStack {
+                        Text(row.0).frame(width: 110, alignment: .leading)
+                        Text(row.1).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -120,6 +130,38 @@ struct EngineWindowView: View {
                         fluidity: .free, plannedStart: t(16)),
         ]
         return FluidLayoutEngine.layOut(modules: modules, from: t(9), hardEnd: t(18))
+    }
+
+    /// P1c：真实溢出块的裁决文案（demo 场景：都是工作块→顺延明天）。
+    static func spillText(for id: UUID) -> String {
+        let c = SpillCandidate(id: id, title: demoTitles[id] ?? "?")
+        return decisionText(SpillResolver.resolve(c, reference: .now))
+    }
+
+    /// P1c：合成候选矩阵——四策略与三升级局面各一例。
+    static func spillDemo() -> [(String, String)] {
+        let ref = Date.now
+        let tomorrow4am = DayContext.logicalWindow(forLabel: DayContext.logicalDay(offset: 1, from: ref)).start
+        let cases: [SpillCandidate] = [
+            SpillCandidate(id: UUID(), title: "工作块"),
+            SpillCandidate(id: UUID(), title: "池投放件", fromPool: true),
+            SpillCandidate(id: UUID(), title: "生活锚", isAnchor: true),
+            SpillCandidate(id: UUID(), title: "今晚DDL", deadline: tomorrow4am.addingTimeInterval(-3600)),
+            SpillCandidate(id: UUID(), title: "滚了3次", spillCount: 3),
+            SpillCandidate(id: UUID(), title: "显式ask", policyOverride: .ask),
+        ]
+        return cases.map { ($0.title, decisionText(SpillResolver.resolve($0, reference: ref))) }
+    }
+
+    private static func decisionText(_ d: SpillDecision) -> String {
+        switch d {
+        case .forward(let day): "顺延 → \(hm(DayContext.logicalWindow(forLabel: day).start))（明日窗口起点）"
+        case .returnToPool: "回池（等下次投放）"
+        case .dissolve: "溶解（零记录，明天照常）"
+        case .escalate(.deadlineBlocksForward): "⚠️ 升提议：DDL 挡路推不过去"
+        case .escalate(.repeatedSpills(let n)): "⚠️ 升提议：已连续顺延 \(n) 次"
+        case .escalate(.userAskedToAsk): "⚠️ 升提议：用户要求每次过问"
+        }
     }
 
     static func hm(_ d: Date) -> String {
