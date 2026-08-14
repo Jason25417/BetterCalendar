@@ -45,6 +45,7 @@ final class AppContainer {
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
+    let learning: LearningStore                // 学习层采集端（E4：快照 save-once + 残差兜底折算）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
     #endif
@@ -106,6 +107,7 @@ final class AppContainer {
                                             startedDays: startedDays, projection: projection)
         self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)
+        self.learning = LearningStore()
         self.logSync = LogSyncService()
         logSync.start()
         SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）

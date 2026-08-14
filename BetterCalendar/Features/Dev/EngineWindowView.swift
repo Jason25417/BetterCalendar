@@ -8,6 +8,7 @@
 //  P1a：图钉序列 ±2 天 + 现在指针 + 当前逻辑日区间。
 //  P1b：流动性排布试算（合成场景演示 FluidLayoutEngine：钉死/软锚/队列/溢出；真实数据接线=P1e）。
 //  P1c：溢出裁决（SpillResolver：顺延/回池/溶解/升提议——含 DDL 挡路与连续顺延升级演示）。
+//  P1d/E4：学习层采集端（今日快照状态 + 昨日残差样本——真数据，非合成）。
 //  刷新=手动按钮 + 打开时（不做周期刷新——menu bar TimelineView 卡死教训，保守起见观察窗同守）。
 //
 
@@ -87,6 +88,30 @@ struct EngineWindowView: View {
                     HStack {
                         Text(row.0).frame(width: 110, alignment: .leading)
                         Text(row.1).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Section("学习层采集（E4 真数据）") {
+                let learning = LearningStore()
+                let today = DayContext.logicalStartOfDay(now)
+                if let snap = learning.snapshot(for: today) {
+                    Text("今日快照：已存（\(snap.items.count) 块，\(Self.hm(snap.createdAt)) 首次确认时）")
+                        .font(.caption)
+                } else {
+                    Text("今日快照：尚未确认写入").font(.caption).foregroundStyle(.secondary)
+                }
+                let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
+                let samples = learning.samples(on: yesterday)
+                if samples.isEmpty {
+                    Text("昨日残差样本：无（无快照/未回填/待兜底折算）")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(samples.enumerated()), id: \.offset) { _, sm in
+                        HStack {
+                            Text(sm.title).frame(width: 90, alignment: .leading).lineLimit(1)
+                            Text("计划 \(sm.plannedMinutes)m → 实际 \(sm.actualMinutes)m · ×\(String(format: "%.2f", Double(sm.actualMinutes) / Double(max(1, sm.plannedMinutes)))) · \(sm.sourceRaw)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
