@@ -28,7 +28,8 @@ final class LearningStore {
             SnapshotItem(id: b.id, title: b.title, plannedStart: b.start,
                          plannedMinutes: max(0, Int(b.end.timeIntervalSince(b.start) / 60)),
                          isFixed: b.isFixed, isAnchor: b.isAnchor,
-                         linkedTaskID: b.linkedTaskID, labels: b.labels)
+                         linkedTaskID: b.linkedTaskID, labels: b.labels,
+                         priorityRaw: b.priority.rawValue)   // E5b：基线要认得 ★
         }
         context.insert(DayPlanSnapshot(dayLabel: dayLabel, items: items))
         try? context.save()

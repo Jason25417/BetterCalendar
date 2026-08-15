@@ -83,6 +83,77 @@ import Foundation
         #expect(r.placed.isEmpty && r.overflow.isEmpty)
     }
 
+    // MARK: E5b 引擎升格（D8：并行槽 / setup 间隙 / 聚簇 / 占线宽度 / hardEndOverride）
+
+    /// 并行组合槽：同组同起点、槽宽=组内最宽；后续块排在槽后。
+    @Test func parallelGroupSharesStartAndWidth() {
+        var a = module("洗衣", start: 9, durationMin: 30, fluidity: .free)
+        a.parallelGroup = "parallel:家务"
+        var b = module("播客", start: 9, durationMin: 60, fluidity: .free)
+        b.parallelGroup = "parallel:家务"
+        let after = module("写作", start: 10, durationMin: 60, fluidity: .free)
+        let r = FluidLayoutEngine.layOut(modules: [a, b, after], from: at(9), hardEnd: at(18))
+        #expect(r.overflow.isEmpty)
+        let pa = r.placed.first { $0.id == a.id }!
+        let pb = r.placed.first { $0.id == b.id }!
+        #expect(pa.start == pb.start, "同组同起点")
+        #expect(pa.end == at(9, 30) && pb.end == at(10), "成员各保自身标称长度")
+        #expect(r.placed.first { $0.id == after.id }!.start == at(10), "后续块从槽宽（组内最长）之后排")
+    }
+
+    /// 族切换 setup 间隙：跨到重档族光标先进 12 分钟；同族连排免；任一侧未知不计价。
+    @Test func familySwitchChargesSetupGap() {
+        var w = module("写作", start: 9, durationMin: 60, fluidity: .free)
+        w.family = "写作"
+        var c = module("编码", start: 10, durationMin: 60, fluidity: .free)
+        c.family = "编码"
+        let r = FluidLayoutEngine.layOut(modules: [w, c], from: at(9), hardEnd: at(18))
+        #expect(r.placed.first { $0.id == c.id }!.start == at(10, 12), "写作→编码：重档 setup 12 分钟")
+
+        var w2 = module("改稿", start: 10, durationMin: 30, fluidity: .free)
+        w2.family = "写作"
+        let r2 = FluidLayoutEngine.layOut(modules: [w, w2], from: at(9), hardEnd: at(18))
+        #expect(r2.placed.first { $0.id == w2.id }!.start == at(10), "同族连排免 setup")
+
+        let plain = module("未标注", start: 10, durationMin: 30, fluidity: .free)
+        let r3 = FluidLayoutEngine.layOut(modules: [w, plain], from: at(9), hardEnd: at(18))
+        #expect(r3.placed.first { $0.id == plain.id }!.start == at(10), "族未知一侧不计价（E5e 前中性）")
+    }
+
+    /// 占线宽度（D4）：块自身保持标称长度，光标按校准值前进——余量成呼吸间隙。
+    @Test func occupiedWidthAdvancesCursorKeepsNominalEnd() {
+        var a = module("写作", start: 9, durationMin: 60, fluidity: .free)
+        a.occupiedDuration = 75 * 60   // ×1.25
+        let b = module("阅读", start: 10, durationMin: 30, fluidity: .free)
+        let r = FluidLayoutEngine.layOut(modules: [a, b], from: at(9), hardEnd: at(18))
+        #expect(r.placed.first { $0.id == a.id }!.end == at(10), "标称端点不变（不顶嘴）")
+        #expect(r.placed.first { $0.id == b.id }!.start == at(10, 15), "下一块从占线端点起=呼吸口 15 分钟")
+    }
+
+    /// 聚簇排序：同族队列块相邻（键=族组首块位置），异族插中间的被移到族组之后。
+    @Test func clusteringGroupsSameFamilyAdjacent() {
+        var a1 = module("写第3章", start: 9, durationMin: 60, fluidity: .free); a1.family = "写作"
+        var b = module("修bug", start: 9, durationMin: 30, fluidity: .free); b.family = "编码"
+        var a2 = module("改第2章", start: 10, durationMin: 30, fluidity: .free); a2.family = "写作"
+        // plannedStart 序=a1(9:00), b(9:30 之前？同 9 点区分)……用 9:00/9:30/10:00 明确顺序
+        b.plannedStart = at(9, 30)
+        let r = FluidLayoutEngine.layOut(modules: [a1, b, a2], from: at(9), hardEnd: at(18))
+        let sa2 = r.placed.first { $0.id == a2.id }!.start
+        let sb = r.placed.first { $0.id == b.id }!.start
+        #expect(sa2 < sb, "同族 a2 聚到 a1 之后，b 让到族组后面")
+        #expect(r.placed.first { $0.id == a2.id }!.start == at(10), "a1 结束即接 a2（同族免 setup）")
+    }
+
+    /// hardEndOverride（★→日界线映射的引擎腿）：越过窗口硬边界照排、不进溢出。
+    @Test func hardEndOverridePlacesBeyondWindow() {
+        let filler = module("占满", start: 9, durationMin: 8 * 60, fluidity: .free)
+        var star = module("要紧事", start: 12, durationMin: 120, fluidity: .free, priority: .important)
+        star.hardEndOverride = at(23, 59)
+        let r = FluidLayoutEngine.layOut(modules: [filler, star], from: at(9), hardEnd: at(17))
+        #expect(!r.overflow.contains(star.id), "★ 有 override 绝不软溢出")
+        #expect(r.placed.contains { $0.id == star.id })
+    }
+
     /// 退化等价：全部钉死/自由、无软锚、空间充足时，与旧 ReflowLayout 铺排一致。
     @Test func degenerateCaseMatchesLegacyReflow() {
         let fixed = ScheduledBlock(title: "会议", start: at(11), end: at(12), isFixed: true)

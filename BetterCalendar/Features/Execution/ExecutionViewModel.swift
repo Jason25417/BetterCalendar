@@ -559,7 +559,14 @@ final class ExecutionViewModel {
     func guardianTick() async {
         autoAdvancePomodoroIfDue()
         await autoCloseAtDayBoundaryIfNeeded()
+        // E5b 分钟兜底脉冲（三层分频计算层）：搭现有 1s ticker、不新增定时器（菜单栏纪律）
+        pulseCounter += 1
+        if pulseCounter >= 60 { pulseCounter = 0; minutePulse?() }
     }
+
+    /// 分钟脉冲出口（E5b）：组装点接 TimelineCoordinator.notePulse——过点未动的块靠它兜底重算。
+    var minutePulse: (() -> Void)?
+    private var pulseCounter = 0
 
     /// 段界自动推进（0.34 Jason 定：番茄自动跑完派生段数才收口，与聪音侧一致）：
     /// 段满自动 工作⇄休息；手动休息中冻结不推；「提前结束本段/转正计时」手动权照旧；
@@ -998,6 +1005,8 @@ final class ExecutionViewModel {
         done.append(ActualRecord(plannedID: best.id, title: best.title,
                                  start: best.start, end: best.end))
         await flushActuals()
+        // 进展信号（E5b 旁路修补）：外部信号入口也要发——排日程页徽标 + TimelineCoordinator 重算都靠它
+        NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
         // 同步等预览更新（不 fire-and-forget）：Intent 返回时状态已就绪；
         // 也避免游离 Task 活过调用方作用域（单测里曾撞已析构的内存库 → SwiftData trap）。
         await updatePreview()
@@ -1167,6 +1176,8 @@ final class ExecutionViewModel {
         guard let item = planned.first(where: { $0.id == id }), !isDone(item) else { return }
         done.append(ActualRecord(plannedID: item.id, title: item.title, start: item.start, end: item.end))
         await flushActuals()
+        // 进展信号（E5b 旁路修补②）：聪音回流完成也要发（此前只有 refreshPreview 一处发）
+        NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
         await updatePreview()
     }
 
@@ -1204,5 +1215,14 @@ extension ExecutionViewModel: ExecutionProgressReading {
         if let a = active?.plannedID { ids.insert(a) }
         for run in background { if let p = run.plannedID { ids.insert(p) } }
         return ids
+    }
+
+    /// 活预报（E5b）：口径同 updatePreview ①——剩余 = 计划时长 − 已投入，下限 60s。
+    var activePrediction: ActivePrediction? {
+        guard let a = active, let pid = a.plannedID,
+              let p = planned.first(where: { $0.id == pid }) else { return nil }
+        let remain = max(60, p.end.timeIntervalSince(p.start) - currentElapsed)
+        return ActivePrediction(id: pid, start: a.start,
+                                end: Date.now.addingTimeInterval(remain))
     }
 }

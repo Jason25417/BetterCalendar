@@ -426,6 +426,8 @@ final class HomeViewModel {
             BehaviorLog.record("确认写入", "\(sorted.count) 件")
             // E4：当日「最初计划」快照——该逻辑日第一次确认写入时存一份，之后不覆盖（残差基准/复盘基线）
             LearningStore().snapshotIfFirst(dayLabel: targetDay, blocks: sorted.map(\.scheduled))
+            // E5b：确认写入=计划编辑事件 → 时间线协调器重算（一行 post，不引依赖）
+            NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
             draftSource = .loaded    // 写入后当前列表 = 已确认的计划
             // 长期事项入「在途」池（幂等：同名在途项只更新不重复）
             for p in pendingLongTasks {

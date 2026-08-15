@@ -46,6 +46,8 @@ final class AppContainer {
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
     let learning: LearningStore                // 学习层采集端（E4：快照 save-once + 残差兜底折算）
+    let changeTraces = ChangeTraceStore()      // 变更痕迹（E5b 数据层：直写绿的配套义务，UI=E5d）
+    let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
     #endif
@@ -79,8 +81,10 @@ final class AppContainer {
         UNUserNotificationCenter.current().delegate = notificationDelegate
         self.notifier = UNNotificationService()
         self.planStore = PlanStore()
-        // 日记引子读真相源（0.26.15 补迁移）：日历是投影——实时模式绿色淡出，从日历读会把做成的事全算成计划外
-        self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer)
+        self.learning = LearningStore()   // E5b：提前建——复盘/日记基线（D11）要用
+        // 日记引子基线（E5b/D11）：计划侧=当日最初快照优先（直写绿后真相=活预报，不再当基线用）
+        self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer,
+                                                           learning: learning)
         self.longTasks = LongTaskStore()
         self.reviewStore = ReviewLocalStore()
         self.milestones = MilestoneStore(reviewStore: reviewStore)
@@ -107,7 +111,13 @@ final class AppContainer {
                                             startedDays: startedDays, projection: projection)
         self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)
-        self.learning = LearningStore()
+        // E5b 时间线协调器（影子期：只动实时日真相、不碰投影；三层分频见 §14.1）
+        self.timeline = TimelineCoordinator(planStore: planStore, startedDays: startedDays,
+                                            traces: changeTraces)
+        timeline.progress = execution
+        timeline.start()
+        TimelineCoordinator.sharedForDev = timeline   // 引擎观察窗桥（开发期，M8 摘除）
+        execution.minutePulse = { [weak timeline] in timeline?.notePulse() }   // 分钟兜底（不新增定时器）
         self.logSync = LogSyncService()
         logSync.start()
         SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）
@@ -132,7 +142,8 @@ final class AppContainer {
     var reviewModel: ReviewViewModel {
         ReviewViewModel(calendarStore: calendarStore, comparer: comparer,
                         arrangeDay: arrangeDay, localStore: reviewStore,
-                        longTasks: longTasks, planStore: planStore, looseDays: looseDays)
+                        longTasks: longTasks, planStore: planStore, looseDays: looseDays,
+                        learning: learning)   // E5b/D11：计划基线=当日最初快照
     }
 
     // MARK: 页面依赖包（反向依赖清零 2026-07-12：Features 不再见 AppContainer，按页注入所需具体依赖）

@@ -91,6 +91,27 @@ struct EngineWindowView: View {
                     }
                 }
             }
+            Section("引擎对照（E5b 影子：协调器状态 + 升格演示）") {
+                if let co = TimelineCoordinator.sharedForDev {
+                    Text(co.lastComputeAt.map { "最近重算：\(Self.fmt.string(from: $0))" } ?? "尚未重算（未开工日=影子闸拦截）")
+                        .font(.caption)
+                    Text("写回：\(co.lastWriteNote) · 手改冷却 \(co.manualHolds.count) 块")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !co.softSpilledIDs.isEmpty {
+                        Text("软溢出标记：\(co.softSpilledIDs.count) 块（收工复盘时硬执行）")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("协调器未接线（测试/预览环境）").font(.caption).foregroundStyle(.secondary)
+                }
+                // 升格行为演示（合成）：族聚簇 + setup 间隙 + 并行槽 + 校准呼吸口
+                ForEach(Array(Self.upgradeDemo().enumerated()), id: \.offset) { _, row in
+                    HStack {
+                        Text(row.0).frame(width: 110, alignment: .leading)
+                        Text(row.1).font(.system(.caption, design: .monospaced))
+                    }
+                }
+            }
             Section("学习层采集（E4 真数据）") {
                 let learning = LearningStore()
                 let today = DayContext.logicalStartOfDay(now)
@@ -192,5 +213,33 @@ struct EngineWindowView: View {
     static func hm(_ d: Date) -> String {
         let c = Calendar.current.dateComponents([.hour, .minute], from: d)
         return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// E5b 升格演示（合成）：写作×2（同族相邻+首块后免 setup）→ 沟通（跨族但轻档 s=0）→
+    /// 编码（跨族重档 s=12 间隙）+ 并行组同起点 + 校准占线（呼吸口=下一块起点晚于上一块名义终点）。
+    static func upgradeDemo() -> [(String, String)] {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: .now)
+        func t(_ h: Int, _ mi: Int = 0) -> Date { cal.date(byAdding: .minute, value: h * 60 + mi, to: day)! }
+        let ids = (w1: UUID(), code: UUID(), w2: UUID(), talk: UUID(), pa: UUID(), pb: UUID())
+        let modules = [
+            FluidModule(id: ids.w1, title: "写第3章", duration: 3600, fluidity: .free, plannedStart: t(9),
+                        occupiedDuration: 3600 * 1.25, family: "写作"),
+            FluidModule(id: ids.code, title: "修 bug", duration: 3600, fluidity: .free, plannedStart: t(10),
+                        occupiedDuration: 3600 * 1.25, family: "编码"),
+            FluidModule(id: ids.w2, title: "改第2章", duration: 1800, fluidity: .free, plannedStart: t(11),
+                        occupiedDuration: 1800 * 1.25, family: "写作"),
+            FluidModule(id: ids.talk, title: "回邮件", duration: 1800, fluidity: .free, plannedStart: t(12),
+                        family: "沟通协调"),
+            FluidModule(id: ids.pa, title: "洗衣(并行A)", duration: 1800, fluidity: .free, plannedStart: t(13),
+                        parallelGroup: "parallel:家务"),
+            FluidModule(id: ids.pb, title: "听播客(并行B)", duration: 1800, fluidity: .free, plannedStart: t(13),
+                        parallelGroup: "parallel:家务"),
+        ]
+        let titles: [UUID: String] = [ids.w1: "写第3章", ids.code: "修 bug", ids.w2: "改第2章",
+                                      ids.talk: "回邮件", ids.pa: "洗衣(并行A)", ids.pb: "听播客(并行B)"]
+        let r = FluidLayoutEngine.layOut(modules: modules, from: t(9), hardEnd: t(18))
+        return r.placed.map { (titles[$0.id] ?? "?", "\(hm($0.start)) – \(hm($0.end))") }
+            + r.overflow.map { (titles[$0] ?? "?", "→ 溢出") }
     }
 }

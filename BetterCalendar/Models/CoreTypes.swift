@@ -110,6 +110,14 @@ extension ScheduledBlock {
     static let parallelPrefix = "parallel:"
     /// 所属并行组标签（nil=不并行）。同组块 reflow/重排时作为整体同起点铺开。
     var parallelGroup: String? { labels.first { $0.hasPrefix(Self.parallelPrefix) } }
+
+    /// 族（E5b/D2，§14.3 闭集）：labels `family:<族名>` 前缀——零 schema 变更走遍全链。
+    /// E5e（FamilyResolver 三重一致性）开始写值；写值前恒 nil=引擎 setup/聚簇保持中性。
+    static let familyPrefix = "family:"
+    var family: String? {
+        labels.first { $0.hasPrefix(Self.familyPrefix) }
+            .map { String($0.dropFirst(Self.familyPrefix.count)) }
+    }
 }
 
 // ReflowResolution（压缩/跳过/分割三选）已退役（0.23 A）：「排不下」弹窗=羞辱（违 §3.3），

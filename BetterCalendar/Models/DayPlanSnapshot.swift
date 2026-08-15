@@ -23,6 +23,11 @@ nonisolated struct SnapshotItem: Codable, Equatable, Sendable {
     var isAnchor: Bool
     var linkedTaskID: UUID?
     var labels: [String]
+    /// ★优先级（E5b 补，D11：快照接任复盘基线后 MIT 兑现红利需要它）。
+    /// optional=旧 JSON blob 缺键解码为 nil（additive 安全）；nil 视为 normal。
+    var priorityRaw: String? = nil
+
+    var priority: BlockPriority { priorityRaw.flatMap { BlockPriority(rawValue: $0) } ?? .normal }
 }
 
 @Model

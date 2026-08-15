@@ -21,6 +21,7 @@ final class ReviewViewModel {
     // 复盘：读计划 + 读/写蓝色实际（A2 后真相在 PlanStore；补一笔写这里=即时可读、无 EventKit 缓存竞态）。nil=测试可省。
     private let planStore: (PlanReading & ActualReading & ActualWriting)?
     private let looseDays: LooseDayStore?    // 松散日 → 复盘转"休息肯定"（§5.12）；nil=不转
+    private let learning: LearningStore?     // 计划基线=当日最初快照（E5b/D11）；nil=直读真相源
 
     /// 今天是否松散日 → 复盘转肯定（不显对比/完成率，措辞赋义）。
     var isLooseToday: Bool { looseDays?.isLoose(.now) ?? false }
@@ -47,7 +48,7 @@ final class ReviewViewModel {
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
          longTasks: LongTaskStore? = nil, planStore: (PlanReading & ActualReading & ActualWriting)? = nil,
-         looseDays: LooseDayStore? = nil) {
+         looseDays: LooseDayStore? = nil, learning: LearningStore? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
@@ -55,6 +56,7 @@ final class ReviewViewModel {
         self.longTasks = longTasks
         self.planStore = planStore
         self.looseDays = looseDays
+        self.learning = learning
     }
 
     /// 剥离锚点：午饭/通勤/午休这类作息不是"要完成的任务"，不进对比（否则会算成 missed）。
@@ -104,10 +106,11 @@ final class ReviewViewModel {
             where DayContext.isSameLogicalDay(c.start, .now) {
                 if let bid = c.blockID, !storedIDs.contains(bid) { actual.append(c) }
             }
-            // 绿色淡出地基（§5.10 原则6.4）：绿色计划从 PlanStore **真相源**读，不再从日历读——
-            // 这样绿色即使从 Apple 日历常驻淡出，签名功能「计划×实际」对比依然成立。
+            // 计划侧基线（E5b/D11 换合同）：直写绿后真相源=活预报，「计划 vs 实际」的基线改用
+            // **当日最初快照**（save-once，最重硬条件的兑现）；无快照日回退真相源（行为同旧版）。
             // 传**逻辑日标签**（凌晨 1 点复盘=复盘昨晚这一天）：计划与实际两侧同一逻辑日窗口，完成度不错位。
-            let todayPlanned = (try? planStore?.plannedBlocks(on: DayContext.logicalStartOfDay(.now))) ?? []
+            let todayPlanned = PlanBaseline.plannedBlocks(on: DayContext.logicalStartOfDay(.now),
+                                                         planStore: planStore, learning: learning)
             let planned = todayPlanned.map {
                 CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned,
                                    blockID: $0.id)

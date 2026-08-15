@@ -15,16 +15,20 @@ import Foundation
 final class ReflectionContextProvider {
     private let planStore: PlanReading & ActualReading
     private let comparer: PlanComparing
+    private let learning: LearningStore?   // 计划基线=当日最初快照（E5b/D11）；nil=直读真相源
 
-    init(planStore: PlanReading & ActualReading, comparer: PlanComparing) {
+    init(planStore: PlanReading & ActualReading, comparer: PlanComparing,
+         learning: LearningStore? = nil) {
         self.planStore = planStore
         self.comparer = comparer
+        self.learning = learning
     }
 
     /// 当天写作引子（来自计划×实际对比）；当天没做成什么则返回 nil（不硬塞）。
     func todayPrompt(_ now: Date = .now) async -> String? {
         let label = DayContext.logicalStartOfDay(now)
-        let plannedBlocks = (try? planStore.plannedBlocks(on: label)) ?? []
+        let plannedBlocks = PlanBaseline.plannedBlocks(on: label, planStore: planStore,
+                                                      learning: learning)
         // 锚点（午饭/通勤）不进对比——同复盘口径，否则做成件数被作息灌水
         let anchorTitles = plannedBlocks.filter(\.isAnchor).map(\.title)
         func keep(_ title: String) -> Bool {
@@ -51,10 +55,11 @@ final class ReflectionContextProvider {
         AutoJournal.compose(comparison: todayComparison(now))
     }
 
-    /// 当天对比（供引子/自动日记共用；口径同复盘：真相源 + 剥锚点）。
+    /// 当天对比（供引子/自动日记共用；口径同复盘：快照基线优先 + 剥锚点）。
     private func todayComparison(_ now: Date) -> DayComparison {
         let label = DayContext.logicalStartOfDay(now)
-        let plannedBlocks = (try? planStore.plannedBlocks(on: label)) ?? []
+        let plannedBlocks = PlanBaseline.plannedBlocks(on: label, planStore: planStore,
+                                                      learning: learning)
         let anchorTitles = plannedBlocks.filter(\.isAnchor).map(\.title)
         func keep(_ title: String) -> Bool {
             !anchorTitles.contains { TitleMatch.similarity($0, title) >= 0.6 }

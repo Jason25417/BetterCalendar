@@ -170,12 +170,22 @@ final class ReconcileService {
         await projection.projectUpcomingWindow(skipping: skip)
     }
 
-    private func reconcile(label: Date, allGreenEvents: [CalendarEventDraft]) async {
+    private func reconcile(label: Date, allGreenEvents: [CalendarEventDraft],
+                           isRetry: Bool = false) async {
         let window = DayContext.logicalWindow(forLabel: label)
         let events = allGreenEvents.filter { $0.start >= window.start && $0.start < window.end }
         guard let truth = try? planReader.plannedBlocks(on: label) else { return }
         let fp = ProjectionFingerprints.get(label)
         let plan = Self.diff(truth: truth, events: events, fingerprint: fp)
+
+        // E5b 竞态加固：事件快照读于 8 日循环之前，循环期间 Coordinator 可能已写真相+投影
+        // （指纹同步更新）——「旧事件 × 新真相 × 新指纹」会被误判成用户手改、把旧时间倒灌回真相。
+        // 判到回流时先重读该日事件再核一遍（只在真有 updates 时多读一次，代价极小）。
+        if !isRetry, !plan.updates.isEmpty {
+            let fresh = (try? await calendarStore.read(kind: .planned)) ?? []
+            await reconcile(label: label, allGreenEvents: fresh, isRetry: true)
+            return
+        }
 
         var touchedLabels: Set<Date> = []
         for u in plan.updates {
@@ -184,9 +194,11 @@ final class ReconcileService {
             touchedLabels.insert(DayContext.logicalStartOfDay(u.start))   // 拖去别的日子 → 新桶也要重投影
             DevLog.shared.info("对账", "日历手改回流：「\(u.title)」")
         }
-        // 回流改了真相 → 通知界面刷新（排日程页无未保存修改时重新加载，0.22.2 Jason 报"改了不实时"）
+        // 回流改了真相 → 通知界面刷新（排日程页无未保存修改时重新加载，0.22.2 Jason 报"改了不实时"）；
+        // E5b：带上回流块 id → TimelineCoordinator 手改冷却（D12 用户最后动作赢）
         if !plan.updates.isEmpty {
-            NotificationCenter.default.post(name: Self.planChangedExternally, object: nil)
+            NotificationCenter.default.post(name: Self.planChangedExternally, object: nil,
+                                            userInfo: ["updatedIDs": plan.updates.map(\.id)])
         }
         if !plan.deletions.isEmpty {
             switch ReconcileSettings.deletionPolicy {
