@@ -147,6 +147,42 @@ struct LongTermView: View {
                     Text("说一句")   // 审计 #20：标题覆盖真实能力（加新的＋改现有的），与排日程页一框双模同族
                 }
 
+                // ===== 待办（E5a 一池两区）：小愿望 + 溢出顺延物 =====
+                // 池铁律全继承：无维护义务、不显时间衰减/计数徽标、丢弃=溶解零愧疚。
+                // 溢出物排前（晨间露脸序，E5d 接晨间摘要）；捕获口常驻（捕获零摩擦）。
+                Section {
+                    ForEach(store.todos) { entry in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.title).font(.callout)
+                                if entry.spilledFromDay != nil {
+                                    // 中性来源事实，不写「没做完」（呈现红线：世界归因、无缺口措辞）
+                                    Text("之前留下的").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button("排今天") {
+                                router.scheduleRequest = .insertLongTask(entry.id)
+                                router.selectedTab = .schedule
+                            }
+                            .font(.caption).buttonStyle(.bordered).controlSize(.small)
+                            .tint(.primary)
+                            Button {
+                                store.discard(entry)
+                            } label: { Image(systemName: "xmark.circle").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
+                            .help("丢弃——想做的事可以不做，丢了就丢了")
+                            .accessibilityLabel("丢弃「\(entry.title)」")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    InlineAddRow(prompt: "记一件想做的小事", placeholder: "想做的小事叫…") {
+                        store.addTodo(title: $0)
+                    }
+                } header: {
+                    Text("待办")
+                }
+
                 // ===== 先放下（捞回入口） =====
                 let shelved = store.shelved()
                 if !shelved.isEmpty {

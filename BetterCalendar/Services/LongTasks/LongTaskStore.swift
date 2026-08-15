@@ -4,6 +4,8 @@
 //
 //  「在途」池的数据访问（M10）。SwiftData 随 CloudKit 跨端。
 //  防重：同名（TitleMatch ≥0.6）已有在途项时 add 幂等跳过——重复确认/两端并发不产生双份。
+//  一池两区（E5a，I1 裁定 2026-08-15）：items 口径=长期区在途（老消费者零改动自动排除待办区）；
+//  待办区走独立缓存 todos（小愿望+溢出物，丢弃=溶解硬删除，仅限该区）。
 //
 
 import Foundation
@@ -14,8 +16,11 @@ import SwiftData
 @Observable
 final class LongTaskStore {
     @ObservationIgnored private let context: ModelContext
-    /// 当前在途列表（缓存，mutator 后刷新——UI 直接观察它）。
+    /// 当前**长期区**在途列表（缓存，mutator 后刷新——UI 直接观察它）。
+    /// ⚠️ 口径（E5a）：不含待办区——arrange 喂池/归属匹配/L3/进度统计等直取 items 的消费者天然不被待办区污染。
     private(set) var items: [LongTask] = []
+    /// 待办区列表（缓存）：昨日溢出在前（晨间露脸序），其余按创建时间新的在前。
+    private(set) var todos: [LongTask] = []
 
     init(context: ModelContext? = nil) {
         self.context = context ?? SharedModelContainer.shared.mainContext
@@ -24,7 +29,7 @@ final class LongTaskStore {
 
     func reload() {
         let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
-        items = all.filter { $0.status == .active }
+        items = all.filter { $0.status == .active && $0.poolZone == .longterm }
             .sorted {
                 switch ($0.deadline, $1.deadline) {
                 case let (a?, b?): return a < b
@@ -33,23 +38,43 @@ final class LongTaskStore {
                 case (nil, nil): return $0.createdAt < $1.createdAt
                 }
             }
+        todos = all.filter { $0.status == .active && $0.poolZone == .todo }
+            .sorted {
+                switch ($0.spilledFromDay, $1.spilledFromDay) {
+                case let (a?, b?): return a > b                      // 新溢出的在前
+                case (_?, nil): return true                          // 溢出物先于手动愿望
+                case (nil, _?): return false
+                case (nil, nil): return $0.createdAt > $1.createdAt  // 愿望按新到旧
+                }
+            }
     }
 
-    /// 在途中的任务：有 DDL 的按 DDL 升序在前，无 DDL 的按创建时间。
+    /// 长期区在途任务：有 DDL 的按 DDL 升序在前，无 DDL 的按创建时间。
     func active() -> [LongTask] { items }
+
+    /// 待办区条目（E5a）：溢出物在前、手动愿望在后。
+    func todoItems() -> [LongTask] { todos }
 
     /// DDL 已过仍在途的（温和三选的对象）。
     func overdue(now: Date = .now) -> [LongTask] {
         active().filter { ($0.deadline ?? .distantFuture) < now }
     }
 
-    /// 入池（幂等）：同名在途项已存在 → 只更新 DDL/节奏（取新值），不重复建。返回实际生效的任务。
+    /// 入池（长期区，幂等）：同名长期区在途项已存在 → 只更新 DDL/节奏（取新值），不重复建。
+    /// 跨区幂等（E5a）：同名条目在**待办区** → 升格为长期区并回填字段，不重建（防跨区重复）。
     @discardableResult
     func add(title: String, deadline: Date? = nil,
              cadenceMinutesPerWeek: Int? = nil, totalMinutes: Int? = nil,
              unitMinutes: Int? = nil, note: String = "") -> LongTask {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing = active().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 }) {
+        let existing = active().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 })
+            ?? todoItems().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 })
+        if let existing {
+            if existing.poolZone == .todo {
+                existing.zoneRaw = PoolZone.longterm.rawValue
+                existing.spilledFromDay = nil
+                DevLog.shared.info("在途", "待办区条目升格为长期：\(existing.title)")
+            }
             if let d = deadline { existing.deadline = d }
             if let c = cadenceMinutesPerWeek { existing.cadenceMinutesPerWeek = c }
             if let tm = totalMinutes { existing.totalMinutes = tm }
@@ -67,6 +92,44 @@ final class LongTaskStore {
         reload()
         DevLog.shared.info("在途", "入池：\(t)" + (deadline != nil ? "（有 DDL）" : ""))
         return task
+    }
+
+    // MARK: 待办区（E5a，一池两区）
+
+    /// 收进待办区（幂等）：同名待办条目已在 → 更新来源日/族；同名**长期区**在途项已在 → 不重复建、
+    /// 返回长期项（它已有家——溢出的池块本来就该回它的长期任务）。
+    @discardableResult
+    func addTodo(title: String, family: String? = nil, spilledFromDay: Date? = nil) -> LongTask {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = todoItems().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 }) {
+            if let s = spilledFromDay { existing.spilledFromDay = s }
+            if let f = family { existing.family = f }
+            existing.modifiedAt = .now
+            try? context.save()
+            reload()
+            return existing
+        }
+        if let home = active().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 }) {
+            DevLog.shared.info("待办区", "「\(t)」已有长期任务归属，不重复收待办")
+            return home
+        }
+        let entry = LongTask(title: t, zone: .todo, family: family, spilledFromDay: spilledFromDay)
+        context.insert(entry)
+        try? context.save()
+        reload()
+        DevLog.shared.info("待办区", "收进待办：\(t)" + (spilledFromDay != nil ? "（溢出）" : "（愿望）"))
+        return entry
+    }
+
+    /// 丢弃（=溶解，零记录零愧疚）：**仅限待办区**的硬删除；长期区维持「无删除只改状态」裁决。
+    func discard(_ entry: LongTask) {
+        guard entry.poolZone == .todo else {
+            DevLog.shared.warn("待办区", "discard 只用于待办区，长期区走 shelve/complete：\(entry.title)")
+            return
+        }
+        context.delete(entry)
+        try? context.save()
+        reload()
     }
 
     func complete(_ task: LongTask) {
@@ -96,16 +159,18 @@ final class LongTaskStore {
 
     // MARK: 长期页（#40 批1）：分组查询 / 捞回 / 三量编辑 / 检查点
 
-    /// 「先放下」的任务（长期页折叠区，捞回入口）——按放下时间近的在前。
+    /// 「先放下」的任务（长期页折叠区，捞回入口）——按放下时间近的在前。只看长期区（待办区无三态）。
     func shelved() -> [LongTask] {
         let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
-        return all.filter { $0.status == .shelved }.sorted { $0.modifiedAt > $1.modifiedAt }
+        return all.filter { $0.status == .shelved && $0.poolZone == .longterm }
+            .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
-    /// 「做成了」的任务（长期页折叠区，正反馈存档）——按做成时间近的在前。
+    /// 「做成了」的任务（长期页折叠区，正反馈存档）——按做成时间近的在前。只看长期区。
     func doneItems() -> [LongTask] {
         let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
-        return all.filter { $0.status == .done }.sorted { ($0.doneAt ?? $0.modifiedAt) > ($1.doneAt ?? $1.modifiedAt) }
+        return all.filter { $0.status == .done && $0.poolZone == .longterm }
+            .sorted { ($0.doneAt ?? $0.modifiedAt) > ($1.doneAt ?? $1.modifiedAt) }
     }
 
     /// 捞回（先放下 → 在途）：放下是体面出口，捞回同样零成本。

@@ -564,7 +564,9 @@ struct HomeView: View {
                     model.targetDay = DayContext.logicalDay(offset: 1)
                     model.autoLoadOnAppear()
                 case .insertLongTask(let id):   // #40 批1：长期页「排进今天」→ 智能插空档
-                    if let t = deps.longTasks.items.first(where: { $0.id == id }) {
+                    // E5a：待办区条目同走这条路（轻量条目无检查点/单元 → 落 60 分钟默认块长）
+                    if let t = deps.longTasks.items.first(where: { $0.id == id })
+                        ?? deps.longTasks.todoItems().first(where: { $0.id == id }) {
                         model.smartInsertFromLongTask(t)
                     }
                 }

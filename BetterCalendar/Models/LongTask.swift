@@ -17,6 +17,14 @@ enum LongTaskStatus: String, Codable, CaseIterable, Sendable {
     case shelved    // 先放下（体面出口，不是失败）
 }
 
+/// 一池两区（E5a，I1 裁定 2026-08-15）：同一张表两个分区。
+/// longterm=长期区（郑重收进来的长线事项，无删除只改状态）；
+/// todo=待办区（小愿望+溢出顺延物，轻量条目：重字段全空、无检查点；丢弃=溶解硬删除）。
+enum PoolZone: String, Sendable {
+    case longterm
+    case todo
+}
+
 @Model
 final class LongTask {
     var id: UUID = UUID()
@@ -30,6 +38,13 @@ final class LongTask {
     var createdAt: Date = Date.now
     var doneAt: Date?
     var modifiedAt: Date = Date.now
+    // 一池两区（E5a）。CloudKit additive：带默认值，老数据自动落长期区。存字符串保兼容。
+    // ⚠️ 命名：不能叫 `zone`——CoreData 属性名禁撞 NSObject 方法名（-zone），SwiftData 直接 EXC_BREAKPOINT。
+    var zoneRaw: String = PoolZone.longterm.rawValue
+    /// 族（§14.3 闭集）：setup 计价与学习层分桶单位；归属到本任务的块经继承拿它（FamilyResolver 第一级）。
+    var family: String?
+    /// 溢出来源逻辑日（nil=手动收的愿望）：待办区晨间露脸判据（昨日溢出晨间必露一次脸）。
+    var spilledFromDay: Date?
     /// 检查点（#40，2026-07-15 M10 管辖域修订后放开的「有限一层」）：只此一层、只有顺序、
     /// 无各自 DDL（检查点无期限红线）。CloudKit 约束：关系 optional。空=沿用计数/时长型进度。
     @Relationship(deleteRule: .cascade, inverse: \LongTaskCheckpoint.task)
@@ -39,7 +54,8 @@ final class LongTask {
          deadline: Date? = nil, cadenceMinutesPerWeek: Int? = nil,
          totalMinutes: Int? = nil, unitMinutes: Int? = nil,
          status: LongTaskStatus = .active,
-         createdAt: Date = .now, doneAt: Date? = nil, modifiedAt: Date = .now) {
+         createdAt: Date = .now, doneAt: Date? = nil, modifiedAt: Date = .now,
+         zone: PoolZone = .longterm, family: String? = nil, spilledFromDay: Date? = nil) {
         self.id = id
         self.title = title
         self.note = note
@@ -51,7 +67,13 @@ final class LongTask {
         self.createdAt = createdAt
         self.doneAt = doneAt
         self.modifiedAt = modifiedAt
+        self.zoneRaw = zone.rawValue
+        self.family = family
+        self.spilledFromDay = spilledFromDay
     }
+
+    /// 类型安全的分区读取（存储层是字符串，未知值兜底长期区）。
+    var poolZone: PoolZone { PoolZone(rawValue: zoneRaw) ?? .longterm }
 
     /// 检查点按手排顺序（order）返回。
     var sortedCheckpoints: [LongTaskCheckpoint] {
