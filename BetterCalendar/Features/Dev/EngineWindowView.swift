@@ -17,6 +17,7 @@ import SwiftUI
 struct EngineWindowView: View {
     @Environment(\.appTheme) private var theme
     @State private var now = Date.now
+    @State private var seedStatus = ""   // CloudKit 播种结果回执（开发件）
 
     private var window: DateInterval {
         DateInterval(start: PinSchedule.dayBoundary(atOrBefore: now).addingTimeInterval(-2 * 86400),
@@ -90,6 +91,19 @@ struct EngineWindowView: View {
                         Text(row.1).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+            }
+            Section("CloudKit schema 播种（开发件；Deploy 前后各点一次）") {
+                Text(seedStatus.isEmpty ? CloudKitSchemaSeeder.status() : seedStatus)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                HStack {
+                    Button("播种") { seedStatus = CloudKitSchemaSeeder.seed() }
+                    Button("清除") { seedStatus = CloudKitSchemaSeeder.cleanup() }
+                        .tint(.primary)
+                    Spacer()
+                }
+                Text("Debug 运行=CloudKit Development 环境。播种 → 等同步 → Console(Development) 看到 DayPlanSnapshot / ResidualSample / LongTask 新字段 → Deploy → 回来点「清除」。")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Section("引擎对照（E5b 影子：协调器状态 + 升格演示）") {
                 if let co = TimelineCoordinator.sharedForDev {
