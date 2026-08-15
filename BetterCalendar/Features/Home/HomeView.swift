@@ -228,6 +228,10 @@ struct HomeView: View {
                 // ===== 统一输入组件（S2 附录A 合并案，批次3）：一框双模 =====
                 // 「说的时刻」（无计划 / ↺ 重说模式）提交=整排；「改/看的时刻」提交=AI 微调（含「再加一项…」）。
                 unifiedInput
+                // 剩余地形（E5e §14.6）：空间事实一行——不评判、超订不显负数（「今天已排满」即止）
+                if let terrain = model.terrainLine {
+                    Text(terrain).font(.caption2).foregroundStyle(.secondary)
+                }
                 if model.isWorking, !deps.liveDraft.streaming.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         // #42 流式跳动修复（2026-07-20）：块 UUID 每次增量 decode 都重新生成 →
@@ -445,6 +449,7 @@ struct HomeView: View {
                               systemImage: "calendar.badge.minus")
                             .font(.callout).foregroundStyle(.secondary)
                             .padding(.vertical, 8)
+                        addTailRow   // E5e：空态也留「加一件」入口（此前只有 List 尾行有）
                     } else {
                         List {
                             ForEach(model.blocks) { item in
@@ -587,10 +592,15 @@ struct HomeView: View {
                     model.targetDay = DayContext.logicalDay(offset: 1)
                     model.autoLoadOnAppear()
                 case .insertLongTask(let id):   // #40 批1：长期页「排进今天」→ 智能插空档
-                    // E5a：待办区条目同走这条路（轻量条目无检查点/单元 → 落 60 分钟默认块长）
+                    // E5a：待办区条目同走这条路；E5e 入口分流统一：草稿编辑中 → 进草稿；
+                    // 已确认/空态 → 单件入线直写（微投放）
                     if let t = deps.longTasks.items.first(where: { $0.id == id })
                         ?? deps.longTasks.todoItems().first(where: { $0.id == id }) {
-                        model.smartInsertFromLongTask(t)
+                        if model.hasUnsavedChanges || model.draftSource == .arranged {
+                            model.smartInsertFromLongTask(t)
+                        } else {
+                            Task { await model.admitFromPool(t) }
+                        }
                     }
                 }
                 deps.router.scheduleRequest = nil   // 消费掉
@@ -728,7 +738,15 @@ struct HomeView: View {
                     .onSubmit {
                         let t = smartAddText.trimmingCharacters(in: .whitespaces)
                         addRowActive = false; smartAddText = ""
-                        if t.isEmpty { model.addBlock() } else { Task { await model.addBlockSmart(t) } }
+                        // E5e 入口分流（三入口统一）：有未确认草稿 → 进草稿（照旧确认制）；
+                        // 已确认/空态 → 单件入线直写真相（微投放，不惊动其他块）
+                        if t.isEmpty {
+                            model.addBlock()
+                        } else if model.hasUnsavedChanges || model.draftSource == .arranged {
+                            Task { await model.addBlockSmart(t) }
+                        } else {
+                            Task { await model.admitOne(t) }
+                        }
                     }
                 Button("取消") { addRowActive = false; smartAddText = "" }
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)

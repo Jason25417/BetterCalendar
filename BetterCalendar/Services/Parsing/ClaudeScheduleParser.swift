@@ -28,6 +28,10 @@ struct ClaudeScheduleParser: ScheduleParsing {
                   let end = DateParsing.parse(b["end"] as? String) else { dropped += 1; continue }
             // 并行组（0.22）：同组同名 parallel 值 → labels "parallel:<组名>"（reflow 同组绑定）
             let parallel = (b["parallel"] as? String)?.trimmingCharacters(in: .whitespaces)
+            // 族（E5e §14.3）：闭集校验，非法/「其他」不落标签（族未知=引擎中性；定案在 FamilyResolver）
+            let family = (b["family"] as? String).flatMap {
+                FamilyTaxonomy.closedSet.contains($0) && $0 != FamilyTaxonomy.fallback ? $0 : nil
+            }
             // 锚点不计时（2026-07-11 Jason 定）：prompt 已说死，这里再兜底——模型抽风给锚点配番茄也拉回 none
             //（锚点本就不进执行列表，此处是界面一致性+双保险）
             let isAnchor = b["isAnchor"] as? Bool ?? false
@@ -41,7 +45,8 @@ struct ClaudeScheduleParser: ScheduleParsing {
                     : TimingStyle(rawValue: b["timingStyle"] as? String ?? "light") ?? .light,
                 priority: BlockPriority(rawValue: b["priority"] as? String ?? "normal") ?? .normal,
                 deadline: DateParsing.parse(b["deadline"] as? String),
-                labels: (parallel?.isEmpty == false) ? [ScheduledBlock.parallelPrefix + parallel!] : []))
+                labels: ((parallel?.isEmpty == false) ? [ScheduledBlock.parallelPrefix + parallel!] : [])
+                    + (family.map { [ScheduledBlock.familyPrefix + $0] } ?? [])))
         }
         var longTasks: [ParsedLongTask] = []
         for t in (obj["longTasks"] as? [[String: Any]]) ?? [] {
@@ -158,7 +163,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     现在真实时间与**目标日**见下方【今日上下文】——所有块排在目标日当天；"明早/上午/晚上"都指目标日的时段。**睡前跨过午夜的块延到次日凌晨、日期写次日**（别写成目标日 00:xx）。晚间语境里的「12点/12点半」指**午夜**（次日 00:00/00:30），不是中午——如「晚上10点到12点半写论文」=目标日 22:00 到次日 00:30；用户给了起止时刻就**照写**，别自行截短或平均切分。用户话里的「明天/明早/明晚」**同样指目标日本身**（排哪天已由目标日决定；凌晨排「明天」尤其如此=睡醒后的那一天）——绝不因「明天」二字把日期再 +1。
     目标日可能是"逻辑上的今天"（凌晨 0–4 点仍属前一晚，目标日=日历昨天是正常的）：**即使目标日的多数时段已过去，也照常解析全部任务并排出（blocks 绝不因"时间已过"而返回空）**——用户现在（凌晨）要做的事从当前时刻排起、日期写真实的今天。
     只输出一个 JSON 对象，不要解释、不要 markdown 围栏：
-    {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null,"checkpoints":[]}]}
+    {"loose":false,"blocks":[{"title":"","start":"YYYY-MM-DD HH:mm","end":"YYYY-MM-DD HH:mm","isFixed":false,"isAnchor":false,"category":"","timingStyle":"light","priority":"normal","deadline":null,"family":"其他"}],"longTasks":[{"title":"","deadline":null,"cadenceMinutesPerWeek":null,"totalMinutes":null,"unitMinutes":null,"checkpoints":[]}]}
     start/end 用 24 小时制本地时间。
 
     【块规则】
@@ -168,6 +173,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
     - isAnchor：午/晚/早饭、通勤、午休、睡觉等作息=true（照排占时间，但不是"要完成的任务"）；**锚点一律 timingStyle="none"**（作息不计时、不进执行）。
     - **用餐默认补排（「不漏也不多」的唯一例外）**：用户安排的时间范围与午餐（约 11:30–13:30）或晚餐（约 17:30–19:30）时段**有交集**、而用户没提对应那顿饭时，默认插入该顿锚点块——标题就叫「午饭」/「晚饭」，30–60 分钟，isAnchor=true、isFixed=false、timingStyle="none"，放在不与其他块冲突的合理时刻。用户明说不吃/不用安排、或该时段已被排满/占用时不加；只补午/晚两顿，早饭夜宵不补。
     - timingStyle ∈ pomodoro/light/none，默认 light；**只有**背书/写卷子/啃论文这类"高摩擦易劝退"才 pomodoro。priority ∈ normal/important（要紧/紧急用 important）。deadline 为硬截止或 null。
+    - family：任务的**活动族**，从闭集选一个：写作/编码/阅读学习/沟通协调/事务杂务/创作设计/运动生活/其他。按任务实际做的事分（写论文=写作、修 bug=编码、开会回邮件=沟通协调、报销跑腿=事务杂务、健身吃饭=运动生活）；拿不准用"其他"。
     - 粒度：**不要生成"小休息"块**（两块之间留空隙即可）；拿快递/喝水这类碎片并入相邻块或省略；别切太碎（固定块不并进别的块）。
     - 收工时间（软限制）见【今日上下文】：没指定时间的事尽量排在收工前；只有略超 5–10 分钟正好做完一件大事才可越界。用户明说的晚间/睡前块不受限。
 
@@ -243,7 +249,7 @@ struct ClaudeScheduleParser: ScheduleParsing {
                 "type": "array",
                 "items": [
                     "type": "object", "additionalProperties": false,
-                    "required": ["title", "start", "end", "isFixed", "isAnchor", "category", "timingStyle", "priority", "deadline", "parallel"],
+                    "required": ["title", "start", "end", "isFixed", "isAnchor", "category", "timingStyle", "priority", "deadline", "parallel", "family"],
                     "properties": [
                         "title": ["type": "string"],
                         "start": ["type": "string"],
@@ -255,6 +261,9 @@ struct ClaudeScheduleParser: ScheduleParsing {
                         "priority": ["type": "string", "enum": ["normal", "important"]],
                         "deadline": ["type": ["string", "null"]],
                         "parallel": ["type": ["string", "null"]],
+                        "family": ["type": "string",
+                                   "enum": ["写作", "编码", "阅读学习", "沟通协调", "事务杂务",
+                                            "创作设计", "运动生活", "其他"]],
                     ],
                 ],
             ],

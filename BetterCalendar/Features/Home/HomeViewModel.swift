@@ -281,6 +281,25 @@ final class HomeViewModel {
                     }
                     return eb
                 }
+            // E5e 族定案（三重一致性，§14.3）：LLM 标注的入账 Ledger+归属继承上溯；
+            // 没标注的走 归属继承/历史复用；都不中=族未知（引擎中性），下次解析再试
+            blocks = blocks.map { eb in
+                var eb = eb
+                if let fam = eb.scheduled.family {
+                    FamilyLedger.record(eb.title, family: fam)
+                    if let linked = eb.linkedTaskID,
+                       let t = longTaskStore?.items.first(where: { $0.id == linked }), t.family == nil {
+                        t.family = fam   // 长期任务经块标注拿族（下次归属继承直接命中）
+                    }
+                } else {
+                    let fam = FamilyResolver.resolve(title: eb.title, linkedTaskID: eb.linkedTaskID,
+                                                     parsedFamily: nil, longTasks: longTaskStore)
+                    if fam != FamilyTaxonomy.fallback {
+                        eb.labels.append(ScheduledBlock.familyPrefix + fam)
+                    }
+                }
+                return eb
+            }
             draftSource = .arranged
             note = outcome.decision.note
             // LLM 识别到"想松散"的显式意图 → 标目标日松散（解析明说的意愿，非 App 自判；可手动撕）
@@ -300,6 +319,105 @@ final class HomeViewModel {
             DevLog.shared.warn("排程", "解析全失败（干净失败态）：\(error.localizedDescription)")
         }
         isWorking = false
+    }
+
+    // MARK: 单件入线（E5e 投放管道·微投放：加一件事就是加一件事，不惊动其他块）
+
+    /// 已确认态/空态的「加一件」：解析取首块 → 归属/族定案 → 直接写真相 + 触发协调器。
+    /// 草稿态不走这里（入口分流在 HomeView：有未确认草稿 → addBlockSmart 照旧进草稿确认制）。
+    func admitOne(_ text: String) async {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        isWorking = true
+        defer { isWorking = false }
+        let parsed = try? await arrangeDay.parser.parse(t, referenceDate: targetDay,
+                                                        context: ParseContext())
+        let pb = parsed?.blocks.first
+        var sb: ScheduledBlock
+        if let pb, let s = pb.start, let e = pb.end {
+            let (cs, ce) = ArrangeDayUseCase.clampToDay(start: s, end: e, referenceDate: targetDay)
+            sb = ScheduledBlock(title: pb.title, start: cs, end: ce, isFixed: pb.isFixed,
+                                isAnchor: pb.isAnchor || RefineGuards.isObviousAnchor(pb.title),
+                                timingStyle: pb.timingStyle, priority: pb.priority,
+                                deadline: pb.deadline, labels: pb.labels)
+            // 弹性块撞已排块 → 就近寻空档（用户给了明确时刻的固定/锚点块按用户说的）
+            if !sb.isFixed, !sb.isAnchor, overlapsExistingTruth(sb) {
+                let dur = sb.end.timeIntervalSince(sb.start)
+                let start = freeSlotStart(duration: dur)
+                sb.start = start; sb.end = start.addingTimeInterval(dur)
+            }
+        } else {
+            // 解析失败/无时刻：本地兜底 60 分钟寻空档投放（用户的字绝不丢）
+            let dur = TimeInterval((pb?.durationMinutes ?? 60) * 60)
+            let start = freeSlotStart(duration: dur)
+            sb = ScheduledBlock(title: pb?.title ?? t, start: start,
+                                end: start.addingTimeInterval(dur), labels: pb?.labels ?? [])
+        }
+        await admitDirect(sb)
+    }
+
+    /// 池条目一键入线（提名/晨间摘要/长期页共用）：长期区带归属；待办区上线即离池（再溢出会回来）。
+    func admitFromPool(_ task: LongTask) async {
+        let next = task.nextCheckpoint
+        let dur = TimeInterval((next?.estimatedMinutes ?? task.unitMinutes ?? 60) * 60)
+        let start = freeSlotStart(duration: dur)
+        var sb = ScheduledBlock(title: next.map { "\(task.title) · \($0.title)" } ?? task.title,
+                                start: start, end: start.addingTimeInterval(dur))
+        if task.poolZone == .longterm { sb.linkedTaskID = task.id }
+        if let fam = task.family { sb.labels.append(ScheduledBlock.familyPrefix + fam) }
+        await admitDirect(sb)
+        if task.poolZone == .todo { longTaskStore?.discard(task) }
+    }
+
+    /// 投放落库（管道后三步）：归属自动匹配 → 族定案 → insertPlanned + 重投影 + 捅协调器 + 刷视图。
+    private func admitDirect(_ raw: ScheduledBlock) async {
+        var sb = raw
+        if sb.linkedTaskID == nil {
+            sb.linkedTaskID = longTaskStore?.items
+                .first { TitleMatch.similarity($0.title, sb.title) >= 0.6 }?.id
+        }
+        if let fam = sb.family {
+            FamilyLedger.record(sb.title, family: fam)
+        } else {
+            let fam = FamilyResolver.resolve(title: sb.title, linkedTaskID: sb.linkedTaskID,
+                                             parsedFamily: nil, longTasks: longTaskStore)
+            if fam != FamilyTaxonomy.fallback { sb.labels.append(ScheduledBlock.familyPrefix + fam) }
+        }
+        try? planStore.insertPlanned([sb])
+        try? await projection.project(label: DayContext.logicalStartOfDay(sb.start))
+        NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
+        DevLog.shared.info("投放", "单件入线：「\(sb.title)」\(sb.start.formatted(date: .omitted, time: .shortened))")
+        if !hasUnsavedChanges { loadConfirmedPlan() }   // 已确认视图即时可见
+    }
+
+    /// 寻空档（今天从现在起、未来日从 9 点起，收工线为界；排不下接末尾）——smartInsert 同款口径。
+    private func freeSlotStart(duration: TimeInterval) -> Date {
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: targetDay)
+        let isToday = cal.isDate(targetDay, inSameDayAs: now())
+        let notBefore = isToday ? max(now(), dayStart) : dayStart.addingTimeInterval(9 * 3600)
+        let windDown = dayStart.addingTimeInterval(TimeInterval(WorkHoursSettings.windDownHour) * 3600)
+        let existing = ((try? planStore.plannedBlocks(on: targetDay)) ?? [])
+            .map { (start: $0.start, end: $0.end) }
+        return Self.firstFreeStart(existing: existing, duration: duration,
+                                   notBefore: notBefore, windDown: windDown)
+            ?? (existing.map(\.end).max() ?? notBefore)
+    }
+
+    private func overlapsExistingTruth(_ sb: ScheduledBlock) -> Bool {
+        ((try? planStore.plannedBlocks(on: targetDay)) ?? [])
+            .contains { $0.start < sb.end && sb.start < $0.end }
+    }
+
+    /// 剩余地形一行（E5e，空间事实无评判）：只对逻辑今天有意义；已过收工线/非今天返回 nil。
+    var terrainLine: String? {
+        let today = DayContext.logicalStartOfDay(now())
+        guard Calendar.current.startOfDay(for: targetDay) == today else { return nil }
+        let workEnd = PinSchedule.workEnd(forLabel: today)
+        guard now() < workEnd else { return nil }
+        let spans = blocks.map { (start: $0.start, end: $0.end) }
+        return TerrainSummary.line(freeMinutes:
+            TerrainSummary.freeMinutes(spans: spans, from: now(), until: workEnd))
     }
 
     /// 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL)。纯函数、可单测。
@@ -340,6 +458,14 @@ final class HomeViewModel {
             var eb = EditableBlock(from: b)
             if eb.linkedTaskID == nil, let l = linkByTitle[b.title] { eb.linkedTaskID = l }
             if eb.labels.isEmpty, let ls = labelsByTitle[b.title] { eb.labels = ls }
+            // E5e 改名丢族的缓解（核查已知边界）：标题补回落空的块走 归属/Ledger 模糊再解一次
+            if eb.scheduled.family == nil {
+                let fam = FamilyResolver.resolve(title: b.title, linkedTaskID: eb.linkedTaskID,
+                                                 parsedFamily: nil, longTasks: longTaskStore)
+                if fam != FamilyTaxonomy.fallback {
+                    eb.labels.append(ScheduledBlock.familyPrefix + fam)
+                }
+            }
             return eb
         }
         // C 状态行（#15）：本地 diff 出「改了几处」的确定性事实——不是模型的话，零措辞风险
