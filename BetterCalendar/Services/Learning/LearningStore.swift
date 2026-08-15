@@ -48,6 +48,11 @@ final class LearningStore {
         return (try? context.fetch(d))?.filter { $0.dayLabel == dayLabel } ?? []
     }
 
+    /// 全量样本（L3 聚合折算用；聚合器按 createdAt 游标自行取新）。
+    func allSamples() -> [ResidualSample] {
+        (try? context.fetch(FetchDescriptor<ResidualSample>())) ?? []
+    }
+
     /// 启动兜底：补折过去 7 天里「有快照、无样本、已过去」的日子（幂等）。
     /// 返回补折的天数（观察窗/DevLog 用）。
     @discardableResult

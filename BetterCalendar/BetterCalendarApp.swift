@@ -131,8 +131,12 @@ struct BetterCalendarApp: App {
             .task {
                 container.learning.foldPendingDays(planStore: container.planStore,
                                                    sessionStore: ExecutionSessionStore())
-                // 测试 host 不动真库（闸放调用点：executeSpills 本体保持可测）
-                if !TestHost.isActive { container.timeline.executePendingSpills() }
+                // 测试 host 不动真库/真文件（闸放调用点：本体保持可测）
+                if !TestHost.isActive {
+                    container.timeline.executePendingSpills()
+                    // L3：样本 → 聚合桶（幂等游标；只算不用，L5 回放过门才进排布）
+                    container.aggregator.fold(samples: container.learning.allSamples())
+                }
             }
             // 多端跟随（#30）：启动/回前台 catch-up（推送错过也收敛，同聪音对账哲学）+ 屏蔽联动接线
             .task {

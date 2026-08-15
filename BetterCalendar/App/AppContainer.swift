@@ -47,6 +47,7 @@ final class AppContainer {
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
     let learning: LearningStore                // 学习层采集端（E4：快照 save-once + 残差兜底折算）
     let changeTraces = ChangeTraceStore()      // 变更痕迹（E5b 数据层：直写绿的配套义务，UI=E5d）
+    let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）

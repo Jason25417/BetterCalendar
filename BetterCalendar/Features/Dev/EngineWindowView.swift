@@ -126,6 +126,25 @@ struct EngineWindowView: View {
                     }
                 }
             }
+            Section("学习层聚合桶（L3 真数据：只算不用，切生产=L5 回放门控）") {
+                let agg = LearningAggregator()
+                let rows = agg.bucketRows()
+                if rows.isEmpty {
+                    Text("还没有聚合桶（等 E4 攒出残差样本后启动自动折算）")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(rows.prefix(8).enumerated()), id: \.offset) { _, row in
+                        HStack {
+                            Text(row.key).font(.system(.caption, design: .monospaced))
+                                .frame(width: 150, alignment: .leading).lineLimit(1)
+                            Text("n=\(row.stats.count) · ×\(String(format: "%.2f", ResidualMath.suggestionMultiplier(mean: row.stats.mean, dev: row.stats.dev)))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("全局建议倍率 ×\(String(format: "%.2f", agg.suggestionMultiplier(taskID: nil, family: nil)))（排布现用出厂 ×\(String(format: "%.2f", DurationCalibration.defaultMultiplier))）")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
             Section("学习层采集（E4 真数据）") {
                 let learning = LearningStore()
                 let today = DayContext.logicalStartOfDay(now)
