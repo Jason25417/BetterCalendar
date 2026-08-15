@@ -31,6 +31,7 @@ final class HomeViewModel {
     private let projection: ProjectionService  // PlanStore→日历 单向投影（先写真相源、再投影）
     private let notifier: NotificationScheduling
     private let longTaskStore: LongTaskStore?   // 「在途」池（M10）；nil=不入池（旧测试兼容）
+    private let routines: RoutineTemplateStore?  // K1 例行模板；nil=不物化（旧测试兼容）
     private let draftStore: DraftSnapshotStore? // 草稿快照（崩溃/重启还原）；nil=不持久化
     private let looseDays: LooseDayStore?        // 松散日：LLM 识别"想松散"→标目标日（§5.12）；nil=不标
     private let startedDays: StartedDayStore?    // 绿色淡出：开始今天后进实时模式、绿色从日历淡出；nil=不淡出
@@ -85,6 +86,7 @@ final class HomeViewModel {
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,
          looseDays: LooseDayStore? = nil, startedDays: StartedDayStore? = nil,
          progress: ExecutionProgressReading? = nil,
+         routines: RoutineTemplateStore? = nil,
          now: @escaping () -> Date = { .now }) {
         self.arrangeDay = arrangeDay
         self.refiner = refiner
@@ -99,6 +101,7 @@ final class HomeViewModel {
         self.looseDays = looseDays
         self.startedDays = startedDays
         self.progress = progress
+        self.routines = routines
         self.now = now
         self.targetDay = DayContext.defaultTargetDay(now())   // 重锚默认目标日到注入时钟（默认闭包下与原值等价）
         restoreDraftIfAny()
@@ -300,6 +303,14 @@ final class HomeViewModel {
                 }
                 return eb
             }
+            // K1 例行模板物化（进草稿走确认制）：启用且当日生效的模板补插实例；
+            // 与已有块（含 parser 补排的午饭/晚饭锚点）TitleMatch 重复的跳过——不重复补
+            for t in routines?.enabled(on: targetDay) ?? [] {
+                let inst = RoutineTemplateStore.instantiate(t, on: targetDay)
+                let dup = blocks.contains { TitleMatch.similarity($0.title, inst.title) >= 0.6 }
+                if !dup { blocks.append(EditableBlock(from: inst)) }
+            }
+            blocks.sort { $0.start < $1.start }
             draftSource = .arranged
             note = outcome.decision.note
             // LLM 识别到"想松散"的显式意图 → 标目标日松散（解析明说的意愿，非 App 自判；可手动撕）

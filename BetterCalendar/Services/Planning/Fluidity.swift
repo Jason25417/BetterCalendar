@@ -32,18 +32,50 @@ nonisolated struct Fluidity: Equatable, Sendable {
     static func soft(_ minutes: Int) -> Fluidity { Fluidity(anchor: .clock, rangeMinutes: minutes) }
 }
 
-/// kind → 流动性 查表（v1 桥接现有二分 + isAnchor；生活种类行后议）。
+/// 生活锚细表（K4，2026-08-15 Jason 放行；SPEC §13.1.A.2 已裁行）：
+/// 吃饭=±30 / 锻炼·睡眠=±120 / 其他锚（通勤/午休/routine 门块）=±60。
+/// 判定权威序：K1 模板实例的 `routine:` 标签（显式）→ 标题启发式兜底 → 默认 ±60。
+/// 习惯锚点时刻（「你总是 12:40 吃饭」）等 L3 节律有数据后再接——本表只管范围。
+nonisolated enum AnchorKindTable {
+    static let mealRangeMinutes = 30
+    static let bodyRangeMinutes = 120      // 锻炼/睡眠（A.2：±2h）
+    static let defaultRangeMinutes = 60
+
+    static let routinePrefix = "routine:"
+
+    private static let mealWords = ["饭", "餐", "宵夜", "lunch", "dinner", "breakfast", "brunch"]
+    private static let bodyWords = ["锻炼", "健身", "运动", "跑步", "睡", "gym", "workout"]
+
+    static func rangeMinutes(title: String, labels: [String]) -> Int {
+        if let kind = labels.first(where: { $0.hasPrefix(routinePrefix) })
+            .map({ String($0.dropFirst(routinePrefix.count)) }) {
+            switch kind {
+            case "meal": return mealRangeMinutes
+            case "exercise", "sleep": return bodyRangeMinutes
+            default: return defaultRangeMinutes   // morning/evening 门块等
+            }
+        }
+        let t = title.lowercased()
+        if mealWords.contains(where: t.contains) { return mealRangeMinutes }
+        if bodyWords.contains(where: t.contains) { return bodyRangeMinutes }
+        return defaultRangeMinutes
+    }
+}
+
+/// kind → 流动性 查表（K4 起为种类查表；resolve(isFixed:isAnchor:) 保留为无标题信息时的桥接）。
 nonisolated enum FluidityTable {
-    /// 生活锚（isAnchor：午饭/通勤/午休）的软锚范围：±60 分钟（保守初值，学习层将来可校准）。
-    static let anchorSoftRangeMinutes = 60
+    /// 无种类信息时生活锚的软锚范围（桥接默认）。
+    static let anchorSoftRangeMinutes = AnchorKindTable.defaultRangeMinutes
 
     static func resolve(isFixed: Bool, isAnchor: Bool) -> Fluidity {
         if isFixed { return .pinned }                              // 会议/外部承诺：钉死
-        if isAnchor { return .soft(anchorSoftRangeMinutes) }       // 生活锚：±60
+        if isAnchor { return .soft(anchorSoftRangeMinutes) }       // 生活锚（无种类信息）：±60
         return .free                                               // 工作块：日内队列流动
     }
 
     static func resolve(_ b: ScheduledBlock) -> Fluidity {
-        resolve(isFixed: b.isFixed, isAnchor: b.isAnchor)
+        if b.isFixed { return .pinned }
+        if b.isAnchor { return .soft(AnchorKindTable.rangeMinutes(title: b.title, labels: b.labels)) }
+        return .free
     }
 }

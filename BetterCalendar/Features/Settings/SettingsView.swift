@@ -118,6 +118,14 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            // 例行（K1，2026-08-15）：内置五件默认全关（opt-in 铁律）；开了才在排今天时补进草稿。
+            // 改这里=改模板（长期习惯点）；改某天的实例直接在草稿里拖——「仅此次」不弹对话框。
+            Section("例行") {
+                RoutineTemplateRows()
+                Text("打开的例行会在排一天时自动补进草稿（跟其他块一起过目确认）。没做也没关系——它明天照常出现，不记录、不打卡、不连排。想只改某一天的时间，直接在草稿里拖那一块。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             // 进阶设置（渐进披露，§5.9）：手动折叠（DisclosureGroup 在 macOS Form 里收不回）
             Section("进阶设置") {
                 Button { withAnimation(Motion.standard) { showAdvanced.toggle() } } label: {   // 动效令牌（条文10）
@@ -448,5 +456,37 @@ struct SettingsView: View {
         CloudSettings.useCloud = useCloud
         ReminderSettings.leadMinutes = leadMinutes
         savedHint = "已保存"
+    }
+}
+
+/// 例行模板行（K1）：每件一行 Toggle + 时刻选择（分钟粒度）；共享 RoutineTemplateStore.shared。
+/// 时长/生效日 v1 用内置默认不开编辑面（防配置面滑坡）；要改的话后议。
+struct RoutineTemplateRows: View {
+    @State private var store = RoutineTemplateStore.shared
+
+    var body: some View {
+        ForEach(store.templates) { t in
+            HStack {
+                Toggle(t.name, isOn: Binding(
+                    get: { store.templates.first { $0.id == t.id }?.enabled ?? false },
+                    set: { var nt = t; nt.enabled = $0; store.update(nt) }))
+                Spacer()
+                DatePicker("", selection: Binding(
+                    get: {
+                        let c = DateComponents(hour: t.hour, minute: t.minute)
+                        return Calendar.current.date(from: c) ?? .now
+                    },
+                    set: {
+                        let c = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                        var nt = t
+                        nt.hour = c.hour ?? t.hour
+                        nt.minute = c.minute ?? t.minute
+                        store.update(nt)
+                    }), displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .disabled(!t.enabled)
+                Text("\(t.durationMinutes) 分钟").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }

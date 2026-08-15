@@ -159,7 +159,8 @@ final class AppContainer {
                  looseDays: looseDays, startedDays: startedDays, execution: execution,
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
                  reconcile: reconcile,
-                 timeline: timeline)   // E5d：晨间摘要/痕迹条/一键撤
+                 timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
+                 routines: RoutineTemplateStore.shared)  // K1：例行模板物化
     }
 
     var journalDeps: JournalDeps {

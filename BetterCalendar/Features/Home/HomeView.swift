@@ -45,6 +45,7 @@ struct HomeDeps {
     let router: AppRouter
     let reconcile: ReconcileService
     var timeline: TimelineCoordinator? = nil   // E5d：晨间摘要/痕迹条与一键撤；nil=不显（旧测试兼容）
+    var routines: RoutineTemplateStore? = nil  // K1：例行模板物化进草稿；nil=不物化（旧测试兼容）
 }
 
 struct HomeView: View {
@@ -111,7 +112,8 @@ struct HomeView: View {
             draftStore: deps.draftSnapshots,
             looseDays: deps.looseDays,
             startedDays: deps.startedDays,
-            progress: deps.execution))
+            progress: deps.execution,
+            routines: deps.routines))
     }
 
     var body: some View {
