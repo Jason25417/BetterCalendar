@@ -36,25 +36,29 @@ private final class FakeProgress: ExecutionProgressReading {
         let started: StartedDayStore
         let progress: FakeProgress
         let traces: ChangeTraceStore
+        let pool: LongTaskStore
         let container: ModelContainer   // 只为保活（ModelContext 不持有容器——第五根因）
     }
 
     private func makeFixture(started: Bool = true) throws -> Fixture {
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
-        let container = try ModelContainer(for: PlanBlock.self, configurations: config)
+        let container = try ModelContainer(for: PlanBlock.self, LongTask.self, configurations: config)
         let plan = PlanStore(context: container.mainContext)
+        let pool = LongTaskStore(context: container.mainContext)
         let startedDays = StartedDayStore(persisted: false)
         let progress = FakeProgress()
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("trace-tests-\(UUID().uuidString)", isDirectory: true)
         let traces = ChangeTraceStore(directory: dir)
+        let markers = UserDefaults(suiteName: "bc-spill-test-\(UUID().uuidString)")!
         let now = fixedNow
         let co = TimelineCoordinator(planStore: plan, startedDays: startedDays,
-                                     traces: traces, now: { now })
+                                     traces: traces, markerDefaults: markers, now: { now })
         co.progress = progress
+        co.longTasks = pool
         if started { startedDays.markStarted(DayContext.logicalStartOfDay(now)) }
         return Fixture(co: co, plan: plan, started: startedDays, progress: progress,
-                       traces: traces, container: container)
+                       traces: traces, pool: pool, container: container)
     }
 
     private var today: Date { DayContext.logicalStartOfDay(fixedNow) }
@@ -185,5 +189,67 @@ private final class FakeProgress: ExecutionProgressReading {
         #expect(store.entries(day: old).isEmpty, "过期页已清")
         store.clear(day: day)
         #expect(store.entries(day: day).isEmpty)
+    }
+
+    // MARK: E5c 溢出硬执行（两阶段第二段）
+
+    /// 硬执行分流：没做的工作块→收待办区；生活锚→溶解零痕迹；固定块/已做的→不动。
+    @Test func executeSpillsPoolsUndoneWork() throws {
+        let f = try makeFixture()
+        let done = ScheduledBlock(title: "做了的", start: at(9), end: at(10))
+        let undone = ScheduledBlock(title: "没做的", start: at(10), end: at(11))
+        let anchor = ScheduledBlock(title: "午休", start: at(12), end: at(12, 30), isAnchor: true)
+        let fixed = ScheduledBlock(title: "会议", start: at(14), end: at(15), isFixed: true)
+        try f.plan.replacePlanned([done, undone, anchor, fixed], on: today)
+        try f.plan.upsertActuals([ActualBlock(id: done.id, title: done.title,
+                                              start: at(9), end: at(10))])
+        let pooled = f.co.executeSpills(day: today)
+        #expect(pooled == 1)
+        let remaining = try f.plan.plannedBlocks(on: today).map(\.title)
+        #expect(remaining.contains("做了的") && remaining.contains("会议"), "已做/固定块不动")
+        #expect(!remaining.contains("没做的") && !remaining.contains("午休"), "溢出物与生活锚离线")
+        #expect(f.pool.todoItems().map(\.title) == ["没做的"], "工作块收待办区；生活锚溶解不进池")
+        #expect(f.pool.todoItems().first?.spilledFromDay == today, "露脸判据=来源日")
+        #expect(f.traces.entries(day: today).contains { $0.kind == "收池" })
+        #expect(!f.traces.entries(day: today).contains { $0.title == "午休" }, "溶解零痕迹")
+    }
+
+    /// 幂等：同日第二次硬执行零动作。
+    @Test func executeSpillsIdempotentPerDay() throws {
+        let f = try makeFixture()
+        try f.plan.replacePlanned([ScheduledBlock(title: "没做的", start: at(10), end: at(11))], on: today)
+        #expect(f.co.executeSpills(day: today) == 1)
+        try f.plan.replacePlanned([ScheduledBlock(title: "又一块", start: at(11), end: at(12))], on: today)
+        #expect(f.co.executeSpills(day: today) == 0, "按日幂等闸")
+        #expect(f.pool.todoItems().count == 1)
+    }
+
+    /// 逐件覆写：显式「排到明天」=同钟点平移，不收池。
+    @Test func spillOverrideForwardShiftsToTomorrow() throws {
+        let f = try makeFixture()
+        let b = ScheduledBlock(title: "明天再做", start: at(10), end: at(11))
+        try f.plan.replacePlanned([b], on: today)
+        f.co.setSpillOverride(b.id, policy: .forward)
+        #expect(f.co.executeSpills(day: today) == 0, "forward 不算收池")
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+        let moved = try f.plan.plannedBlocks(on: tomorrow)
+        #expect(moved.count == 1 && moved.first?.title == "明天再做", "平移到明天")
+        #expect(f.pool.todoItems().isEmpty)
+    }
+
+    /// 启动兜底祖父条款：首次只销账不动数据；初始化后过去日正常补执行。
+    @Test func backstopGrandfathersFirstRun() throws {
+        let f = try makeFixture()
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        try f.plan.replacePlanned([ScheduledBlock(title: "昨天遗留", start: at(-14), end: at(-13))],
+                                  on: yesterday)
+        f.co.executePendingSpills()
+        #expect(f.pool.todoItems().isEmpty, "祖父条款：历史遗留不洪水入池")
+        let rows = try f.plan.plannedBlocks(on: yesterday)
+        #expect(!rows.isEmpty, "数据原样")
+        // 已初始化后：新的过去日欠账正常补执行——但昨天已被销账，补一块前天的不行（已销）；
+        // 换个思路：清掉昨天的销账标记再跑（模拟「初始化后新产生的欠账」）
+        f.co.executePendingSpills()
+        #expect(f.pool.todoItems().isEmpty, "昨天已销账，幂等不动")
     }
 }

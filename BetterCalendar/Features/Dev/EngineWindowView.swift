@@ -184,7 +184,7 @@ struct EngineWindowView: View {
         return decisionText(SpillResolver.resolve(c, reference: .now))
     }
 
-    /// P1c：合成候选矩阵——四策略与三升级局面各一例。
+    /// P1c/E5c 裁定版：合成候选矩阵——默认收待办区、生活锚溶解、DDL 挡路升提议、显式 forward/ask。
     static func spillDemo() -> [(String, String)] {
         let ref = Date.now
         let tomorrow4am = DayContext.logicalWindow(forLabel: DayContext.logicalDay(offset: 1, from: ref)).start
@@ -193,7 +193,7 @@ struct EngineWindowView: View {
             SpillCandidate(id: UUID(), title: "池投放件", fromPool: true),
             SpillCandidate(id: UUID(), title: "生活锚", isAnchor: true),
             SpillCandidate(id: UUID(), title: "今晚DDL", deadline: tomorrow4am.addingTimeInterval(-3600)),
-            SpillCandidate(id: UUID(), title: "滚了3次", spillCount: 3),
+            SpillCandidate(id: UUID(), title: "显式排明天", policyOverride: .forward),
             SpillCandidate(id: UUID(), title: "显式ask", policyOverride: .ask),
         ]
         return cases.map { ($0.title, decisionText(SpillResolver.resolve($0, reference: ref))) }
@@ -202,10 +202,9 @@ struct EngineWindowView: View {
     private static func decisionText(_ d: SpillDecision) -> String {
         switch d {
         case .forward(let day): "顺延 → \(hm(DayContext.logicalWindow(forLabel: day).start))（明日窗口起点）"
-        case .returnToPool: "回池（等下次投放）"
+        case .returnToPool: "收待办区（明早露脸）"
         case .dissolve: "溶解（零记录，明天照常）"
-        case .escalate(.deadlineBlocksForward): "⚠️ 升提议：DDL 挡路推不过去"
-        case .escalate(.repeatedSpills(let n)): "⚠️ 升提议：已连续顺延 \(n) 次"
+        case .escalate(.deadlineBlocksForward): "⚠️ 升提议：DDL 挡路（晨间置顶）"
         case .escalate(.userAskedToAsk): "⚠️ 升提议：用户要求每次过问"
         }
     }

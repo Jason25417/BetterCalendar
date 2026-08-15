@@ -36,6 +36,7 @@ struct ReviewPanel: View {
                                 .font(.caption).foregroundStyle(theme.looseTint)
                         }
                         calibrationSection(c)
+                        spillSection   // E5c 两阶段溢出：收工语境下展示 + 逐件可改（盖章时硬执行）
                         shareSummaryButton(c)
                     }
                 } else if model.isWorking {
@@ -50,6 +51,47 @@ struct ReviewPanel: View {
             backfillSection
         }
         .task { await model.load() }
+    }
+
+    // MARK: 溢出处置（E5c 两阶段：软标展示→盖章硬执行；默认静默收待办区）
+    // 措辞红线：说「留到以后/还想做的」，不说「没做完/没排下」；生活锚不上屏（溶解零叙事）。
+    // 只在收工语境（过傍晚线）出现——白天「现在就回看」不把下午的计划说成「留到以后」。
+
+    @ViewBuilder
+    private var spillSection: some View {
+        let pending = model.spillPending
+        if !pending.isEmpty, let timeline = model.timeline,
+           Date.now >= WorkHoursSettings.eveningStart(for: .now) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("还想做的 \(pending.count) 件，收工后进待办区（明早会露脸）",
+                      systemImage: "tray.and.arrow.down")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(pending) { b in
+                    HStack {
+                        Text(b.title).font(.callout).lineLimit(1)
+                        Spacer()
+                        spillMenu(for: b, timeline: timeline)
+                    }
+                }
+            }
+        }
+    }
+
+    private func spillMenu(for b: ScheduledBlock, timeline: TimelineCoordinator) -> some View {
+        let current = timeline.spillOverrides[b.id]
+        let label = switch current {
+        case .forward: "排到明天"
+        case .dissolve: "就算了"
+        default: "收进待办"
+        }
+        return Menu(label) {
+            Button("收进待办（明早露脸）") { timeline.setSpillOverride(b.id, policy: nil) }
+            Button("排到明天") { timeline.setSpillOverride(b.id, policy: .forward) }
+            Button("就算了（丢了就丢了）") { timeline.setSpillOverride(b.id, policy: .dissolve) }
+        }
+        .font(.caption)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private func shareSummaryButton(_ c: DayComparison) -> some View {

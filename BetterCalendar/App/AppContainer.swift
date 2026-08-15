@@ -115,6 +115,7 @@ final class AppContainer {
         self.timeline = TimelineCoordinator(planStore: planStore, startedDays: startedDays,
                                             traces: changeTraces)
         timeline.progress = execution
+        timeline.longTasks = longTasks   // E5c：溢出硬执行 → 收待办区/回长期池
         timeline.start()
         TimelineCoordinator.sharedForDev = timeline   // 引擎观察窗桥（开发期，M8 摘除）
         execution.minutePulse = { [weak timeline] in timeline?.notePulse() }   // 分钟兜底（不新增定时器）
@@ -143,7 +144,8 @@ final class AppContainer {
         ReviewViewModel(calendarStore: calendarStore, comparer: comparer,
                         arrangeDay: arrangeDay, localStore: reviewStore,
                         longTasks: longTasks, planStore: planStore, looseDays: looseDays,
-                        learning: learning)   // E5b/D11：计划基线=当日最初快照
+                        learning: learning,    // E5b/D11：计划基线=当日最初快照
+                        timeline: timeline)    // E5c：溢出软标展示+逐件覆写
     }
 
     // MARK: 页面依赖包（反向依赖清零 2026-07-12：Features 不再见 AppContainer，按页注入所需具体依赖）
@@ -162,6 +164,7 @@ final class AppContainer {
         JournalDeps(journalStore: journalStore, milestones: milestones, photoStore: photoStore,
                     reflectionContext: reflectionContext, router: router,
                     makeReviewModel: { self.reviewModel },
-                    longTasks: longTasks)   // #40 批3：收尾轻问「推进到哪了？」
+                    longTasks: longTasks,   // #40 批3：收尾轻问「推进到哪了？」
+                    timeline: timeline)     // E5c：盖章=溢出硬执行
     }
 }

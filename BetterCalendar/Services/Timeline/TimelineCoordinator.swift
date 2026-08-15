@@ -38,6 +38,8 @@ final class TimelineCoordinator {
     private let startedDays: StartedDayStore
     private let traces: ChangeTraceStore
     weak var progress: (any ExecutionProgressReading)?
+    /// 溢出硬执行的去向（E5c）：收待办区/回长期池。nil=不接池（测试可省）。
+    weak var longTasks: LongTaskStore?
     /// 时钟注入（测试用固定时刻；生产=真实时钟）。
     let now: () -> Date
 
@@ -53,13 +55,18 @@ final class TimelineCoordinator {
     /// 观察窗弱引用桥（开发期，同 ExecutionBridge 先例；M8 摘除）。
     static weak var sharedForDev: TimelineCoordinator?
 
+    /// 溢出结算的幂等标记库（注入=测试不污染真实 UserDefaults——共享默认库的老坑）。
+    private let markerDefaults: UserDefaults
+
     init(planStore: PlanReading & PlanWriting & ActualReading,
          startedDays: StartedDayStore,
          traces: ChangeTraceStore,
+         markerDefaults: UserDefaults = .standard,
          now: @escaping () -> Date = { .now }) {
         self.planStore = planStore
         self.startedDays = startedDays
         self.traces = traces
+        self.markerDefaults = markerDefaults
         self.now = now
     }
 
@@ -103,6 +110,107 @@ final class TimelineCoordinator {
     func noteManualEdits(ids: [UUID]) {
         let until = now().addingTimeInterval(TimeInterval(Self.manualHoldMinutes * 60))
         for id in ids { manualHolds[id] = until }
+    }
+
+    // MARK: 溢出硬执行（E5c，两阶段溢出的第二阶段）
+
+    /// 复盘展开逐件可改的覆写（收待办[默认]/排明天/就算了）：seal 时随硬执行消费。
+    private(set) var spillOverrides: [UUID: SpillPolicy] = [:]
+    func setSpillOverride(_ id: UUID, policy: SpillPolicy?) {
+        spillOverrides[id] = policy
+    }
+
+    /// 某逻辑日的溢出候选（今日与过去日统一派生口径——软标是派生态，过去日重导同一规则）：
+    /// 计划行中「无实际、无清除墓碑、非固定块、原排在收工线前」者=没做成的溢出物。
+    func pendingSpillCandidates(day: Date) -> [ScheduledBlock] {
+        guard let blocks = try? planStore.plannedBlocks(on: day) else { return [] }
+        let actualIDs = Set(((try? planStore.actualBlocks(on: day)) ?? []).map(\.id))
+        let cleared = (try? planStore.clearedPlannedIDs(on: day)) ?? []
+        let workEnd = PinSchedule.workEnd(forLabel: day)
+            .addingTimeInterval(TimeInterval(WorkHoursSettings.graceMinutes * 60))
+        return blocks.filter { b in
+            !b.isFixed && !actualIDs.contains(b.id) && !cleared.contains(b.id) && b.start < workEnd
+        }
+    }
+
+    private func spillExecutedKey(_ day: Date) -> String { "bc.spill.executed.\(DayContext.dayKey(day))" }
+
+    /// 硬执行某逻辑日的溢出（收工盖章时刻调；幂等闸按日一次）。返回收池件数（复盘/DevLog 用）。
+    /// 默认静默：溶解=deletePlanned 零痕迹零叙事；收池=deletePlanned+待办区（昨日露脸判据）+痕迹；
+    /// 排明天（用户显式选）=时间平移到明天同钟点；DDL 挡路=同收池但 DevLog 标注（晨间置顶排序在 E5d）。
+    @discardableResult
+    func executeSpills(day: Date) -> Int {
+        guard !markerDefaults.bool(forKey: spillExecutedKey(day)) else { return 0 }
+        let candidates = pendingSpillCandidates(day: day)
+        guard !candidates.isEmpty else {
+            markerDefaults.set(true, forKey: spillExecutedKey(day))
+            return 0
+        }
+        let spillCs = candidates.map { b in
+            SpillCandidate(id: b.id, title: b.title, deadline: b.deadline,
+                           fromPool: b.linkedTaskID != nil, isAnchor: b.isAnchor,
+                           policyOverride: spillOverrides[b.id])
+        }
+        let reference = DayContext.logicalWindow(forLabel: day).start
+        var pooled = 0
+        for (c, decision) in SpillResolver.resolveAll(spillCs, reference: reference) {
+            guard let block = candidates.first(where: { $0.id == c.id }) else { continue }
+            switch decision {
+            case .dissolve:
+                try? planStore.deletePlanned(ids: [c.id])   // 零记录、明天照常、不进偏差叙事
+            case .forward(let target):
+                // 用户显式「排到明天」：同钟点平移（懒物化——明天重算时自然归位）
+                let shift = target.timeIntervalSince(day)
+                try? planStore.updatePlanned(id: c.id, start: block.start.addingTimeInterval(shift),
+                                             end: block.end.addingTimeInterval(shift), title: block.title)
+                traces.append(ChangeTraceEntry(time: now(), blockID: c.id, title: c.title, kind: "顺延",
+                                               beforeStart: block.start, beforeEnd: block.end,
+                                               afterStart: block.start.addingTimeInterval(shift),
+                                               afterEnd: block.end.addingTimeInterval(shift),
+                                               reason: "按你的选择排到明天"),
+                              day: day)
+            case .returnToPool, .escalate:
+                // 收待办区（池投放件回它的长期任务——addTodo 的归属让路自动处理）；
+                // escalate（DDL 挡路/显式 ask）同收池但保露脸：晨间摘要置顶（E5d 按 DDL 排序）
+                try? planStore.deletePlanned(ids: [c.id])
+                longTasks?.addTodo(title: c.title,
+                                   family: block.family,
+                                   spilledFromDay: day)
+                traces.append(ChangeTraceEntry(time: now(), blockID: c.id, title: c.title, kind: "收池",
+                                               beforeStart: block.start, beforeEnd: block.end,
+                                               afterStart: block.start, afterEnd: block.end,
+                                               reason: "今天没排下——收进待办区，明早会露脸"),
+                              day: day)
+                pooled += 1
+                if case .escalate(.deadlineBlocksForward) = decision {
+                    DevLog.shared.warn("溢出", "「\(c.title)」带 DDL 收池——晨间必须置顶露脸")
+                }
+            }
+        }
+        markerDefaults.set(true, forKey: spillExecutedKey(day))
+        spillOverrides = [:]
+        softSpilledIDs = []
+        DevLog.shared.info("溢出", "硬执行 \(DayContext.dayKey(day))：候选 \(candidates.count) · 收池 \(pooled)")
+        return pooled
+    }
+
+    /// 启动兜底：过去 7 天里「已过去且未结算」的日子补执行（先 fold 残差再执行——数据面不相交，
+    /// 顺序仅为叙事清晰；今天不在此列，今天的硬执行只发生在收工盖章）。
+    /// 祖父条款：首次启用只把过去日全部标记为已结算、不动数据——E5c 之前的历史遗留块
+    /// 不搞一次性洪水入池（追溯式收池会把旧账突然堆进待办区，违背无维护义务的池铁律）。
+    func executePendingSpills() {
+        let today = DayContext.logicalStartOfDay(now())
+        let initKey = "bc.spill.backstop.initialized"
+        let initialized = markerDefaults.bool(forKey: initKey)
+        for offset in 1...7 {
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: today) else { continue }
+            if initialized {
+                executeSpills(day: day)
+            } else {
+                markerDefaults.set(true, forKey: spillExecutedKey(day))   // 祖父：只销账不动数据
+            }
+        }
+        markerDefaults.set(true, forKey: initKey)
     }
 
     // MARK: 核心循环

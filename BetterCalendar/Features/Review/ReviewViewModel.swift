@@ -22,6 +22,7 @@ final class ReviewViewModel {
     private let planStore: (PlanReading & ActualReading & ActualWriting)?
     private let looseDays: LooseDayStore?    // 松散日 → 复盘转"休息肯定"（§5.12）；nil=不转
     private let learning: LearningStore?     // 计划基线=当日最初快照（E5b/D11）；nil=直读真相源
+    let timeline: TimelineCoordinator?       // 溢出两阶段（E5c）：软标展示 + 逐件覆写；nil=不显该区
 
     /// 今天是否松散日 → 复盘转肯定（不显对比/完成率，措辞赋义）。
     var isLooseToday: Bool { looseDays?.isLoose(.now) ?? false }
@@ -48,7 +49,8 @@ final class ReviewViewModel {
     init(calendarStore: CalendarStore, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
          longTasks: LongTaskStore? = nil, planStore: (PlanReading & ActualReading & ActualWriting)? = nil,
-         looseDays: LooseDayStore? = nil, learning: LearningStore? = nil) {
+         looseDays: LooseDayStore? = nil, learning: LearningStore? = nil,
+         timeline: TimelineCoordinator? = nil) {
         self.calendarStore = calendarStore
         self.comparer = comparer
         self.arrangeDay = arrangeDay
@@ -57,6 +59,13 @@ final class ReviewViewModel {
         self.planStore = planStore
         self.looseDays = looseDays
         self.learning = learning
+        self.timeline = timeline
+    }
+
+    /// 今天的溢出候选（E5c 两阶段：复盘时展示、盖章时硬执行）；生活锚不上屏（默认溶解零叙事）。
+    var spillPending: [ScheduledBlock] {
+        (timeline?.pendingSpillCandidates(day: DayContext.logicalStartOfDay(.now)) ?? [])
+            .filter { !$0.isAnchor }
     }
 
     /// 剥离锚点：午饭/通勤/午休这类作息不是"要完成的任务"，不进对比（否则会算成 missed）。

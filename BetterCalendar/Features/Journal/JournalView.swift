@@ -38,6 +38,7 @@ struct JournalDeps {
     let router: AppRouter
     let makeReviewModel: () -> ReviewViewModel   // 复盘头 VM 工厂（每次进视图新建，同原 container.reviewModel）
     var longTasks: LongTaskStore? = nil          // #40 批3：收尾轻问「推进到哪了？」；nil=不问（旧测试兼容）
+    var timeline: TimelineCoordinator? = nil     // E5c：盖章=溢出硬执行时刻；nil=不执行（旧测试兼容）
 }
 
 struct JournalView: View {
@@ -166,6 +167,9 @@ struct JournalView: View {
 
     private func sealWrapUp() {
         WrapUpSeal.seal()
+        // E5c 两阶段溢出的硬执行时刻：「今天到此为止」的承诺一起结算没排下的块
+        // （默认静默收待办区+明早露脸；复盘区逐件覆写在此消费；幂等闸按日一次）
+        deps.timeline?.executeSpills(day: DayContext.logicalStartOfDay(.now))
         deps.milestones.refresh()
         wrapUpStage = nil
         wrapUpJustSealed = true
