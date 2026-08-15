@@ -96,14 +96,17 @@ final class LongTaskStore {
 
     // MARK: 待办区（E5a，一池两区）
 
-    /// 收进待办区（幂等）：同名待办条目已在 → 更新来源日/族；同名**长期区**在途项已在 → 不重复建、
+    /// 收进待办区（幂等）：同名待办条目已在 → 更新来源日/族/DDL；同名**长期区**在途项已在 → 不重复建、
     /// 返回长期项（它已有家——溢出的池块本来就该回它的长期任务）。
+    /// deadline（E5d）：带 DDL 的溢出物保留 DDL——晨间摘要按它置顶（DDL 挡路件不静默沉底）。
     @discardableResult
-    func addTodo(title: String, family: String? = nil, spilledFromDay: Date? = nil) -> LongTask {
+    func addTodo(title: String, family: String? = nil, spilledFromDay: Date? = nil,
+                 deadline: Date? = nil) -> LongTask {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = todoItems().first(where: { TitleMatch.similarity($0.title, t) >= 0.6 }) {
             if let s = spilledFromDay { existing.spilledFromDay = s }
             if let f = family { existing.family = f }
+            if let d = deadline { existing.deadline = d }
             existing.modifiedAt = .now
             try? context.save()
             reload()
@@ -113,7 +116,8 @@ final class LongTaskStore {
             DevLog.shared.info("待办区", "「\(t)」已有长期任务归属，不重复收待办")
             return home
         }
-        let entry = LongTask(title: t, zone: .todo, family: family, spilledFromDay: spilledFromDay)
+        let entry = LongTask(title: t, deadline: deadline, zone: .todo,
+                             family: family, spilledFromDay: spilledFromDay)
         context.insert(entry)
         try? context.save()
         reload()

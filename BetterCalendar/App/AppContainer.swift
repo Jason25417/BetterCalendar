@@ -157,7 +157,8 @@ final class AppContainer {
                  notifier: notifier, longTasks: longTasks, draftSnapshots: draftSnapshots,
                  looseDays: looseDays, startedDays: startedDays, execution: execution,
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
-                 reconcile: reconcile)
+                 reconcile: reconcile,
+                 timeline: timeline)   // E5d：晨间摘要/痕迹条/一键撤
     }
 
     var journalDeps: JournalDeps {

@@ -459,8 +459,14 @@ final class HomeViewModel {
                 // 早晚极简通知：时间据今日计划（首块前 / 末块后）算
                 let times = RescheduleService.reminderTimes(for: sorted.map(\.scheduled))
                 await notifier.requestAuthorizationIfNeeded()
+                // E5d：早通知带待办区露脸计数——排明天时今天的溢出已收池（收工盖章在前），
+                // 明早的「昨天」正是此刻的池里溢出物
+                let pooled = longTaskStore?.todoItems()
+                    .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }
+                    .count ?? 0
                 await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
-                                                      summary: Self.morningSummary(for: sorted))
+                                                      summary: Self.morningSummary(for: sorted,
+                                                                                   pooledFromYesterday: pooled))
             }
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
@@ -474,12 +480,14 @@ final class HomeViewModel {
 
     /// 早通知小总结（0.28.1，Jason 定：带件数/重点）：件数只数任务（锚点不算）、有尽早★则点名、
     /// 落点=第一件任务（前向：指向下一步动作）。纯函数、可单测。
-    static func morningSummary(for blocks: [EditableBlock]) -> String {
+    /// pooledFromYesterday（E5d）：待办区露脸计数——中性事实一行，不写「没做完」。
+    static func morningSummary(for blocks: [EditableBlock], pooledFromYesterday: Int = 0) -> String {
         let tasks = blocks.filter { !$0.isAnchor }.sorted { $0.start < $1.start }
         guard !tasks.isEmpty else { return "今天安排好了，开始吧。" }
         var parts = ["今天 \(tasks.count) 件"]
         if let mit = tasks.first(where: { $0.priority == .important }) { parts.append("尽早：\(mit.title)") }
         if let first = tasks.first { parts.append("第一件：「\(first.title)」——准备好了就开始") }
+        if pooledFromYesterday > 0 { parts.append("待办区有 \(pooledFromYesterday) 件昨天留下的") }
         return parts.joined(separator: " · ")
     }
 

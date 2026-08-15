@@ -94,4 +94,12 @@ import SwiftData
         store.addTodo(title: "新溢出", spilledFromDay: d2)
         #expect(store.todos.map(\.title) == ["新溢出", "旧溢出", "手动愿望"])
     }
+
+    /// addTodo 保 DDL（E5d）：带 DDL 的溢出物收池后晨间可置顶。
+    @Test func addTodoKeepsDeadline() throws {
+        let f = try makeFixture()
+        let ddl = Calendar.current.date(byAdding: .day, value: 2, to: .now)!
+        let e = f.store.addTodo(title: "交报销单", spilledFromDay: .now, deadline: ddl)
+        #expect(e.deadline == ddl)
+    }
 }

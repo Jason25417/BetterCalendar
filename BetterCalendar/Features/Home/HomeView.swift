@@ -44,6 +44,7 @@ struct HomeDeps {
     let journalStore: JournalStore
     let router: AppRouter
     let reconcile: ReconcileService
+    var timeline: TimelineCoordinator? = nil   // E5d：晨间摘要/痕迹条与一键撤；nil=不显（旧测试兼容）
 }
 
 struct HomeView: View {
@@ -70,6 +71,8 @@ struct HomeView: View {
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
     @State private var showFreshCompare = false    // 徽标 v2：两版只读对比 sheet
     @State private var tnDismissTick = false       // 寄语条「今天先收起」即时刷新（存储在 TomorrowNote）
+    @State private var briefDismissTick = 0        // 晨间摘要「今天先不排」即时刷新（E5d，存 UserDefaults）
+    @State private var showTraceSheet = false      // 变更痕迹二层 sheet（E5d）
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
     #else
@@ -147,6 +150,22 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                         .accessibilityLabel("今天先收起")
+                    }
+                }
+
+                // 晨间摘要（E5d）：昨日收池露脸 + DDL 置顶 + 一键入线；当天可收（TomorrowNote 同族）
+                let _ = briefDismissTick
+                if !MorningBrief.isDismissedToday {
+                    MorningBriefStrip(longTasks: deps.longTasks, router: deps.router,
+                                      onDismiss: { briefDismissTick += 1 })
+                }
+
+                // 变更痕迹轻提示（E5d，预授权直写绿的配套义务）：一行计数 → 点开二层 sheet（R12 世界归因）
+                if let timeline = deps.timeline, timeline.todayTraceCount() > 0 {
+                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.looseTint,
+                                 text: "计划今天有 \(timeline.todayTraceCount()) 处自动调整") {
+                        Button("查看") { showTraceSheet = true }
+                            .buttonStyle(.plain).font(.caption).foregroundStyle(theme.accent)
                     }
                 }
 
@@ -365,6 +384,10 @@ struct HomeView: View {
                                           sourceLabel: model.freshnessSource.label,
                                           onAdoptFresh: { model.adoptFreshBase(); showFreshCompare = false },
                                           onKeepMine: { model.keepMyDraft(); showFreshCompare = false })
+                    }
+                    .sheet(isPresented: $showTraceSheet) {
+                        // E5d 变更痕迹二层：清单 + 一键撤（deps.timeline 为 nil 时提示条根本不显示，进不来）
+                        if let timeline = deps.timeline { ChangeTraceSheet(timeline: timeline) }
                     }
                 }
 

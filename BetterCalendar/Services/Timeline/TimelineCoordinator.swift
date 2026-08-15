@@ -112,6 +112,50 @@ final class TimelineCoordinator {
         for id in ids { manualHolds[id] = until }
     }
 
+    // MARK: 一键撤（E5d，D6：预授权直写绿的配套义务）
+
+    /// 撤销今天的自动位移（顺延/活动预报/晨间投放）：逆序回放前像 → 终态=当天最早的原位。
+    /// 收池不在撤销范围（它经过了收工复盘的逐件可改环节）。撤完的块进手改冷却——
+    /// 撤销是用户显式动作，协调器不许下一秒又把它们挪回去（D12 用户最后动作赢）。
+    @discardableResult
+    func undoToday() -> Int {
+        let today = DayContext.logicalStartOfDay(now())
+        let movable: Set<String> = ["顺延", "活动预报", "晨间投放"]
+        let entries = traces.entries(day: today).filter { movable.contains($0.kind) }
+        guard !entries.isEmpty else { return 0 }
+        var restored: Set<UUID> = []
+        for e in entries.reversed() {   // 逆序回放：终态=每块最早的前像
+            guard let blocks = try? planStore.plannedBlocks(on: today),
+                  blocks.contains(where: { $0.id == e.blockID }) else { continue }
+            try? planStore.updatePlanned(id: e.blockID, start: e.beforeStart, end: e.beforeEnd,
+                                         title: e.title)
+            restored.insert(e.blockID)
+        }
+        guard !restored.isEmpty else { return 0 }
+        noteManualEdits(ids: Array(restored))
+        traces.append(ChangeTraceEntry(time: now(), blockID: restored.first ?? UUID(),
+                                       title: "撤销 \(restored.count) 块", kind: "撤销",
+                                       beforeStart: now(), beforeEnd: now(),
+                                       afterStart: now(), afterEnd: now(),
+                                       reason: "按你的要求恢复今天的自动调整"),
+                      day: today)
+        lastWriteNote = "撤销：恢复 \(restored.count) 块"
+        DevLog.shared.info("时间线", lastWriteNote)
+        NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
+                                        userInfo: ["source": "timelineCoordinator"])
+        return restored.count
+    }
+
+    /// 今日自动调整计数（晨间摘要/痕迹条用；撤销条目不算「调整」）。
+    func todayTraceCount() -> Int {
+        traces.entries(day: DayContext.logicalStartOfDay(now())).filter { $0.kind != "撤销" }.count
+    }
+
+    /// 今日痕迹（sheet 列表用，时间正序）。
+    func todayTraces() -> [ChangeTraceEntry] {
+        traces.entries(day: DayContext.logicalStartOfDay(now()))
+    }
+
     // MARK: 溢出硬执行（E5c，两阶段溢出的第二阶段）
 
     /// 复盘展开逐件可改的覆写（收待办[默认]/排明天/就算了）：seal 时随硬执行消费。
@@ -175,7 +219,8 @@ final class TimelineCoordinator {
                 try? planStore.deletePlanned(ids: [c.id])
                 longTasks?.addTodo(title: c.title,
                                    family: block.family,
-                                   spilledFromDay: day)
+                                   spilledFromDay: day,
+                                   deadline: block.deadline)   // E5d：DDL 保留→晨间置顶
                 traces.append(ChangeTraceEntry(time: now(), blockID: c.id, title: c.title, kind: "收池",
                                                beforeStart: block.start, beforeEnd: block.end,
                                                afterStart: block.start, afterEnd: block.end,

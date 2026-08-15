@@ -252,4 +252,31 @@ private final class FakeProgress: ExecutionProgressReading {
         f.co.executePendingSpills()
         #expect(f.pool.todoItems().isEmpty, "昨天已销账，幂等不动")
     }
+
+    // MARK: E5d 一键撤 + 晨间摘要
+
+    /// 撤销：逆序回放前像 → 回最初位置；撤完进手改冷却（协调器不许立刻又挪回去）。
+    @Test func undoTodayReversesAutomaticMoves() async throws {
+        let f = try makeFixture()
+        let stale = ScheduledBlock(title: "过点块", start: at(10), end: at(11))
+        try f.plan.replacePlanned([stale], on: today)
+        _ = await f.co.recompute(reason: "测试")
+        let movedRows = try f.plan.plannedBlocks(on: today)
+        #expect(movedRows.first?.start == fixedNow, "先被拉到 now")
+        #expect(f.co.undoToday() == 1)
+        let restored = try f.plan.plannedBlocks(on: today)
+        #expect(restored.first?.start == at(10), "回到最初前像")
+        #expect(f.co.manualHolds.keys.contains(stale.id), "撤销块进手改冷却")
+        _ = await f.co.recompute(reason: "测试")
+        let held = try f.plan.plannedBlocks(on: today)
+        #expect(held.first?.start == at(10), "冷却窗内不被再次拉走")
+    }
+
+    /// 早通知小总结：有露脸计数时补中性一行；无则不提待办区。
+    @Test func morningSummaryMentionsPooledCount() {
+        let b = EditableBlock(from: ScheduledBlock(title: "写作", start: at(9), end: at(10)))
+        let s = HomeViewModel.morningSummary(for: [b], pooledFromYesterday: 2)
+        #expect(s.contains("待办区有 2 件昨天留下的"))
+        #expect(!HomeViewModel.morningSummary(for: [b]).contains("待办区"))
+    }
 }
