@@ -34,6 +34,10 @@ enum FocusStateExporter {
             var timingStyle: String   // light / pomodoro / none
             var startedAt: Date
             var elapsedSec: Int
+            /// 累计不计投入的秒数（休息暂停等；含正在进行中的那段休息）——0.66 时间戳授时。
+            /// 游戏侧可纯算术推：净投入 = now − startedAt − pausedSec，**无视轮询延迟与掉帧**。
+            /// elapsedSec 保留作兼容兜底（老 mod 仍读它）。
+            var pausedSec: Int?
             var plannedSec: Int?      // 计划时长（轻计时的预算；nil=计划外）
             // 终点对齐协议（Jason 2026-07-10 定）：BC 算好终点推给游戏、游戏按终点反推——
             // 休息暂停/接替等都被 BC 折进 endsAt，游戏零计算误差；tick 刷新时终点自动顺延。

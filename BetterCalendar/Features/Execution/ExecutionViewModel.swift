@@ -506,8 +506,13 @@ final class ExecutionViewModel {
                 let remain = planned - currentElapsed
                 endsAt = remain > 0 ? Date.now.addingTimeInterval(remain) : nil
             }
+            // 0.66 时间戳授时：pausedSec = 墙钟总时长 − 净投入（含正在进行中的休息），
+            // 游戏侧据此纯算术推净投入，不受 2 秒轮询延迟/游戏掉帧影响。
+            let wall = Date.now.timeIntervalSince(blk.start)
+            let paused = max(0, wall - currentElapsed)
             return .init(title: blk.title, timingStyle: blk.timingStyle.rawValue, startedAt: blk.start,
-                         elapsedSec: Int(currentElapsed), plannedSec: activePlannedDuration.map { Int($0) },
+                         elapsedSec: Int(currentElapsed), pausedSec: Int(paused),
+                         plannedSec: activePlannedDuration.map { Int($0) },
                          endsAt: endsAt, inRest: inRest, segmentsRemaining: segRemain,
                          workSec: workSec, restSec: restSec)
         }
