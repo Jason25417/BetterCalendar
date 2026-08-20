@@ -110,6 +110,7 @@ final class TimelineCoordinator {
     func noteManualEdits(ids: [UUID]) {
         let until = now().addingTimeInterval(TimeInterval(Self.manualHoldMinutes * 60))
         for id in ids { manualHolds[id] = until }
+        SmokeLog.hit("手改冷却", "\(ids.count) 块进 30min 冷却")
     }
 
     // MARK: 一键撤（E5d，D6：预授权直写绿的配套义务）
@@ -141,6 +142,7 @@ final class TimelineCoordinator {
                       day: today)
         lastWriteNote = "撤销：恢复 \(restored.count) 块"
         DevLog.shared.info("时间线", lastWriteNote)
+        SmokeLog.hit("一键撤", "恢复 \(restored.count) 块到原位")
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
                                         userInfo: ["source": "timelineCoordinator"])
         return restored.count
@@ -236,6 +238,7 @@ final class TimelineCoordinator {
         spillOverrides = [:]
         softSpilledIDs = []
         DevLog.shared.info("溢出", "硬执行 \(DayContext.dayKey(day))：候选 \(candidates.count) · 收池 \(pooled)")
+        SmokeLog.hit("收工硬执行", "候选 \(candidates.count) · 收池 \(pooled)")
         return pooled
     }
 
@@ -346,6 +349,7 @@ final class TimelineCoordinator {
         guard wrote > 0 else { return 0 }
         lastWriteNote = "\(reason)：写回 \(wrote) 块（软标 \(softSpilledIDs.count)）"
         DevLog.shared.info("时间线", lastWriteNote)
+        SmokeLog.hit("影子直写绿", "\(reason)·写回 \(wrote)·软标 \(softSpilledIDs.count)")
         // 呈现层通知（带自家标记防自激）：排日程页干净则重载、编辑中亮徽标——复用现成分流
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
                                         userInfo: ["source": "timelineCoordinator"])

@@ -132,6 +132,7 @@ final class LongTaskStore {
             return
         }
         context.delete(entry)
+        SmokeLog.hit("待办区-丢弃", "溶解「\(entry.title)」")
         try? context.save()
         reload()
     }

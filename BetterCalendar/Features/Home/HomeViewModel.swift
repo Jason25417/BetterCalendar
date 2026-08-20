@@ -303,6 +303,7 @@ final class HomeViewModel {
                 }
                 return eb
             }
+            SmokeLog.hit("族标注", "\(blocks.filter { $0.scheduled.family != nil }.count)/\(blocks.count) 块带族（UI 不呈现）")
             // K1 例行模板物化（进草稿走确认制）：启用且当日生效的模板补插实例；
             // 与已有块（含 parser 补排的午饭/晚饭锚点）TitleMatch 重复的跳过——不重复补
             for t in routines?.enabled(on: targetDay) ?? [] {
@@ -398,6 +399,7 @@ final class HomeViewModel {
         try? await projection.project(label: DayContext.logicalStartOfDay(sb.start))
         NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
         DevLog.shared.info("投放", "单件入线：「\(sb.title)」\(sb.start.formatted(date: .omitted, time: .shortened))")
+        SmokeLog.hit("单件入线", "「\(sb.title)」直写真相")
         if !hasUnsavedChanges { loadConfirmedPlan() }   // 已确认视图即时可见
     }
 
