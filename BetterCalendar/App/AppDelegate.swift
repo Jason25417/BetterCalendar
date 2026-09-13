@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppLifecycleControllin
 
     /// CloudKit 静默推送 → 多端跟随（#30）。SwiftData 的同步推送自带处理，转发无害。
     func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
-        FocusFollow.handlePush(userInfo)
+        Task { await FocusFollow.handlePush(userInfo) }
     }
 
     /// 关掉最后一个窗口不终止 App → 常驻 menu bar。

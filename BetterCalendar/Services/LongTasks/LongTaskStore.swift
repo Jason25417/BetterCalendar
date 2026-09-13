@@ -27,8 +27,15 @@ final class LongTaskStore {
         reload()
     }
 
+    private func saveChanges() {
+        do { try context.save() }
+        catch { DataSyncMonitor.shared.report("长期任务尚未保存：\(error.localizedDescription)") }
+    }
+
     func reload() {
-        let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
+        let all: [LongTask]
+        do { all = try context.fetch(FetchDescriptor<LongTask>()) }
+        catch { DataSyncMonitor.shared.report("长期任务读取失败：\(error.localizedDescription)"); return }
         items = all.filter { $0.status == .active && $0.poolZone == .longterm }
             .sorted {
                 switch ($0.deadline, $1.deadline) {
@@ -80,7 +87,7 @@ final class LongTaskStore {
             if let tm = totalMinutes { existing.totalMinutes = tm }
             if let um = unitMinutes { existing.unitMinutes = um }
             existing.modifiedAt = .now
-            try? context.save()
+            saveChanges()
             reload()
             return existing
         }
@@ -88,7 +95,7 @@ final class LongTaskStore {
                             cadenceMinutesPerWeek: cadenceMinutesPerWeek,
                             totalMinutes: totalMinutes, unitMinutes: unitMinutes)
         context.insert(task)
-        try? context.save()
+        saveChanges()
         reload()
         DevLog.shared.info("在途", "入池：\(t)" + (deadline != nil ? "（有 DDL）" : ""))
         return task
@@ -108,7 +115,7 @@ final class LongTaskStore {
             if let f = family { existing.family = f }
             if let d = deadline { existing.deadline = d }
             existing.modifiedAt = .now
-            try? context.save()
+            saveChanges()
             reload()
             return existing
         }
@@ -119,7 +126,7 @@ final class LongTaskStore {
         let entry = LongTask(title: t, deadline: deadline, zone: .todo,
                              family: family, spilledFromDay: spilledFromDay)
         context.insert(entry)
-        try? context.save()
+        saveChanges()
         reload()
         DevLog.shared.info("待办区", "收进待办：\(t)" + (spilledFromDay != nil ? "（溢出）" : "（愿望）"))
         return entry
@@ -133,7 +140,7 @@ final class LongTaskStore {
         }
         context.delete(entry)
         SmokeLog.hit("待办区-丢弃", "溶解「\(entry.title)」")
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -141,7 +148,7 @@ final class LongTaskStore {
         task.status = .done
         task.doneAt = .now
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -149,7 +156,7 @@ final class LongTaskStore {
     func shelve(_ task: LongTask) {
         task.status = .shelved
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -158,7 +165,7 @@ final class LongTaskStore {
         let base = task.deadline ?? .now
         task.deadline = Calendar.current.date(byAdding: .day, value: days, to: base)
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -182,7 +189,7 @@ final class LongTaskStore {
     func unshelve(_ task: LongTask) {
         task.status = .active
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -193,7 +200,7 @@ final class LongTaskStore {
         task.status = .active
         task.doneAt = nil
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -207,7 +214,7 @@ final class LongTaskStore {
         if let tm = totalMinutes { task.totalMinutes = tm }
         if let um = unitMinutes { task.unitMinutes = um }
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -221,7 +228,7 @@ final class LongTaskStore {
         cp.task = task
         context.insert(cp)
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
         return cp
     }
@@ -230,14 +237,14 @@ final class LongTaskStore {
     func toggleCheckpoint(_ cp: LongTaskCheckpoint) {
         cp.doneAt = cp.doneAt == nil ? .now : nil
         cp.task?.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 
     func deleteCheckpoint(_ cp: LongTaskCheckpoint) {
         cp.task?.modifiedAt = .now
         context.delete(cp)
-        try? context.save()
+        saveChanges()
         reload()
     }
 
@@ -245,7 +252,7 @@ final class LongTaskStore {
     func reorderCheckpoints(_ task: LongTask, ordered: [LongTaskCheckpoint]) {
         for (i, cp) in ordered.enumerated() { cp.order = i }
         task.modifiedAt = .now
-        try? context.save()
+        saveChanges()
         reload()
     }
 

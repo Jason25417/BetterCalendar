@@ -1153,12 +1153,14 @@ struct LogicTests {
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: JournalPhoto.self, configurations: config)
 
-        // 预置一张「旧版本只存了本地文件」的照片 → init 时应迁入 DB
+        // 旧文件不在 init 时自动迁入：需显式导入，避免复活云端已删除的缓存照片。
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         let legacy = "legacy.jpg"
         try Data([0xFF, 0xD8, 0xFF]).write(to: tmp.appendingPathComponent(legacy))
 
         let store = PhotoStore(context: container.mainContext, directory: tmp)
+        #expect(try container.mainContext.fetch(FetchDescriptor<JournalPhoto>()).isEmpty)
+        store.importLegacyFiles()
         let inDB = try container.mainContext.fetch(FetchDescriptor<JournalPhoto>())
         #expect(inDB.contains { $0.ref == legacy })          // 旧文件迁入
 

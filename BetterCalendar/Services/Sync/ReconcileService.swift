@@ -153,7 +153,9 @@ final class ReconcileService {
     /// 对账 逻辑今天…+7 天（与启动对账同窗）；实时模式（已开始）的日子跳过（橙色归执行层）。
     func reconcileWindow() async {
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
-        let events = (try? await calendarStore.read(kind: .planned)) ?? []
+        let events: [CalendarEventDraft]
+        do { events = try await calendarStore.read(kind: .planned) }
+        catch { DataSyncMonitor.shared.report("日历读取失败，已停止对账：\(error.localizedDescription)"); return }
         for offset in 0..<8 {
             let label = DayContext.logicalDay(offset: offset)
             if startedDays?.isStarted(label) ?? false { continue }
@@ -166,8 +168,9 @@ final class ReconcileService {
     func startupSync() async {
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
         await reconcileWindow()
-        let skip = Set(pendingAdditions.map { Calendar.current.startOfDay(for: $0.label) })
-        await projection.projectUpcomingWindow(skipping: skip)
+        // Startup is read/reconcile only: CloudKit, KVS and EventKit have no shared arrival barrier.
+        // Blanket projection here could erase another device's changes before local import completes.
+        // Explicit plan confirmation and verified three-way differences own projection writes.
     }
 
     private func reconcile(label: Date, allGreenEvents: [CalendarEventDraft],
@@ -177,12 +180,18 @@ final class ReconcileService {
         guard let truth = try? planReader.plannedBlocks(on: label) else { return }
         let fp = ProjectionFingerprints.get(label)
         let plan = Self.diff(truth: truth, events: events, fingerprint: fp)
+        guard plan.conflicts.isEmpty else {
+            DataSyncMonitor.shared.report("日历与数据库有 \(plan.conflicts.count) 项不同且缺少共同版本，已保留两侧内容，等待核对。")
+            return
+        }
 
         // E5b 竞态加固：事件快照读于 8 日循环之前，循环期间 Coordinator 可能已写真相+投影
         // （指纹同步更新）——「旧事件 × 新真相 × 新指纹」会被误判成用户手改、把旧时间倒灌回真相。
         // 判到回流时先重读该日事件再核一遍（只在真有 updates 时多读一次，代价极小）。
         if !isRetry, !plan.updates.isEmpty {
-            let fresh = (try? await calendarStore.read(kind: .planned)) ?? []
+            let fresh: [CalendarEventDraft]
+            do { fresh = try await calendarStore.read(kind: .planned) }
+            catch { DataSyncMonitor.shared.report("日历复核失败，保持原数据：\(error.localizedDescription)"); return }
             await reconcile(label: label, allGreenEvents: fresh, isRetry: true)
             return
         }
@@ -238,7 +247,7 @@ final class ReconcileService {
         }
         if plan.needsRepaint { touchedLabels.insert(Calendar.current.startOfDay(for: label)) }
         // 有待确认新建的日子先不重画：重画会把用户新建的事件当无主清掉（问都没问）
-        let holdLabels = Set(pendingAdditions.map { Calendar.current.startOfDay(for: $0.label) })
+        let holdLabels = Set((pendingAdditions.map(\.label) + pendingDeletions.map(\.label)).map { Calendar.current.startOfDay(for: $0) })
         for l in touchedLabels where !holdLabels.contains(l) { try? await projection.project(label: l) }
     }
 
@@ -284,6 +293,7 @@ final class ReconcileService {
         var updates: [Update] = []
         var deletions: [Deletion] = []
         var additions: [CalendarEventDraft] = []   // 日历里新建的无章事件 → 按策略 加/清/问（0.20.2）
+        var conflicts: [UUID] = []
         var needsRepaint = false   // 带章但真相没有/缺投影 → 让投影按真相源重画
     }
 
@@ -310,8 +320,11 @@ final class ReconcileService {
                 if evTuple == truthTuple { continue }
                 if evTuple == fingerprint[key] {
                     plan.needsRepaint = true   // 日历没人动，是真相更新未投影 → 真相赢
-                } else {
+                } else if fingerprint[key] == truthTuple {
                     plan.updates.append(Update(id: b.id, start: e.start, end: e.end, title: e.title))
+                } else {
+                    // No common base, or both channels changed: no reliable last-writer evidence.
+                    plan.conflicts.append(b.id)
                 }
             } else if fingerprint[key] != nil {
                 plan.deletions.append(Deletion(id: b.id, title: b.title))   // 我们写过 → 用户删了

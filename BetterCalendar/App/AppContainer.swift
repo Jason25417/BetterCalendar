@@ -32,7 +32,7 @@ final class AppContainer {
     let longTasks: LongTaskStore               // 「在途」池：跨日任务/长线作业（M10）
     let draftSnapshots = DraftSnapshotStore()  // 排日程草稿快照（崩溃/重启还原）
     let looseDays = LooseDayStore()            // 松散日标记（退场姿态；iCloud KV，无 schema）
-    let startedDays = StartedDayStore()        // 「已开始今天」标记（绿色淡出=实时模式）
+    let startedDays = StartedDayStore(persisted: !TestHost.isActive)        // 「已开始今天」标记（绿色淡出=实时模式）
     let liveDraft = LiveDraft()                // 端侧流式解析的「进行中部分块」（边生成边显示）
     let logSync: LogSyncService                // 跨端日志：DevLog→CloudKit→(Mac)容器纯文本
     let reviewStore: ReviewLocalStore          // 活跃天数 + 今日 MVP（SwiftData，跨端同步）
@@ -109,6 +109,7 @@ final class AppContainer {
                                             planStore: planStore, reminderStore: reminderStore,
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore(),
+                                            persistsRunState: !TestHost.isActive,
                                             startedDays: startedDays, projection: projection)
         self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)
@@ -121,9 +122,16 @@ final class AppContainer {
         TimelineCoordinator.sharedForDev = timeline   // 引擎观察窗桥（开发期，M8 摘除）
         execution.minutePulse = { [weak timeline] in timeline?.notePulse() }   // 分钟兜底（不新增定时器）
         self.logSync = LogSyncService()
-        logSync.start()
+        if !TestHost.isActive { logSync.start() }
         SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）
         reconcile.start()
+        DataSyncMonitor.shared.start { [weak longTasks, weak execution, weak aggregator, weak learning] in
+            longTasks?.reload(); execution?.reloadImportedData()
+            if let learning { aggregator?.reconcile(samples: learning.allSamples()) }
+        }
+        DataMaintenance.shared.start()
+        FocusFollow.localHeartbeat = { [weak execution] in execution?.exportFocusStateNow() }
+        FocusFollow.startPolling()
         ExecutionBridge.shared = execution   // Focus Filter 联动直达口（§5.7）
         #if os(macOS)
         // 分心自动休息（#26 V1）：mac 前台感知 → 执行层换挡（iOS 腿=快捷指令自动化调同一入口）

@@ -16,14 +16,20 @@ enum SharedModelContainer {
                              ExecutionSession.self, JournalEntry.self,   // AppSettings 已删（2026-07-22：M0 骨架遗产，从未实例化——设置全走 UserDefaults；云端 record type 留着无害）
                              DayRecord.self, JournalPhoto.self, LongTask.self,
                              LongTaskCheckpoint.self, DeviceLog.self])
+        if TestHost.isActive {
+            return try! ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        }
         // M7：优先 iCloud 同步（需 iCloud + CloudKit capability + container）。
         // 配好 entitlement → 自动用 CloudKit 跨端同步；没配好 → 回退本地库，绝不崩。
-        if let cloud = try? ModelContainer(
+        do {
+            let cloud = try ModelContainer(
             for: schema,
-            configurations: ModelConfiguration(schema: schema, cloudKitDatabase: .automatic)) {
+            configurations: ModelConfiguration(schema: schema, cloudKitDatabase: .private("iCloud.com.jason.BetterCalendar")))
+            DataSyncMonitor.shared.storageOpened(cloud: true)
             return cloud
+        } catch {
+            DataSyncMonitor.shared.storageOpened(cloud: false, error: error)
         }
-        print("[数据] CloudKit 不可用（未配 iCloud capability？）→ 回退本地库")
         do {
             return try ModelContainer(
                 for: schema,

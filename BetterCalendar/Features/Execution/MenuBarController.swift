@@ -126,7 +126,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         } else if let f = FollowRunState.shared.run {
             // 多端跟随（#30）：本机空档而另一台在做 → 陪伴显示（点开面板可退出跟随）
             symbol("ipad.and.iphone", "另一台设备进行中")
-            button.title = " " + ExecutionPanel.hms(Date.now.timeIntervalSince(f.startedAt))
+            button.title = " " + ExecutionPanel.hms(f.elapsed())
         } else {
             symbol("calendar.badge.clock", "BetterCalendar")
             button.title = ""        // 空档：只显图标

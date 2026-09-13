@@ -266,6 +266,24 @@ final class ExecutionViewModel {
     // MARK: - 读取今日
 
     /// 重建今日状态：计划与实际都以 **PlanStore 真相源**为准（实际再 ∪ 带章日历=迁移+跨设备兜底）。
+    /// Imported cloud/maintenance data refreshes displays without triggering completion inference or writes.
+    func reloadImportedData(now: Date = .now) {
+        do {
+            let label = DayContext.logicalStartOfDay(now)
+            let blocks = try planStore.plannedBlocks(on: label)
+            let actuals = try planStore.actualBlocks(on: label)
+            planned = blocks.filter { !$0.isAnchor }.map {
+                PlannedItem(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
+                            timingStyle: $0.timingStyle, isFixed: $0.isFixed, priority: $0.priority)
+            }
+            if let id = selected?.id { selected = planned.first { $0.id == id } }
+            if let id = active?.plannedID, let item = planned.first(where: { $0.id == id }) { active?.title = item.title }
+            if active == nil, background.isEmpty {
+                done = actuals.map { ActualRecord(plannedID: $0.id, title: $0.title, start: $0.start, end: $0.end) }
+            }
+        } catch { DataSyncMonitor.shared.report("执行列表重读失败：\(error.localizedDescription)") }
+    }
+
     func loadToday() async {
         restoreRunStateIfNeeded()   // 0.20：重启/清后台后，同逻辑日的计时原样接上
         do {
@@ -528,8 +546,8 @@ final class ExecutionViewModel {
             chiyneLastSignificantEvent = ev
         }
         FocusStateExporter.write(active: a, event: ev)
-        // 多端跟随（#30）：同一份 runstate 也发布到 CloudKit（开关内部判；tick 内部 5 分节流）。
-        FocusFollow.publish(kind: kind, active: a)
+        // 多端跟随（#30）：同一份 runstate 也发布到 CloudKit（开关内部判；tick 内部 60 秒节流）。
+        FocusFollow.publish(kind: kind, active: a, isPaused: isOnBreak, elapsed: currentElapsed)
     }
 
     /// 事件账本：本会话最近一次重要事件（start/complete），tick 导出时原样带上。
@@ -981,6 +999,7 @@ final class ExecutionViewModel {
             if active != nil { breakCount += 1 }   // 中途休息计入会话 interruptions
         }
         if persistsRunState { BehaviorLog.record("休息", isOnBreak ? "开始" : "结束") }
+        exportFocusState(event: isOnBreak ? "pause" : "resume")
         persistRunState()
         if let s = liveSnapshot() { liveActivity.update(s) }
     }

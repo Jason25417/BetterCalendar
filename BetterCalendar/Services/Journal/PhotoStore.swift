@@ -25,7 +25,8 @@ final class PhotoStore {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         dir = base
         self.context = context
-        migrateLocalFilesIfNeeded()
+        // Legacy migration must be explicit: reimporting every unmatched cached file on each launch
+        // resurrects photos deleted on another device. Existing file-only data remains on disk.
     }
 
     func url(for ref: String) -> URL { dir.appendingPathComponent(ref) }
@@ -43,7 +44,7 @@ final class PhotoStore {
 
     /// 读一张图：本地缓存优先；没有（云端同步来的新照片）→ 从 DB 取并回写缓存。
     func data(for ref: String) -> Data? {
-        if let d = try? Data(contentsOf: url(for: ref)), !d.isEmpty { return d }
+        if context == nil { return try? Data(contentsOf: url(for: ref)) }
         guard let context,
               let p = ((try? context.fetch(FetchDescriptor<JournalPhoto>())) ?? [])
                   .first(where: { $0.ref == ref }),
@@ -62,7 +63,7 @@ final class PhotoStore {
     }
 
     /// 旧版本只存了本地文件的照片 → 迁入 DB（跨端可见）。幂等：DB 里已有的 ref 跳过。
-    private func migrateLocalFilesIfNeeded() {
+    func importLegacyFiles() {
         guard let context else { return }
         let existing = Set(((try? context.fetch(FetchDescriptor<JournalPhoto>())) ?? []).map(\.ref))
         let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []

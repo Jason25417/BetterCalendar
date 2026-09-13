@@ -48,7 +48,7 @@ final class LogSyncService {
     /// 挂 DevLog 钩子 + 起 30s 节流；error 级立即 flush（崩前尽量落盘）。
     func start() {
         DevLog.shared.onAppend = { [weak self] entry in
-            guard let self else { return }
+            guard let self, entry.source != "行为" else { return }
             let tf = DateFormatter()
             tf.locale = Locale(identifier: "en_US_POSIX")
             tf.dateFormat = "HH:mm:ss"

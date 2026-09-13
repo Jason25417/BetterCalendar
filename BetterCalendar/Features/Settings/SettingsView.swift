@@ -52,6 +52,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("数据与同步（开发期）") { DataMaintenancePanel() }
             Section("云端排程大脑") {
                 Toggle("启用云端", isOn: $useCloud)
 
@@ -229,10 +230,9 @@ struct SettingsView: View {
                     Toggle("多端跟随专注（Beta）", isOn: $focusFollowOn)
                         .onChange(of: focusFollowOn) { _, v in
                             FocusFollowSettings.enabled = v
-                            if v { Task { await FocusFollow.ensureSubscription() } }
-                            else { FollowRunState.shared.exitFollow() }
+                            FocusFollow.settingsChanged()
                         }
-                    Text("同一 iCloud 的另一台设备开始专注时，这台准实时（秒~十几秒）跟随显示同任务计时；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
+                    Text("同一 iCloud 的另一台设备开始专注时，这台自动跟随显示同任务计时；动作立即发送，推送优先，活动中每 5 秒补查，空闲时每 15 秒补查，实际到达受网络与系统调度影响；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     #if os(macOS)

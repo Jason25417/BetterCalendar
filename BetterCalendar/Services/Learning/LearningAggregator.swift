@@ -82,6 +82,7 @@ final class LearningAggregator {
     nonisolated private struct File: Codable {
         var cursor = Date(timeIntervalSince1970: 0)   // 已折算样本的 createdAt 游标（时序折算）
         var buckets: [String: BucketStats] = [:]
+        var sourceDigest: String?
     }
     private var file: File
 
@@ -127,6 +128,27 @@ final class LearningAggregator {
         persist()
         DevLog.shared.info("学习层", "聚合折算 \(fresh.count) 样本 → \(file.buckets.count) 桶")
         return fresh.count
+    }
+
+    /// Full-source reconciliation for imports/developer edits: old timestamps are not evidence of no change.
+    @discardableResult
+    func reconcile(samples: [ResidualSample]) -> Int {
+        let descriptions = samples.map { s in
+            [s.blockID.uuidString, String(s.createdAt.timeIntervalSinceReferenceDate),
+             String(s.plannedMinutes), String(s.actualMinutes), String(s.isFixed), String(s.isAnchor),
+             s.linkedTaskID?.uuidString ?? "", s.labels.joined(separator: "\u{001F}")]
+        }.sorted { $0.lexicographicallyPrecedes($1) }
+        guard let bytes = try? ArchiveCodec.encoder().encode(descriptions) else { return 0 }
+        let digest = ArchiveCodec.digest(bytes)
+        guard file.sourceDigest != digest else { return 0 }
+        file = File()
+        let count = fold(samples: samples.sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.blockID.uuidString < $1.blockID.uuidString
+        })
+        file.sourceDigest = digest
+        persist() // also persists the empty-source case after all samples were removed
+        return count
     }
 
     private func familyOf(labels: [String]) -> String? {

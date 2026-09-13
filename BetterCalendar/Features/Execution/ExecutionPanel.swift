@@ -41,7 +41,7 @@ struct ExecutionPanel: View {
         if model.active == nil, let f = FollowRunState.shared.run {
             HStack(spacing: 6) {
                 Image(systemName: "ipad.and.iphone").foregroundStyle(.secondary)
-                Text("另一台设备正在做「\(f.title)」· 已 \(Self.hms(Date.now.timeIntervalSince(f.startedAt)))")
+                Text("另一台设备正在做「\(f.title)」· 已 \(Self.hms(f.elapsed()))")
                     .font(.caption)
                 Spacer()
                 Button("退出跟随") { FollowRunState.shared.exitFollow() }

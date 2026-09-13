@@ -31,9 +31,11 @@ enum SettingsSync {
     private static let kv = NSUbiquitousKeyValueStore.default
     /// 拉取远程写本地期间抑制回推（配合值比较，双保险防回环）。
     private static var applyingRemote = false
+    private static var lastLocal: [String: NSObject] = [:]
 
     /// App 启动时调用一次（组装点）：挂双向监听 + 初次全量拉取远程。
     static func start() {
+        guard !TestHost.isActive else { return }
         NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: kv, queue: .main
@@ -47,6 +49,7 @@ enum SettingsSync {
         ) { _ in
             pushLocalToCloud()
         }
+        lastLocal = localSnapshot()
         kv.synchronize()
         applyRemote(changedKeys: nil)   // 初次全量：远程有值即以远程为准落到本地
     }
@@ -57,6 +60,8 @@ enum SettingsSync {
         let ud = UserDefaults.standard
         for key in syncedKeys {
             let local = ud.object(forKey: key)
+            guard !valuesEqual(local, lastLocal[key]) else { continue }
+            if let value = local as? NSObject { lastLocal[key] = value } else { lastLocal.removeValue(forKey: key) }
             let remote = kv.object(forKey: key)
             guard !valuesEqual(local, remote) else { continue }
             if let local { kv.set(local, forKey: key) } else { kv.removeObject(forKey: key) }
@@ -71,9 +76,15 @@ enum SettingsSync {
         var applied = false
         applyingRemote = true
         for key in keys {
-            guard let remote = kv.object(forKey: key) else { continue }
+            guard let remote = kv.object(forKey: key) else {
+                if changedKeys != nil {
+                    ud.removeObject(forKey: key); lastLocal.removeValue(forKey: key); applied = true
+                }
+                continue
+            }
             guard !valuesEqual(ud.object(forKey: key), remote) else { continue }
             ud.set(remote, forKey: key)
+            lastLocal[key] = remote as? NSObject
             applied = true
         }
         applyingRemote = false
@@ -81,6 +92,12 @@ enum SettingsSync {
             NotificationCenter.default.post(name: didSyncRemotely, object: nil)
             DevLog.shared.info("设置同步", "已从 iCloud 拉取设置变更")
         }
+    }
+
+    private static func localSnapshot() -> [String: NSObject] {
+        var values: [String: NSObject] = [:]
+        for key in syncedKeys { values[key] = UserDefaults.standard.object(forKey: key) as? NSObject }
+        return values
     }
 
     /// UserDefaults 存的都是 property-list 标量（Bool/Int/Double→NSNumber、String→NSString）→ NSObject 相等即值相等。

@@ -19,8 +19,10 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        FocusFollow.handlePush(userInfo)
-        completionHandler(.newData)
+        Task {
+            await FocusFollow.handlePush(userInfo)
+            completionHandler(.newData)
+        }
     }
 }
 #endif

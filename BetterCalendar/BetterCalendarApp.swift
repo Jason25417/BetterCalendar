@@ -116,8 +116,9 @@ struct BetterCalendarApp: App {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     handlePendingAppIntent(); consumePrimeNextStart()
-                    Task { await FocusFollow.refreshAndApply(reason: "回前台") }
+                    DataSyncMonitor.shared.refreshNow()
                 }
+                FocusFollow.setForeground(phase == .active)
             }
             // 早通知 deep-link（0.23 A）：打开执行界面 + 第一件「待开始」（不自动计时）
             .onChange(of: container.router.primeNextStart) { _, want in
@@ -135,7 +136,7 @@ struct BetterCalendarApp: App {
                 if !TestHost.isActive {
                     container.timeline.executePendingSpills()
                     // L3：样本 → 聚合桶（幂等游标；只算不用，L5 回放过门才进排布）
-                    container.aggregator.fold(samples: container.learning.allSamples())
+                    container.aggregator.reconcile(samples: container.learning.allSamples())
                 }
             }
             // 多端跟随（#30）：启动/回前台 catch-up（推送错过也收敛，同聪音对账哲学）+ 屏蔽联动接线

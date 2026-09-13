@@ -83,7 +83,7 @@ final class ProjectionService {
     /// 已在真相源守卫单测白名单登记（ProjectionService.swift）。
     private func foreignStampedEvents(kind: PlanCalendarKind, window: DateInterval,
                                       knownIDs: Set<UUID>, fingerprint: [String: String]) async throws -> [CalendarEventDraft] {
-        let existing = (try? await calendarStore.read(kind: kind)) ?? []
+        let existing = try await calendarStore.read(kind: kind)
         return existing.filter { e in
             guard window.contains(e.start), let bid = e.blockID else { return false }   // 无章走既有新建策略
             return !knownIDs.contains(bid) && fingerprint[bid.uuidString] == nil

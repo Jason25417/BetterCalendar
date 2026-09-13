@@ -93,12 +93,20 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         let label = Calendar.current.startOfDay(for: day)
         let stale = try context.fetch(FetchDescriptor<PlanBlock>())
             .filter { $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
-        for old in stale { context.delete(old) }
+        let wanted = Set(blocks.map(\.id))
+        var byID = Dictionary(stale.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        for old in stale where !wanted.contains(old.id) { context.delete(old) }
         for b in blocks {
-            context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
-                                     isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
-                                     timingStyle: b.timingStyle, priority: b.priority,
-                                     deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID))
+            let row: PlanBlock
+            if let existing = byID[b.id] { row = existing }
+            else {
+                row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end)
+                context.insert(row); byID[b.id] = row
+            }
+            row.title = b.title; row.start = b.start; row.end = b.end
+            row.isFixed = b.isFixed; row.isAnchor = b.isAnchor
+            row.timingStyle = b.timingStyle; row.priority = b.priority
+            row.deadline = b.deadline; row.labels = b.labels; row.linkedTaskID = b.linkedTaskID
         }
         try context.save()
         DevLog.shared.info("PlanStore", "写入 \(blocks.count) 计划块 @ \(Self.dayStr(day))")

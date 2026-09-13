@@ -104,6 +104,7 @@ struct JournalView: View {
                 JournalDetailView(entry: e, model: model, photoStore: deps.photoStore)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: DataSyncMonitor.dataChanged)) { _ in model.reload() }
         .onAppear {
             if locked { unlock() }
             openTodayIfNeeded()
