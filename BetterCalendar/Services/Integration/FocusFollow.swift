@@ -38,6 +38,12 @@ final class FollowRunState {
         var updatedAt: Date = .now
         func elapsed(at now: Date = .now) -> TimeInterval { max(0, (pausedAt ?? now).timeIntervalSince(startedAt)) }
         var seq: Int64           // 来源记录 seq（退出跟随后按它静音，防 catch-up 复活）
+
+        var liveActivitySnapshot: LiveActivitySnapshot {
+            .init(title: title, timerStart: startedAt, pausedAt: pausedAt,
+                  // 协议尚未同步番茄段终点，先展示准确的已用时间。
+                  mode: .light, phaseEndsAt: nil, phaseIsRest: isRest, isRemote: true)
+        }
     }
 
     private(set) var run: Run?
@@ -52,7 +58,9 @@ final class FollowRunState {
     func set(_ r: Run?) {
         if let r, r.seq == mutedSeq, r.sourceDevice == mutedDevice { return }   // 用户退出过这一轮跟随 → 静音
         let changed = (run?.title != r?.title) || (run == nil) != (r == nil)
-            || run?.style != r?.style || run?.pausedAt != r?.pausedAt || run?.isRest != r?.isRest
+            || run?.sourceDevice != r?.sourceDevice || run?.seq != r?.seq
+            || run?.startedAt != r?.startedAt || run?.style != r?.style
+            || run?.pausedAt != r?.pausedAt || run?.isRest != r?.isRest
         run = r
         if changed { onChange?() }
     }
@@ -121,6 +129,9 @@ enum FocusFollow {
     static func publish(kind: String, active: FocusStateExporter.State.Active?, isPaused: Bool = false,
                         elapsed: TimeInterval? = nil, sampledAt: Date = .now) {
         guard !TestHost.isActive, FocusFollowSettings.enabled else { return }
+        // An idle receiver's periodic catch-up must never manufacture a completion and compete
+        // with the device that is actually running. Only an explicit complete may clear a run.
+        guard FocusSyncPolicy.shouldPublish(kind: kind, hasActive: active != nil) else { return }
         let now = sampledAt
         hasLocalRun = active != nil
         let action = isPaused ? "paused" : (active?.inRest == true ? "rest" : "running")
@@ -137,6 +148,9 @@ enum FocusFollow {
                               startedAt: active.map { FocusSyncPolicy.anchor(sampledAt: now, elapsed: elapsed ?? Double($0.elapsedSec)) } ?? .distantPast,
                               hasActive: active != nil, seq: lastSequence, updatedAt: now)
         persistPending()
+        if kind != "tick" {
+            DevLog.shared.info("跟随", "待发送 \(pending?.kind ?? kind) · seq \(lastSequence)")
+        }
         drain()
     }
 
@@ -173,6 +187,9 @@ enum FocusFollow {
                         FocusSyncDiagnostics.shared.sent(action: next.kind, seq: next.seq, device: deviceID,
                             sourceAt: next.updatedAt, now: .now,
                             seconds: ProcessInfo.processInfo.systemUptime - requestStart)
+                        if !next.kind.hasPrefix("tick") {
+                            DevLog.shared.info("跟随", "服务器已接收 \(next.kind) · seq \(next.seq)")
+                        }
                     } else {
                         FocusSyncDiagnostics.shared.failed("较新状态已由另一动作保存，本机旧动作未覆盖它。")
                     }
@@ -343,12 +360,15 @@ enum FocusFollow {
         guard revisionGate.accept(serverDate: record.modificationDate, sourceDate: updatedAt) else { return }
         let sourceDevice = (record["deviceID"] as? String) ?? ""
         guard sourceDevice != deviceID else { FollowRunState.shared.set(nil); return }   // 自己发的不跟
-        let hasActive = ((record["hasActive"] as? Int) ?? 0) == 1
-        let seq = (record["seq"] as? Int64) ?? 0
+        let hasActive = (record["hasActive"] as? NSNumber)?.boolValue ?? false
+        let seq = (record["seq"] as? NSNumber)?.int64Value ?? 0
         let action = (record["action"] as? String) ?? ""
-        FocusSyncDiagnostics.shared.received(action: action, seq: seq, device: sourceDevice,
+        let newlyObserved = FocusSyncDiagnostics.shared.received(action: action, seq: seq, device: sourceDevice,
             sourceAt: updatedAt, now: now, seconds: requestSeconds, reason: reason,
             revision: record.recordChangeTag ?? "\(sourceDevice):\(seq):\(updatedAt.timeIntervalSince1970)")
+        if newlyObserved, !action.hasPrefix("tick") {
+            DevLog.shared.info("跟随", "收到另一台设备 \(action) · seq \(seq) · \(reason)")
+        }
         // 60 秒心跳；12 分钟无新状态停止展示。时钟超前明显时不伪装成零延迟。
         if updatedAt.timeIntervalSince(now) > 5 {
             FocusSyncDiagnostics.shared.failed("来源设备时间超前，请核对两端自动日期与时间；延迟测量含时钟偏差。")

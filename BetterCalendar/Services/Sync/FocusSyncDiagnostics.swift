@@ -29,14 +29,16 @@ final class FocusSyncDiagnostics {
     func read(at now: Date, seconds: Double) {
         lastRead = now; lastRequestSeconds = seconds; issue = nil
     }
+    @discardableResult
     func received(action: String, seq: Int64, device: String, sourceAt: Date,
-                  now: Date, seconds: Double, reason: String, revision: String) {
+                  now: Date, seconds: Double, reason: String, revision: String) -> Bool {
         // Re-reading the same record is not a new latency sample.
-        guard revision != lastRevision else { return }
+        guard revision != lastRevision else { return false }
         lastRevision = revision
         append(.init(direction: "received", action: action, sequence: seq, sourceDevice: device,
                      sourceAt: sourceAt, observedAt: now, requestSeconds: seconds,
                      apparentAgeSeconds: now.timeIntervalSince(sourceAt), trigger: reason))
+        return true
     }
     func sent(action: String, seq: Int64, device: String, sourceAt: Date, now: Date, seconds: Double) {
         lastWrite = now
@@ -80,6 +82,9 @@ nonisolated enum FocusSyncPolicy {
     static let staleAfter: TimeInterval = 720
     static func pollInterval(hasLocalRun: Bool, hasFollowedRun: Bool, hasPending: Bool) -> TimeInterval {
         hasLocalRun || hasFollowedRun || hasPending ? activePoll : idlePoll
+    }
+    static func shouldPublish(kind: String, hasActive: Bool) -> Bool {
+        hasActive || kind != "tick"
     }
     static func anchor(sampledAt: Date, elapsed: TimeInterval) -> Date {
         sampledAt.addingTimeInterval(-max(0, elapsed))

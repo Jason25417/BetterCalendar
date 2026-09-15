@@ -117,9 +117,11 @@ private func tintColor(_ s: ExecutionActivityAttributes.ContentState) -> Color {
 }
 
 private func statusLine(_ s: ExecutionActivityAttributes.ContentState) -> String {
-    if s.pausedAt != nil { return "休息中 · 已暂停" }
-    if s.mode == .pomodoro { return s.phaseIsRest ? "番茄钟 · 休息" : "番茄钟 · 专注" }
-    return "计时中"
+    let status: String
+    if s.pausedAt != nil { status = "休息中 · 已暂停" }
+    else if s.mode == .pomodoro { status = s.phaseIsRest ? "番茄钟 · 休息" : "番茄钟 · 专注" }
+    else { status = "计时中" }
+    return s.isRemote ? "另一台设备 · \(status)" : status
 }
 
 // MARK: - 预览
@@ -132,7 +134,7 @@ extension ExecutionActivityAttributes.ContentState {
     fileprivate static var light: Self {
         .init(title: "trans 移到 MQTT（Hotaru 项目）",
               timerStart: .now.addingTimeInterval(-25 * 60), pausedAt: nil,
-              mode: .light, phaseEndsAt: nil, phaseIsRest: false)
+              mode: .light, phaseEndsAt: nil, phaseIsRest: false, isRemote: false)
     }
     fileprivate static var pomodoro: Self {
         .init(title: "游戏自动化配置", timerStart: .now.addingTimeInterval(-5 * 60), pausedAt: nil,

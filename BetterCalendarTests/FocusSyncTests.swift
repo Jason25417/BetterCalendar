@@ -72,4 +72,30 @@ import Testing
         #expect(FocusSyncPolicy.pollInterval(hasLocalRun: true, hasFollowedRun: false, hasPending: false) == 5)
         #expect(FocusSyncPolicy.pollInterval(hasLocalRun: false, hasFollowedRun: false, hasPending: true) == 5)
     }
+
+    @Test func idleCatchUpNeverPublishesAFakeCompletion() {
+        #expect(!FocusSyncPolicy.shouldPublish(kind: "tick", hasActive: false))
+        #expect(FocusSyncPolicy.shouldPublish(kind: "complete", hasActive: false))
+        #expect(FocusSyncPolicy.shouldPublish(kind: "tick", hasActive: true))
+    }
+
+    @Test func followedRunProducesRemoteLiveActivityAndRefreshesOnNewRevision() {
+        let state = FollowRunState()
+        var changes = 0
+        state.onChange = { changes += 1 }
+        let first = FollowRunState.Run(title: "写作", sourceDevice: "mac", style: "pomodoro",
+                                       startedAt: t, updatedAt: t, seq: 10)
+        state.set(first)
+        let snapshot = first.liveActivitySnapshot
+        #expect(snapshot.title == "写作")
+        #expect(snapshot.timerStart == t)
+        #expect(snapshot.isRemote)
+        #expect(snapshot.mode == .light)
+
+        var next = first
+        next.seq = 11
+        next.startedAt = t.addingTimeInterval(5)
+        state.set(next)
+        #expect(changes == 2)
+    }
 }

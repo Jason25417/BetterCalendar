@@ -30,6 +30,8 @@ nonisolated struct ExecutionActivityAttributes: ActivityAttributes {
         var phaseEndsAt: Date?
         /// 番茄钟当前段是否为休息段。
         var phaseIsRest: Bool
+        /// 来自另一台设备的只读跟随态；Widget 用它明确来源，不改变计时口径。
+        var isRemote: Bool = false
     }
 
     enum Mode: String, Codable, Hashable { case light, pomodoro }

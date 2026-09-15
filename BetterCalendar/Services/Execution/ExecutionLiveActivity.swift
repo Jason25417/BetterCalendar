@@ -16,6 +16,8 @@ struct LiveActivitySnapshot {
     var mode: LiveActivityMode
     var phaseEndsAt: Date?     // 番茄段结束时刻（倒计时）
     var phaseIsRest: Bool
+    /// true when this phone is presenting another device's run rather than owning it.
+    var isRemote: Bool = false
 }
 
 enum LiveActivityMode { case light, pomodoro }

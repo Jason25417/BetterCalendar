@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.2", date: "2026-09", changes: [
+            "在另一台设备开始、暂停或结束一项日程后，本机的进行状态会随 CloudKit 状态更新；iPhone 同时在锁屏和灵动岛显示标题、来源与已用时间",
+            "空闲设备的定时补查不再误发“已结束”，避免它与真正计时的设备争抢状态",
+            "同步日志新增服务器接收与另一端收到的明确回执，方便区分发送、CloudKit 到达和界面展示三个环节",
+        ]),
         ChangelogEntry(version: "0.65.1", date: "2026-09", changes: [
             "跨端数据到达后自动刷新长期任务、日程与日记；设置里可检查账号、最近上传/收到数据的回执和错误",
             "日历对账更谨慎：读取失败时保持原数据，两边同时改动且无法判断先后时保留内容等待核对",

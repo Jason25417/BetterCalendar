@@ -22,6 +22,7 @@ final class ExecutionViewModel {
     private let planStore: PlanReading & ActualReading & ActualWriting
     private let reminderStore: ReminderStore
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
+    private var presentingFollowActivity = false
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
     private let persistsRunState: Bool                // 运行态快照开关（测试关：test host 与真 App 共享 UserDefaults，别互相污染）
     private let startedDays: StartedDayStore?         // 实时模式标记（0.23 A：首次开始一件事=进实时模式）；nil=不标
@@ -261,6 +262,25 @@ final class ExecutionViewModel {
         // 多端跟随（#30）：另一台设备的番茄也参与屏蔽（跟随=同一份预先承诺的延伸）
         ScreenTimeBlocker.shared.sync(shouldShield: working || FollowRunState.shared.shouldShield)
         #endif
+    }
+
+    /// 把另一台设备的只读运行态映射到本机锁屏/灵动岛；不创建 session、实际记录或日历事件。
+    /// 本机有 active 时始终由本机状态占据 Live Activity。
+    func syncFollowPresentation() {
+        updateScreenTimeShield()
+        guard active == nil else {
+            presentingFollowActivity = false
+            return
+        }
+        guard let followed = FollowRunState.shared.run else {
+            if presentingFollowActivity { liveActivity.end() }
+            presentingFollowActivity = false
+            return
+        }
+        let snapshot = followed.liveActivitySnapshot
+        if presentingFollowActivity { liveActivity.update(snapshot) }
+        else { liveActivity.start(snapshot) }
+        presentingFollowActivity = true
     }
 
     // MARK: - 读取今日
@@ -797,6 +817,7 @@ final class ExecutionViewModel {
         breakCount = 0
         persistRunState()
         refreshPreview(enteringLiveMode: true)
+        presentingFollowActivity = false
         if let s = liveSnapshot() { liveActivity.start(s) }
         exportFocusState(event: "start")   // 聪音：开始一件事→起番茄/专注
         syncFocusShortcut()

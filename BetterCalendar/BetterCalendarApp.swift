@@ -142,8 +142,9 @@ struct BetterCalendarApp: App {
             // 多端跟随（#30）：启动/回前台 catch-up（推送错过也收敛，同聪音对账哲学）+ 屏蔽联动接线
             .task {
                 FollowRunState.shared.onChange = { [execution = container.execution] in
-                    execution.updateScreenTimeShield()
+                    execution.syncFollowPresentation()
                 }
+                container.execution.syncFollowPresentation()
                 // #36：执行中不弹 toast（红线①）+ 点击直达成就页
                 AchievementToastCenter.shared.isBusy = { [execution = container.execution] in
                     execution.active != nil
