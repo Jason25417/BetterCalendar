@@ -11,10 +11,12 @@ files.activity v2包含目录覆盖状态、权限失败数、最多35件最新�
 - Mac新增4项Swift Testing全部通过。首次测试发现对符号链接调用skipDescendants会跳过兄弟目录；改为直接跳过链接后回归通过。
 - iOS Simulator条件编译通过。
 - 五个建议目录的CLI元数据扫描：三轮约0.61/0.47/0.27秒，35个最新候选；大目录partial-budget继续下一轮，不伪装完整。此CLI验证没有上传用户文件线索。
-- Mac Release archive、上传、ASC分发状态：进行中，完成后写回真实回执。
+- Mac Release archive成功；16:27:51 UTC上传成功，EXPORT SUCCEEDED，已核对归档版本0.65.4/161与bundle com.jason.BetterCalendar。ASC build 5454999b-2581-4994-8bf0-c4823cb03281已VALID、IN_BETA_TESTING；中文测试说明已写入并读回确认。外测仍READY_FOR_BETA_SUBMISSION，不表示App Store生产上架。代码commit 6dc0da7已push。
 
 ## 仍需实际设备验收
 
 iPhone保留已可用的0.65.3 (160)，本批只有Mac采集变化，不重复发布手机二进制。现有正式插件订阅/合成事件/Dot自动读取与ack已通过，服务16:25 UTC仍只有合成来源。尚需Mac/iPhone配置与OS权限；iPhone连接解锁后整理已安装App，逐个或按组配置个人自动化。全局App使用流不可因用户授权而假设存在。
 
 独立云端一分钟clock源码已准备，但Cloudflare当前未登录，尚未部署。Mac在线一分钟flush/手机事件可用，设备休眠后定时flush仍待云端账号。Computer Use拒绝访问BetterCalendar，需要实际应用访问权限或由用户手动设置。
+
+16:29 UTC：设备工具所列均为关闭的模拟器，没有可访问真机。Computer History state=stopped；resume返回必须先在Codex Settings启用，本轮未变更现有allow/blocklist。

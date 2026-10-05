@@ -13,6 +13,7 @@
 - [x] Mac文件采集4项新测试：递归与排除/符号链接、重叠去重与新旧排序、预算/无权限/输出截断、跨轮继续与完整扫描后的删除。
 - [x] 五个建议目录真实元数据扫描性能验证：三轮各约0.27–0.61秒；仅测试CLI，不是App采集或Dot的真实设备回执。
 - [x] Mac/iPhone 0.65.3 (160) 均VALID、IN_BETA_TESTING，中文测试说明已保存。
+- [x] Mac多目录更新0.65.4 (161)已VALID、IN_BETA_TESTING，中文测试说明写入后读回确认。
 - [x] 用户安装插件后，Codex正式调用read_instructions/read_connection_status/read_current_state成功（15:47 UTC）；只有过期合成状态，未收到真实设备观察。
 
 ## 真实设备与Dot

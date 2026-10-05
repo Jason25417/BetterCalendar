@@ -22,7 +22,7 @@ flowchart LR
 
 - 独立私有接收服务已上线：https://jason-state-bridge.jason25417.chatgpt.site 。当前账号以外不可访问；MCP工具和事件发现已发布。
 - 观察带设备ID、来源、schemaVersion、递增sequence、原发生时间、服务器收到时间及有效期。重复事件不重复记账，旧数据不覆盖新状态。
-- Mac/iPhone采集和快捷指令入口已写入0.65.3 (160)代码；来源方法、各平台限制和设置步骤见 [StateBridge说明](../StateBridge/README.md)。
+- Mac/iPhone采集和快捷指令入口已发布0.65.3 (160)；Mac多目录补充0.65.4 (161)已VALID、IN_BETA_TESTING；来源方法、各平台限制和设置步骤见 [StateBridge说明](../StateBridge/README.md)。
 - 开始/暂停/继续/结束计时独立持久化；暂停段不累计。用户说明、原始线索、推断分别存储，用户纠正保留历史。
 - 合成事件确认正式服务已接收并生成分钟批次。SQLite核心测试通过；Mac现有238项测试通过；iOS Simulator build通过。
 - 已向Dot交接工具与订阅合同，并提供「个人状态接入」插件连接入口。
@@ -31,7 +31,8 @@ flowchart LR
 
 - 用户已安装插件，正式读取成功。16:07 UTC修复Worker redirect兼容性后，state.minute_changed订阅建立并完成挑战验证；有效期至2026-10-12 16:07:59 UTC，自动续约另验收。
 - 16:10 UTC自动测试事件完成读取/理解/acknowledge_batch，全链路已验证；单次服务接收约1.7秒、模型处理约70秒。仍只有合成来源，真实设备采集、OS权限与持续延迟另验收。
-- 当前Computer Use明确未获准访问BetterCalendar，文件系统全访问不替代应用操作权限；需用户开放该App访问或自行完成设备设置。已配对的iPhone当前均未连接，未取得安装App清单。
+- 当前Computer Use明确未获准访问BetterCalendar，文件系统全访问不替代应用操作权限；需用户开放该App访问或自行完成设备设置。当前设备列表只有关闭的模拟器，未检测到可访问的真实iPhone；需真机连接并解锁后取得安装App清单。
+- Computer History 当前stopped；resume工具明确要求先在Codex Settings启用。既有观察默认全部允许，本轮未改设置或读取键盘/AX正文。
 - iOS后台采集频率由系统决定，HomeKit后台通知/远程中枢、FP2桌/床区域身份、手机自动化均需真机验收。
 - 当前分钟汇总由在线Mac的60秒循环及手机事件触发，没有独立云端一分钟调度器。所有设备都离线时不保证每分钟唤醒；读状态时立即标记过期。
 - 邮箱、云日历、Drive、GitHub由Dot复用既有连接，未另建全文复制库，不保证每个连接都支持一分钟事件。
