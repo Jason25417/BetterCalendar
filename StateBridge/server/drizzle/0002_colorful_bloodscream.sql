@@ -1,0 +1,1 @@
+ALTER TABLE `subscriptions` ADD `verified_at` text;

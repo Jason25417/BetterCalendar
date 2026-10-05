@@ -15,6 +15,13 @@
       "when": 1791213976356,
       "tag": "0001_narrow_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791214372505,
+      "tag": "0002_colorful_bloodscream",
+      "breakpoints": true
     }
   ]
 }

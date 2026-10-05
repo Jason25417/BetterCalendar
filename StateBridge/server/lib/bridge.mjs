@@ -1,8 +1,11 @@
+import { timingSafeEqual } from "node:crypto";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
 }
+export class CallbackEndpointError extends BridgeError { constructor(message,reason){super(message,502);this.reason=reason;} }
 const enc=new TextEncoder();
+const equal=(a,b)=>typeof a==="string"&&typeof b==="string"&&enc.encode(a).length===enc.encode(b).length&&timingSafeEqual(enc.encode(a),enc.encode(b));
 export function canonical(v){
   if(Array.isArray(v))return `[${v.map(canonical).join(",")}]`;
   if(v&&typeof v==="object")return `{${Object.keys(v).sort().map(k=>`${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
@@ -139,12 +142,22 @@ export function createBridge(db,{now=()=>new Date(),fetcher=fetch}={}){
   async function subscribe(v,ownerId){
     if(v.name!=="state.minute_changed"||v.delivery?.mode!=="webhook"||Object.keys(v.arguments??{}).length)throw new BridgeError("不支持的订阅");
     if(v.ttlMs!=null&&(!Number.isFinite(v.ttlMs)||v.ttlMs<1))throw new BridgeError("订阅有效期无效");
-    const callback=await validateCallback(v.delivery.url,fetcher);await signWebhook(v.delivery.secret,"validate","0","");
-    const id=`sub_${(await sha(canonical({ownerId,callback,name:v.name}))).slice(0,32)}`,challenge=b64(crypto.getRandomValues(new Uint8Array(32)));
-    const r=await sendSigned({id,callback,secret:v.delivery.secret},`verify_${crypto.randomUUID()}`,JSON.stringify({type:"verification",challenge}));
-    if(!r.ok||(await r.json()).challenge!==challenge)throw new BridgeError("回调验证失败",502);
+    await signWebhook(v.delivery.secret,"validate","0","");
+    let callback;try{callback=await validateCallback(v.delivery.url,fetcher);}catch{throw new CallbackEndpointError("回调地址验证失败","invalid_url");}
+    const id=`sub_${(await sha(canonical({ownerId,callback,name:v.name,arguments:{}}))).slice(0,32)}`;
+    const prior=await one("SELECT * FROM subscriptions WHERE id=?",id);
+    let verifiedAt=prior?.verified_at;
+    if(!prior||!equal(prior.secret,v.delivery.secret)||!verifiedAt||Date.parse(verifiedAt)<now().getTime()-300000){
+      const challenge=b64(crypto.getRandomValues(new Uint8Array(32)));
+      let r;
+      try{r=await sendSigned({id,callback,secret:v.delivery.secret},`verify_${crypto.randomUUID()}`,JSON.stringify({type:"verification",challenge}));}
+      catch(error){throw new CallbackEndpointError("回调验证连接失败",error?.name==="TimeoutError"?"timeout":"network_error");}
+      let echoed;try{const body=await r.text();if(body.length>32000)throw new Error();echoed=JSON.parse(body).challenge;}catch{throw new CallbackEndpointError("回调挑战没有有效响应","challenge_failed");}
+      if(!r.ok||!equal(echoed,challenge))throw new CallbackEndpointError("回调挑战验证失败","challenge_failed");
+      verifiedAt=time();
+    }
     const expiry=new Date(now().getTime()+Math.min(7*86400000,v.ttlMs??7*86400000)).toISOString();
-    await q("INSERT INTO subscriptions(id,owner_id,callback,secret,expires_at,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET secret=excluded.secret,expires_at=excluded.expires_at",id,ownerId,callback,v.delivery.secret,expiry,time()).run();
+    await q("INSERT INTO subscriptions(id,owner_id,callback,secret,expires_at,created_at,verified_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET secret=excluded.secret,expires_at=excluded.expires_at,verified_at=excluded.verified_at",id,ownerId,callback,v.delivery.secret,expiry,time(),verifiedAt).run();
     return {id,refreshBefore:expiry,cursor:null,truncated:false};
   }
   async function unsubscribe(v,ownerId){if(v.name!=="state.minute_changed"||typeof v.delivery?.url!=="string")throw new BridgeError("订阅参数无效");await q("DELETE FROM subscriptions WHERE owner_id=? AND callback=?",ownerId,v.delivery.url).run();return {};}

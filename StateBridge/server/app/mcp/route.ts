@@ -1,5 +1,5 @@
 import { service } from "@/lib/service";
-import { BridgeError } from "@/lib/bridge.mjs";
+import { BridgeError, CallbackEndpointError } from "@/lib/bridge.mjs";
 import { dotInstructions } from "@/lib/dot-instructions";
 export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
@@ -53,6 +53,6 @@ export async function POST(request:Request){
     return Response.json({jsonrpc:"2.0",id,error:{code:-32601,message:"未知方法"}});
   }catch(error){
     const message=error instanceof BridgeError?error.message:"接口暂不可用，请勿确认操作已完成";
-    return Response.json({jsonrpc:"2.0",id,error:{code:error instanceof BridgeError&&error.status===401?-32001:-32602,message}}, {status:error instanceof BridgeError&&error.status===401?401:200});
+    return Response.json({jsonrpc:"2.0",id,error:{code:error instanceof CallbackEndpointError?-32015:error instanceof BridgeError&&error.status===401?-32001:-32602,message,...(error instanceof CallbackEndpointError?{data:{reason:error.reason}}:{})}}, {status:error instanceof BridgeError&&error.status===401?401:200});
   }
 }
