@@ -18,23 +18,40 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>用 Face ID 解锁你的日记（隐私锁）</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>把你的计划写入一个专用「计划」日历(Dev)并读回做对比</string>
-	<key>NSHumanReadableCopyright</key>
-	<string></string>
-	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>把要紧事写进提醒事项并带提前提醒</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>执行你的专注快捷指令，或读取前台浏览器页面，为个人状态助手提供背景。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>把你的计划写入一个专用「计划」日历(Dev)并读回做对比</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>用 Face ID 解锁你的日记（隐私锁）</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>读取你的睡眠、步数与锻炼，为你自己的 Dot 助手提供生活状态。</string>
+	<key>NSHomeKitUsageDescription</key>
+	<string>读取你的家居存在传感器状态，帮助区分书桌与床边的活动线索。</string>
+	<key>NSHumanReadableCopyright</key>
+	<string></string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>应用未打开时接收明显地点变化与到访记录，避免要求你手动记录。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>了解你大致所在的地点，为个人生活建议提供背景。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>读取步行、骑行或乘车状态，为个人记录提供线索。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>把要紧事写进提醒事项并带提前提醒</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.jason.BetterCalendar.handoff</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
@@ -50,10 +67,6 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSUserActivityTypes</key>
-	<array>
-		<string>com.jason.BetterCalendar.handoff</string>
 	</array>
 </dict>
 </plist>

@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.3", date: "2026-10", changes: [
+            "个人状态内测：设置里可连接私有 Dot 接入服务；Mac 按分钟汇总应用、浏览器、日历、提醒事项与所选文件夹的变化",
+            "iPhone 新增健康、位置、运动与家居线索采集，并提供快捷指令动作；系统后台允许的更新周期会显示为数据新鲜度，不冒充持续在线",
+            "任务开始、暂停、继续与结束可交给 Dot 对话保存；明确计时和设备推断分别记录，断网保留待上传记录",
+        ]),
         ChangelogEntry(version: "0.65.2", date: "2026-09", changes: [
             "在另一台设备开始、暂停或结束一项日程后，本机的进行状态会随 CloudKit 状态更新；iPhone 同时在锁屏和灵动岛显示标题、来源与已用时间",
             "空闲设备的定时补查不再误发“已结束”，避免它与真正计时的设备争抢状态",

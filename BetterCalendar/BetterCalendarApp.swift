@@ -23,6 +23,8 @@ struct BetterCalendarApp: App {
     @UIApplicationDelegateAdaptor(IOSAppDelegate.self) private var iosDelegate
     #endif
 
+    init() { if !TestHost.isActive { StateBridgeCollector.shared.start() } }
+
     var body: some Scene {
         WindowGroup {
             themedRoot()
@@ -65,6 +67,7 @@ struct BetterCalendarApp: App {
             .tint(ThemeSettings.current.accent)
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
+            .task { StateBridgeCollector.shared.start(); await StateBridgeCollector.shared.sample() }
     }
 
     @ViewBuilder

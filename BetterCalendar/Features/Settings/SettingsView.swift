@@ -52,6 +52,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("个人状态与 Dot（内测）") { StateBridgeSettingsPanel() }
             Section("数据与同步（开发期）") { DataMaintenancePanel() }
             Section("云端排程大脑") {
                 Toggle("启用云端", isOn: $useCloud)
