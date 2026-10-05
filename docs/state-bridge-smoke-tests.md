@@ -10,6 +10,8 @@
 - [x] TypeScript检查和Worker构建。
 - [x] Mac项目238项单测通过；测试宿主不读Keychain/不启动采集器/不上传。
 - [x] iOS Simulator build成功。
+- [x] Mac/iPhone 0.65.3 (160) 均VALID、IN_BETA_TESTING，中文测试说明已保存。
+- [x] 用户安装插件后，Codex正式调用read_instructions/read_connection_status/read_current_state成功（15:47 UTC）；只有过期合成状态，未收到真实设备观察。
 
 ## 真实设备与Dot
 
