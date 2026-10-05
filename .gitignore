@@ -14,3 +14,7 @@ xcuserdata/
 .build/
 .swiftpm/
 dist/
+
+# StateBridge Worker/build helpers are source, not Xcode artifacts.
+!StateBridge/server/build/
+!StateBridge/server/build/**
