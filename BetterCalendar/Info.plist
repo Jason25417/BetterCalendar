@@ -30,6 +30,8 @@
 	<string>用 Face ID 解锁你的日记（隐私锁）</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>读取你的睡眠、步数与锻炼，为你自己的 Dot 助手提供生活状态。</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>个人状态助手当前只读取健康线索，为你的日程建议提供背景；不会写入或修改健康记录。</string>
 	<key>NSHomeKitUsageDescription</key>
 	<string>读取你的家居存在传感器状态，帮助区分书桌与床边的活动线索。</string>
 	<key>NSHumanReadableCopyright</key>
