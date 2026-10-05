@@ -1,0 +1,9 @@
+{
+  "name": "jason-personal-state-clock",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-05",
+  "workers_dev": false,
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "STATE_BRIDGE_ORIGIN": "https://jason-state-bridge.jason25417.chatgpt.site" },
+  "observability": { "enabled": true }
+}
