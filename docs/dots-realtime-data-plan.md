@@ -58,3 +58,9 @@ Jason要求iPhone覆盖所有游戏、社交、工作学习与常用App，具体
 - [EventKit访问](https://developer.apple.com/documentation/EventKit/accessing-the-event-store)：日历/提醒事项原生权限。
 
 每项数据以“代码实现／系统已授权／收到真实数据／Dot已处理”分别验收，最后以用户实际不用手动维护记录而得到有用建议为准。
+
+## 2026-10-05 18:00 UTC 设备设置交接
+
+Jason已取得并提供iPhone设备配置，服务确认该设备登记；目前尚无真实iPhone观察。只在App粘贴保存、启用并接受OS权限后才开始采集。用户当前只有手机，其余Mac权限等回到电脑操作。
+
+Cloudflare复用Sotto/Scritto的现有账号；本机Wrangler仍未登录，因此独立分钟clock未部署。clock已用无个人来源权限的独立设备登记，连接配置以0600留在本机Application Support，不入Git/记忆；凭据不在本报告重复。
