@@ -62,6 +62,6 @@ D1迁移使用Drizzle增量SQL；已经部署的迁移不改写。服务记录ob
 - 核心SQLite测试：重复/乱序/过期恢复、幂等计时与并发版本、分钟批次/签名重试、纠正保留历史。
 - `cd server && node --test tests/bridge.test.mjs`；`npx tsc --noEmit`。
 - Mac项目门控与iOS Simulator build均需通过；真机的系统权限、电量、后台时效不由编译结果证明。
-- 服务已私有发布；合成事件已确认服务器接收和批次生成。到Dot模型处理的完整链路仍须连接后出现acknowledge_batch回执。
+- 服务已私有发布；正式订阅、挑战验证、合成事件发送和Dot自动读取/理解/acknowledge_batch已确认。单次回调接收约1.7秒、模型处理约70秒；真实设备覆盖、后台延迟与续约仍待实测。
 
 `tools/provision.py`只做私有上传链路登记/合成测试，凭据通过隐藏stdin，不写Git或日志。临时配置文件权限0600，App运行凭据存Keychain。Sites独立源码仓库负责云服务发布；本项目保留其可重复构建的源码副本，排除嵌套Git、依赖和运行目录。

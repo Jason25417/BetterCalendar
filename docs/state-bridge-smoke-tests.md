@@ -15,8 +15,11 @@
 
 ## 真实设备与Dot
 
-- [ ] 同一账户连接「个人状态接入」，Dot调用read_instructions/read_connection_status成功。
-- [ ] Dot订阅state.minute_changed；挑战验证成功，refreshBefore续约正常。
+- [x] 同一账户连接「个人状态接入」，Dot读取约定/连接状态，Codex正式插件读取成功。
+- [x] Dot订阅state.minute_changed；挑战验证成功，服务端有效订阅已保存（16:07:59 UTC）。
+- [ ] refreshBefore自动续约正常；当前有效期至2026-10-12 16:07:59 UTC。
+- [x] 合成批次minute_29853609经正式订阅送达，16:09:28 UTC回调接收成功，attempts=1；这不是分析完成回执。
+- [x] 同一自动事件触发Dot依次read_instructions、read_current_state、read_changes，再acknowledge_batch；16:10:36 UTC持久化处理回执。单次从批次生成到接收约1.7秒，到理解完成约70秒，不保证每次一分钟内完成。
 - [ ] Mac/iPhone分别从私有网页复制配置，保存到Keychain，接受系统权限。
 - [ ] mac.activity真实观察到达；切App/进入idle的发生时间和收到时间能对齐。
 - [ ] 每个有变化的分钟收到批次；同一批次重试不重复记账；Dot完成处理后出现acknowledge_batch。

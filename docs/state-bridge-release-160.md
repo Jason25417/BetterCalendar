@@ -23,4 +23,10 @@ Mac/iPhone还需从私有网页复制配置到App，开启并授予系统权限�
 
 16:05 UTC日志确认真正根因：Worker fetch不接受redirect:error，DNS调用先抛TypeError。16:07 UTC源码`1e23a491008f4a5f77924d59012ad5a9a6ac21cd`部署`appgdep_6ac3cb29184c819184b8e77f6bf3b0bd` succeeded。DNS/签名挑战/事件发送改为manual并显式拒绝3xx；公开地址与HTTPS校验保留。新增DNS/receiver跳转回归，SQLite5/5、TypeScript、Worker构建通过。尚未部署的分钟时钟同样修正，Wrangler dry-run通过；正式事件验收继续。
 
+16:07:59 UTC正式订阅`sub_bc14c0dce362662ebe7015f19924ef7e`创建成功，有效期至2026-10-12 16:07:59 UTC；续约待实测。16:09:26 UTC合成测试批次`minute_29853609`生成，activeSubscriptions=1；16:09:28 UTC正式回调status=received、attempts=1、last_error为空。设备真实数据仍未收到，测试批次的processed_at当时为空，不能把回调接收等同于模型完成分析。
+
+16:10:36.560 UTC同一批次processed_at已保存。Dot自动事件回合`01a10cd3-f9d5-77f0-95f9-7b1e7aeb71ba`先读约定、最新状态与完整变化，再acknowledge_batch成功，未生成真实活动记录。由批次生成16:09:26.570 UTC计算：回调接收1.696秒，处理确认69.990秒。此为单次合成链路验收，不代表后台真实源覆盖或持续延迟保证。
+
+16:11 UTC再次尝试Mac Computer Use，工具明确返回未获准访问BetterCalendar，未操作App配置。后续需用户开放该App的电脑操作权限，或手动在设备内连接、启用采集并确认OS权限；不因文件系统全访问而绕过App访问限制。
+
 独立云端分钟时钟源码在StateBridge/clock，Wrangler dry-run已通过，但Cloudflare CLI当前未连接，尚未部署。Mac在线的60秒循环与手机事件触发仍可转发；不承诺设备离线时独立主动唤醒。不能把iOS后台采集改成固定分钟计时器。
