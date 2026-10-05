@@ -17,11 +17,12 @@ const tools=[
 ];
 const event={name:"state.minute_changed",description:"按分钟汇总全部有变化的个人状态；先读最新状态，再静默理解，只有必要时问或建议。",delivery:["webhook"],inputSchema:object(),payloadSchema:{type:"object",properties:{schemaVersion:{type:"integer"},readLatestState:{type:"boolean"},fromChangeId:{type:"integer"},throughChangeId:{type:"integer"},changes:{type:"array",items:{type:"object"}},omittedCount:{type:"integer"}},required:["schemaVersion","readLatestState","fromChangeId","throughChangeId","changes","omittedCount"],additionalProperties:false}};
 export async function POST(request:Request){
-  let id:unknown=null;
+  let id:unknown=null,methodForLog="unknown";
   try{
     const raw=await request.text();if(new TextEncoder().encode(raw).length>256*1024)throw new BridgeError("请求过大",413);
     const rpc=JSON.parse(raw);id=rpc.id??null;
     const p=rpc.params??{},method=rpc.method;
+    if(["initialize","notifications/initialized","ping","server/discover","tools/list","events/list","events/subscribe","events/unsubscribe","tools/call"].includes(method))methodForLog=method;
     const result=(value:unknown)=>Response.json({jsonrpc:"2.0",id,result:value});
     if(method==="initialize")return result({protocolVersion:"2026-07-28",capabilities:{tools:{},events:{}},serverInfo:{name:"personal-state-bridge",version:"0.1.0"},instructions:"个人状态数据与持久化计时；先调用 read_instructions。"});
     if(method==="notifications/initialized")return new Response(null,{status:202});
@@ -53,6 +54,9 @@ export async function POST(request:Request){
     return Response.json({jsonrpc:"2.0",id,error:{code:-32601,message:"未知方法"}});
   }catch(error){
     const message=error instanceof BridgeError?error.message:"接口暂不可用，请勿确认操作已完成";
+    // Only protocol labels and categorized failures: never arguments, identities,
+    // callback URLs, tokens, challenges, or device observations.
+    console.warn("state-bridge-mcp-error",{method:methodForLog,kind:error instanceof CallbackEndpointError?"callback":error instanceof BridgeError?"request":"internal",status:error instanceof BridgeError?error.status:500,reason:error instanceof CallbackEndpointError?error.reason:undefined});
     return Response.json({jsonrpc:"2.0",id,error:{code:error instanceof CallbackEndpointError?-32015:error instanceof BridgeError&&error.status===401?-32001:-32602,message,...(error instanceof CallbackEndpointError?{data:{reason:error.reason}}:{})}}, {status:error instanceof BridgeError&&error.status===401?401:200});
   }
 }

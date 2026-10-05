@@ -15,4 +15,8 @@
 
 Mac/iPhone还需从私有网页复制配置到App，开启并授予系统权限；iPhone的App/Focus状态另配置快捷指令个人自动化。到Dot实际处理的全链路以acknowledge_batch为证据，目前尚未确认真实设备状态或正式订阅。
 
+15:51 UTC，Dot正式创建事件自动化两次，均仅返回`task service unexpected error`，没有error code/data.reason。服务端订阅仍为空，不能宣称自动推送启用。另已确认本机安装Mac160，但Computer Use读取界面失败，未代操作本地设置。网页在缺少用户ID时有401；为此新增平台登录入口，未接受邮箱、服务凭据或自定义用户头替代稳定的登录用户ID。MCP失败诊断只记录方法、错误类别/状态与reason，不记录身份、回调地址、密钥或观察内容。
+
+15:55 UTC，诊断/网页登录补丁源码`391a0a368387de3cc5309643ea0aac4ff7a04572`部署`appgdep_6ac3c852c284819184c0c8d4b02af687` succeeded，保留私有访问与env revision1。核心SQLite 4/4、TypeScript与Worker构建再次通过；已交接Dot作正式订阅重试。无需新TestFlight构建。
+
 独立云端分钟时钟源码在StateBridge/clock，Wrangler dry-run已通过，但Cloudflare CLI当前未连接，尚未部署。Mac在线的60秒循环与手机事件触发仍可转发；不承诺设备离线时独立主动唤醒。不能把iOS后台采集改成固定分钟计时器。
