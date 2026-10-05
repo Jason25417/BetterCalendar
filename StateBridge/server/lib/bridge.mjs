@@ -22,7 +22,7 @@ export async function signWebhook(secret,id,time,body){
   const key=await crypto.subtle.importKey("raw",bytes,{name:"HMAC",hash:"SHA-256"},false,["sign"]);
   return `v1,${b64(new Uint8Array(await crypto.subtle.sign("HMAC",key,enc.encode(`${id}.${time}.${body}`))))}`;
 }
-export async function validateCallback(value,fetcher=fetch){
+export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch(...args)){
   let u;try{u=new URL(value);}catch{throw new BridgeError("回调地址无效");}
   const host=u.hostname.toLowerCase();
   if(u.protocol!=="https:"||u.username||u.password||u.hash||(u.port&&u.port!=="443")||!["openai.com","chatgpt.com"].some(d=>host===d||host.endsWith(`.${d}`)))throw new BridgeError("仅接受 OpenAI 或 ChatGPT 的公开 HTTPS 回调");
@@ -38,7 +38,7 @@ export async function validateCallback(value,fetcher=fetch){
   }
   if(!addresses)throw new BridgeError("回调没有公开地址");return u.toString();
 }
-export function createBridge(db,{now=()=>new Date(),fetcher=fetch}={}){
+export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args)}={}){
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   async function registerDevice(v){
@@ -143,7 +143,14 @@ export function createBridge(db,{now=()=>new Date(),fetcher=fetch}={}){
     if(v.name!=="state.minute_changed"||v.delivery?.mode!=="webhook"||Object.keys(v.arguments??{}).length)throw new BridgeError("不支持的订阅");
     if(v.ttlMs!=null&&(!Number.isFinite(v.ttlMs)||v.ttlMs<1))throw new BridgeError("订阅有效期无效");
     await signWebhook(v.delivery.secret,"validate","0","");
-    let callback;try{callback=await validateCallback(v.delivery.url,fetcher);}catch{throw new CallbackEndpointError("回调地址验证失败","invalid_url");}
+    let callback;try{callback=await validateCallback(v.delivery.url,fetcher);}catch(error){
+      let hostname;try{hostname=new URL(v.delivery.url).hostname;}catch{}
+      // A public hostname and our own fixed validation label locate integration
+      // failures without exposing the callback path, secret or request body.
+      const known=["回调地址无效","仅接受 OpenAI 或 ChatGPT 的公开 HTTPS 回调","无法验证回调 DNS","回调 DNS 无效","回调不能指向私有地址","回调没有公开地址"];
+      console.warn("state-bridge-callback-rejected",{hostname,validation:known.includes(error?.message)?error.message:"DNS请求失败",failureType:error?.name,...(!known.includes(error?.message)?{dnsFailure:String(error?.message??"unknown").slice(0,200)}:{})});
+      throw new CallbackEndpointError("回调地址验证失败","invalid_url");
+    }
     const id=`sub_${(await sha(canonical({ownerId,callback,name:v.name,arguments:{}}))).slice(0,32)}`;
     const prior=await one("SELECT * FROM subscriptions WHERE id=?",id);
     let verifiedAt=prior?.verified_at;

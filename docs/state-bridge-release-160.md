@@ -19,4 +19,6 @@ Mac/iPhone还需从私有网页复制配置到App，开启并授予系统权限�
 
 15:55 UTC，诊断/网页登录补丁源码`391a0a368387de3cc5309643ea0aac4ff7a04572`部署`appgdep_6ac3c852c284819184c0c8d4b02af687` succeeded，保留私有访问与env revision1。核心SQLite 4/4、TypeScript与Worker构建再次通过；已交接Dot作正式订阅重试。无需新TestFlight构建。
 
+正式重试确认events/subscribe到达服务，reason=invalid_url。进一步定位为公开回调主机connectors.api.openai.com的DNS请求异常，未将其误报为非法地址。16:04 UTC，默认fetch改为globalThis方法调用后，源码`0f7ba8ecef7e91ebeba19c352f273944413ddfba`部署`appgdep_6ac3ca6b0ee481919d93de93d072afdd` succeeded，地址校验保留，SQLite4/4、TypeScript和Worker构建通过；仍需正式重试确认效果。
+
 独立云端分钟时钟源码在StateBridge/clock，Wrangler dry-run已通过，但Cloudflare CLI当前未连接，尚未部署。Mac在线的60秒循环与手机事件触发仍可转发；不承诺设备离线时独立主动唤醒。不能把iOS后台采集改成固定分钟计时器。
