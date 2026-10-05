@@ -7,10 +7,10 @@ function fixture(){
  const sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){return sqlite.prepare(sql).run(...args);}};}
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const r=ops.map(o=>o.run());sqlite.exec('COMMIT');return r;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
- let clock=new Date('2026-10-05T12:00:00Z'),posts=[],fail=false;
- const fetcher=async(url,opts)=>{if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});posts.push({url,...opts});if(fail)return new Response('',{status:503});let data=JSON.parse(opts.body);return Response.json(data.type==='verification'?{challenge:data.challenge}:{});};
+ let clock=new Date('2026-10-05T12:00:00Z'),posts=[],fail=false,redirectReceiver=false;
+ const fetcher=async(url,opts)=>{assert.equal(opts.redirect,'manual','edge-compatible redirect mode');if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});posts.push({url,...opts});if(redirectReceiver)return new Response('',{status:302,headers:{Location:'https://127.0.0.1/private'}});if(fail)return new Response('',{status:503});let data=JSON.parse(opts.body);return Response.json(data.type==='verification'?{challenge:data.challenge}:{});};
  const core=createBridge(db,{now:()=>clock,fetcher});
- return {core,sqlite,posts,advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},time(){return clock.toISOString();}};
+ return {core,sqlite,posts,advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},setReceiverRedirect(v){redirectReceiver=v;},time(){return clock.toISOString();}};
 }
 const obs=(seq,value,f,extra={})=>({schemaVersion:1,eventId:`test-${seq}`,source:'mac.activity',sequence:seq,observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+90000).toISOString(),assertion:'observed',value,...extra});
 async function device(f){const d=await f.core.registerDevice({id:'mac',label:'test',scopes:['mac.activity']});return f.core.authenticateDevice(d.token);}
@@ -47,4 +47,17 @@ test('correction supersedes inference without removing history',async()=>{
  const f=fixture();await f.core.recordNote({id:'guess',kind:'activity',body:{state:'rest'},assertion:'inferred',confidence:'low',basis:['sensor:test']});
  await f.core.recordNote({id:'correction',kind:'activity',body:{state:'reading'},assertion:'user',confidence:'high',basis:[],supersedes:'guess'});
  assert.equal((await f.core.readState()).notes.length,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,2);
+});
+test('DNS and receiver redirects cannot bypass callback checks on Workers',async()=>{
+ const f=fixture(),secret='whsec_'+Buffer.alloc(32,9).toString('base64');
+ await assert.rejects(validateCallback('https://connectors.api.openai.com/',async(_url,options)=>{assert.equal(options.redirect,'manual');return new Response('',{status:302,headers:{Location:'https://127.0.0.1/private'}});}),/无法验证回调 DNS/);
+ f.setReceiverRedirect(true);
+ await assert.rejects(f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://connectors.api.openai.com/callback',secret}},'owner'),error=>error.reason==='invalid_url');
+ assert.equal(f.posts.length,1);
+ assert.equal((await f.core.diagnostics()).subscriptions.length,0);
+ f.setReceiverRedirect(false);await f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://connectors.api.openai.com/callback',secret}},'owner');
+ await f.core.ingest({observations:[obs(1,'editor',f)]},await device(f));f.setReceiverRedirect(true);
+ assert.equal((await f.core.flush()).delivered,0);
+ assert.equal((await f.core.diagnostics()).deliveries[0].status,'pending');
+ assert.ok(f.posts.every(p=>p.url.startsWith('https://connectors.api.openai.com/')));
 });

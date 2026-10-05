@@ -6,7 +6,7 @@
 
 - [x] 私有服务正式部署成功，保留owner-private访问。
 - [x] 合成观察正式上传被接受，分钟批次生成；此时activeSubscriptions=0，不是Dot处理回执。
-- [x] SQLite核心测试4/4：重复/乱序、计时重试/暂停、过期恢复、签名回调重试、纠正保留历史。
+- [x] SQLite核心测试5/5：重复/乱序、计时重试/暂停、过期恢复、签名回调重试、纠正保留历史；Worker支持manual并拒绝DNS/receiver的3xx跳转。
 - [x] TypeScript检查和Worker构建。
 - [x] Mac项目238项单测通过；测试宿主不读Keychain/不启动采集器/不上传。
 - [x] iOS Simulator build成功。

@@ -28,7 +28,7 @@ export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch
   if(u.protocol!=="https:"||u.username||u.password||u.hash||(u.port&&u.port!=="443")||!["openai.com","chatgpt.com"].some(d=>host===d||host.endsWith(`.${d}`)))throw new BridgeError("仅接受 OpenAI 或 ChatGPT 的公开 HTTPS 回调");
   let addresses=0;
   for(const type of ["A","AAAA"]){
-    const r=await fetcher(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`,{headers:{Accept:"application/dns-json"},redirect:"error",signal:AbortSignal.timeout(5000)});
+    const r=await fetcher(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`,{headers:{Accept:"application/dns-json"},redirect:"manual",signal:AbortSignal.timeout(5000)});
     if(!r.ok)throw new BridgeError("无法验证回调 DNS");const a=await r.json();
     if(a.Status!==0)throw new BridgeError("回调 DNS 无效");
     for(const x of a.Answer??[]){
@@ -137,7 +137,10 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   }
   async function sendSigned(s,id,body){
     await validateCallback(s.callback,fetcher);const timestamp=Math.floor(now().getTime()/1000).toString();
-    return fetcher(s.callback,{method:"POST",redirect:"error",signal:AbortSignal.timeout(10000),headers:{"Content-Type":"application/json","webhook-id":id,"webhook-timestamp":timestamp,"webhook-signature":await signWebhook(s.secret,id,timestamp,body),"X-MCP-Subscription-Id":s.id},body});
+    // Workers supports manual/follow; manual returns redirects without following.
+    const response=await fetcher(s.callback,{method:"POST",redirect:"manual",signal:AbortSignal.timeout(10000),headers:{"Content-Type":"application/json","webhook-id":id,"webhook-timestamp":timestamp,"webhook-signature":await signWebhook(s.secret,id,timestamp,body),"X-MCP-Subscription-Id":s.id},body});
+    if(response.status>=300&&response.status<400)throw new CallbackEndpointError("回调不能跳转","invalid_url");
+    return response;
   }
   async function subscribe(v,ownerId){
     if(v.name!=="state.minute_changed"||v.delivery?.mode!=="webhook"||Object.keys(v.arguments??{}).length)throw new BridgeError("不支持的订阅");
@@ -158,7 +161,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
       const challenge=b64(crypto.getRandomValues(new Uint8Array(32)));
       let r;
       try{r=await sendSigned({id,callback,secret:v.delivery.secret},`verify_${crypto.randomUUID()}`,JSON.stringify({type:"verification",challenge}));}
-      catch(error){throw new CallbackEndpointError("回调验证连接失败",error?.name==="TimeoutError"?"timeout":"network_error");}
+      catch(error){if(error instanceof CallbackEndpointError)throw error;throw new CallbackEndpointError("回调验证连接失败",error?.name==="TimeoutError"?"timeout":"network_error");}
       let echoed;try{const body=await r.text();if(body.length>32000)throw new Error();echoed=JSON.parse(body).challenge;}catch{throw new CallbackEndpointError("回调挑战没有有效响应","challenge_failed");}
       if(!r.ok||!equal(echoed,challenge))throw new CallbackEndpointError("回调挑战验证失败","challenge_failed");
       verifiedAt=time();

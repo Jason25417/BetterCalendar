@@ -21,4 +21,6 @@ Mac/iPhone还需从私有网页复制配置到App，开启并授予系统权限�
 
 正式重试确认events/subscribe到达服务，reason=invalid_url。进一步定位为公开回调主机connectors.api.openai.com的DNS请求异常，未将其误报为非法地址。16:04 UTC，默认fetch改为globalThis方法调用后，源码`0f7ba8ecef7e91ebeba19c352f273944413ddfba`部署`appgdep_6ac3ca6b0ee481919d93de93d072afdd` succeeded，地址校验保留，SQLite4/4、TypeScript和Worker构建通过；仍需正式重试确认效果。
 
+16:05 UTC日志确认真正根因：Worker fetch不接受redirect:error，DNS调用先抛TypeError。16:07 UTC源码`1e23a491008f4a5f77924d59012ad5a9a6ac21cd`部署`appgdep_6ac3cb29184c819184b8e77f6bf3b0bd` succeeded。DNS/签名挑战/事件发送改为manual并显式拒绝3xx；公开地址与HTTPS校验保留。新增DNS/receiver跳转回归，SQLite5/5、TypeScript、Worker构建通过。尚未部署的分钟时钟同样修正，Wrangler dry-run通过；正式事件验收继续。
+
 独立云端分钟时钟源码在StateBridge/clock，Wrangler dry-run已通过，但Cloudflare CLI当前未连接，尚未部署。Mac在线的60秒循环与手机事件触发仍可转发；不承诺设备离线时独立主动唤醒。不能把iOS后台采集改成固定分钟计时器。
