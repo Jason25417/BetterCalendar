@@ -1,4 +1,4 @@
-# 0.65.3 (160) 个人状态接入验收
+# 个人状态接入验收（160 / Mac 161）
 
 2026-10-05。此表区分代码验证与真实使用，不把编译或上传当作采集成功。
 
@@ -9,7 +9,9 @@
 - [x] SQLite核心测试5/5：重复/乱序、计时重试/暂停、过期恢复、签名回调重试、纠正保留历史；Worker支持manual并拒绝DNS/receiver的3xx跳转。
 - [x] TypeScript检查和Worker构建。
 - [x] Mac项目238项单测通过；测试宿主不读Keychain/不启动采集器/不上传。
-- [x] iOS Simulator build成功。
+- [x] iOS Simulator build成功（161源码条件编译也通过）。
+- [x] Mac文件采集4项新测试：递归与排除/符号链接、重叠去重与新旧排序、预算/无权限/输出截断、跨轮继续与完整扫描后的删除。
+- [x] 五个建议目录真实元数据扫描性能验证：三轮各约0.27–0.61秒；仅测试CLI，不是App采集或Dot的真实设备回执。
 - [x] Mac/iPhone 0.65.3 (160) 均VALID、IN_BETA_TESTING，中文测试说明已保存。
 - [x] 用户安装插件后，Codex正式调用read_instructions/read_connection_status/read_current_state成功（15:47 UTC）；只有过期合成状态，未收到真实设备观察。
 
@@ -21,6 +23,7 @@
 - [x] 合成批次minute_29853609经正式订阅送达，16:09:28 UTC回调接收成功，attempts=1；这不是分析完成回执。
 - [x] 同一自动事件触发Dot依次read_instructions、read_current_state、read_changes，再acknowledge_batch；16:10:36 UTC持久化处理回执。单次从批次生成到接收约1.7秒，到理解完成约70秒，不保证每次一分钟内完成。
 - [ ] Mac/iPhone分别从私有网页复制配置，保存到Keychain，接受系统权限。
+- [ ] Mac多选目录授权后，files.activity v2真实数据到达；扫描不完整不得推断未活动。
 - [ ] mac.activity真实观察到达；切App/进入idle的发生时间和收到时间能对齐。
 - [ ] 每个有变化的分钟收到批次；同一批次重试不重复记账；Dot完成处理后出现acknowledge_batch。
 - [ ] iPhone睡眠/步数/锻炼读取结果；拒绝读取或缺少样本时显示未知而非没有活动。

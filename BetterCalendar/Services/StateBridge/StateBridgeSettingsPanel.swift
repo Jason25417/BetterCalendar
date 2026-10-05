@@ -4,6 +4,9 @@ struct StateBridgeSettingsPanel: View {
     @State private var credentials = ""
     @State private var enabled = StateBridgeCollector.shared.enabled
     @State private var error: String?
+    #if os(macOS)
+    @State private var folderCount = StateBridgeCollector.shared.selectedFolderCount
+    #endif
     private let client = StateBridgeClient.shared
     var body: some View {
         VStack(alignment:.leading,spacing:10) {
@@ -15,7 +18,8 @@ struct StateBridgeSettingsPanel: View {
             }
             Toggle("启用个人状态采集",isOn:$enabled).onChange(of:enabled) { _,value in StateBridgeCollector.shared.setEnabled(value) }
             #if os(macOS)
-            Button("选择要观察的文件夹…") { StateBridgeCollector.shared.chooseFilesFolder() }.disabled(!client.configured)
+            Button("选择要观察的文件夹（可多选）…") { StateBridgeCollector.shared.chooseFilesFolder(); folderCount = StateBridgeCollector.shared.selectedFolderCount }.disabled(!client.configured)
+            Text("已选择 \(folderCount) 个目录；包含子文件夹，排除缓存、依赖和凭据。推荐：学习、Developer、Documents、Desktop、Downloads。 ").font(.caption).foregroundStyle(.secondary)
             Button("选择 Computer History 数据目录…") { StateBridgeCollector.shared.chooseHistoryFolder() }.disabled(!client.configured)
             Text("Mac 在线时每分钟上传变化；浏览器首次读取会请求 Automation 权限。文件只读取名称与修改时间。")
             #else

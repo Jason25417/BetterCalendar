@@ -3,6 +3,7 @@ import EventKit
 #if os(macOS)
 import AppKit
 import CoreGraphics
+import CryptoKit
 #endif
 
 @MainActor final class StateBridgeCollector {
@@ -76,7 +77,8 @@ import CoreGraphics
                 } else { client.emit("mac.browser",value:.object(["availability":.string("permission-or-browser-unavailable")])) }
             } else { client.emit("mac.browser",value:.object(["availability":.string("not-frontmost")])) }
         }
-        sampleFiles()
+        await sampleFiles()
+        guard enabled else { return }
         sampleHistory()
         #endif
         if EKEventStore.authorizationStatus(for:.event) == .fullAccess {
@@ -137,20 +139,54 @@ import CoreGraphics
             }
         } catch { StateBridgeClient.shared.emit("mac.history",value:.object(["availability":.string("history-directory-unavailable")]),validFor:180) }
     }
-    func chooseFilesFolder() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url, let bookmark = try? url.bookmarkData(options:.withSecurityScope,includingResourceValuesForKeys:nil,relativeTo:nil) { UserDefaults.standard.set(bookmark,forKey:"dotStateBridge.folder") }
+    var selectedFolderCount: Int { fileBookmarks.count }
+    private var fileBookmarks: [Data] {
+        if let bookmarks = UserDefaults.standard.array(forKey:"dotStateBridge.folders") as? [Data] { return bookmarks }
+        return UserDefaults.standard.data(forKey:"dotStateBridge.folder").map { [$0] } ?? []
     }
-    private func sampleFiles() {
-        guard let bookmark = UserDefaults.standard.data(forKey:"dotStateBridge.folder") else { return }
+    func chooseFilesFolder() {
+        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
+        panel.message = "可多选学习、开发、文档、桌面与下载目录（最多12个）；包括子文件夹，只读取名称与修改时间。"
+        guard panel.runModal() == .OK else { return }
         do {
-            var stale = false; let url = try URL(resolvingBookmarkData:bookmark,options:.withSecurityScope,relativeTo:nil,bookmarkDataIsStale:&stale)
-            guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }; defer { url.stopAccessingSecurityScopedResource() }
-            let keys: Set<URLResourceKey> = [.contentModificationDateKey,.isRegularFileKey]
-            let children = try FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:Array(keys),options:[.skipsHiddenFiles])
-            let recent = try children.compactMap { child -> (String,Date)? in let v = try child.resourceValues(forKeys:keys); guard v.isRegularFile == true, let date = v.contentModificationDate else { return nil }; return (child.lastPathComponent,date) }.sorted { $0.1 > $1.1 }.prefix(30)
-            let f = ISO8601DateFormatter(); StateBridgeClient.shared.emit("files.activity",value:.array(recent.map { .object(["name":.string($0.0),"modifiedAt":.string(f.string(from:$0.1))]) }),validFor:3600)
-        } catch { StateBridgeClient.shared.emit("files.activity",value:.object(["availability":.string("folder-unavailable")]),validFor:3600) }
+            let bookmarks = try panel.urls.prefix(12).map { try $0.bookmarkData(options:.withSecurityScope,includingResourceValuesForKeys:nil,relativeTo:nil) }
+            UserDefaults.standard.set(bookmarks,forKey:"dotStateBridge.folders")
+        } catch {
+            DevLog.shared.warn("StateBridge", "无法保存所选文件夹权限；原配置保留。")
+            StateBridgeClient.shared.emit("files.activity",value:.object(["availability":.string("folder-selection-failed")]),validFor:3600)
+        }
+    }
+    private func sampleFiles() async {
+        let bookmarks = fileBookmarks
+        guard !bookmarks.isEmpty else {
+            StateBridgeClient.shared.emit("files.activity",value:.object(["availability":.string("not-configured")]),validFor:3600)
+            return
+        }
+        var roots: [URL] = [], refreshed = bookmarks, unavailable = 0
+        for (index, bookmark) in bookmarks.prefix(12).enumerated() {
+            do {
+                var stale = false
+                let url = try URL(resolvingBookmarkData:bookmark,options:.withSecurityScope,relativeTo:nil,bookmarkDataIsStale:&stale)
+                guard url.startAccessingSecurityScopedResource() else { unavailable += 1; continue }
+                roots.append(url)
+                if stale, let updated = try? url.bookmarkData(options:.withSecurityScope,includingResourceValuesForKeys:nil,relativeTo:nil) { refreshed[index] = updated }
+            } catch { unavailable += 1 }
+        }
+        defer { roots.forEach { $0.stopAccessingSecurityScopedResource() } }
+        if refreshed != bookmarks { UserDefaults.standard.set(refreshed,forKey:"dotStateBridge.folders") }
+        let accessibleRoots = roots
+        let snapshot = await StateBridgeFileMonitor.shared.scan(roots:accessibleRoots)
+        guard enabled else { return }
+        let f = ISO8601DateFormatter()
+        StateBridgeClient.shared.emit("files.activity",value:.object([
+            "schemaVersion":.number(2),
+            "availability":.string(roots.isEmpty ? "unavailable" : unavailable > 0 ? "partial" : "available"),
+            "unavailableRoots":.number(Double(unavailable)),
+            "roots":.array(snapshot.roots.map { .object(["path":.string(String($0.path.prefix(200))),"coverage":.string($0.status),"inspected":.number(Double($0.inspected))]) }),
+            "items":.array(snapshot.items.map { .object(["id":.string(SHA256.hash(data:Data((snapshot.roots[$0.root].path + "/" + $0.relativePath).utf8)).map { String(format:"%02x",$0) }.joined()),"root":.number(Double($0.root)),"path":.string(String($0.relativePath.prefix(180))),"modifiedAt":.string(f.string(from:$0.modifiedAt))]) }),
+            "omittedItems":.bool(snapshot.omittedItems),
+            "metadataOnly":.bool(true)
+        ]),validFor:3600)
     }
     #endif
 }

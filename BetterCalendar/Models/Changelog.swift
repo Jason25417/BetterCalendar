@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.4", date: "2026-10", changes: [
+            "Mac 的个人状态采集支持多个目录和子文件夹，只观察文件名称与修改时间，并排除缓存、依赖、凭据与符号链接",
+            "大目录扫描分轮继续，界面保持响应；扫描不完整或目录未授权时明确告知 Dot，避免把缺少线索误记为没有活动",
+            "原先选过的文件夹仍可继续使用；在个人状态设置里可重新多选学习、开发、文档、桌面和下载目录",
+        ]),
         ChangelogEntry(version: "0.65.3", date: "2026-10", changes: [
             "个人状态内测：设置里可连接私有 Dot 接入服务；Mac 按分钟汇总应用、浏览器、日历、提醒事项与所选文件夹的变化",
             "iPhone 新增健康、位置、运动与家居线索采集，并提供快捷指令动作；系统后台允许的更新周期会显示为数据新鲜度，不冒充持续在线",
