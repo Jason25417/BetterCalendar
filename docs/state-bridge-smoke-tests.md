@@ -39,7 +39,7 @@
 
 ## 必须保留的限制
 
-iOS后台不是分钟级定时器。当前没有已验证的独立云端一分钟调度器，分钟flush依在线Mac循环/手机事件；所有设备都离线时不保证主动唤醒，读状态时按expiresAt即时标记stale。旧BetterCalendar数据库模型未改变，无新CloudKit schema部署。
+iOS后台不是分钟级定时器。独立云端分钟Worker已部署且连续三次scheduled成功，Mac关闭采集时也完成独立转发；分钟flush还保留在线Mac循环/手机事件。云端无法采集离线设备的新数据，读状态时按expiresAt即时标记stale；模型处理不保证一分钟内完成。旧BetterCalendar数据库模型未改变，无新CloudKit schema部署。
 
 ## 真机与诊断回执：2026-10-05 22:44 EDT
 
@@ -50,3 +50,22 @@ Computer Use浏览器操作可用；Computer History工具state=stopped，最新
 Cloudflare网页显示原先Apple账号的已保存登录profile，但当前为登录页；Wrangler未认证。现有账号可继续使用，账号存在与本机登录是不同状态，未实际部署clock。
 
 发现health.status初次失败后未在成功查询时恢复；源码增加queries-completed回执，仍不把空样本视为授权或无活动。iOS Simulator编译通过，待随下一次需要用户测试的设备更新发布，不为此重复要求重新连接。
+
+## Mac接通与账号恢复：2026-10-05 23:03 EDT
+
+- Computer History为running，startedAt为2026-10-06T02:55:22Z；本机事件文件02:57:43Z仍有更新，随后实际上下文到达服务。之前stopped是当时的运行状态，不能误写成用户关闭了开关。
+- 安装版Mac 0.65.4 (161)原生UI可用；独立Mac配置存到Keychain、启用采集并选择电脑历史目录。服务确认真实mac.activity与mac.history，后者应用/窗口/URL字段可读。
+- 通过系统目录选择器以用户主目录覆盖常用学习/开发/文档位置；真实files.activity为available、metadataOnly，覆盖partial-budget。不能以有文件记录推断整棵目录已经扫完。
+- Mac日历、提醒事项、device.status亦到达。独立mac.browser当前为permission-or-browser-unavailable；已有电脑历史URL线索不等于该AppleScript通道权限已通过。
+- minute_29854260与minute_29854261分别于03:00:08Z、03:01:28Z被正式回调接收。Dot处理仍以它自己的processed_at为准，本会话不代ack。
+- Cloudflare已登录既有账号，Sotto/Scritto服务可见；独立时钟已固定该账号、dry-run通过。CLI OAuth等待用户确认新权限，尚未上传Worker或启用Cron。
+
+23:04 EDT用户完成部署授权，whoami核验账号与最少所需OAuth scopes。Worker发布版本17cbba14-f8cc-4a0b-a227-050541ec6ebe为100%；两个secrets经stdin提交，Cloudflare界面显示一分钟Cron、公开URL关闭。当前等待scheduled日志，配置成功不替代运行证据。
+
+Mac第一批minute_29854260于03:01:40.972Z由Dot处理（约94秒）；minute_29854262、63、64之后均出现实际处理回执。无需本会话代ack或重复发送消息去打断Dot。
+
+## 独立分钟Cron验收：2026-10-05 23:12 EDT
+
+Mac采集先通过原生UI关闭，然后仅ingest一条明确synthetic的bridge.probe sequence 3；不手动flush、不代ack。Cloudflare三次scheduledTime为03:10:29Z、03:11:29Z、03:12:29Z，间隔60秒、outcome=ok、无exceptions。首轮batchCreated=true、delivered=1；后两轮无变化，batchCreated=false、delivered=0。
+
+服务确认minute_29854270创建03:10:31.432Z、回调接收03:10:35.370Z、Dot处理03:12:03.903Z，约92秒。首次新Cron配置传播约6分钟；独立转发不依赖Mac上传循环已实测。Mac采集于23:12 EDT恢复开启；03:13:07Z以后新的历史、活动、文件元数据、日历/提醒和设备状态到达服务，恢复后的回执已通过。没有为纯云端配置重复发TestFlight。
