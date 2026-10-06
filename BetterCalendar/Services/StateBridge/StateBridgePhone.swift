@@ -131,6 +131,8 @@ import UIKit
             client.emit("health.resting-heart-rate",value:.array(resting.compactMap { s in guard let q = s as? HKQuantitySample else { return nil }; return .object(["id":.string(q.uuid.uuidString),"end":.string(f.string(from:q.endDate)),"bpm":.number(q.quantity.doubleValue(for:HKUnit.count().unitDivided(by:.minute())))]) }),validFor:36*3600)
             let workouts = try await samples(types[3],days:14,limit:30)
             client.emit("health.workouts",value:.array(workouts.compactMap { s in guard let w = s as? HKWorkout else { return nil }; return .object(["id":.string(w.uuid.uuidString),"start":.string(f.string(from:w.startDate)),"end":.string(f.string(from:w.endDate)),"durationSeconds":.number(w.duration),"activityType":.number(Double(w.workoutActivityType.rawValue))]) }),validFor:36*3600)
+            // Clear a prior transient query error. Completion does not disclose HealthKit read authorization.
+            client.emit("health.status",value:.object(["availability":.string("queries-completed"),"emptySamplesAreUnknown":.bool(true)]),validFor:3600)
         } catch { client.emit("health.status",value:.object(["availability":.string("read-unavailable")]),validFor:3600) }
     }
 }

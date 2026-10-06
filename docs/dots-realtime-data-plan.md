@@ -64,3 +64,11 @@ Jason要求iPhone覆盖所有游戏、社交、工作学习与常用App，具体
 Jason已取得并提供iPhone设备配置，服务确认该设备登记；目前尚无真实iPhone观察。只在App粘贴保存、启用并接受OS权限后才开始采集。用户当前只有手机，其余Mac权限等回到电脑操作。
 
 Cloudflare复用Sotto/Scritto的现有账号；本机Wrangler仍未登录，因此独立分钟clock未部署。clock已用无个人来源权限的独立设备登记，连接配置以0600留在本机Application Support，不入Git/记忆；凭据不在本报告重复。
+
+## 2026-10-05 22:44 EDT 当前核验
+
+iPhone已收到真实数据，两个事件批次都完成Dot处理回执。手机连接阶段已通过；后台更新节奏、低置信传感器区域身份和手机App自动化仍按原清单验收。
+
+Computer Use浏览器可操作；Computer History录制状态stopped，事件文件停在11:40 EDT，不能据此断定用户未启用开关。观察规则已为全部observe，未擅自改设置。需要检查录制运行状态；Codex自身设置页由工具自身保护禁止操作。Cloudflare浏览器和CLI均未登录，但网页有原有Apple账号profile；复用现有账号的决定保持，等待恢复本机登录。
+
+健康查询成功后清除旧失败状态的源码修复已通过iOS Simulator build；手机160暂未包含，当前应依据更新的实际来源区分过去的失败，不把health.status旧错误当作持续授权失败。

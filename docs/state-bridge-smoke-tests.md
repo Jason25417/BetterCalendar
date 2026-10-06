@@ -23,11 +23,13 @@
 - [ ] refreshBefore自动续约正常；当前有效期至2026-10-12 16:07:59 UTC。
 - [x] 合成批次minute_29853609经正式订阅送达，16:09:28 UTC回调接收成功，attempts=1；这不是分析完成回执。
 - [x] 同一自动事件触发Dot依次read_instructions、read_current_state、read_changes，再acknowledge_batch；16:10:36 UTC持久化处理回执。单次从批次生成到接收约1.7秒，到理解完成约70秒，不保证每次一分钟内完成。
-- [ ] Mac/iPhone分别从私有网页复制配置，保存到Keychain，接受系统权限。
+- [x] iPhone网页登记后配置生效，真实健康/位置/运动/日历/提醒/家居来源到达。
+- [ ] Mac配置与目录权限真实生效；不能把手机通过当作Mac通过。
 - [ ] Mac多选目录授权后，files.activity v2真实数据到达；扫描不完整不得推断未活动。
 - [ ] mac.activity真实观察到达；切App/进入idle的发生时间和收到时间能对齐。
 - [ ] 每个有变化的分钟收到批次；同一批次重试不重复记账；Dot完成处理后出现acknowledge_batch。
-- [ ] iPhone睡眠/步数/锻炼读取结果；拒绝读取或缺少样本时显示未知而非没有活动。
+- [x] iPhone睡眠/步数/静息心率/锻炼的真实结果已收到。
+- [ ] 空样本/拒绝读取情况下保持未知；成功后的health.status错误清理已修复源码，当前160手机尚不包含此修复。
 - [ ] 后台位置与HealthKit实测更新延迟、电量、锁屏、重启、离线补传。
 - [ ] Home传感器分区实测：桌/床位置变动确认映射，离线/无中枢不伪装实时。
 - [ ] 每台iPhone快捷指令App/Focus个人自动化实际触发。
@@ -38,3 +40,13 @@
 ## 必须保留的限制
 
 iOS后台不是分钟级定时器。当前没有已验证的独立云端一分钟调度器，分钟flush依在线Mac循环/手机事件；所有设备都离线时不保证主动唤醒，读状态时按expiresAt即时标记stale。旧BetterCalendar数据库模型未改变，无新CloudKit schema部署。
+
+## 真机与诊断回执：2026-10-05 22:44 EDT
+
+iPhone真实来源到达，两个分钟批次均经签名回调接收并由Dot确认处理：第一批约89秒，第二批约161秒。设备→服务→Dot已实测，不能承诺模型每批一分钟内处理完。记录中未保存个人观察内容。Mac/独立云端定时器仍待验收。
+
+Computer Use浏览器操作可用；Computer History工具state=stopped，最新事件文件最后修改为本日11:40 EDT。观察规则默认observe且无例外。运行停止不能证明用户未打开开关；Codex自身设置UI受Computer Use保护，不能自行点开检查。安装版BetterCalendar的原生应用访问当前超时，不再按此前错误结果笼统要求全局授权。
+
+Cloudflare网页显示原先Apple账号的已保存登录profile，但当前为登录页；Wrangler未认证。现有账号可继续使用，账号存在与本机登录是不同状态，未实际部署clock。
+
+发现health.status初次失败后未在成功查询时恢复；源码增加queries-completed回执，仍不把空样本视为授权或无活动。iOS Simulator编译通过，待随下一次需要用户测试的设备更新发布，不为此重复要求重新连接。
