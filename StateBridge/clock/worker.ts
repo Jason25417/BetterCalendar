@@ -13,5 +13,5 @@ async function flush(env:Env){
   if(!response.ok)throw new Error('Minute flush failed with HTTP '+response.status);
   // Print only transport counts. Do not log secrets, callbacks, or observations.
   const receipt=await response.json() as {minute:number;batchId:string|null;delivered:number;activeSubscriptions:number};
-  console.log(JSON.stringify({minute:receipt.minute,batchCreated:!!receipt.batchId,delivered:receipt.delivered,activeSubscriptions:receipt.activeSubscriptions}));
+  console.log(JSON.stringify({minute:receipt.minute,batchPresent:!!receipt.batchId,delivered:receipt.delivered,activeSubscriptions:receipt.activeSubscriptions}));
 }

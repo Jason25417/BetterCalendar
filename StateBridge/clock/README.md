@@ -2,7 +2,7 @@
 
 此Worker每分钟调用私有状态服务flush，只做事件转发/过期判断，不调用模型、不采集设备数据、没有公开控制接口。用于Mac睡眠时仍发送服务已经收到的手机变化。
 
-**状态：独立Worker已部署，真实分钟Cron与Dot处理全链路通过。** 2026-10-05 23:04 EDT在既有Sotto/Scritto账号完成Wrangler授权、空Cron初始部署、经stdin提交两个secrets、最后部署每分钟Cron。当前100%版本为 `17cbba14-f8cc-4a0b-a227-050541ec6ebe`；Cloudflare页面确认Triggers 1、Cron每分钟、No URLs enabled，secret list只核验名称，不读密钥。既有两个服务未作修改。
+**状态：独立Worker已部署，真实分钟Cron与Dot处理全链路通过。** 2026-10-05 23:04 EDT在既有Sotto/Scritto账号完成Wrangler授权、空Cron初始部署、经stdin提交两个secrets、最后部署每分钟Cron。当前100%版本为 `b8b30fdb-5724-471b-baf3-21954db660ba`；Cloudflare页面确认Triggers 1、Cron每分钟、No URLs enabled，secret list只核验名称，不读密钥。既有两个服务未作修改。
 
 启用前：正常连接Cloudflare账户，登记独立clock设备（不可采集个人来源），将STATE_BRIDGE_PLATFORM_TOKEN与STATE_BRIDGE_DEVICE_TOKEN作为Worker secrets提交。凭据通过stdin，不能写wrangler.jsonc、shell参数、Git或日志。再部署此目录，核验Cron实际触发和私有接收回执。当前Mac在线每分钟flush照常可用。
 
@@ -23,3 +23,5 @@ iPhone与Mac都已收到真实来源，Computer History正在采集，Mac在线�
 - 首轮日志minute=29854270、batchCreated=true、delivered=1、activeSubscriptions=1；后两轮batchCreated=false、delivered=0，无变化不生成批次。
 - minute_29854270于03:10:31.432Z创建、03:10:35.370Z回调收到、03:12:03.903Z由Dot实际处理（创建到处理约92秒）。本会话未代ack。
 - Mac采集已于23:12 EDT恢复开启；云端时钟不能替代设备采集，也不保证模型分析在一分钟内完成。Wrangler本机登录凭据及设备连接文件权限均为0600，不进入Git/记忆。
+
+验收日志来自17cbba14版本。该版本的batchCreated仅表示本分钟存在batchId，已有Mac批次也会显示true；此轮Mac关闭，创建时间和delivered=1另有回执，故独立创建/转发成立。随后将日志字段改名batchPresent并发布b8b30fdb版本，避免以后把复用已有批次误认作新创建或重复交付；delivered仍只计本次成功回调数。
