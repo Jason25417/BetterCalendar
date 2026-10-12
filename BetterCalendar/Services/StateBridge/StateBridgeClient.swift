@@ -36,7 +36,17 @@ struct BridgeObservation: Codable {
     var assertion = "observed"
     var value: BridgeJSON
 }
-private struct BridgeOutbox: Codable { var nextSequence = 1; var observations: [BridgeObservation] = [] }
+struct BridgeOutbox: Codable {
+    var nextSequence = 1
+    var observations: [BridgeObservation] = []
+    func validate() throws {
+        guard nextSequence > 0, observations.allSatisfy({ $0.schemaVersion == 1 && $0.sequence > 0 && $0.sequence < nextSequence }),
+              Set(observations.map(\.eventId)).count == observations.count,
+              Set(observations.map(\.sequence)).count == observations.count else {
+            throw NSError(domain:"StateBridge.Queue",code:1,userInfo:[NSLocalizedDescriptionKey:"上传队列序号或事件身份不一致"])
+        }
+    }
+}
 private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
@@ -48,6 +58,7 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
     private var outbox = BridgeOutbox()
     private var busy = false
     private var queueHealthy = true
+    private var lastFailure: String?
     private var credentials: BridgeCredentials?
     private let delegate = BridgeNoRedirect()
     @ObservationIgnored private lazy var session: URLSession = { let configuration = URLSessionConfiguration.ephemeral; configuration.timeoutIntervalForRequest = 20; return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil) }()
@@ -56,8 +67,9 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
     var configured: Bool { credentials != nil }
     private init() {
         guard !TestHost.isActive else { return }
-        do { if FileManager.default.fileExists(atPath: location.path) { outbox = try JSONDecoder().decode(BridgeOutbox.self, from: Data(contentsOf: location)) }; pendingCount = outbox.observations.count }
-        catch { queueHealthy = false; status = "本地队列读取失败，已保留原文件；请检查后再启用"; return }
+        do { if FileManager.default.fileExists(atPath: location.path) { outbox = try JSONDecoder().decode(BridgeOutbox.self, from: Data(contentsOf: location)); try outbox.validate() }; pendingCount = outbox.observations.count }
+        catch { queueHealthy = false; reportFailure("本地队列读取失败，已保留原文件；请检查后再启用"); return }
+        lastUpload = UserDefaults.standard.object(forKey:"dotStateBridge.lastUpload") as? Date
         let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:"com.jason.BetterCalendar.StateBridge", kSecAttrAccount as String:account, kSecReturnData as String:true]
         var item: CFTypeRef?
         if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data { credentials = try? JSONDecoder().decode(BridgeCredentials.self, from:data); status = credentials == nil ? "凭据读取失败" : "已配置，等待采集" }
@@ -75,14 +87,18 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         guard result == errSecSuccess else { throw NSError(domain:NSOSStatusErrorDomain,code:Int(result)) }
         credentials = c; status = "凭据已保存到本机 Keychain"
     }
-    func emit(_ source: String, value: BridgeJSON, validFor: TimeInterval = 180, observedAt: Date = Date()) {
-        guard configured, queueHealthy, !TestHost.isActive else { return }
+    @discardableResult func emit(_ source: String, value: BridgeJSON, validFor: TimeInterval = 180, observedAt: Date = Date()) -> Bool {
+        guard configured, queueHealthy, !TestHost.isActive else { return false }
         let formatter = ISO8601DateFormatter()
         let observation = BridgeObservation(eventId:UUID().uuidString,source:source,sequence:outbox.nextSequence,observedAt:formatter.string(from:observedAt),expiresAt:formatter.string(from:observedAt.addingTimeInterval(validFor)),value:value)
-        guard let encoded = try? JSONEncoder().encode(observation), encoded.count < 48*1024 else { status = "观察内容过大或格式无效，未写入上传队列"; return }
+        guard let encoded = try? JSONEncoder().encode(observation), encoded.count < 48*1024 else { reportFailure("观察内容过大或格式无效，未写入上传队列"); return false }
         var next = outbox; next.nextSequence += 1; next.observations.append(observation)
-        do { try persist(next); outbox = next; pendingCount = next.observations.count }
-        catch { status = "保存观察失败；没有标记为已上传" }
+        do { try persist(next); outbox = next; pendingCount = next.observations.count; return true }
+        catch { reportFailure("保存观察失败；没有标记为已上传"); return false }
+    }
+    private func reportFailure(_ message: String) {
+        status = message
+        if lastFailure != message { DevLog.shared.warn("StateBridge",message); lastFailure = message }
     }
     private func persist(_ value: BridgeOutbox) throws {
         try FileManager.default.createDirectory(at:location.deletingLastPathComponent(),withIntermediateDirectories:true)
@@ -98,11 +114,12 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         request.setValue("Bearer " + c.platformToken,forHTTPHeaderField:"OAI-Sites-Authorization")
         request.setValue("Bearer " + c.deviceToken,forHTTPHeaderField:"Authorization")
         let (data,response) = try await session.data(for:request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(http.statusCode) else { throw NSError(domain:"StateBridge.HTTP",code:http.statusCode) }
         return (try JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
     }
     func uploadAndFlush() async {
-        guard configured, !busy, !TestHost.isActive else { return }; busy = true; defer { busy = false }
+        guard configured, queueHealthy, !busy, !TestHost.isActive else { return }; busy = true; defer { busy = false }
         do {
             // Small batches stay below the request limit. Preserve concurrently appended observations.
             while !outbox.observations.isEmpty {
@@ -114,7 +131,12 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
                 var next = outbox; next.observations.removeAll { acknowledged.contains($0.eventId) }; try persist(next); outbox = next; pendingCount = next.observations.count
             }
             let result = try await post("flush",body:Data("{}".utf8))
-            lastUpload = Date(); status = (result["activeSubscriptions"] as? Int ?? 0) > 0 ? "状态已保存；等待 Dot 处理" : "状态已保存，Dot 事件订阅尚未连接"
-        } catch { status = "上传失败；保留 \(outbox.observations.count) 条观察等待重试" }
+            lastUpload = Date(); UserDefaults.standard.set(lastUpload,forKey:"dotStateBridge.lastUpload"); lastFailure = nil
+            status = (result["activeSubscriptions"] as? Int ?? 0) > 0 ? "状态已保存；等待 Dot 处理" : "状态已保存，Dot 事件订阅尚未连接"
+        } catch {
+            let failure = error as NSError
+            let reason = failure.domain == "StateBridge.HTTP" ? "服务返回 HTTP \(failure.code)" : "网络或响应异常（\(failure.code)）"
+            reportFailure("\(reason)；保留 \(outbox.observations.count) 条观察等待重试")
+        }
     }
 }

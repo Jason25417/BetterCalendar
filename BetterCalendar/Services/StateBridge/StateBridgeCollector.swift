@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import Network
 #if os(macOS)
 import AppKit
 import CoreGraphics
@@ -11,6 +12,7 @@ import CryptoKit
     private let calendar = EKEventStore()
     private var timer: Timer?
     private var sampling = false
+    private var networkMonitor: NWPathMonitor?
     #if os(macOS)
     private var workspaceObservers: [NSObjectProtocol] = []
     private var activityTimer: Timer?
@@ -20,6 +22,7 @@ import CryptoKit
     func setEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled,forKey:"dotStateBridge.enabled")
         if enabled { start() } else { timer?.invalidate(); timer = nil
+            networkMonitor?.cancel(); networkMonitor = nil
             #if os(macOS)
             activityTimer?.invalidate(); activityTimer = nil
             workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }; workspaceObservers.removeAll()
@@ -31,24 +34,48 @@ import CryptoKit
     }
     func start() {
         guard enabled, StateBridgeClient.shared.configured, !TestHost.isActive else { return }
-        if timer == nil { timer = Timer.scheduledTimer(withTimeInterval:60,repeats:true) { _ in Task { @MainActor in await StateBridgeCollector.shared.sample() } } }
+        let newlyStarted = timer == nil
+        if newlyStarted {
+            let t = Timer(timeInterval:60,repeats:true) { _ in Task { @MainActor in await StateBridgeCollector.shared.sample() } }
+            RunLoop.main.add(t,forMode:.common); timer = t
+        }
+        if networkMonitor == nil {
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { path in
+                guard path.status == .satisfied else { return }
+                Task { @MainActor in await StateBridgeCollector.shared.recover() }
+            }
+            monitor.start(queue:DispatchQueue(label:"com.jason.BetterCalendar.StateBridge.Network")); networkMonitor = monitor
+        }
         #if os(macOS)
         if workspaceObservers.isEmpty {
             for event in [NSWorkspace.didActivateApplicationNotification,NSWorkspace.didWakeNotification,NSWorkspace.willSleepNotification] {
                 workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:event,object:nil,queue:.main) { note in
                     Task { @MainActor in
                         guard StateBridgeCollector.shared.enabled else { return }
-                        if note.name == NSWorkspace.willSleepNotification { StateBridgeClient.shared.emit("device.status",value:.object(["availability":.string("sleeping")])) }
+                        if note.name == NSWorkspace.willSleepNotification {
+                            StateBridgeClient.shared.emit("device.status",value:.object(["availability":.string("sleeping")]))
+                            await StateBridgeClient.shared.uploadAndFlush()
+                        } else if note.name == NSWorkspace.didWakeNotification { await StateBridgeCollector.shared.recover() }
                         else { StateBridgeCollector.shared.sampleActivity(force:true) }
                     }
                 })
             }
-            activityTimer = Timer.scheduledTimer(withTimeInterval:15,repeats:true) { _ in Task { @MainActor in StateBridgeCollector.shared.sampleActivity() } }
+            let t = Timer(timeInterval:15,repeats:true) { _ in Task { @MainActor in StateBridgeCollector.shared.sampleActivity() } }
+            RunLoop.main.add(t,forMode:.common); activityTimer = t
         }
         #endif
         #if os(iOS)
         StateBridgePhone.shared.startIfAuthorized()
         #endif
+        if newlyStarted { Task { await recover() } }
+    }
+    /// Recover old observations with their original identities before collecting
+    /// a new snapshot. A wake/network event does not mean the person changed task.
+    func recover() async {
+        guard enabled, !TestHost.isActive else { return }
+        await StateBridgeClient.shared.uploadAndFlush()
+        await sample()
     }
     func requestPermissions() async {
         guard !TestHost.isActive else { return }
@@ -134,8 +161,9 @@ import CryptoKit
             }
             if !contexts.isEmpty {
                 // Exclude AX contents and keyboard text. File activity is not proof that capture is running.
-                StateBridgeClient.shared.emit("mac.history",value:.object(["contexts":.array(Array(contexts.suffix(20))),"captureStatus":.string("unknown-use-computer-history-status"),"boundedTail":.bool(true)]),validFor:180,observedAt:latestDate ?? Date())
-                UserDefaults.standard.set(["segment":segment.lastPathComponent,"id":latestId],forKey:cursorKey)
+                if StateBridgeClient.shared.emit("mac.history",value:.object(["contexts":.array(Array(contexts.suffix(20))),"captureStatus":.string("unknown-use-computer-history-status"),"boundedTail":.bool(true)]),validFor:180,observedAt:latestDate ?? Date()) {
+                    UserDefaults.standard.set(["segment":segment.lastPathComponent,"id":latestId],forKey:cursorKey)
+                }
             }
         } catch { StateBridgeClient.shared.emit("mac.history",value:.object(["availability":.string("history-directory-unavailable")]),validFor:180) }
     }

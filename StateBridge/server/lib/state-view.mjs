@@ -1,0 +1,49 @@
+const errorStatuses = new Set(["read-unavailable", "permission-request-failed", "location-unavailable", "notification-unavailable", "history-directory-unavailable", "folder-selection-failed", "permission-or-browser-unavailable", "unavailable"]);
+const emptyStatuses = new Set(["not-frontmost"]);
+
+// Keep availability and freshness independent. A fresh error is not usable
+// evidence; an old successful observation is history, not the current activity.
+export function sourceView(observation, sourceKey, readAt) {
+  const value = observation.value;
+  const reason = value && !Array.isArray(value) && typeof value === "object" ? value.availability : null;
+  let availability = "available";
+  if (reason === "not-configured") availability = "not_configured";
+  else if (reason === "not-authorized") availability = "not_authorized";
+  else if (errorStatuses.has(reason)) availability = "error";
+  else if (reason === "partial") availability = "partial";
+  else if (reason === "no-readable-samples-not-proof-of-no-sleep" || reason === "no-visible-home-or-permission") availability = "unknown";
+  else if (emptyStatuses.has(reason)) availability = "empty";
+  else if (Array.isArray(value) && !value.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
+  else if (value && typeof value === "object" && observation.source === "health.steps" && value.count == null) availability = "unknown";
+  else if (value && typeof value === "object" && (Array.isArray(value.items) || Array.isArray(value.samples))) {
+    const entries = value.items ?? value.samples;
+    if (!entries.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
+    else if (value.truncated || value.omittedItems) availability = "partial";
+  }
+  const freshness = observation.expiresAt && Date.parse(observation.expiresAt) <= Date.parse(readAt) ? "stale" : "current";
+  return {
+    ...observation, sourceKey, freshness, availability,
+    reason: reason ?? (availability === "unknown" ? "empty_samples_do_not_establish_absence_or_permission" : null),
+    lastObservedAt: observation.observedAt, lastReceivedAt: observation.receivedAt,
+    lastSuccessfulReadAt: ["available", "partial", "empty"].includes(availability) ? observation.observedAt : null,
+    usableForCurrentState: freshness === "current" && ["available", "partial", "empty"].includes(availability),
+  };
+}
+
+export function coverageView(devices, sources) {
+  const byKey = new Map(sources.map(s => [s.sourceKey, s]));
+  return devices.map(d => ({
+    deviceId: d.id, label: d.label, revoked: d.revoked_at != null,
+    sources: JSON.parse(d.scopes).filter(s => s !== "bridge.probe").map(source => {
+      const state = byKey.get(`${d.id}:${source}`);
+      return { source, availability: state?.availability ?? "not_received", freshness: state?.freshness ?? "unknown", usableForCurrentState: state?.usableForCurrentState ?? false, lastObservedAt: state?.lastObservedAt ?? null, lastReceivedAt: state?.lastReceivedAt ?? null };
+    }),
+  }));
+}
+
+export function stateWarnings(sources) {
+  return sources.filter(s => s.source === "health.status" && s.availability === "error").flatMap(status => {
+    const later = sources.filter(s => s.deviceId === status.deviceId && s.source.startsWith("health.") && s.source !== "health.status" && s.usableForCurrentState && Date.parse(s.observedAt) > Date.parse(status.observedAt));
+    return later.length ? [{ code: "health_summary_older_than_samples", deviceId: status.deviceId, sourceKeys: later.map(s => s.sourceKey), explanation: "旧健康汇总失败不代表较新的各项数据不可读取；分别使用各来源的新鲜度。" }] : [];
+  });
+}

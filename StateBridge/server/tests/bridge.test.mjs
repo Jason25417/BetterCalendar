@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createBridge, signWebhook, validateCallback } from '../lib/bridge.mjs';
-function fixture(){
+function fixture(options={}){
  const sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){return sqlite.prepare(sql).run(...args);}};}
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const r=ops.map(o=>o.run());sqlite.exec('COMMIT');return r;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  let clock=new Date('2026-10-05T12:00:00Z'),posts=[],fail=false,redirectReceiver=false;
  const fetcher=async(url,opts)=>{assert.equal(opts.redirect,'manual','edge-compatible redirect mode');if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});posts.push({url,...opts});if(redirectReceiver)return new Response('',{status:302,headers:{Location:'https://127.0.0.1/private'}});if(fail)return new Response('',{status:503});let data=JSON.parse(opts.body);return Response.json(data.type==='verification'?{challenge:data.challenge}:{});};
- const core=createBridge(db,{now:()=>clock,fetcher});
+ const core=createBridge(db,{now:()=>clock,fetcher,...options});
  return {core,sqlite,posts,advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},setReceiverRedirect(v){redirectReceiver=v;},time(){return clock.toISOString();}};
 }
 const obs=(seq,value,f,extra={})=>({schemaVersion:1,eventId:`test-${seq}`,source:'mac.activity',sequence:seq,observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+90000).toISOString(),assertion:'observed',value,...extra});
@@ -47,6 +47,36 @@ test('correction supersedes inference without removing history',async()=>{
  const f=fixture();await f.core.recordNote({id:'guess',kind:'activity',body:{state:'rest'},assertion:'inferred',confidence:'low',basis:['sensor:test']});
  await f.core.recordNote({id:'correction',kind:'activity',body:{state:'reading'},assertion:'user',confidence:'high',basis:[],supersedes:'guess'});
  assert.equal((await f.core.readState()).notes.length,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,2);
+});
+
+test('state coverage separates fresh errors, empty samples, missing sources and old successful data',async()=>{
+ const f=fixture();const enrolled=await f.core.registerDevice({id:'iphone',label:'test',scopes:['health.status','health.sleep','ios.app','calendar.events']});const d=await f.core.authenticateDevice(enrolled.token);
+ const input=(seq,source,value)=>obs(seq,value,f,{source,eventId:`coverage-${seq}`});
+ await f.core.ingest({observations:[input(1,'health.status',{availability:'read-unavailable'})]},d);
+ f.advance(1000);await f.core.ingest({observations:[input(2,'health.sleep',{samples:[{stage:1}],availability:'readable'}),input(3,'calendar.events',{items:[],truncated:false})]},d);
+ const state=await f.core.readState(),status=state.sources.find(s=>s.source==='health.status');
+ assert.equal(status.freshness,'current');assert.equal(status.availability,'error');assert.equal(status.usableForCurrentState,false);
+ assert.equal(state.coverage[0].sources.find(s=>s.source==='ios.app').availability,'not_received');
+ assert.equal(state.sources.find(s=>s.source==='calendar.events').availability,'empty');assert.equal(state.warnings[0].code,'health_summary_older_than_samples');
+ f.advance(100000);const stale=await f.core.readState();assert.equal(stale.sources.find(s=>s.source==='health.sleep').usableForCurrentState,false);assert.equal(stale.warnings.length,0);
+ await f.core.ingest({observations:[input(4,'health.sleep',{samples:[],availability:'no-readable-samples-not-proof-of-no-sleep'})]},d);
+ assert.equal((await f.core.readState()).sources.find(s=>s.source==='health.sleep').availability,'unknown');
+});
+
+test('default policy forwards every valid change and does not create batches for unchanged heartbeats',async()=>{
+ const f=fixture(),d=await device(f);await f.core.ingest({observations:[obs(1,'editor',f)]},d);
+ const a=await f.core.flush();assert.equal(a.decision.policy,'ForwardAllToDots');
+ const saved=JSON.parse(f.sqlite.prepare('SELECT body FROM batches WHERE id=?').get(a.batchId).body);assert.equal(saved.data.changes.length,1);assert.equal(saved.data.decision.forward,true);
+ f.advance(60000);await f.core.ingest({observations:[obs(2,'editor',f)]},d);assert.equal((await f.core.flush()).batchId,null);
+});
+
+test('decision interface can defer without losing changes or blocking older delivery retries',async()=>{
+ let forward=true;const f=fixture({decisionPolicy:{async decide(){return {forward,policy:'TestPolicy'};}}}),d=await device(f),secret='whsec_'+Buffer.alloc(32,7).toString('base64');
+ await f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://api.openai.com/test-callback',secret}},'owner');
+ await f.core.ingest({observations:[obs(1,'editor',f)]},d);f.setFail(true);await f.core.flush();
+ f.advance(60000);await f.core.ingest({observations:[obs(2,'browser',f)]},d);forward=false;f.setFail(false);
+ const deferred=await f.core.flush();assert.equal(deferred.batchId,null);assert.equal(deferred.deferred,true);assert.equal(deferred.delivered,1);
+ forward=true;const resumed=await f.core.flush();assert.ok(resumed.batchId);const body=JSON.parse(f.sqlite.prepare('SELECT body FROM batches WHERE id=?').get(resumed.batchId).body);assert.equal(body.data.changes[0].observation.value,'browser');
 });
 test('DNS and receiver redirects cannot bypass callback checks on Workers',async()=>{
  const f=fixture(),secret='whsec_'+Buffer.alloc(32,9).toString('base64');

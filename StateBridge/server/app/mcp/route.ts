@@ -5,7 +5,7 @@ export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const string={type:"string"};
 const tools=[
-  {name:"read_current_state",description:"读取当前状态、来源新鲜度、正在计时的任务和近期说明；先读此工具再给建议。",inputSchema:object(),annotations:{readOnlyHint:true}},
+  {name:"read_current_state",description:"读取手机、电脑、健康、位置、App及文件来源的最后观察、更新时间、新鲜度、接入覆盖、任务计时和说明。先调用；即使部分来源过期，也不要直接说没有权限或读不到。coverage.not_received表示尚无上传，stale表示旧数据。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"read_changes",description:"按游标读取完整变化记录；补传事件须按发生时间理解。",inputSchema:object({afterId:{type:"integer",minimum:0},limit:{type:"integer",minimum:1,maximum:100}}),annotations:{readOnlyHint:true}},
   {name:"read_instructions",description:"读取用户已批准的个人状态助手行为约定。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"task_command",description:"仅按用户明确表达开始、暂停、继续或结束计时。使用稳定 commandId 防止重试重复执行；非开始操作需先读会话 revision。保存成功后才能确认。",inputSchema:object({commandId:string,action:{type:"string",enum:["start","pause","resume","finish"]},title:string,sessionId:string,expectedRevision:{type:"integer"},occurredAt:{type:"string",format:"date-time"},provenance:{type:"string",enum:["user"]}},["commandId","action","provenance"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
@@ -15,7 +15,7 @@ const tools=[
   {name:"read_connection_status",description:"查看已登记设备、事件订阅与回调接收状态；不返回密钥。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"flush_minute_changes",description:"发送本分钟尚未发送的变化并重试待发送回调；一分钟最多一个新批次，没有变化不发。不能把回调接收当作 Dot 完成分析。",inputSchema:object(),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
 ];
-const event={name:"state.minute_changed",description:"按分钟汇总全部有变化的个人状态；先读最新状态，再静默理解，只有必要时问或建议。",delivery:["webhook"],inputSchema:object(),payloadSchema:{type:"object",properties:{schemaVersion:{type:"integer"},readLatestState:{type:"boolean"},fromChangeId:{type:"integer"},throughChangeId:{type:"integer"},changes:{type:"array",items:{type:"object"}},omittedCount:{type:"integer"}},required:["schemaVersion","readLatestState","fromChangeId","throughChangeId","changes","omittedCount"],additionalProperties:false}};
+const event={name:"state.minute_changed",description:"按分钟汇总全部有变化的个人状态；先读最新状态，再静默理解，只有必要时问或建议。",delivery:["webhook"],inputSchema:object(),payloadSchema:{type:"object",properties:{schemaVersion:{type:"integer"},readLatestState:{type:"boolean"},fromChangeId:{type:"integer"},throughChangeId:{type:"integer"},changes:{type:"array",items:{type:"object"}},omittedCount:{type:"integer"},decision:{type:"object"}},required:["schemaVersion","readLatestState","fromChangeId","throughChangeId","changes","omittedCount"],additionalProperties:false}};
 export async function POST(request:Request){
   let id:unknown=null,methodForLog="unknown";
   try{

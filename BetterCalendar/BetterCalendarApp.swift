@@ -120,6 +120,8 @@ struct BetterCalendarApp: App {
                 if phase == .active {
                     handlePendingAppIntent(); consumePrimeNextStart()
                     DataSyncMonitor.shared.refreshNow()
+                    StateBridgeCollector.shared.start()
+                    Task { await StateBridgeCollector.shared.recover() }
                 }
                 FocusFollow.setForeground(phase == .active)
             }

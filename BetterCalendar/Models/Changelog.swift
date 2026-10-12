@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.5", date: "2026-10", changes: [
+            "个人状态采集在启动、回前台、电脑唤醒与网络恢复后自动补传；上次保存时间在重启后仍可查看",
+            "iPhone 健康数据逐项读取，一项查询出错不会阻断其余来源；失败与缺少样本分别说明",
+            "Mac 采集设置直接提供登录启动与退出保留菜单栏选项，明确说明 App 真正退出后无法采集",
+            "Dot 接入服务分别显示数据是否过期、是否读取出错及哪些来源尚未上传；全部有效变化仍交给 Dot 判断",
+        ]),
         ChangelogEntry(version: "0.65.4", date: "2026-10", changes: [
             "Mac 的个人状态采集支持多个目录和子文件夹，只观察文件名称与修改时间，并排除缓存、依赖、凭据与符号链接",
             "大目录扫描分轮继续，界面保持响应；扫描不完整或目录未授权时明确告知 Dot，避免把缺少线索误记为没有活动",

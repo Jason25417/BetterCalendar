@@ -17,6 +17,7 @@ import UIKit
     private var started = false
     private var healthReading = false
     private var healthPending = false
+    private var lastHealthFailure: String?
     private let types: [HKSampleType] = [HKObjectType.categoryType(forIdentifier:.sleepAnalysis)!,HKObjectType.quantityType(forIdentifier:.stepCount)!,HKObjectType.quantityType(forIdentifier:.restingHeartRate)!,HKObjectType.workoutType()]
     override private init() { super.init(); location.delegate = self }
     func requestPermissions() async {
@@ -35,7 +36,13 @@ import UIKit
             if HKHealthStore.isHealthDataAvailable() {
                 for type in types {
                     let query = HKObserverQuery(sampleType:type,predicate:nil) { _,completion,error in
-                        guard error == nil else { completion(); return }
+                        guard error == nil else {
+                            Task { @MainActor in
+                                StateBridgePhone.shared.recordHealthFailure("health.status")
+                                completion()
+                            }
+                            return
+                        }
                         Task { @MainActor in
                             defer { completion() }
                             guard StateBridgeCollector.shared.enabled else { return }
@@ -43,7 +50,13 @@ import UIKit
                         }
                     }
                     health.execute(query); healthQueries.append(query)
-                    health.enableBackgroundDelivery(for:type,frequency:.immediate) { _,_ in }
+                    health.enableBackgroundDelivery(for:type,frequency:.immediate) { success,error in
+                        if !success || error != nil { Task { @MainActor in
+                            guard StateBridgeCollector.shared.enabled else { return }
+                            StateBridgeClient.shared.emit("health.status",value:.object(["availability":.string("notification-unavailable"),"queryStatus":.string("unknown"),"backgroundDelivery":.string("unavailable")]),validFor:3600)
+                            DevLog.shared.warn("StateBridge","健康后台订阅不可用；前台查询仍可用，请以每项来源为准。")
+                        } }
+                    }
                 }
             }
             if CMMotionActivityManager.isActivityAvailable() {
@@ -119,21 +132,42 @@ import UIKit
         if healthReading { healthPending = true; return }; healthReading = true
         defer { healthReading = false; if healthPending { healthPending = false; Task { await readHealth() } } }
         let client = StateBridgeClient.shared, f = ISO8601DateFormatter()
+        var failed: [String] = []
         do {
             let sleep = try await samples(types[0],days:3,limit:100)
             client.emit("health.sleep",value:.object(["samples":.array(sleep.compactMap { sample in guard let s = sample as? HKCategorySample else { return nil }; return .object(["id":.string(s.uuid.uuidString),"start":.string(f.string(from:s.startDate)),"end":.string(f.string(from:s.endDate)),"stage":.number(Double(s.value)),"source":.string(s.sourceRevision.source.name)]) }),"availability":.string(sleep.isEmpty ? "no-readable-samples-not-proof-of-no-sleep" : "readable"),"snapshot":.bool(true)]),validFor:36*3600)
+        } catch { failed.append("health.sleep"); recordHealthFailure("health.sleep") }
+        do {
             let stepType = HKObjectType.quantityType(forIdentifier:.stepCount)!
             let steps: Double? = try await withCheckedThrowingContinuation { c in
                 let q = HKStatisticsQuery(quantityType:stepType,quantitySamplePredicate:HKQuery.predicateForSamples(withStart:Calendar.current.startOfDay(for:Date()),end:Date()),options:.cumulativeSum) { _,stats,error in if let error { c.resume(throwing:error) } else { c.resume(returning:stats?.sumQuantity()?.doubleValue(for:.count())) } }; health.execute(q)
             }
             client.emit("health.steps",value:.object(["day":.string(f.string(from:Calendar.current.startOfDay(for:Date()))),"count":steps.map(BridgeJSON.number) ?? .null]),validFor:7200)
+        } catch { failed.append("health.steps"); recordHealthFailure("health.steps") }
+        do {
             let resting = try await samples(types[2],days:3,limit:5)
             client.emit("health.resting-heart-rate",value:.array(resting.compactMap { s in guard let q = s as? HKQuantitySample else { return nil }; return .object(["id":.string(q.uuid.uuidString),"end":.string(f.string(from:q.endDate)),"bpm":.number(q.quantity.doubleValue(for:HKUnit.count().unitDivided(by:.minute())))]) }),validFor:36*3600)
+        } catch { failed.append("health.resting-heart-rate"); recordHealthFailure("health.resting-heart-rate") }
+        do {
             let workouts = try await samples(types[3],days:14,limit:30)
             client.emit("health.workouts",value:.array(workouts.compactMap { s in guard let w = s as? HKWorkout else { return nil }; return .object(["id":.string(w.uuid.uuidString),"start":.string(f.string(from:w.startDate)),"end":.string(f.string(from:w.endDate)),"durationSeconds":.number(w.duration),"activityType":.number(Double(w.workoutActivityType.rawValue))]) }),validFor:36*3600)
-            // Clear a prior transient query error. Completion does not disclose HealthKit read authorization.
-            client.emit("health.status",value:.object(["availability":.string("queries-completed"),"emptySamplesAreUnknown":.bool(true)]),validFor:3600)
-        } catch { client.emit("health.status",value:.object(["availability":.string("read-unavailable")]),validFor:3600) }
+        } catch { failed.append("health.workouts"); recordHealthFailure("health.workouts") }
+        // Every source is queried independently. One failed query must not stop
+        // later sources or negate successful reads; empty reads remain unknown.
+        client.emit("health.status",value:.object([
+            "availability":.string(failed.isEmpty ? "queries-completed" : failed.count == types.count ? "read-unavailable" : "partial"),
+            "failedSources":.array(failed.map(BridgeJSON.string)),
+            "emptySamplesAreUnknown":.bool(true)
+        ]),validFor:3600)
+        if failed.isEmpty { lastHealthFailure = nil }
+    }
+    private func recordHealthFailure(_ source: String) {
+        guard StateBridgeCollector.shared.enabled else { return }
+        StateBridgeClient.shared.emit(source,value:.object(["availability":.string("read-unavailable")]),validFor:3600)
+        if lastHealthFailure != source {
+            DevLog.shared.warn("StateBridge","健康来源 \(source) 查询失败；其他来源仍分别读取，不能推断未授权或没有活动。")
+            lastHealthFailure = source
+        }
     }
 }
 #endif

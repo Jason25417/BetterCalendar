@@ -1,4 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
+import { ForwardAllToDots } from "./event-decision.mjs";
+import { sourceView, coverageView, stateWarnings } from "./state-view.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -38,7 +40,7 @@ export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch
   }
   if(!addresses)throw new BridgeError("回调没有公开地址");return u.toString();
 }
-export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args)}={}){
+export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots()}={}){
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   async function registerDevice(v){
@@ -82,7 +84,14 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return {accepted,ignored,receivedAt:time()};
   }
   const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,provenance:r.provenance});
-  async function readState(){return {schemaVersion:1,readAt:time(),sources:(await all("SELECT * FROM states ORDER BY source_key")).map(r=>({...JSON.parse(r.body),sourceKey:r.source_key,freshness:r.expires_at&&Date.parse(r.expires_at)<=now().getTime()?"stale":"current"})),sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes:(await all("SELECT * FROM notes n WHERE (n.expires_at IS NULL OR n.expires_at>?) AND NOT EXISTS(SELECT 1 FROM notes replacement WHERE replacement.supersedes=n.id) ORDER BY created_at DESC LIMIT 30",time())).map(n=>({...n,body:JSON.parse(n.body),basis:JSON.parse(n.basis)}))};}
+  async function readState(){
+    const readAt=time();
+    const sources=(await all("SELECT * FROM states ORDER BY source_key")).map(r=>sourceView(JSON.parse(r.body),r.source_key,readAt));
+    const devices=await all("SELECT id,label,scopes,revoked_at FROM devices ORDER BY id");
+    return {schemaVersion:1,readAt,sources,coverage:coverageView(devices,sources),warnings:stateWarnings(sources),
+      interpretation:"sources 保留最后一次观察；stale 不是当前活动。coverage 的 not_received 表示此来源尚未上传，不证明用户没有该活动。lastSuccessfulReadAt 为本次可读快照时间，失败时为空，不代表历史从未成功。",
+      sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes:(await all("SELECT * FROM notes n WHERE (n.expires_at IS NULL OR n.expires_at>?) AND NOT EXISTS(SELECT 1 FROM notes replacement WHERE replacement.supersedes=n.id) ORDER BY created_at DESC LIMIT 30",readAt)).map(n=>({...n,body:JSON.parse(n.body),basis:JSON.parse(n.basis)}))};
+  }
   async function taskCommand(v){
     const commandId=str(v.commandId,"commandId",150),requestHash=await sha(canonical(v));
     const replay=await one("SELECT * FROM commands WHERE id=?",commandId);
@@ -174,12 +183,18 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   async function flush(){
     const t=time(),minute=Math.floor(now().getTime()/60000);
     for(const s of await all("SELECT * FROM states WHERE expires_at IS NOT NULL AND expires_at<=?",t))await q("INSERT OR IGNORE INTO changes(event_id,source_key,occurred_at,body) VALUES(?,?,?,?)",`stale:${s.source_key}:${s.seq}`,s.source_key,s.expires_at,JSON.stringify({sourceKey:s.source_key,freshness:"stale",assertion:"observed",value:null})).run();
-    let batch=await one("SELECT * FROM batches WHERE minute=?",minute);
+    let batch=await one("SELECT * FROM batches WHERE minute=?",minute),decision=null;
     const last=await one("SELECT through_id FROM batches ORDER BY minute DESC LIMIT 1"),pending=await all("SELECT * FROM changes WHERE id>? ORDER BY id LIMIT 1000",last?.through_id??0);
     if(!batch&&pending.length){
       const id=`minute_${minute}`,data={schemaVersion:1,readLatestState:true,fromChangeId:pending[0].id,throughChangeId:pending.at(-1).id,changes:pending.map(r=>({id:r.id,sourceKey:r.source_key,occurredAt:r.occurred_at,observation:JSON.parse(r.body)})),omittedCount:0};
-      while(enc.encode(JSON.stringify(data)).length>180*1024&&data.changes.length)data.changes.pop();data.omittedCount=pending.length-data.changes.length;
-      await q("INSERT OR IGNORE INTO batches(id,minute,through_id,created_at,body) VALUES(?,?,?,?,?)",id,minute,pending.at(-1).id,t,JSON.stringify({eventId:id,name:"state.minute_changed",timestamp:t,data,cursor:null})).run();batch=await one("SELECT * FROM batches WHERE minute=?",minute);
+      decision=await decisionPolicy.decide({readAt:t,changes:data.changes});
+      if(typeof decision?.forward!=="boolean"||typeof decision.policy!=="string")throw new BridgeError("判断接口没有返回有效决定",503);
+      // Deferring never advances the durable cursor or discards observations.
+      if(decision.forward){
+        data.decision=decision;
+        while(enc.encode(JSON.stringify(data)).length>180*1024&&data.changes.length)data.changes.pop();data.omittedCount=pending.length-data.changes.length;
+        await q("INSERT OR IGNORE INTO batches(id,minute,through_id,created_at,body) VALUES(?,?,?,?,?)",id,minute,pending.at(-1).id,t,JSON.stringify({eventId:id,name:"state.minute_changed",timestamp:t,data,cursor:null})).run();batch=await one("SELECT * FROM batches WHERE minute=?",minute);
+      }
     }
     const subs=await all("SELECT * FROM subscriptions WHERE expires_at IS NULL OR expires_at>?",t);
     if(batch)for(const s of subs)await q("INSERT OR IGNORE INTO deliveries(id,subscription_id,batch_id,status,next_attempt_at) VALUES(?,?,?,?,?)",`${s.id}:${batch.id}`,s.id,batch.id,"pending",t).run();
@@ -191,7 +206,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
       const attempts=d.attempts+1;
       await q("UPDATE deliveries SET status=?,attempts=?,next_attempt_at=?,received_at=?,last_error=? WHERE id=?",ok?"received":terminal||attempts>=8?"failed":"pending",attempts,new Date(now().getTime()+Math.min(3600000,30000*2**attempts)).toISOString(),ok?time():null,ok?null:error,d.id).run();if(ok)delivered++;
     }
-    return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,processing:"回调收到不代表 Dot 已分析"};
+    return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }
   async function diagnostics(){return {readAt:time(),devices:await all("SELECT id,label,scopes,created_at,revoked_at FROM devices"),sourceCount:(await one("SELECT COUNT(*) AS n FROM states")).n,subscriptions:await all("SELECT id,expires_at,created_at FROM subscriptions"),deliveries:await all("SELECT batch_id,status,attempts,received_at,last_error FROM deliveries ORDER BY next_attempt_at DESC LIMIT 15"),batches:await all("SELECT id,created_at,processed_at FROM batches ORDER BY minute DESC LIMIT 15")};}
   return {registerDevice,authenticateDevice,ingest,readState,taskCommand,taskHistory,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
