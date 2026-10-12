@@ -23,7 +23,11 @@ macOS 255/255通过（xcresult正式汇总），iOS Simulator编译通过；SQLi
 
 私有云端版本11已部署成功，源commit78cbfbdd6ee5dd69ef4c8d55c5af021a4fe5ce4c。D1只追加两个可空元数据列；没有新的SwiftData/CloudKit模型或字段。正式MCP摘要读取返回21来源、不含正文，随后单来源正文读取成功。
 
-163双端稳定Xcode串行归档/上传进行中：/tmp/bc-release-163/status.json。此时不能把启动构建当作TestFlight可用。
+163双端稳定Xcode串行归档/上传成功，ASC回读确认两个构建均VALID、IN_BETA_TESTING，中文测试说明一致。iOS构建5e353656-c99a-407e-b5bc-f834fe0f6a40；Mac构建74f4c1dc-faad-43d3-989d-bbea2ecfa445。上传状态/tmp/bc-release-163/status.json，校验工具/tmp/bc-release-163-asc.py。源码79f31a6已推送。
+
+Mac已通过TestFlight安装163，原生界面显示0.65.6(163)，设置采集开关/登录启动均on，12:12–12:13保存持续更新。选择指定build时TestFlight临时关闭自动更新，已恢复on。升级后再次导出432条旧记录并在隔离空库恢复通过：字段、关系、照片一致，日用库未写入。档案/Users/jasontu/Downloads/BetterCalendar-Data/snapshot-03B49607-F442-4A15-99E0-5DA0B3F10565.json，10,068,307字节、权限600；没有上传私人档案。
+
+后续云端版本12私有部署成功：e981c5c761ad291e122ce6fdbe991d3f00d84f07，新增原始操作回执查询和计时历史分页，不更改数据库表或原记录。SQLite20/20、TS/build通过；正式MCP计时历史查询返回hasMore/nextCursor等新字段成功，当前无计时记录。Dots于16:16:58 UTC发现并实际调用read_task_commands(limit=1)成功，返回commands=[]、hasMore=false；当前没有保存回执，不创建虚假任务。Edge页面证据/private/tmp/bc-dots-v12-diagnostic-result.png。
 
 ## 尚未验收与限制
 
@@ -33,3 +37,4 @@ macOS 255/255通过（xcresult正式汇总），iOS Simulator编译通过；SQLi
 - 旧70条会话及其它SwiftData资料已随432条真实档案在隔离空库恢复验证；尚未迁移到新D1会话。长期事项/机会/愿望编辑MCP、30天回收站、完整跨版本与多端实测仍未完成。
 - Dots当前状态工具可用；事件处理仍可能排队数分钟甚至更久。摘要与固定批次终点降低重复读取，不证明平台调度延迟已经解决。
 - 手机镜像曾成功连接并显示真实主屏；开发设备列表只有模拟器。不能据镜像可见认定App/Focus快捷指令自动化已配置。
+- 当前完全访问只解决本地开发执行权限。手机镜像再次连接后出现系统画面捕获失败，未验手机安装163；iPhone各来源最后更新仍约11:17，App/Focus未接入，Mac仅选择1个文件目录。不能因此声称全部数据源权限/后台采集完成。

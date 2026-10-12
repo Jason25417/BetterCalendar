@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { ForwardAllToDots } from "./event-decision.mjs";
 import { sourceView, coverageView, stateWarnings } from "./state-view.mjs";
 import { createObservationHistory } from "./observation-history.mjs";
+import { createTaskHistory } from "./task-history.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -135,10 +136,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     await db.batch(ops);const committed=await one("SELECT result,request_hash FROM commands WHERE id=?",commandId);
     if(!committed||committed.request_hash!==requestHash)throw new BridgeError("计时并发冲突，请重新读取",409);return JSON.parse(committed.result);
   }
-  async function taskHistory(v={}) {
-    const from=v.from==null?"1970-01-01T00:00:00.000Z":iso(v.from), before=v.before==null?time():iso(v.before);
-    return {readAt:time(),sessions:(await all("SELECT * FROM sessions WHERE started_at>=? AND started_at<=? ORDER BY started_at DESC LIMIT ?",from,before,Math.min(100,Math.max(1,v.limit??100)))).map(sessionView)};
-  }
+  const {taskHistory,readTaskCommands}=createTaskHistory(db,time,sessionView);
   async function acknowledgeBatch(id,ownerId) {
     str(id,"批次 ID",100);if(!await one("SELECT id FROM batches WHERE id=?",id))throw new BridgeError("找不到批次",404);
     await q("UPDATE batches SET processed_at=COALESCE(processed_at,?),processed_by=COALESCE(processed_by,?) WHERE id=?",time(),ownerId,id).run();
@@ -231,6 +229,6 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }
   async function diagnostics(){return {readAt:time(),devices:await all("SELECT id,label,scopes,created_at,revoked_at FROM devices"),sourceCount:(await one("SELECT COUNT(*) AS n FROM states")).n,subscriptions:await all("SELECT id,expires_at,created_at FROM subscriptions"),deliveries:await all("SELECT batch_id,status,attempts,received_at,last_error FROM deliveries ORDER BY next_attempt_at DESC LIMIT 15"),batches:await all("SELECT id,created_at,processed_at FROM batches ORDER BY minute DESC LIMIT 15")};}
-  return {registerDevice,authenticateDevice,ingest,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  return {registerDevice,authenticateDevice,ingest,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }

@@ -195,3 +195,42 @@ test('DNS and receiver redirects cannot bypass callback checks on Workers',async
  assert.equal((await f.core.diagnostics()).deliveries[0].status,'pending');
  assert.ok(f.posts.every(p=>p.url.startsWith('https://connectors.api.openai.com/')));
 });
+
+test('timing history pages beyond 100 without losing equal timestamps or admitting late inserts',async()=>{
+ const f=fixture();
+ for(let i=0;i<105;i++)await f.core.taskCommand({commandId:`start-${i}`,action:'start',title:`事项${i}`,provenance:'user'});
+ const first=await f.core.taskHistory({limit:60});assert.equal(first.sessions.length,60);assert.equal(first.hasMore,true);
+ await f.core.taskCommand({commandId:'late-start',action:'start',title:'晚到',provenance:'user'});
+ const second=await f.core.taskHistory({limit:60,cursor:first.nextCursor});assert.equal(second.sessions.length,45);assert.equal(second.hasMore,false);assert.equal(second.nextCursor,null);
+ const ids=[...first.sessions,...second.sessions].map(s=>s.id);assert.equal(new Set(ids).size,105);
+ assert.equal((await f.core.taskHistory({limit:100})).hasMore,true);
+ await assert.rejects(f.core.taskHistory({limit:1.5}),/每页/);
+ await assert.rejects(f.core.taskHistory({cursor:first.nextCursor,from:'2026-10-04T00:00:00Z'}),/游标/);
+});
+
+test('original command receipts survive state updates, paginate, and retain future fields',async()=>{
+ const f=fixture(),s=await f.core.taskCommand({commandId:'开始-数学',action:'start',title:'数学',provenance:'user'});
+ f.advance(60000);await f.core.taskCommand({commandId:'暂停-数学',action:'pause',sessionId:s.id,expectedRevision:1,provenance:'user'});
+ f.advance(60000);await f.core.taskCommand({commandId:'结束-数学',action:'finish',sessionId:s.id,expectedRevision:2,provenance:'user'});
+ const old=JSON.parse(f.sqlite.prepare('SELECT result FROM commands WHERE id=?').get('开始-数学').result);old.futureEnvelope={version:99,preserved:true};
+ const bytes=JSON.stringify(old);f.sqlite.prepare('UPDATE commands SET result=? WHERE id=?').run(bytes,'开始-数学');
+ const first=await f.core.readTaskCommands({sessionId:s.id,limit:2});assert.equal(first.hasMore,true);
+ const second=await f.core.readTaskCommands({sessionId:s.id,limit:2,cursor:first.nextCursor});assert.equal(second.hasMore,false);
+ assert.deepEqual([...first.commands,...second.commands].map(c=>c.commandId),['结束-数学','暂停-数学','开始-数学']);
+ assert.equal(second.commands[0].result.status,'running');assert.equal(second.commands[0].result.revision,1);assert.deepEqual(second.commands[0].result.futureEnvelope,old.futureEnvelope);
+ assert.equal(second.commands[0].request_hash,undefined);assert.equal(f.sqlite.prepare('SELECT result FROM commands WHERE id=?').get('开始-数学').result,bytes);
+ await assert.rejects(f.core.readTaskCommands({sessionId:'other',cursor:first.nextCursor}),/游标/);
+ await assert.rejects(f.core.taskHistory({cursor:first.nextCursor}),/游标/);
+ assert.equal((await f.core.taskHistory()).sessions[0].status,'finished');
+});
+
+test('oversized receipt pages preserve complete records and signal continuation',async()=>{
+ const f=fixture();
+ for(let i=0;i<4;i++){
+  const s=await f.core.taskCommand({commandId:`wide-${i}`,action:'start',title:'测试',provenance:'user'});
+  const receipt={...s,futureText:'x'.repeat(44000)};f.sqlite.prepare('UPDATE commands SET result=? WHERE id=?').run(JSON.stringify(receipt),`wide-${i}`);
+ }
+ const first=await f.core.readTaskCommands();assert.equal(first.commands.length,2);assert.equal(first.hasMore,true);
+ const second=await f.core.readTaskCommands({cursor:first.nextCursor});assert.equal(second.hasMore,false);
+ assert.equal([...first.commands,...second.commands].length,4);assert.ok([...first.commands,...second.commands].every(c=>c.result.futureText.length===44000));
+});

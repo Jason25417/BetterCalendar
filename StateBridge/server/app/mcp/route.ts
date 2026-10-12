@@ -10,7 +10,8 @@ const tools=[
   {name:"read_observation_history",description:"按 sourceKey 和发生时间查询一个来源的原始历史；保留未知版本和字段，区分发生与接收时间。每页最多100条，hasMore时以相同范围及nextCursor继续；补传后复核需重读完整时间窗。不能把历史当实时状态。",inputSchema:object({sourceKey:string,from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:string},["sourceKey"]),annotations:{readOnlyHint:true}},
   {name:"read_instructions",description:"读取用户已批准的个人状态助手行为约定。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"task_command",description:"仅按用户明确表达开始、暂停、继续或结束计时，与BC按钮使用同一记录。结束计时不标记事项完成。使用稳定commandId防重；非开始操作先读revision。开始时可传relatedRecordId关联旧计划ID，不迁移或改写旧记录。返回saved=true才确认。",inputSchema:object({commandId:string,action:{type:"string",enum:["start","pause","resume","finish"]},title:string,sessionId:string,expectedRevision:{type:"integer"},occurredAt:{type:"string",format:"date-time"},provenance:{type:"string",enum:["user"]},relatedRecordId:string},["commandId","action","provenance"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
-  {name:"read_task_history",description:"读取包含已结束任务的计时历史；开始时间范围使用带时区时间戳，最多100条。",inputSchema:object({from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100}}),annotations:{readOnlyHint:true}},
+  {name:"read_task_history",description:"分页读取BC云端计时的最新记录，包含已结束任务；按开始时间查询，读到hasMore=false。分页不冻结状态，旧SwiftData历史尚未迁移。",inputSchema:object({from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string"}}),annotations:{readOnlyHint:true}},
+  {name:"read_task_commands",description:"按服务端保存时间分页读取BC计时原始操作回执；可按sessionId筛选，读到hasMore=false。回执用于核对保存证据，不会重放操作或修改记录。",inputSchema:object({sessionId:{type:"string"},from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string"}}),annotations:{readOnlyHint:true}},
   {name:"acknowledge_batch",description:"仅在读取最新状态、补齐截断变化并完成本批理解后调用，记录 Dot 的实际处理时间；不能提前确认。",inputSchema:object({batchId:string},["batchId"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"record_context",description:"保存用户说明或单独标记的推断；推断必须引用依据，不会自动完成或暂停显式计时。",inputSchema:object({id:string,kind:string,body:{type:"object"},assertion:{type:"string",enum:["user","inferred"]},confidence:{type:"string",enum:["high","medium","low","unknown"]},basis:{type:"array",items:string},expiresAt:{type:"string",format:"date-time"},supersedes:string},["id","kind","body","assertion","confidence","basis"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"read_connection_status",description:"查看已登记设备、事件订阅与回调接收状态；不返回密钥。",inputSchema:object(),annotations:{readOnlyHint:true}},
@@ -45,6 +46,7 @@ export async function POST(request:Request){
         case "read_instructions":value={instructions:dotInstructions};break;
         case "task_command":value=await core.taskCommand(a);break;
         case "read_task_history":value=await core.taskHistory(a);break;
+        case "read_task_commands":value=await core.readTaskCommands(a);break;
         case "acknowledge_batch":value=await core.acknowledgeBatch(a.batchId,owner);break;
         case "record_context":value=await core.recordNote(a);break;
         case "read_connection_status":value=await core.diagnostics();break;
