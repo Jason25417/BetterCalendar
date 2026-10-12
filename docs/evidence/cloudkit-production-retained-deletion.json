@@ -1,0 +1,53 @@
+{
+  "observedAt": "2026-10-12T23:46:59.108Z",
+  "container": "iCloud.com.jason.BetterCalendar",
+  "environment": "Production",
+  "fields": [
+    {
+      "name": "CD_JournalEntry 21 fields",
+      "fields": [
+        "CD_deletedAtDate/TimeQueryable, Sortable",
+        "CD_deletionContextBytesQueryable, Sortable",
+        "CD_deletionIDStringQueryable, Searchable, Sortable",
+        "CD_restoredDeletionIDStringQueryable, Searchable, Sortable"
+      ]
+    },
+    {
+      "name": "CD_JournalPhoto 15 fields",
+      "fields": [
+        "CD_deletedAtDate/TimeQueryable, Sortable",
+        "CD_deletionContextBytesQueryable, Sortable",
+        "CD_deletionIDStringQueryable, Searchable, Sortable",
+        "CD_restoredDeletionIDStringQueryable, Searchable, Sortable"
+      ]
+    },
+    {
+      "name": "CD_LongTask 25 fields",
+      "fields": [
+        "CD_deletedAtDate/TimeQueryable, Sortable",
+        "CD_deletionContextBytesQueryable, Sortable",
+        "CD_deletionIDStringQueryable, Searchable, Sortable",
+        "CD_restoredDeletionIDStringQueryable, Searchable, Sortable"
+      ]
+    },
+    {
+      "name": "CD_LongTaskCheckpoint 16 fields",
+      "fields": [
+        "CD_deletedAtDate/TimeQueryable, Sortable",
+        "CD_deletionContextBytesQueryable, Sortable",
+        "CD_deletionIDStringQueryable, Searchable, Sortable",
+        "CD_restoredDeletionIDStringQueryable, Searchable, Sortable"
+      ]
+    },
+    {
+      "name": "CD_PlanBlock 25 fields",
+      "fields": [
+        "CD_deletedAtDate/TimeQueryable, Sortable",
+        "CD_deletionContextBytesQueryable, Sortable",
+        "CD_deletionIDStringQueryable, Searchable, Sortable",
+        "CD_restoredDeletionIDStringQueryable, Searchable, Sortable"
+      ]
+    }
+  ],
+  "deployPerformed": false
+}

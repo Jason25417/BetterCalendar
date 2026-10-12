@@ -67,3 +67,9 @@ macOS应用单元测试275/275，无跳过或失败，/tmp/bc-browser-tests-fina
 通过Edge扩展打开CloudKit Console，实际跳转到Apple登录表单。尚不能读取Development→Production真实差异。已请Jason仅完成登录；登录不代表批准Production部署。待实际预览后核对这20个字段及额外索引/角色差异，给出具体可审阅变更，再按独立授权边界处理生产更新。普通仓库push/TestFlight常驻授权不自动覆盖CloudKit Production结构变更。
 
 等待期间不发布含新模型的App，也不停止当前163采集、临时pool、共享计时或本地研究录制。现有原型试用不依赖此登录。完整长期目标尚未完成；本轮是发布前置证据复核，不宣称真实双端删除/恢复验收成功。
+
+## 登录后的生产字段核验（2026-10-12T23:48:16.289061+00:00）
+
+通过 Edge 扩展在正确团队 D2KWHV599Z、容器 iCloud.com.jason.BetterCalendar 中逐项读取 Development 和 Production。Production 的 CD_PlanBlock、CD_LongTask、CD_LongTaskCheckpoint、CD_JournalEntry、CD_JournalPhoto 已各有四个删除字段：CD_deletedAt=Date/Time、CD_deletionContext=Bytes、CD_deletionID/CD_restoredDeletionID=String；时间与字节字段 Queryable/Sortable，字符串 Queryable/Searchable/Sortable。与 Development 所需字段一致，共20个，当前生产 schema 已兼容这批 App。部署预览为零变更，本轮未点击 Deploy、未更改角色或生产数据；不推断由谁在何时部署。之前“Production 未部署”的表述仅代表当时缺少证据，不能用来描述当前状态。
+
+实际页面字段与截图保存在 docs/evidence/cloudkit-production-retained-deletion.json 和 .png；只有 schema 信息，不含私人业务记录。开始准备0.65.7/164双端 TestFlight，最终状态以新的发布报告为准。真实设备删除恢复仍须在双端都更新后核验，字段兼容不等于端到端同步验收。
