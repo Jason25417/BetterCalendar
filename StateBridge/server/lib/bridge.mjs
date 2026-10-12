@@ -4,6 +4,7 @@ import { sourceView, coverageView, stateWarnings } from "./state-view.mjs";
 import { createObservationHistory } from "./observation-history.mjs";
 import { createTaskHistory } from "./task-history.mjs";
 import { createPoolRecords } from "./pool-records.mjs";
+import { createResearch } from "./research.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -46,6 +47,7 @@ export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch
 export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots()}={}){
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
+  const research=createResearch(db,time);
   async function registerDevice(v){
     const id=str(v.id,"设备 ID",80),label=str(v.label,"设备名",100);
     if(!Array.isArray(v.scopes)||!v.scopes.length||v.scopes.some(s=>typeof s!=="string"||!/^[a-z][a-z0-9_.-]{1,60}$/.test(s)))throw new BridgeError("来源范围无效");
@@ -236,6 +238,9 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }
   async function diagnostics(){return {readAt:time(),devices:await all("SELECT id,label,scopes,created_at,revoked_at FROM devices"),sourceCount:(await one("SELECT COUNT(*) AS n FROM states")).n,subscriptions:await all("SELECT id,expires_at,created_at FROM subscriptions"),deliveries:await all("SELECT batch_id,status,attempts,received_at,last_error FROM deliveries ORDER BY next_attempt_at DESC LIMIT 15"),batches:await all("SELECT id,created_at,processed_at FROM batches ORDER BY minute DESC LIMIT 15")};}
-  return {registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  const recordContext=(input,actor)=>input.kind==='bc.research.batch_result'
+    ? research.complete({...input.body,resultId:input.body?.resultId ?? input.id},actor)
+    : recordNote(input);
+  return {research,recordContext,registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }

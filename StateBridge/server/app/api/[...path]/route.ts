@@ -20,14 +20,25 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
     }
     if(path==="ingest"||path==="flush"||path==="pool/upload"){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
-      return json(path==="pool/upload"?await core.uploadPool(body,device):path==="ingest"?await core.ingest(body,device):await core.flush());
+      return json(await core.research.invoke(path,body,`device:${device.id}`,()=>path==="pool/upload"?core.uploadPool(body,device):path==="ingest"?core.ingest(body,device):core.flush()));
+    }
+    if(path.startsWith("research/")){
+      const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
+      if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人研究读取权限",403);
+      // Read-only local archiver: cannot acknowledge, send or operate timing.
+      if(path==="research/log")return json(await core.research.read(body));
+      if(path==="research/batches")return json(await core.research.batches(body));
+      if(path==="research/changes")return json(await core.readChanges(body.afterId??0,body.limit??100,body.throughId??null));
+      if(path==="research/state")return json(await core.readState(body));
+      if(path==="research/evidence")return json(await core.research.evidence(body));
+      throw new BridgeError("未知研究读取接口",404);
     }
     if(path==="tasks/state"||path==="tasks/command"||path==="pool/read"){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       // Only the owner's enrolled interactive devices can participate in task
       // timing. Clock/probe tokens cannot read or control personal sessions.
       if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人任务操作权限",403);
-      return json(path==="pool/read"?await core.readPoolRecords(body):path==="tasks/state"?await core.taskState():await core.taskCommand(body,`device:${device.id}`));
+      return json(await core.research.invoke(path,body,`device:${device.id}`,()=>path==="pool/read"?core.readPoolRecords(body):path==="tasks/state"?core.taskState():core.taskCommand(body,`device:${device.id}`)));
     }
     if(!request.headers.get("oai-authenticated-user-id"))throw new BridgeError("需要已登录的用户",401);
     if(path==="devices/enroll") {

@@ -4,6 +4,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createBridge, signWebhook, validateCallback } from '../lib/bridge.mjs';
 import { sourceView } from '../lib/state-view.mjs';
+import { shadowDecision } from '../lib/shadow-decision.mjs';
+import { safeArguments } from '../lib/research.mjs';
 function fixture(options={}){
  const sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){return sqlite.prepare(sql).run(...args);}};}
@@ -304,4 +306,88 @@ test('pool fragmentation reconstructs UTF-8 notes, limits pages without losing o
  const f=fixture(),d=await poolDevice(f),text='学习🌲'.repeat(20000),records=[poolRecord('large',{note:text}),poolRecord('next')];
  await publishPool(f,d,records);const first=await f.core.readPoolRecords();assert.equal(first.records.length,1);assert.equal(first.records[0].values.note,text);assert.equal(first.byteBudgetExceeded,true);assert.equal(first.hasMore,true);
  const second=await f.core.readPoolRecords({cursor:first.nextCursor});assert.equal(second.records[0].id,'next');assert.equal(second.hasMore,false);
+});
+
+async function researchFixture() {
+ const f=fixture(),d=await device(f);
+ for(let seq=1;seq<=3;seq++)await f.core.ingest({observations:[obs(seq,{seq},f)]},d);
+ const batch=await f.core.flush();return {...f,batch};
+}
+async function readForBatch(f,limit=100) {
+ let after=0,calls=[];
+ while(true){const p=await f.core.research.invoke('read_changes',{afterId:after,throughId:3,limit},'owner',()=>f.core.readChanges(after,limit,3));calls.push(p.research.callId);after=p.nextCursor;if(!p.hasMore)break;}
+ const state=await f.core.research.invoke('read_current_state',{},'owner',()=>f.core.readState());calls.push(state.research.callId);return calls;
+}
+const completion=(f,calls)=>({batchId:f.batch.batchId,resultId:'same-result',readCallIds:calls,conclusions:[],notification:{channel:'silent',result:'not_requested'},operation:{kind:'none'}});
+test('research complete rejects first page, persists full pages atomically and retries one result',async()=>{
+ const f=await researchFixture();
+ const p=await f.core.research.invoke('read_changes',{afterId:0,limit:1,throughId:3},'owner',()=>f.core.readChanges(0,1,3));
+ await assert.rejects(f.core.research.complete(completion(f,[p.research.callId]),'owner'),/完整读取/);
+ assert.equal(f.sqlite.prepare('SELECT processed_at FROM batches').get().processed_at,null);
+ const calls=await readForBatch(f,1),input=completion(f,calls),r=await f.core.research.complete(input,'owner');
+ assert.equal(r.recorded,true);assert.equal(r.deviceApplication,'unknown');
+ assert.equal((await f.core.research.complete(input,'owner')).resultId,r.resultId);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='batch_result'").get().n,1);
+ await assert.rejects(f.core.research.complete({...input,attention:{seconds:3}},'owner'),/不能复用/);
+ await assert.rejects(f.core.research.complete({...input,resultId:'other'},'other-owner'),/不属于/);
+});
+test('research conclusions cite actual calls; silence cannot claim a notification; operation needs saved receipt',async()=>{
+ const f=await researchFixture(),calls=await readForBatch(f),input=completion(f,calls);
+ await assert.rejects(f.core.research.complete({...input,conclusions:[{summary:'猜测',sourceClass:'inference',confidence:'low',rationale:'活动不足',evidenceCallIds:['invented'],alternatives:[]}]},'owner'),/结论必须/);
+ await assert.rejects(f.core.research.complete({...input,notification:{channel:'silent',result:'reported_sent'}},'owner'),/静默/);
+ await assert.rejects(f.core.research.complete({...input,operation:{kind:'task_command',commandId:'invented'}},'owner'),/保存回执/);
+ assert.equal((await f.core.research.complete({...input,conclusions:[{summary:'没有足够证据判断任务结束',sourceClass:'inference',confidence:'low',rationale:'只观察到应用变化',evidenceCallIds:[calls[0]],alternatives:['可能仍在纸上工作']}]},'owner')).userFeedback,'unknown');
+});
+test('recording fails before execution; response loss after actual saved command retries without double timing',async()=>{
+ const f=fixture();f.sqlite.exec('DROP TABLE research_log');let executed=false;
+ await assert.rejects(f.core.research.invoke('task_command',{},'owner',()=>{executed=true;return {};}));assert.equal(executed,false);
+ const g=fixture(),v={commandId:'persist-loss',action:'start',title:'fixture',provenance:'user'};
+ g.sqlite.exec("CREATE TRIGGER fail_return BEFORE INSERT ON research_log WHEN NEW.kind='call_returned' BEGIN SELECT RAISE(FAIL,'disk failure'); END");
+ await assert.rejects(g.core.research.invoke('task_command',v,'owner',()=>g.core.taskCommand(v)),/disk failure/);
+ assert.equal(g.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,1);
+ g.sqlite.exec('DROP TRIGGER fail_return');const result=await g.core.research.invoke('task_command',v,'owner',()=>g.core.taskCommand(v));assert.equal(result.saved,true);
+ assert.equal(g.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,1);
+});
+test('complete persistence failure cannot advance processed_at; correction preserves original receipt',async()=>{
+ const f=await researchFixture(),calls=await readForBatch(f),input=completion(f,calls);
+ f.sqlite.exec("CREATE TRIGGER fail_result BEFORE INSERT ON research_log WHEN NEW.kind='batch_result' BEGIN SELECT RAISE(FAIL,'disk failure'); END");
+ await assert.rejects(f.core.research.complete(input,'owner'),/disk failure/);assert.equal(f.sqlite.prepare('SELECT processed_at FROM batches').get().processed_at,null);
+ f.sqlite.exec('DROP TRIGGER fail_result');const first=await f.core.research.complete(input,'owner');
+ await f.core.research.complete({...input,resultId:'correction',supersedes:first.resultId},'owner');
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='batch_result'").get().n,2);
+});
+test('research cursor freezes upper bound; no credential or raw body in metadata; revoked device denied',async()=>{
+ const f=fixture(),d=await device(f);
+ await f.core.research.invoke('read_current_state',{},'owner',()=>f.core.readState());
+ const page=await f.core.research.read({limit:1});await f.core.research.invoke('read_current_state',{},'owner',()=>f.core.readState());
+ const rest=await f.core.research.read({afterId:page.nextCursor,throughId:page.throughId});assert.equal(rest.entries.length,1);assert.equal(rest.hasMore,false);
+ assert.deepEqual(safeArguments({token:'secret',body:{token:'secret'},commandId:'ok',basis:['Bearer secret']}),{commandId:'ok',basis:['[redacted]']});
+ const enrolled=await f.core.registerDevice({id:'revoked',label:'fixture',scopes:['user.context']});await f.core.revokeDevice(enrolled.id);await assert.rejects(f.core.authenticateDevice(enrolled.token),/撤销/);
+ const args={observations:[obs(1,{privateText:'original'},f)]};await f.core.research.invoke('ingest',args,'device:mac',()=>f.core.ingest(args,d));
+ const logged=f.sqlite.prepare('SELECT body FROM research_log').all().map(r=>r.body).join('');assert.ok(!logged.includes('original'));assert.ok(logged.includes('test-1'));
+});
+test('shadow preserves errors and user commands; refresh filtering is pure and distinct from ForwardAll',()=>{
+ const c=(id,value,extra={})=>({id,sourceKey:'mac:activity',observation:{eventId:String(id),assertion:'observed',value,...extra}});
+ const first=shadowDecision([c(1,{app:'editor',sampledAt:'old'})]);
+ const second=shadowDecision([c(2,{app:'editor',sampledAt:'new'}),c(2,{app:'editor'})],first.next);
+ assert.equal(second.wake,false);assert.equal(second.notify,false);assert.equal(second.execute,false);assert.equal(first.wake,true);
+ assert.equal(shadowDecision([c(3,{availability:'read-unavailable'})],first.next).wake,true);
+ assert.equal(shadowDecision([c(4,{}, {assertion:'user'})],first.next).wake,true);
+});
+test('new archiver starting after the latest event sees an empty page rather than invalid cursor',async()=>{
+ const f=fixture();const page=await f.core.research.batches({afterMinute:100});assert.deepEqual(page.entries,[]);assert.equal(page.nextCursor,100);assert.equal(page.throughMinute,100);assert.equal(page.hasMore,false);
+ await assert.rejects(f.core.research.batches({afterMinute:100,throughMinute:99}),/终点/);
+});
+test('cached record_context adapter uses the same evidence checks and does not create an inferred activity',async()=>{
+ const f=await researchFixture(),calls=await readForBatch(f),body=completion(f,calls);
+ const result=await f.core.recordContext({id:body.resultId,kind:'bc.research.batch_result',assertion:'inferred',confidence:'unknown',basis:calls,body},'owner');
+ assert.equal(result.recorded,true);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,0);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ await assert.rejects(f.core.recordContext({id:'invalid',kind:'bc.research.batch_result',body:{...body,resultId:'invalid',readCallIds:['invented']}},'owner'),/不存在/);
+});
+test('later research completion preserves original legacy processed time and escapes unusual secret-bearing parameters',async()=>{
+ const f=await researchFixture(),calls=await readForBatch(f);await f.core.acknowledgeBatch(f.batch.batchId,'owner');const original=f.time();f.advance(60000);
+ const result=await f.core.research.complete(completion(f,calls),'owner');assert.equal(result.processedAt,original);assert.equal(result.recordedAt,f.time());
+ assert.equal((await f.core.research.complete(completion(f,calls),'owner')).recordedAt,result.recordedAt);
+ assert.deepEqual(safeArguments({basis:['Bearer "odd-secret" text']}),{basis:['[redacted] text']});
 });
