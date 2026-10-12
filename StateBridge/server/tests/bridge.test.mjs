@@ -234,3 +234,16 @@ test('oversized receipt pages preserve complete records and signal continuation'
  const second=await f.core.readTaskCommands({cursor:first.nextCursor});assert.equal(second.hasMore,false);
  assert.equal([...first.commands,...second.commands].length,4);assert.ok([...first.commands,...second.commands].every(c=>c.result.futureText.length===44000));
 });
+
+test('legacy resting-heart-rate null is unknown rather than available',()=>{
+ const base={deviceId:'phone',source:'health.resting-heart-rate',observedAt:'2026-10-05T12:00:00Z',receivedAt:'2026-10-05T12:00:01Z',expiresAt:'2026-10-06T12:00:00Z'};
+ for(const value of [{bpm:null},{bpm:null,availability:'readable'},[]]){
+   const view=sourceView({...base,value},'phone:health.resting-heart-rate','2026-10-05T12:01:00Z');
+   assert.equal(view.availability,'unknown');assert.equal(view.usableForCurrentState,false);
+ }
+ for(const value of [{bpm:62},[{bpm:62,end:'2026-10-05T12:00:00Z'}]]){
+   assert.equal(sourceView({...base,value},'phone:health.resting-heart-rate','2026-10-05T12:01:00Z').availability,'available');
+ }
+ const failure=sourceView({...base,value:{availability:'read-unavailable',bpm:null}},'phone:health.resting-heart-rate','2026-10-05T12:01:00Z');
+ assert.equal(failure.availability,'error');
+});

@@ -15,6 +15,7 @@ export function sourceView(observation, sourceKey, readAt) {
   else if (emptyStatuses.has(reason)) availability = "empty";
   else if (Array.isArray(value) && !value.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
   else if (value && typeof value === "object" && observation.source === "health.steps" && value.count == null) availability = "unknown";
+  else if (value && !Array.isArray(value) && typeof value === "object" && observation.source === "health.resting-heart-rate" && value.bpm == null) availability = "unknown";
   else if (["available", "partial"].includes(availability) && value && typeof value === "object" && (Array.isArray(value.items) || Array.isArray(value.samples))) {
     const entries = value.items ?? value.samples;
     if (availability === "partial" || value.truncated || value.omittedItems) availability = "partial";

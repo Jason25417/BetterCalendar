@@ -19,6 +19,8 @@ import CryptoKit
     private var workspaceObservers: [NSObjectProtocol] = []
     private var activityTimer: Timer?
     private var lastActivity: BridgeJSON?
+    private var lastBrowserFailure: BridgeJSON?
+    private let browserReader: any StateBridgeBrowserReading = AppleScriptBridgeBrowserReader()
     #endif
     var enabled: Bool { UserDefaults.standard.bool(forKey:"dotStateBridge.enabled") }
     func setEnabled(_ enabled: Bool) {
@@ -97,18 +99,19 @@ import CryptoKit
         #if os(macOS)
         let app = NSWorkspace.shared.frontmostApplication
         sampleActivity(force:true)
-        if let bundle = app?.bundleIdentifier {
-            let command: String?
-            if bundle == "com.apple.Safari" { command = "tell application \"Safari\" to return {URL of current tab of front window, name of current tab of front window}" }
-            else if ["com.google.Chrome","com.microsoft.edgemac","company.thebrowser.Browser"].contains(bundle), let name = app?.localizedName { command = "tell application \"\(name.replacingOccurrences(of:"\"",with:""))\" to return {URL of active tab of front window, title of active tab of front window}" }
-            else { command = nil }
-            if let command, let script = NSAppleScript(source:command) {
-                var error: NSDictionary?; let result = script.executeAndReturnError(&error)
-                if error == nil { var url = URLComponents(string:result.atIndex(1)?.stringValue ?? ""); url?.query = nil; url?.fragment = nil
-                    client.emit("mac.browser",value:.object(["url":.text(url?.string),"title":.text(result.atIndex(2)?.stringValue)]))
-                } else { client.emit("mac.browser",value:.object(["availability":.string("permission-or-browser-unavailable")])) }
-            } else { client.emit("mac.browser",value:.object(["availability":.string("not-frontmost")])) }
-        }
+        let browser = await browserReader.snapshot(bundleID: app?.bundleIdentifier, at: now)
+        guard enabled else { return }
+        if case let .object(fields) = browser.value,
+           case let .string(availability) = fields["availability"],
+           ["not-authorized", "read-unavailable"].contains(availability) {
+            if lastBrowserFailure != browser.value {
+                let reason: String
+                if case let .string(value) = fields["reason"] { reason = value } else { reason = "browser-read-failed" }
+                DevLog.shared.warn("StateBridge", "浏览器状态读取未成功：\(reason)；未将它当作空页面。")
+                lastBrowserFailure = browser.value
+            }
+        } else { lastBrowserFailure = nil }
+        client.emit("mac.browser", value: browser.value, observedAt: browser.observedAt)
         await sampleFiles()
         guard enabled else { return }
         sampleHistory()
@@ -120,7 +123,10 @@ import CryptoKit
         #if os(iOS)
         await StateBridgePhone.shared.readHealth()
         #endif
-        client.emit("device.status",value:.object(["availability":.string("online"),"platform":.string(ProcessInfo.processInfo.operatingSystemVersionString)]))
+        client.emit("device.status",value:.object(["availability":.string("online"),
+            "platform":.string(ProcessInfo.processInfo.operatingSystemVersionString),
+            "collector":.object(["name":.string("BetterCalendar"),"version":.string(AppInfo.version),
+                                 "build":.string(BuildInfo.buildNumber),"schemaVersion":.number(2)])]))
         await client.uploadAndFlush()
     }
     #if os(macOS)

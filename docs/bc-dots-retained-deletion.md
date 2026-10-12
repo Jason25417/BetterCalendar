@@ -37,7 +37,7 @@
 
 预期 schema 差异为五个既有 `CD_` Record Type 各新增四个字段，共20个；不主动变更 Security Roles。正式差异以 Development 写入与 Console 实际预览为准，不能把预期清单称作已部署。
 
-现有开发期 schema 播种器已经补齐五类非空哨兵；有独立验证、幂等播种和按操作身份/时间清理。只写无个人内容的合成数据，不改真实记录；播种/保存失败可见。必须在 Development 环境完成字段生成、核验 Production 部署，再发布含本功能的双端更新。当前未执行新字段播种或 Production 部署。
+现有开发期 schema 播种器已经补齐五类非空哨兵；有独立验证、幂等播种和按操作身份/时间清理。只写无个人内容的合成数据，不改真实记录；播种/保存失败可见。2026-10-12后续已通过独立Development入口实际播种并收到成功export，五类合成记录删除字段齐全，日用库仍旧结构。Console尚未登录、实际字段diff未读取，Production未部署。后续证据见[独立准备与采集修复](bc-dots-collection-and-development-schema.md)。必须核验Production部署，再发布含本功能的双端更新。
 
 剩余验收：Development生成/Production部署、双端TestFlight更新、真实删除传播与恢复、离线重连和并发操作。后台采集覆盖、长期事项MCP和旧/新历史统一查询仍属于整体目标的其他未完成部分。
 

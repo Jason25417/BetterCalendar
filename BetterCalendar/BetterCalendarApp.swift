@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 
+#if !(BC_SCHEMA_SEEDER && DEBUG && os(macOS))
 @main
 struct BetterCalendarApp: App {
     @State private var container = AppContainer()
@@ -270,3 +271,5 @@ struct BetterCalendarApp: App {
         }
     }
 }
+
+#endif
