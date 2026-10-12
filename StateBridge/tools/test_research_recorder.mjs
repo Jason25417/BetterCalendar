@@ -54,3 +54,22 @@ test('minimal capability contrast retains user statements and does not equate ab
 test('retention keeps referenced request snapshots and does not delete fresh evidence',async t=>{
  const r=setup(t,{retentionDays:1}),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);const count=r.db.prepare('SELECT COUNT(*) n FROM snapshots').get().n;r.prune();assert.equal(r.db.prepare('SELECT COUNT(*) n FROM snapshots').get().n,count);assert.equal(r.db.prepare('SELECT COUNT(*) n FROM runs').get().n,1);
 });
+
+
+test('research summary separates processed silence, missing results and shadow savings without counting corrections twice',async t=>{
+ const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);
+ const run=JSON.parse(r.db.prepare('SELECT body FROM runs').get().body);
+ const second={...run,id:'second',shadow:{...run.shadow,wake:false}};
+ r.db.prepare('INSERT INTO runs VALUES(?,?)').run(second.id,JSON.stringify(second));
+ const initial=r.stats();assert.equal(initial.awaitingResearchResult,2);assert.equal(initial.processedWithoutAction,0);assert.equal(initial.shadowWouldSkipWake,1);
+ const result={id:1,callId:'result_1',batchId:run.id,kind:'batch_result',createdAt:new Date(now.getTime()+3000).toISOString(),body:{notification:{channel:'silent',result:'not_requested'},operation:{kind:'none'},supersedes:null}};
+ r.db.prepare('INSERT INTO calls VALUES(?,?)').run(1,JSON.stringify(result));
+ const corrected={...result,id:2,callId:'result_2',createdAt:new Date(now.getTime()+70000).toISOString(),body:{...result.body,supersedes:'result_1'}};
+ r.db.prepare('INSERT INTO calls VALUES(?,?)').run(2,JSON.stringify(corrected));
+ const summary=r.stats();assert.equal(summary.recordedAgentResults,1);assert.equal(summary.awaitingResearchResult,1);assert.equal(summary.processedWithoutAction,1);assert.equal(summary.processedWithoutActionAndShadowWouldSkip,0);assert.equal(summary.correctionCount,1);assert.equal(summary.batches[0].resultId,'result_2');assert.equal(summary.batches[0].firstResultDelaySeconds,3);assert.equal(summary.batches[0].latestResultDelaySeconds,70);assert.equal(summary.batches[1].firstResultDelaySeconds,null);assert.equal(summary.modelCost,null);assert.equal(summary.userApproval,'unknown');
+ assert.ok(readFileSync(r.view(),'utf8').includes('真实 ForwardAll 仍运行'));
+ const file=join(r.root,'summary-export.json');r.export(file);assert.equal(JSON.parse(readFileSync(file)).summary.recordedAgentResults,1);
+ const command={...result,id:3,callId:'result_3',batchId:'second',body:{notification:{channel:'chat',result:'reported_sent'},operation:{kind:'task_command',commandId:'command_1'},supersedes:null}};
+ r.db.prepare('INSERT INTO calls VALUES(?,?)').run(3,JSON.stringify(command));
+ assert.equal(r.stats().notificationReportedSent,1);assert.equal(r.stats().operationReceipts,1);assert.equal(r.stats().processedWithoutAction,1);
+});

@@ -58,6 +58,7 @@ App 和 Dots 用法不变：自然问下一步，明确说开始/暂停/继续/�
 node StateBridge/tools/research-recorder.mjs once
 node StateBridge/tools/research-recorder.mjs watch
 node StateBridge/tools/research-recorder.mjs view
+node StateBridge/tools/research-recorder.mjs stats
 node StateBridge/tools/research-recorder.mjs export '/选择的本地路径/研究导出.json'
 node StateBridge/tools/research-recorder.mjs replay minute_事件编号
 node StateBridge/tools/research-recorder.mjs stop
@@ -71,7 +72,7 @@ node StateBridge/tools/research-recorder.mjs stop
 
 ## 本轮验收边界
 
-已验证：41 项 SQLite/纯规则/本地持久化检查通过（26 既有，15 本轮）。涵盖重复投递、旧状态/乱序、分页、重启、断线补传、实际计时成功但响应/日志丢失、旧 revision 冲突、设备撤权、结果持久化失败、shadow 与真实路径分离、回放零联网/写入、来源对照、凭据过滤与离线查看/导出。
+已验证：42 项 SQLite/纯规则/本地持久化检查通过（26 既有，16 本轮）。涵盖重复投递、旧状态/乱序、分页、重启、断线补传、实际计时成功但响应/日志丢失、旧 revision 冲突、设备撤权、结果持久化失败、shadow 与真实路径分离、回放零联网/写入、来源对照、凭据过滤与离线查看/导出。
 
 未验证：这些测试不是生产设备端到端可靠性；未证明用户真的看到提醒、设备应用每条计时、所有 iPhone 后台分钟持续覆盖、Dots 每批都用新研究回执、实际模型费用、真实注意力成本或生活改善。
 
@@ -104,3 +105,12 @@ node StateBridge/tools/research-recorder.mjs stop
 - 同目录 `research.sqlite`：持续采集原文/回执；config.json 可调期限、容量和本地调试反馈。
 
 上述原始资料不进入源码仓库，不复制到新云服务。查看页是手动生成的静态快照，重新运行 view 更新；持续采集不代表页面自动刷新。日常每批使用新回执、设备实际应用、成本和生活收益继续保持未验证。
+
+
+### 22:02 UTC 持续运行检查与汇总增量
+
+- 本轮没有再向 Dots 发送测试消息。后续真实批次 minute_29864037 和 minute_29864039 分别于22:00:03.327和22:00:19.033 UTC保存研究回执；本地已下载calls#411/#426，均有实际读取callIds、1条结论、silent/not_requested和operation=none。先前“接收但尚无结果”如实呈现，后来按回执转成已记录，不以接收HTTP宣称处理成功。
+- 22:01:26本地5批已保存结果；22:02:04新增第6批，仍为待回执。不能把某一时点pending=0当持续清空保证。Mac状态/目录在21:58继续更新，两个后台进程实查存活；手机最新心跳21:48已stale，位置/家庭数据也有缺口，仍不宣称手机每分钟后台持续覆盖。
+- 新stats离线汇总同时呈现已保存结果、处理后无动作、尚无结果、shadow未来可省唤醒；后者不是真实节约。更正按一批当前结果计一次，原始证据保留。已增加聚焦测试，累计42/42通过。
+- 延迟口径单独写清：服务端批次createdAt→第一次结果保存，另列最新纠正时间差；不是原始事情发生→用户看到。上述两个后续样本为167.815秒及63.323秒；早期三批包含工具缓存和人工核验过程，不能拿来声称常态响应速度。
+- 查看页和JSON导出加入这份汇总；sample-summary.json是当前本地快照。无需新部署、无App修改、无新增通知或写入权限。费用、注意力时间、实际帮助、用户认可仍为未知。原始资料与页仍只在本机。

@@ -129,19 +129,55 @@ export class Recorder {
     const inputs=comparisonInputs(run.changes,run.window,{context});
     return {version:1,id,sideEffects:false,network:false,groups:inputs.map(i=>({...i,shadow:shadowDecision(i.changes,run.shadowPrior ?? {})})),evaluation:{falsePositives:null,falseNegatives:null,usefulness:null,cost:null,reason:'requires labeled real samples; silence is not approval'}};
   }
+  stats() {
+    const calls=this.db.prepare('SELECT body FROM calls ORDER BY id').all().map(r=>JSON.parse(r.body));
+    const runs=this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body));
+    const byBatch=new Map(),firstByBatch=new Map();
+    for(const call of calls)if(call.kind==='batch_result'){byBatch.set(call.batchId,call);if(!firstByBatch.has(call.batchId))firstByBatch.set(call.batchId,call);}
+    const summary={version:1,generatedAt:this.clock().toISOString(),archivedBatches:runs.length,
+      recordedAgentResults:0,awaitingResearchResult:0,processedWithoutAction:0,
+      shadowWouldSkipWake:0,processedWithoutActionAndShadowWouldSkip:0,
+      notificationReportedSent:0,notificationFailed:0,operationReceipts:0,
+      correctionCount:calls.filter(c=>c.kind==='batch_result'&&c.body.supersedes).length,
+      errors:{localReadFailures:this.db.prepare('SELECT COUNT(*) n FROM failures').get().n,archivedCallFailures:calls.filter(c=>c.kind==='call_failed').length},
+      modelTokens:null,modelCost:null,attentionSeconds:null,usefulness:null,userApproval:'unknown',
+      caveats:['Shadow does not change ForwardAll or prove saved calls/cost',
+        'Reported notification is not device delivery or proof the user saw it',
+        'Missing result is not proof the model was not woken',
+        'Corrected results counted once per batch; old evidence retained',
+        'User silence is unknown, not approval',
+        'Delay measures server batch creation to saved result, not source occurrence or user delivery'],batches:[]};
+    for(const run of runs) {
+      const result=byBatch.get(run.id),skip=run.shadow.wake===false;
+      const noAction=!!result&&result.body.notification.channel==='silent'&&result.body.notification.result==='not_requested'&&result.body.operation.kind==='none';
+      if(result)summary.recordedAgentResults++;else summary.awaitingResearchResult++;
+      if(noAction)summary.processedWithoutAction++;
+      if(skip)summary.shadowWouldSkipWake++;
+      if(noAction&&skip)summary.processedWithoutActionAndShadowWouldSkip++;
+      if(result?.body.notification.result==='reported_sent')summary.notificationReportedSent++;
+      if(result?.body.notification.result==='failed')summary.notificationFailed++;
+      if(result?.body.operation.kind==='task_command')summary.operationReceipts++;
+      const delay=receipt=>{const ms=Date.parse(receipt?.createdAt)-Date.parse(run.batch.createdAt);return Number.isFinite(ms)&&ms>=0?ms/1000:null;};
+      summary.batches.push({id:run.id,firstResultDelaySeconds:delay(firstByBatch.get(run.id)),latestResultDelaySeconds:delay(result),resultId:result?.callId??null,recordedAt:result?.createdAt??null,
+        agentResult:result?'recorded':'unknown',processedWithoutAction:noAction,shadowWouldSkipWake:skip,
+        notification:result?.body.notification??null,operation:result?.body.operation??null});
+    }
+    return summary;
+  }
   view() {
     const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const calls=this.db.prepare('SELECT body FROM calls ORDER BY id').all().map(r=>JSON.parse(r.body));
     const runs=this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body));
+    const summary=this.stats();
     const rows=runs.reverse().map(run=>{
       const results=calls.filter(c=>c.batchId===run.id&&c.kind==='batch_result');
       return `<article><h2>${escape(run.id)}</h2><p>接收：完整读取 ${run.changes.length} 条变化 · 读取时间：${escape(run.collectedAt)}</p><p>ForwardAll：保留原路径 · Shadow：${run.shadow.wake?'建议唤醒':'也许可省掉唤醒'}（没有改变真实路径）</p><p>结果：${results.length?'有代理处理回执':'尚无完整研究回执；不推断已处理或未处理'} · 用户认可：未知</p><details><summary>来源、时效和缺口</summary><pre>${escape(JSON.stringify({coverage:run.coverage,gaps:run.gaps},null,2))}</pre></details><details><summary>判断与通知／操作结果</summary><pre>${escape(JSON.stringify(results,null,2))}</pre></details><details><summary>完整事件和本地原文索引</summary><pre>${escape(JSON.stringify(run,null,2))}</pre></details>${this.config.debugFeedback?'<p>调试反馈已启用：静默处理只显示在这里，不发送手机通知；查看成本尚未计时。</p>':''}</article>`;
     }).join('');
     const file=join(this.root,'review.html');
-    writeFileSync(file,`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>BC 研究记录</title><style>body{font:16px system-ui;max-width:900px;margin:32px auto;padding:0 20px;background:#faf8f5;color:#292724}article{border-top:1px solid #ccc;padding:16px 0}h2{font-size:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}summary{padding:8px;cursor:pointer}</style><h1>BC 研究记录</h1><p>检查助手的行为，不评判你的生活。原文保存在本地 SQLite；此页面无网络、无操作按钮。</p><p>${runs.length} 个事件样本 · ${calls.length} 条调用／结果回执。缺失日志不追认；未反馈不代表同意。</p>${rows||'<p>尚无本轮采集样本。</p>'}</html>`,{mode:0o600});chmodSync(file,0o600);return file;
+    writeFileSync(file,`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>BC 研究记录</title><style>body{font:16px system-ui;max-width:900px;margin:32px auto;padding:0 20px;background:#faf8f5;color:#292724}article{border-top:1px solid #ccc;padding:16px 0}h2{font-size:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}summary{padding:8px;cursor:pointer}</style><h1>BC 研究记录</h1><p>检查助手的行为，不评判你的生活。原文保存在本地 SQLite；此页面无网络、无操作按钮。</p><p>${runs.length} 个事件样本 · ${calls.length} 条调用／结果回执。缺失日志不追认；未反馈不代表同意。</p><p>代理已保存结果 ${summary.recordedAgentResults} 批 · 其中无提醒／操作 ${summary.processedWithoutAction} 批 · 尚无研究结果 ${summary.awaitingResearchResult} 批。</p><p>Shadow 建议未来可省唤醒 ${summary.shadowWouldSkipWake} 批（真实 ForwardAll 仍运行，不表示已节省调用）；通知仅有代理报告，送达与看到另验。模型费用、注意力成本和有用程度均未知。</p><details><summary>实验汇总与错误</summary><pre>${escape(JSON.stringify(summary,null,2))}</pre></details>${rows||'<p>尚无本轮采集样本。</p>'}</html>`,{mode:0o600});chmodSync(file,0o600);return file;
   }
   export(path) {
-    const data={version:1,exportedAt:this.clock().toISOString(),config:this.config,runs:this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body)),calls:this.db.prepare('SELECT body FROM calls').all().map(r=>JSON.parse(r.body)),snapshots:this.db.prepare('SELECT * FROM snapshots').all().map(r=>({...r,body:JSON.parse(r.body)})),failures:this.db.prepare('SELECT * FROM failures').all()};
+    const data={version:1,exportedAt:this.clock().toISOString(),config:this.config,summary:this.stats(),runs:this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body)),calls:this.db.prepare('SELECT body FROM calls').all().map(r=>JSON.parse(r.body)),snapshots:this.db.prepare('SELECT * FROM snapshots').all().map(r=>({...r,body:JSON.parse(r.body)})),failures:this.db.prepare('SELECT * FROM failures').all()};
     const file=resolve(path);if(existsSync(file))throw Error('export destination exists');writeFileSync(file,encode(data),{mode:0o600});return {file,bytes:statSync(file).size};
   }
   prune() {
@@ -176,6 +212,7 @@ async function main() {
   const [mode='once',...args]=process.argv.slice(2),root=join(homedir(),'Library/Application Support/BetterCalendarResearch');
   const c=['once','watch'].includes(mode)?credentials():{},recorder=new Recorder(root,{secrets:[c.platformToken,c.deviceToken]});
   if(mode==='export'){console.log(encode(recorder.export(args[0] ?? join(root,'export-'+Date.now()+'.json'))));return;}
+  if(mode==='stats'){console.log(encode(recorder.stats()));return;}
   if(mode==='view'){console.log(encode({file:recorder.view()}));return;}
   if(mode==='replay'){console.log(encode(recorder.replay(args[0])));return;}
   if(mode==='prune'){console.log(encode(recorder.prune()));return;}
