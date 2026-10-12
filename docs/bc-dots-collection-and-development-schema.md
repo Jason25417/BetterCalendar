@@ -54,3 +54,16 @@ Sites原私有项目保存并部署版本13：
 macOS应用单元测试275/275，无跳过或失败，/tmp/bc-browser-tests-final.xcresult。iOS编译成功，/tmp/bc-browser-ios-current.log。独立Development入口签名编译成功，/tmp/bc-schema-build-current.log。服务器SQLite测试21/21、TypeScript与生产构建通过，两份服务器逻辑和测试一致。
 
 没有将此批发布为TestFlight。还需Console实际diff/Production部署、双端新版本和真实删除恢复验收；浏览器新实现真实权限/超时验收、手机App/Focus持续采集、统一历史与长期事项MCP也仍未完成。整体目标保持active。
+
+
+## 2026-10-12 22:06 UTC 发布前置复核
+
+上一轮研究汇总3705840为实际开发进展；本轮转回长期目标的数据保护发布门槛，保留个人原型优先级，不把全源覆盖或完整事项编辑扩大成新门槛。
+
+当前工作区干净。直接重读本机隔离schema.store：ZPLANBLOCK/ZLONGTASK/ZLONGTASKCHECKPOINT/ZJOURNALENTRY/ZJOURNALPHOTO分别存在四个删除字段，并各有1条全部非空的合成记录。所在目录为App sandbox内Application Support/BetterCalendarSchemaSeeder/retained-deletion-v1，不是宿主全局Application Support。原receipt.json仍为17:04:50 UTC的Development exported回执，expectedTypes=5、expectedAddedFields=20、productionChanged=false；createdTypes空数组的问题已在上文说明，未篡改或重播种该旧回执。
+
+只读检查日用default.store的上述五张表均仍无ZDELETIONID；没有加载新ModelContainer或修改日用库。读取现存bc-browser-tests-final.xcresult的Xcode机器摘要：275 passed、0 failed、0 skipped；这是已有测试产物的本轮核对，**不是重新跑了App门控**。原回收站实现仍未发版。
+
+通过Edge扩展打开CloudKit Console，实际跳转到Apple登录表单。尚不能读取Development→Production真实差异。已请Jason仅完成登录；登录不代表批准Production部署。待实际预览后核对这20个字段及额外索引/角色差异，给出具体可审阅变更，再按独立授权边界处理生产更新。普通仓库push/TestFlight常驻授权不自动覆盖CloudKit Production结构变更。
+
+等待期间不发布含新模型的App，也不停止当前163采集、临时pool、共享计时或本地研究录制。现有原型试用不依赖此登录。完整长期目标尚未完成；本轮是发布前置证据复核，不宣称真实双端删除/恢复验收成功。
