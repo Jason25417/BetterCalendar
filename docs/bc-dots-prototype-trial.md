@@ -43,3 +43,10 @@
 本机安装目录：~/Library/Application Support/BetterCalendarPrototype，目录700；上传缓存文件600，私人内容不入Git。已安装脚本为源文件副本。当前会话进程的输出/错误日志为 pool-session-output.log / pool-session-error.log。恢复时先核对PID实际命令再启动，不能凭PID文件重开。停止时只停止此脚本进程；原生 BetterCalendar 不受影响。
 
 13:58 EDT 已向 Dots 发送事项接通的更新，并请求 active/limit=1 只读确认；消息在页面可见。截图仅本机 /private/tmp/bc-dots-prototype-pool-message.png。18:00:30已观察到第二次定时运行成功，原有分片复用且队列0；18:01正式MCP收到18:00:28目录心跳，active筛选18条、current/complete=true。这验证本次会话的连续两个周期，不证明重启或全天覆盖。Dots已回复：18:01:53 UTC实际调用status=active/limit=1成功，收到1条在途事项，Mac目录快照18:01:31，available/current/complete=true。当前真实目录→正式MCP→Dots查询路径已核验；不是生活改善验收。源码d8553df已push。
+
+
+## 试用准备复核（18:08 UTC）
+
+当前会话目录发布进程65901仍存活，17:59后按分钟继续成功；最新输出18:07:56，队列无待传。手机18:07:32再次上传日历、提醒、健康和心跳，18:06:40位置/到访、18:04:36活动均在各自有效期内；不能将此前17:09的中断继续当作当前未接通。App/Focus仍not_received，家居通知来源error；Mac历史18:01:34时效已过期，其他来源继续更新。这些边界按来源说明，不把设备整体称为全实时覆盖。
+
+今天计时历史正式查询为空、hasMore=false，尚无真实对话计时验收。已向Jason提出一次试用反馈问题：建议是否帮助动手、对话计时是否省心、是否打扰或理解错；未试不用立即回答。实际使用和反馈尚未收到，不用技术测试或人为创建任务代替。当前阶段转向真实试用反馈；未出现影响试用的具体问题时不继续建设后置通用功能。
