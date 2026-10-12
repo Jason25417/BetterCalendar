@@ -7,6 +7,7 @@ const string={type:"string"};
 const tools=[
   {name:"read_current_state",description:"读取手机、电脑、健康、位置、App及文件来源的最后观察、更新时间、新鲜度、接入覆盖、任务计时和说明。先调用；即使部分来源过期，也不要直接说没有权限或读不到。coverage.not_received表示尚无上传，stale表示旧数据。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"read_changes",description:"按游标读取完整变化记录；补传事件须按发生时间理解。",inputSchema:object({afterId:{type:"integer",minimum:0},limit:{type:"integer",minimum:1,maximum:100}}),annotations:{readOnlyHint:true}},
+  {name:"read_observation_history",description:"按 sourceKey 和发生时间查询一个来源的原始历史；保留未知版本和字段，区分发生与接收时间。每页最多100条，hasMore时以相同范围及nextCursor继续；补传后复核需重读完整时间窗。不能把历史当实时状态。",inputSchema:object({sourceKey:string,from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:string},["sourceKey"]),annotations:{readOnlyHint:true}},
   {name:"read_instructions",description:"读取用户已批准的个人状态助手行为约定。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"task_command",description:"仅按用户明确表达开始、暂停、继续或结束计时。使用稳定 commandId 防止重试重复执行；非开始操作需先读会话 revision。保存成功后才能确认。",inputSchema:object({commandId:string,action:{type:"string",enum:["start","pause","resume","finish"]},title:string,sessionId:string,expectedRevision:{type:"integer"},occurredAt:{type:"string",format:"date-time"},provenance:{type:"string",enum:["user"]}},["commandId","action","provenance"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"read_task_history",description:"读取包含已结束任务的计时历史；开始时间范围使用带时区时间戳，最多100条。",inputSchema:object({from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100}}),annotations:{readOnlyHint:true}},
@@ -40,6 +41,7 @@ export async function POST(request:Request){
       switch(p.name){
         case "read_current_state":value=await core.readState();break;
         case "read_changes":value=await core.readChanges(a.afterId??0,a.limit??100);break;
+        case "read_observation_history":value=await core.readObservationHistory(a);break;
         case "read_instructions":value={instructions:dotInstructions};break;
         case "task_command":value=await core.taskCommand(a);break;
         case "read_task_history":value=await core.taskHistory(a);break;

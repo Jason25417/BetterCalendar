@@ -1,0 +1,1 @@
+CREATE INDEX `idx_observations_source_time` ON `observations` (`source_key`,`observed_at`,`id`);

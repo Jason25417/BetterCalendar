@@ -1,4 +1,4 @@
-# 个人状态接入验收（160 / Mac 161）
+# 个人状态接入验收（当前 162；下文保留历史回执）
 
 2026-10-05。此表区分代码验证与真实使用，不把编译或上传当作采集成功。
 
@@ -69,3 +69,17 @@ Mac第一批minute_29854260于03:01:40.972Z由Dot处理（约94秒）；minute_2
 Mac采集先通过原生UI关闭，然后仅ingest一条明确synthetic的bridge.probe sequence 3；不手动flush、不代ack。Cloudflare三次scheduledTime为03:10:29Z、03:11:29Z、03:12:29Z，间隔60秒、outcome=ok、无exceptions。首轮batchCreated=true、delivered=1；后两轮无变化，batchCreated=false、delivered=0。
 
 服务确认minute_29854270创建03:10:31.432Z、回调接收03:10:35.370Z、Dot处理03:12:03.903Z，约92秒。首次新Cron配置传播约6分钟；独立转发不依赖Mac上传循环已实测。Mac采集于23:12 EDT恢复开启；03:13:07Z以后新的历史、活动、文件元数据、日历/提醒和设备状态到达服务，恢复后的回执已通过。没有为纯云端配置重复发TestFlight。
+
+
+## 162 当前验收：2026-10-12
+
+- [x] 双端 TestFlight：VALID、IN_BETA_TESTING，中文测试说明读回核对。完整证据见 state-bridge-release-162.md。
+- [x] 云端版本 8 MCP 返回 availability / freshness / coverage / warnings；最新 Mac 七来源有真实上传。
+- [x] EventDecisionPolicy / ForwardAllToDots 核心测试；无变化不新建批次；延后判断不丢游标，不阻止旧批次重试。
+- [ ] Mac 安装 162 后，正常关闭窗口/普通退出保留菜单栏/真正退出，分别核对采集状态；登录启动选择开启后核对重登。
+- [ ] Mac 断网、睡眠唤醒后，队列补传保留发生时间，无重复事件；新观察恢复且最新状态没有倒退。
+- [ ] iPhone 安装 162 后，分别核对健康部分失败和正常成功；锁屏/唤醒/重启后记录各来源实际延迟。
+- [ ] Edge 中 Dots 普通询问实际调用工具，分别解释旧数据、未上传和读取失败；此处不能用回调收到或 Codex 代读充当验收。
+- [ ] Dots 对真实事件处理，并核对 created_at、received_at、processed_at 三个时间；当前数分钟延迟需继续诊断。
+
+此前“Mac 未接通 / Cloudflare 未部署”段落是历史时点记录，不能作为当前状态。162 的真实设备效果尚未核验，保留待测。

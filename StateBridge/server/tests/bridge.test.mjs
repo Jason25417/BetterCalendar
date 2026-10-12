@@ -49,6 +49,60 @@ test('correction supersedes inference without removing history',async()=>{
  assert.equal((await f.core.readState()).notes.length,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,2);
 });
 
+test('observation history paginates equal timestamps, preserves unknown versions, and does not rewrite states',async()=>{
+ const f=fixture(),d=await device(f);
+ for(const [seq,id] of [[1,'记录-甲'],[2,'记录-乙'],[3,'记录-丙']]) await f.core.ingest({observations:[obs(seq,{app:id},f,{eventId:id})]},d);
+ // An upgraded envelope already present in storage must remain readable.
+ const body={schemaVersion:8,extension:{future:'kept'},value:{app:'future'},observedAt:f.time()};
+ f.sqlite.prepare('INSERT INTO observations(id,source_key,device_id,seq,observed_at,received_at,body) VALUES(?,?,?,?,?,?,?)').run('future','mac:mac.activity','mac',4,f.time(),f.time(),JSON.stringify(body));
+ const beforeState=await f.core.readState();
+ let cursor=null,ids=[],pages=[];
+ do {const page=await f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:1,...(cursor?{cursor}: {})});ids.push(...page.observations.map(o=>o.eventId));pages.push(page);cursor=page.nextCursor;f.advance(1000);} while(cursor);
+ assert.equal(ids.length,4);assert.equal(new Set(ids).size,4);assert.deepEqual(pages[0].observations[0].observation,body);
+ assert.ok(pages.every(p=>p.before===pages[0].before));assert.equal(pages.at(-1).hasMore,false);
+ assert.deepEqual((await f.core.readState()).sources.map(s=>s.eventId),beforeState.sources.map(s=>s.eventId));
+ await assert.rejects(f.core.readObservationHistory({sourceKey:'other',cursor:pages[0].nextCursor}),/游标/);
+ await assert.rejects(f.core.readObservationHistory({sourceKey:'mac:mac.activity',cursor:pages[0].nextCursor,before:f.time()}),/游标/);
+ await assert.rejects(f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:0}),/每页/);
+ await assert.rejects(f.core.readObservationHistory({sourceKey:'mac:mac.activity',from:f.time(),before:'2026-10-05T11:00:00Z'}),/开始时间/);
+});
+
+test('history orders delayed evidence by occurrence, keeps receive time, and bounds each source',async()=>{
+ const f=fixture(),d=await device(f);await f.core.ingest({observations:[obs(1,'now',f)]},d);
+ f.advance(60000);await f.core.ingest({observations:[obs(2,'late',f,{eventId:'late-history',observedAt:'2026-10-05T11:00:00Z'})]},d);
+ const history=await f.core.readObservationHistory({sourceKey:'mac:mac.activity'});
+ assert.equal(history.observations[0].eventId,'late-history');assert.equal(history.observations[0].receivedAt,f.time());
+ assert.equal((await f.core.readState()).sources[0].value,'now');
+ assert.equal((await f.core.readObservationHistory({sourceKey:'mac:mac.activity',from:'2026-10-05T12:00:00Z'})).observations.length,1);
+ assert.equal((await f.core.readObservationHistory({sourceKey:'missing:mac.activity'})).observations.length,0);
+ await assert.rejects(f.core.readObservationHistory({sourceKey:'mac:mac.activity',cursor:'broken'}),/游标/);
+});
+
+test('history byte budget paginates without cutting raw entries and late uploads require a new query',async()=>{
+ const f=fixture(),d=await device(f);const payload='x'.repeat(40000);
+ for(let seq=1;seq<=6;seq++) await f.core.ingest({observations:[obs(seq,{payload,seq},f)]},d);
+ const first=await f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:100});
+ assert.equal(first.hasMore,true);assert.ok(JSON.stringify(first).length<180*1024);
+ f.advance(1000);await f.core.ingest({observations:[obs(7,{payload,seq:7},f,{observedAt:'2026-10-05T12:00:00Z'})]},d);
+ const next=await f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:100,cursor:first.nextCursor});
+ assert.equal(next.hasMore,false);assert.equal(first.observations.length+next.observations.length,6);assert.ok(next.observations.every(o=>o.observation.value.payload===payload));
+ const reread=await f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:100});
+ const rereadNext=await f.core.readObservationHistory({sourceKey:'mac:mac.activity',limit:100,cursor:reread.nextCursor});
+ assert.equal(reread.observations.length+rereadNext.observations.length,7);
+});
+
+test('history index migration preserves legacy evidence byte for byte and supports bounded lookup',()=>{
+ const sqlite=new DatabaseSync(':memory:');
+ for(const file of ['0000_red_mathemanic.sql','0001_narrow_loners.sql','0002_colorful_bloodscream.sql']) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
+ const body='{ "schemaVersion": 1, "legacyExtra": {"kept": true}, "value": "原记录" }';
+ sqlite.prepare('INSERT INTO observations(id,source_key,device_id,seq,observed_at,received_at,body) VALUES(?,?,?,?,?,?,?)').run('old','mac:mac.activity','mac',1,'2026-10-05T12:00:00Z','2026-10-05T12:01:00Z',body);
+ const before=sqlite.prepare('SELECT * FROM observations').all();
+ sqlite.exec(readFileSync(new URL('../drizzle/0003_funny_unicorn.sql',import.meta.url),'utf8'));
+ assert.deepEqual(sqlite.prepare('SELECT * FROM observations').all(),before);
+ const plan=sqlite.prepare('EXPLAIN QUERY PLAN SELECT * FROM observations WHERE source_key=? AND observed_at>=? AND observed_at<=? ORDER BY observed_at,id LIMIT 31').all('mac:mac.activity','2026-10-05T00:00:00Z','2026-10-06T00:00:00Z');
+ assert.ok(plan.some(row=>row.detail.includes('idx_observations_source_time')));sqlite.close();
+});
+
 test('state coverage separates fresh errors, empty samples, missing sources and old successful data',async()=>{
  const f=fixture();const enrolled=await f.core.registerDevice({id:'iphone',label:'test',scopes:['health.status','health.sleep','ios.app','calendar.events']});const d=await f.core.authenticateDevice(enrolled.token);
  const input=(seq,source,value)=>obs(seq,value,f,{source,eventId:`coverage-${seq}`});
