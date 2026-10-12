@@ -14,7 +14,7 @@
 
 ## 已核验与限制
 
-- 17:48 UTC，正式 MCP 已发现并成功调用 read_pool_records(limit=1)，返回 not_received / complete=false。原生目录读取器尚未发到用户 App，不是没有事项。源码 b245878 已推送，云端 v16 已部署。
+- 17:48 UTC，目录工具已发现但尚未收到 App 目录。17:57 UTC 加入临时只读 Mac 发布器后，正式 MCP 已返回 available / current / complete=true：25个真实事项、9个阶段，18在途、3完成、4放下；当前这一来源已接通。原生 App 读取器仍未发布，不能称为双端目录上传。
 - 17:50 UTC，Mac 活动、历史、日历/提醒、文件、设备心跳有新上传。文件仍为 partial，浏览器当次 not-frontmost 是可读空状态。
 - 手机最近观察 17:09 UTC：活动/位置/心跳已过期。健康/日历有各自有效期，不能概括为整台手机实时可读。
 - 最近分钟批次有 received 和 processed_at；说明事件链实际工作，不能代替普通对话使用验收，更不能代替生活改善判断。
@@ -28,3 +28,18 @@
 完整事项编辑/执行回执、多端复杂冲突与异常组合、所有来源持续后台覆盖、完整旧史迁移/导出、通用部署和专业 UI。已有保护保留；仍不能破坏历史原数据、虚报保存成功或扩大授权。
 
 产品原则核对：被动状态与自然对话减轻手工记录（无感）；建议可选且用户意向优先（自主支持）；指向当下可做的一步（自愈）；不算过去缺口或评分（正反馈）。
+
+
+## 临时目录读取器：本机已运行（17:59 UTC）
+
+为先验证原型，新增 StateBridge/tools/pool-prototype.py。直接以 SQLite mode=ro + query_only + 一致读取事务查看已安装163的日用库，把长期/待办及阶段发送到现有 owner-private 状态服务；不打开新 SwiftData 模型，不改数据库结构，不写日用库或原生上传队列。既有 Keychain 凭据仅在进程内读取，日志只有时间、数量和错误类别。
+
+默认一次运行；--dry-run 不联网；--watch 为当前会话启动的每分钟原型。原生 outbox 有 poolCache 或服务已有非 prototype_pool_ 清单时停止发布，避免双发布。未变内容复用不可变分片，只更新读取心跳。日期按 Core Data 2001 epoch 转 Unix 毫秒；父子关系和完成/放下状态保留。
+
+17:57:49 正式 MCP 完整读取25条/9阶段，无后续页，与只读数据库数量一致。两个聚焦检查通过：SQLite原字节不变、日期/UUID/关系转换，以及删除标记与原生身份语义一致。没有为本批重跑整个 App 测试或增加异常组合矩阵。
+
+自动登录启动试验失败：launchd 下读库报 unable to open database file，未独立证明具体权限原因。失败 LaunchAgent 已 bootout，plist移到私有目录保留，未留会重复失败的登录任务。改为当前已授权会话启动的后台 Python --watch；PID65901在17:59:27发布成功，进程实查存活。重启自动恢复后置，不保证全天候或所有系统上下文都可读。
+
+本机安装目录：~/Library/Application Support/BetterCalendarPrototype，目录700；上传缓存文件600，私人内容不入Git。已安装脚本为源文件副本。当前会话进程的输出/错误日志为 pool-session-output.log / pool-session-error.log。恢复时先核对PID实际命令再启动，不能凭PID文件重开。停止时只停止此脚本进程；原生 BetterCalendar 不受影响。
+
+13:58 EDT 已向 Dots 发送事项接通的更新，并请求 active/limit=1 只读确认；消息在页面可见。截图仅本机 /private/tmp/bc-dots-prototype-pool-message.png。18:00:30已观察到第二次定时运行成功，原有分片复用且队列0；18:01正式MCP收到18:00:28目录心跳，active筛选18条、current/complete=true。这验证本次会话的连续两个周期，不证明重启或全天覆盖。Dots已读更新，尚未见其本次调用回复。
