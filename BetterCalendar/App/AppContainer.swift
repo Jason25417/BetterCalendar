@@ -39,6 +39,7 @@ final class AppContainer {
     let milestones: MilestoneStore             // 成就系统（#27）：累计里程碑（iCloud KV，零 schema）
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
+    let trash: RetainedTrashService
     let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿/橙计划事件的地方
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
@@ -95,6 +96,8 @@ final class AppContainer {
         self.projection = ProjectionService(planStore: planStore, calendarStore: calendarStore,
                                             startedDays: startedDays)
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
+        self.trash = RetainedTrashService(context: SharedModelContainer.shared.mainContext,
+                                          calendar: calendarStore, projection: projection)
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
                                           calendarStore: calendarStore, projection: projection,
                                           startedDays: startedDays)
@@ -174,7 +177,7 @@ final class AppContainer {
                  notifier: notifier, longTasks: longTasks, draftSnapshots: draftSnapshots,
                  looseDays: looseDays, startedDays: startedDays, execution: execution,
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
-                 reconcile: reconcile,
+                 reconcile: reconcile, trash: trash,
                  timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
                  routines: RoutineTemplateStore.shared)  // K1：例行模板物化
     }

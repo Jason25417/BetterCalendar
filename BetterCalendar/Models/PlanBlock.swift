@@ -12,7 +12,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class PlanBlock {
+final class PlanBlock: RetainedRecord {
     var id: UUID = UUID()
     var title: String = ""
     var start: Date = Date.now
@@ -26,6 +26,10 @@ final class PlanBlock {
     var labels: [String] = []       // 扩展接口
     var linkedTaskID: UUID?         // 精确归属：本块属于哪个未来任务(LongTask.id)；nil=不属于池任务（0.18.2）
     var completion: CompletionStatus?
+    var deletedAt: Date?
+    var deletionID: UUID?
+    var restoredDeletionID: UUID?
+    var deletionContext: Data?
 
     init(id: UUID = UUID(),
          title: String,

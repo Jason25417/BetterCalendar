@@ -36,7 +36,7 @@ final class LongTaskStore {
         let all: [LongTask]
         do { all = try context.fetch(FetchDescriptor<LongTask>()) }
         catch { DataSyncMonitor.shared.report("长期任务读取失败：\(error.localizedDescription)"); return }
-        items = all.filter { $0.status == .active && $0.poolZone == .longterm }
+        items = all.filter { !$0.isInTrash && $0.status == .active && $0.poolZone == .longterm }
             .sorted {
                 switch ($0.deadline, $1.deadline) {
                 case let (a?, b?): return a < b
@@ -45,7 +45,7 @@ final class LongTaskStore {
                 case (nil, nil): return $0.createdAt < $1.createdAt
                 }
             }
-        todos = all.filter { $0.status == .active && $0.poolZone == .todo }
+        todos = all.filter { !$0.isInTrash && $0.status == .active && $0.poolZone == .todo }
             .sorted {
                 switch ($0.spilledFromDay, $1.spilledFromDay) {
                 case let (a?, b?): return a > b                      // 新溢出的在前
@@ -132,15 +132,15 @@ final class LongTaskStore {
         return entry
     }
 
-    /// 丢弃（=溶解，零记录零愧疚）：**仅限待办区**的硬删除；长期区维持「无删除只改状态」裁决。
+    /// 丢弃（从当前列表移除，原记录保留）：**仅限待办区**的可恢复移除；长期区维持「无删除只改状态」裁决。
     func discard(_ entry: LongTask) {
         guard entry.poolZone == .todo else {
             DevLog.shared.warn("待办区", "discard 只用于待办区，长期区走 shelve/complete：\(entry.title)")
             return
         }
-        context.delete(entry)
-        SmokeLog.hit("待办区-丢弃", "溶解「\(entry.title)」")
-        saveChanges()
+        do { try RetainedDeletion.save([entry], in: context) }
+        catch { DataSyncMonitor.shared.report("待办删除尚未保存：\(error.localizedDescription)"); return }
+        SmokeLog.hit("待办区-丢弃", "从当前列表移除「\(entry.title)」，原记录保留")
         reload()
     }
 
@@ -174,14 +174,14 @@ final class LongTaskStore {
     /// 「先放下」的任务（长期页折叠区，捞回入口）——按放下时间近的在前。只看长期区（待办区无三态）。
     func shelved() -> [LongTask] {
         let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
-        return all.filter { $0.status == .shelved && $0.poolZone == .longterm }
+        return all.filter { !$0.isInTrash && $0.status == .shelved && $0.poolZone == .longterm }
             .sorted { $0.modifiedAt > $1.modifiedAt }
     }
 
     /// 「做成了」的任务（长期页折叠区，正反馈存档）——按做成时间近的在前。只看长期区。
     func doneItems() -> [LongTask] {
         let all = (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
-        return all.filter { $0.status == .done && $0.poolZone == .longterm }
+        return all.filter { !$0.isInTrash && $0.status == .done && $0.poolZone == .longterm }
             .sorted { ($0.doneAt ?? $0.modifiedAt) > ($1.doneAt ?? $1.modifiedAt) }
     }
 
@@ -243,8 +243,8 @@ final class LongTaskStore {
 
     func deleteCheckpoint(_ cp: LongTaskCheckpoint) {
         cp.task?.modifiedAt = .now
-        context.delete(cp)
-        saveChanges()
+        do { try RetainedDeletion.save([cp], in: context) }
+        catch { DataSyncMonitor.shared.report("阶段删除尚未保存：\(error.localizedDescription)") }
         reload()
     }
 

@@ -42,24 +42,51 @@ final class PhotoStore {
         return name
     }
 
-    /// 读一张图：本地缓存优先；没有（云端同步来的新照片）→ 从 DB 取并回写缓存。
+    /// 读一张图：数据库确认有效后读取原字节并更新缓存；已删除照片不能从缓存复活。
     func data(for ref: String) -> Data? {
         if context == nil { return try? Data(contentsOf: url(for: ref)) }
         guard let context,
               let p = ((try? context.fetch(FetchDescriptor<JournalPhoto>())) ?? [])
-                  .first(where: { $0.ref == ref }),
+                  .first(where: { $0.ref == ref && !$0.isInTrash }),
               !p.data.isEmpty else { return nil }
         try? p.data.write(to: url(for: ref))   // 回写缓存，下次直读文件
         return p.data
     }
 
-    func delete(_ ref: String) {
-        try? FileManager.default.removeItem(at: url(for: ref))
-        guard let context else { return }
-        for p in ((try? context.fetch(FetchDescriptor<JournalPhoto>())) ?? []) where p.ref == ref {
-            context.delete(p)
+    @discardableResult func delete(_ ref: String) -> Bool {
+        guard let context else {
+            // File-only compatibility mode also retains bytes, rather than unlinking.
+            do {
+                let trash = dir.appendingPathComponent(".retained-trash", isDirectory: true)
+                try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+                let destination = trash.appendingPathComponent(UUID().uuidString + "-" + ref)
+                try FileManager.default.moveItem(at: url(for: ref), to: destination)
+                return true
+            } catch { DevLog.shared.error("日记", "照片移入回收站失败：\(error.localizedDescription)"); return false }
         }
-        try? context.save()
+        var previous: [(JournalPhoto, Data?)] = []
+        do {
+            let photos = try context.fetch(FetchDescriptor<JournalPhoto>()).filter { $0.ref == ref }
+            guard !photos.isEmpty else { throw DataArchiveError.invalid("未找到照片原记录，保留引用与缓存") }
+            var owners: [DeletedPhotoOwner] = []
+            if context.container.schema.entities.contains(where: { $0.name == "JournalEntry" || $0.name.hasSuffix(".JournalEntry") }) {
+                for entry in try context.fetch(FetchDescriptor<JournalEntry>()) {
+                    if let position = entry.photoRefs.firstIndex(of: ref) {
+                        owners.append(DeletedPhotoOwner(entryID: entry.id, createdAt: entry.createdAt, position: position))
+                    }
+                }
+            }
+            for photo in photos where !photo.isInTrash {
+                previous.append((photo, photo.deletionContext))
+                photo.deletionContext = try ArchiveCodec.encoder().encode(owners)
+            }
+            try RetainedDeletion.save(photos, in: context)
+            return true
+        } catch {
+            for (photo, value) in previous { photo.deletionContext = value }
+            DataSyncMonitor.shared.report("照片删除尚未保存：\(error.localizedDescription)")
+            return false
+        }
     }
 
     /// 旧版本只存了本地文件的照片 → 迁入 DB（跨端可见）。幂等：DB 里已有的 ref 跳过。

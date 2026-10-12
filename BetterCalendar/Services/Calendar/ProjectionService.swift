@@ -27,9 +27,11 @@ final class ProjectionService {
 
     /// 把某逻辑日的 PlanStore 投影到日历。label = 逻辑日标签（该日零点）。
     /// 会前提醒规则收口在此：仅固定块（会议/外部承诺）挂 lead 提醒（原则4「仅固定块提醒」）。
-    func project(label: Date) async throws {
+    func project(label: Date, restoring: ScheduledBlock? = nil) async throws {
         let window = DayContext.logicalWindow(forLabel: label)
-        let blocks = try planStore.plannedBlocks(on: label)
+        var blocks = try planStore.plannedBlocks(on: label)
+        if let restoring { blocks.append(restoring) }
+        let deletedIDs = try planStore.deletedPlannedIDs(on: label)
         var drafts = blocks.map { b in
             CalendarEventDraft(title: b.title, start: b.start, end: b.end, kind: .planned,
                                alarmLeadMinutes: b.isFixed ? MeetingSettings.leadMinutes : nil,
@@ -41,7 +43,7 @@ final class ProjectionService {
         // 本机指纹认识而真相已删的照清（本机删计划的正常收敛不受影响）。
         drafts.append(contentsOf: try await foreignStampedEvents(
             kind: .planned, window: window,
-            knownIDs: Set(blocks.map(\.id)), fingerprint: ProjectionFingerprints.get(label)))
+            knownIDs: Set(blocks.map(\.id)).union(deletedIDs), fingerprint: ProjectionFingerprints.get(label)))
         if startedDays?.isStarted(label) ?? false {
             // 实时模式（绿色淡出，§5.10 原则6.4）：绿色清空、整日计划投橙色
             try await calendarStore.apply([], kind: .planned, window: window)

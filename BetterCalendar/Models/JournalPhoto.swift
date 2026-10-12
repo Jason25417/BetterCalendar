@@ -13,10 +13,14 @@ import Foundation
 import SwiftData
 
 @Model
-final class JournalPhoto {
+final class JournalPhoto: RetainedRecord {
     var ref: String = ""
     @Attribute(.externalStorage) var data: Data = Data()
     var createdAt: Date = Date.now
+    var deletedAt: Date?
+    var deletionID: UUID?
+    var restoredDeletionID: UUID?
+    var deletionContext: Data?
 
     init(ref: String, data: Data, createdAt: Date = .now) {
         self.ref = ref

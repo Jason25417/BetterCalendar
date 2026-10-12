@@ -33,7 +33,7 @@ struct BetterCalendarApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsView()
+            SettingsView(trash: container.trash)
                 .environment(\.appTheme, ThemeSettings.current)
                 .tint(ThemeSettings.current.accent)   // 体检 #9：独立 scene 不吃主窗 tint，跨端选中态一致
         }

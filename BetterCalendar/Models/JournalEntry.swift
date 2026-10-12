@@ -11,7 +11,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class JournalEntry {
+final class JournalEntry: RetainedRecord {
     var id: UUID = UUID()
     var date: Date = Date.now      // 关到某一天（与 PlanDay.date 对齐）
     var body: String = ""          // 正文文本
@@ -21,6 +21,10 @@ final class JournalEntry {
     var photoRefs: [String] = []   // 图片文件名/相对路径；文件存 App 容器，不塞进 DB
     var createdAt: Date = Date.now
     var modifiedAt: Date = Date.now
+    var deletedAt: Date?
+    var deletionID: UUID?
+    var restoredDeletionID: UUID?
+    var deletionContext: Data?
 
     init(id: UUID = UUID(),
          date: Date,

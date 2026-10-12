@@ -431,10 +431,17 @@ final class ExecutionViewModel {
     /// （无章新建认领待后续：需给日历事件盖章回写、防重复导入，CalendarStore 暂无改事件能力。）
     func reconcileCalendarActuals() async {
         let label = DayContext.logicalStartOfDay(.now)
-        let stored = (try? planStore.actualBlocks(on: label)) ?? []
-        guard !stored.isEmpty else { return }
-        let calEvents = ((try? await calendarStore.read(kind: .actual)) ?? [])
-            .filter { DayContext.isSameLogicalDay($0.start, .now) }
+        let stored: [ActualBlock]
+        let calEvents: [CalendarEventDraft]
+        do {
+            stored = try planStore.actualBlocks(on: label)
+            guard !stored.isEmpty else { return }
+            calEvents = try await calendarStore.read(kind: .actual)
+                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+        } catch {
+            DataSyncMonitor.shared.report("实际日历读取失败，已保留全部记录：\(error.localizedDescription)")
+            return
+        }
         let calByID = Dictionary(calEvents.compactMap { e in e.blockID.map { ($0, e) } },
                                  uniquingKeysWith: { a, _ in a })
         var deleted: [UUID] = []

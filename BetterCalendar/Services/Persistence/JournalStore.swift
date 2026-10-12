@@ -19,8 +19,8 @@ final class JournalStore {
 
     /// 全部条目，按日期倒序。
     func allEntries() -> [JournalEntry] {
-        (try? context.fetch(
-            FetchDescriptor<JournalEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        ((try? context.fetch(
+            FetchDescriptor<JournalEntry>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []).filter { !$0.isInTrash }
     }
 
     /// 某逻辑日的条目（一天最多一条）。
@@ -58,7 +58,7 @@ final class JournalStore {
     func save() { try? context.save() }
 
     func delete(_ entry: JournalEntry) {
-        context.delete(entry)
-        try? context.save()
+        do { try RetainedDeletion.save([entry], in: context) }
+        catch { DataSyncMonitor.shared.report("日记删除尚未保存：\(error.localizedDescription)") }
     }
 }

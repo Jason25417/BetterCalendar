@@ -58,6 +58,12 @@ enum CloudKitSchemaSeeder {
             created.append("LongTask(zoneRaw/family/spilledFromDay)")
         }
 
+        do { created += try seedRetainedDeletion(in: context) }
+        catch {
+            DataSyncMonitor.shared.report("回收站 schema 播种失败：\(error.localizedDescription)")
+            return "播种失败：\(error.localizedDescription)"
+        }
+
         guard !created.isEmpty else { return "已播种过（点「清除」可撤）" }
         do {
             try context.save()
@@ -71,16 +77,88 @@ enum CloudKitSchemaSeeder {
 
     /// 清除哨兵记录（Deploy 完后调；schema 只增不减，删记录不影响已部署的 schema）。
     static func cleanup() -> String {
-        var removed = 0
+        var removed: Int
+        do { removed = try cleanupRetainedDeletion(in: context) }
+        catch {
+            DataSyncMonitor.shared.report("schema 清理失败：\(error.localizedDescription)")
+            return "清理失败：\(error.localizedDescription)"
+        }
         for s in (try? context.fetch(FetchDescriptor<DayPlanSnapshot>())) ?? []
         where s.dayLabel == sentinel { context.delete(s); removed += 1 }
         for s in (try? context.fetch(FetchDescriptor<ResidualSample>())) ?? []
         where s.dayLabel == sentinel { context.delete(s); removed += 1 }
         for t in (try? context.fetch(FetchDescriptor<LongTask>())) ?? []
         where t.title == sentinelTitle { context.delete(t); removed += 1 }
-        try? context.save()
+        do { try context.save() }
+        catch {
+            DataSyncMonitor.shared.report("schema 清理尚未保存：\(error.localizedDescription)")
+            return "清理尚未保存：\(error.localizedDescription)"
+        }
         DevLog.shared.info("CloudKit", "schema 播种记录已清除（\(removed) 条）")
         return removed == 0 ? "没有可清除的播种记录" : "已清除 \(removed) 条哨兵记录"
+    }
+
+    // Additive recovery fields need non-nil Development records before the
+    // Console can infer them. These disposable sentinels contain no user data.
+    static let retainedOperation = UUID(uuidString: "00000000-0000-4000-8000-000000006164")!
+    static let retainedRestore = UUID(uuidString: "00000000-0000-4000-8000-000000006163")!
+    static let retainedTitle = "⛳️ 回收站 schema 播种（可删）"
+
+    static func seedRetainedDeletion(in context: ModelContext) throws -> [String] {
+        var created: [String] = []
+        func mark(_ row: any RetainedRecord, _ entity: String) {
+            row.deletedAt = sentinel; row.deletionID = retainedOperation
+            row.restoredDeletionID = retainedRestore
+            row.deletionContext = Data("[]".utf8)
+            created.append(entity + "(deletedAt/deletionID/restoredDeletionID/deletionContext)")
+        }
+        func matches(_ row: any RetainedRecord) -> Bool {
+            row.deletedAt == sentinel && row.deletionID == retainedOperation && row.restoredDeletionID == retainedRestore
+        }
+        // A failed read is an error, not proof that the seed is absent.
+        let plans = try context.fetch(FetchDescriptor<PlanBlock>())
+        let tasks = try context.fetch(FetchDescriptor<LongTask>())
+        let checkpoints = try context.fetch(FetchDescriptor<LongTaskCheckpoint>())
+        let journals = try context.fetch(FetchDescriptor<JournalEntry>())
+        let photos = try context.fetch(FetchDescriptor<JournalPhoto>())
+        if !plans.contains(where: matches) {
+            let row = PlanBlock(title: retainedTitle, start: sentinel, end: sentinel.addingTimeInterval(60))
+            context.insert(row); mark(row, "PlanBlock")
+        }
+        if !tasks.contains(where: matches) {
+            let row = LongTask(title: retainedTitle, status: .done, createdAt: sentinel, modifiedAt: sentinel, zone: .todo)
+            context.insert(row); mark(row, "LongTask")
+        }
+        if !checkpoints.contains(where: matches) {
+            let row = LongTaskCheckpoint(title: retainedTitle, createdAt: sentinel)
+            context.insert(row); mark(row, "LongTaskCheckpoint")
+        }
+        if !journals.contains(where: matches) {
+            let row = JournalEntry(date: sentinel, body: retainedTitle, createdAt: sentinel, modifiedAt: sentinel)
+            context.insert(row); mark(row, "JournalEntry")
+        }
+        if !photos.contains(where: matches) {
+            let row = JournalPhoto(ref: "schema-retained-deletion.jpg", data: Data([0]), createdAt: sentinel)
+            context.insert(row); mark(row, "JournalPhoto")
+        }
+        return created
+    }
+
+    static func cleanupRetainedDeletion(in context: ModelContext) throws -> Int {
+        var rows: [any PersistentModel] = []
+        rows.append(contentsOf: try context.fetch(FetchDescriptor<PlanBlock>()))
+        rows.append(contentsOf: try context.fetch(FetchDescriptor<LongTask>()))
+        rows.append(contentsOf: try context.fetch(FetchDescriptor<LongTaskCheckpoint>()))
+        rows.append(contentsOf: try context.fetch(FetchDescriptor<JournalEntry>()))
+        rows.append(contentsOf: try context.fetch(FetchDescriptor<JournalPhoto>()))
+        var count = 0
+        for model in rows {
+            guard let row = model as? any RetainedRecord,
+                  row.deletedAt == sentinel, row.deletionID == retainedOperation,
+                  row.restoredDeletionID == retainedRestore else { continue }
+            context.delete(model); count += 1
+        }
+        return count
     }
 
     /// 当前播种状态（观察窗显示）。

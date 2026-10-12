@@ -176,8 +176,16 @@ final class ReconcileService {
     private func reconcile(label: Date, allGreenEvents: [CalendarEventDraft],
                            isRetry: Bool = false) async {
         let window = DayContext.logicalWindow(forLabel: label)
-        let events = allGreenEvents.filter { $0.start >= window.start && $0.start < window.end }
-        guard let truth = try? planReader.plannedBlocks(on: label) else { return }
+        let deletedIDs: Set<UUID>
+        let truth: [ScheduledBlock]
+        do {
+            deletedIDs = try planReader.deletedPlannedIDs(on: label)
+            truth = try planReader.plannedBlocks(on: label)
+        } catch { DataSyncMonitor.shared.report("计划读取失败，已停止对账：\(error.localizedDescription)"); return }
+        let events = allGreenEvents.filter {
+            $0.start >= window.start && $0.start < window.end &&
+            !($0.blockID.map { deletedIDs.contains($0) } ?? false)
+        }
         let fp = ProjectionFingerprints.get(label)
         let plan = Self.diff(truth: truth, events: events, fingerprint: fp)
         guard plan.conflicts.isEmpty else {

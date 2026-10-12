@@ -17,6 +17,11 @@ import SwiftData
 @MainActor
 protocol PlanReading: AnyObject {
     func plannedBlocks(on day: Date) throws -> [ScheduledBlock]
+    func deletedPlannedIDs(on day: Date) throws -> Set<UUID>
+}
+
+extension PlanReading {
+    func deletedPlannedIDs(on day: Date) throws -> Set<UUID> { [] }
 }
 
 /// 写角色（GRANT UPDATE）：持有者=HomeViewModel（确认写入）+ ReconcileService（0.20 双向同步回流）。
@@ -78,7 +83,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     func plannedBlocks(on day: Date) throws -> [ScheduledBlock] {
         let label = Calendar.current.startOfDay(for: day)
         let result = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
+            .filter { !$0.isInTrash && $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
             .map { ScheduledBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                   isFixed: $0.isFixed, isAnchor: $0.isAnchor, timingStyle: $0.timingStyle,
@@ -88,14 +93,27 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         return result
     }
 
+    func deletedPlannedIDs(on day: Date) throws -> Set<UUID> {
+        let label = Calendar.current.startOfDay(for: day)
+        let rows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned }
+        let active = Set(rows.filter { !$0.isInTrash }.map(\.id))
+        return Set(rows.filter { $0.isInTrash && DayContext.logicalStartOfDay($0.start) == label }
+            .map(\.id)).subtracting(active)
+    }
+
     /// 覆盖写某**逻辑日**的「计划」块（确认 / 晨间再排即替换当天）。day 语义同 plannedBlocks。
     func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws {
         let label = Calendar.current.startOfDay(for: day)
-        let stale = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
+        let allRows = try context.fetch(FetchDescriptor<PlanBlock>())
+        let stale = allRows.filter { !$0.isInTrash && $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
+        let deletedIDs = Set(allRows.filter { $0.isInTrash && $0.kind == .planned }.map(\.id))
+        let activeIDs = Set(allRows.filter { !$0.isInTrash && $0.kind == .planned }.map(\.id))
+        guard !blocks.contains(where: { deletedIDs.contains($0.id) && !activeIDs.contains($0.id) }) else {
+            throw DataArchiveError.invalid("计划仍在回收站，请先恢复；不会自动重新创建")
+        }
         let wanted = Set(blocks.map(\.id))
         var byID = Dictionary(stale.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        for old in stale where !wanted.contains(old.id) { context.delete(old) }
+        let removed = stale.filter { !wanted.contains($0.id) }
         for b in blocks {
             let row: PlanBlock
             if let existing = byID[b.id] { row = existing }
@@ -108,14 +126,14 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
             row.timingStyle = b.timingStyle; row.priority = b.priority
             row.deadline = b.deadline; row.labels = b.labels; row.linkedTaskID = b.linkedTaskID
         }
-        try context.save()
+        try RetainedDeletion.save(removed, in: context)
         DevLog.shared.info("PlanStore", "写入 \(blocks.count) 计划块 @ \(Self.dayStr(day))")
     }
 
     /// 按 ID 就地更新（0.20 对账回流）：只动 时间/标题（固定/★/计时方式日历没有对应概念、保持库值）。
     func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws {
         guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
-            .first(where: { $0.id == id && $0.kind == .planned }) else { return }
+            .first(where: { !$0.isInTrash && $0.id == id && $0.kind == .planned }) else { return }
         block.start = start; block.end = end; block.title = title
         try context.save()
         DevLog.shared.info("PlanStore", "对账回流更新「\(title)」→ \(Self.dayStr(start))")
@@ -124,7 +142,13 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     /// 追加块（0.20.2 对账回流：日历新建经确认后入库，默认弹性/轻计时/普通优先级）。
     func insertPlanned(_ blocks: [ScheduledBlock]) throws {
         guard !blocks.isEmpty else { return }
-        for b in blocks {
+        let allRows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned }
+        let activeIDs = Set(allRows.filter { !$0.isInTrash }.map(\.id))
+        let deletedIDs = Set(allRows.filter { $0.isInTrash }.map(\.id))
+        guard !blocks.contains(where: { deletedIDs.contains($0.id) && !activeIDs.contains($0.id) }) else {
+            throw DataArchiveError.invalid("计划仍在回收站，请先恢复")
+        }
+        for b in blocks where !activeIDs.contains(b.id) {
             context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
                                      isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
                                      timingStyle: b.timingStyle, priority: b.priority,
@@ -139,9 +163,8 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         guard !ids.isEmpty else { return }
         let idSet = Set(ids)
         let victims = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && idSet.contains($0.id) }
-        for v in victims { context.delete(v) }
-        try context.save()
+            .filter { !$0.isInTrash && $0.kind == .planned && idSet.contains($0.id) }
+        try RetainedDeletion.save(victims, in: context)
         DevLog.shared.info("PlanStore", "对账回流删除 \(victims.count) 块")
     }
 
@@ -151,7 +174,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     func actualBlocks(on day: Date) throws -> [ActualBlock] {
         let label = Calendar.current.startOfDay(for: day)
         return try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .actual && DayContext.logicalStartOfDay($0.start) == label }
+            .filter { !$0.isInTrash && $0.kind == .actual && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
             .map { ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end) }
     }
@@ -162,7 +185,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     func clearedPlannedIDs(on day: Date) throws -> Set<UUID> {
         let label = Calendar.current.startOfDay(for: day)
         return Set(try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .planned && $0.completion == .missed
+            .filter { !$0.isInTrash && $0.kind == .planned && $0.completion == .missed
                       && DayContext.logicalStartOfDay($0.start) == label }
             .map { $0.id })
     }
@@ -170,9 +193,15 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     /// 按 id 幂等 upsert 实际块。同 id 只更新时间/标题，不新增行（防每次 flush 堆重复实际）。
     func upsertActuals(_ blocks: [ActualBlock]) throws {
         guard !blocks.isEmpty else { return }
-        let existing = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .actual }
+        let allRows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .actual }
+        let existing = allRows.filter { !$0.isInTrash }
+        let deletedIDs = Set(allRows.filter { $0.isInTrash }.map(\.id))
         var byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for b in blocks {
+            if deletedIDs.contains(b.id), byID[b.id] == nil {
+                DevLog.shared.warn("PlanStore", "已删除的实际记录保持在回收站，不自动重建")
+                continue
+            }
             if let row = byID[b.id] {
                 row.title = b.title; row.start = b.start; row.end = b.end
             } else {
@@ -189,16 +218,15 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         guard !ids.isEmpty else { return }
         let idSet = Set(ids)
         let victims = try context.fetch(FetchDescriptor<PlanBlock>())
-            .filter { $0.kind == .actual && idSet.contains($0.id) }
-        for v in victims { context.delete(v) }
-        try context.save()
+            .filter { !$0.isInTrash && $0.kind == .actual && idSet.contains($0.id) }
+        try RetainedDeletion.save(victims, in: context)
         DevLog.shared.info("PlanStore", "实际块删除 \(victims.count) 项（真相源）")
     }
 
     /// 置/清计划块的完成闩（原则7：自动完成先斩，用户手动改回永远赢；nil=清回未决定）。
     func latchCompletion(plannedID: UUID, _ status: CompletionStatus?) throws {
         guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
-            .first(where: { $0.id == plannedID && $0.kind == .planned }) else { return }
+            .first(where: { !$0.isInTrash && $0.id == plannedID && $0.kind == .planned }) else { return }
         block.completion = status
         try context.save()
     }

@@ -66,7 +66,7 @@ nonisolated struct SealedDataArchive: Codable, Sendable {
         sha256 = ArchiveCodec.digest(try ArchiveCodec.encoder().encode(archive))
     }
     func verified() throws -> DataArchive {
-        guard archive.formatVersion == 1 else { throw DataArchiveError.invalid("不支持的档案版本，原文件保持不变") }
+        guard [1, 2].contains(archive.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本，原文件保持不变") }
         guard ArchiveCodec.digest(try ArchiveCodec.encoder().encode(archive)) == sha256 else {
             throw DataArchiveError.invalid("档案校验失败：内容已改变或文件不完整")
         }
@@ -84,9 +84,36 @@ nonisolated enum DataArchiveError: LocalizedError {
                                DayRecord.self, DayPlanSnapshot.self, ResidualSample.self,
                                JournalEntry.self, JournalPhoto.self, DeviceLog.self])
 
+    static let retainedEntities: Set<String> = ["PlanBlock", "LongTask", "LongTaskCheckpoint", "JournalEntry", "JournalPhoto"]
+    static let retentionFields: Set<String> = ["deletedAt", "deletionID", "restoredDeletionID", "deletionContext"]
+
+    /// Explicit additive interchange migration. The sealed v1 file is left intact.
+    static func upgraded(_ source: DataArchive) throws -> DataArchive {
+        guard [1, 2].contains(source.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本") }
+        var archive = source
+        if source.formatVersion == 1 {
+            for i in archive.records.indices where retainedEntities.contains(archive.records[i].entity) {
+                guard retentionFields.isDisjoint(with: archive.records[i].values.keys) else {
+                    throw DataArchiveError.invalid("版本1档案含有新版删除字段，保留原文件")
+                }
+                for key in retentionFields { archive.records[i].values[key] = .null }
+            }
+            archive.formatVersion = 2
+        }
+        return archive
+    }
+
     static func capture(_ context: ModelContext, now: Date = .now) throws -> DataArchive {
         var records: [DataArchiveRecord] = []
+        var retention: [String: [String: ArchiveValue]] = [:]
+        func retain(_ row: any RetainedRecord, key: String) throws {
+            retention[key] = ["deletedAt": try ArchiveValue.wrap(row.deletedAt),
+                              "deletionID": try ArchiveValue.wrap(row.deletionID),
+                              "restoredDeletionID": try ArchiveValue.wrap(row.restoredDeletionID),
+                              "deletionContext": try ArchiveValue.wrap(row.deletionContext)]
+        }
         for row in try context.fetch(FetchDescriptor<PlanBlock>()) {
+            try retain(row, key: "PlanBlock:" + String(describing: row.persistentModelID))
             records.append(DataArchiveRecord(entity: "PlanBlock", key: "PlanBlock:" + String(describing: row.persistentModelID), values: [
                 "id": try ArchiveValue.wrap(row.id),
                 "title": try ArchiveValue.wrap(row.title),
@@ -115,6 +142,7 @@ nonisolated enum DataArchiveError: LocalizedError {
             ]))
         }
         for row in try context.fetch(FetchDescriptor<LongTask>()) {
+            try retain(row, key: "LongTask:" + String(describing: row.persistentModelID))
             records.append(DataArchiveRecord(entity: "LongTask", key: "LongTask:" + String(describing: row.persistentModelID), values: [
                 "id": try ArchiveValue.wrap(row.id),
                 "title": try ArchiveValue.wrap(row.title),
@@ -133,6 +161,7 @@ nonisolated enum DataArchiveError: LocalizedError {
             ]))
         }
         for row in try context.fetch(FetchDescriptor<LongTaskCheckpoint>()) {
+            try retain(row, key: "LongTaskCheckpoint:" + String(describing: row.persistentModelID))
             records.append(DataArchiveRecord(entity: "LongTaskCheckpoint", key: "LongTaskCheckpoint:" + String(describing: row.persistentModelID), values: [
                 "id": try ArchiveValue.wrap(row.id),
                 "title": try ArchiveValue.wrap(row.title),
@@ -177,6 +206,7 @@ nonisolated enum DataArchiveError: LocalizedError {
             ]))
         }
         for row in try context.fetch(FetchDescriptor<JournalEntry>()) {
+            try retain(row, key: "JournalEntry:" + String(describing: row.persistentModelID))
             records.append(DataArchiveRecord(entity: "JournalEntry", key: "JournalEntry:" + String(describing: row.persistentModelID), values: [
                 "id": try ArchiveValue.wrap(row.id),
                 "date": try ArchiveValue.wrap(row.date),
@@ -190,6 +220,7 @@ nonisolated enum DataArchiveError: LocalizedError {
             ]))
         }
         for row in try context.fetch(FetchDescriptor<JournalPhoto>()) {
+            try retain(row, key: "JournalPhoto:" + String(describing: row.persistentModelID))
             records.append(DataArchiveRecord(entity: "JournalPhoto", key: "JournalPhoto:" + String(describing: row.persistentModelID), values: [
                 "ref": try ArchiveValue.wrap(row.ref),
                 "data": try ArchiveValue.wrap(row.data),
@@ -205,13 +236,18 @@ nonisolated enum DataArchiveError: LocalizedError {
                 "modifiedAt": try ArchiveValue.wrap(row.modifiedAt)
             ]))
         }
-        return DataArchive(createdAt: now, sourceVersion: AppInfo.version,
+        for i in records.indices {
+            if let metadata = retention[records[i].key] {
+                records[i].values.merge(metadata) { _, new in new }
+            }
+        }
+        return DataArchive(formatVersion: 2, createdAt: now, sourceVersion: AppInfo.version,
                            records: records.sorted { $0.key < $1.key })
     }
 
     /// Restoration is only into an EMPTY isolated container. Never wipe or replace a live synced store.
-    @discardableResult static func restore(_ archive: DataArchive, into context: ModelContext) throws -> [String: String] {
-        guard archive.formatVersion == 1 else { throw DataArchiveError.invalid("不支持的档案版本") }
+    @discardableResult static func restore(_ source: DataArchive, into context: ModelContext) throws -> [String: String] {
+        let archive = try upgraded(source)
         guard try capture(context).records.isEmpty, !context.hasChanges else {
             throw DataArchiveError.invalid("恢复目标必须是空库；不覆盖正在使用的数据")
         }
@@ -356,6 +392,15 @@ nonisolated enum DataArchiveError: LocalizedError {
                     restoredKeys.append((record, row))
                 default: throw DataArchiveError.invalid("未知数据类型：\(record.entity)")
                 }
+                if let row = restoredKeys.last?.1 as? any RetainedRecord {
+                    row.deletedAt = try record.get("deletedAt")
+                    row.deletionID = try record.get("deletionID")
+                    row.restoredDeletionID = try record.get("restoredDeletionID")
+                    row.deletionContext = try record.get("deletionContext")
+                    guard (row.deletedAt == nil) == (row.deletionID == nil) else {
+                        throw DataArchiveError.invalid("删除时间与操作身份必须一起保存")
+                    }
+                }
             }
             for (cp, taskID) in checkpoints {
                 if let taskID {
@@ -371,13 +416,15 @@ nonisolated enum DataArchiveError: LocalizedError {
     }
 
     private static func requireFields(_ record: DataArchiveRecord, _ names: Set<String>) throws {
-        guard Set(record.values.keys) == names else {
-            throw DataArchiveError.invalid("\(record.entity) 字段与版本 1 不符；保留原文件，禁止丢字段恢复")
+        let expected = retainedEntities.contains(record.entity) ? names.union(retentionFields) : names
+        guard Set(record.values.keys) == expected else {
+            throw DataArchiveError.invalid("\(record.entity) 字段与档案版本不符；保留原文件，禁止丢字段恢复")
         }
     }
 
     /// Exercise the real mapper in an isolated local store, including all relationships and binary assets.
-    static func validateRestoration(_ archive: DataArchive) throws {
+    static func validateRestoration(_ source: DataArchive) throws {
+        let archive = try upgraded(source)
         let container = try ModelContainer(for: schema,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let keyMap = try restore(archive, into: container.mainContext)
@@ -424,7 +471,7 @@ extension DataArchiveStore {
             let old = result.records[index]
             if old.values == edit.replacement { continue } // idempotent retry after receipt write failure
             guard old.values == edit.expected else { throw DataArchiveError.invalid("内容已被其他操作更新，拒绝覆盖；请重新导出") }
-            let immutable = ["id", "kind", "blockID", "ref", "deviceID", "dayKey", "dayLabel", "createdAt"]
+            let immutable = ["id", "kind", "blockID", "ref", "deviceID", "dayKey", "dayLabel", "createdAt", "deletedAt", "deletionID", "restoredDeletionID", "deletionContext"]
             for key in immutable where old.values[key] != edit.replacement[key] {
                 throw DataArchiveError.invalid("不能修改身份字段 \(key)；本接口只改既有记录")
             }

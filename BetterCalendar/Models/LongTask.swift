@@ -19,14 +19,14 @@ enum LongTaskStatus: String, Codable, CaseIterable, Sendable {
 
 /// 一池两区（E5a，I1 裁定 2026-08-15）：同一张表两个分区。
 /// longterm=长期区（郑重收进来的长线事项，无删除只改状态）；
-/// todo=待办区（小愿望+溢出顺延物，轻量条目：重字段全空、无检查点；丢弃=溶解硬删除）。
+/// todo=待办区（小愿望+溢出顺延物，轻量条目：重字段全空、无检查点；丢弃=从当前列表移除，原记录进入回收站）。
 enum PoolZone: String, Sendable {
     case longterm
     case todo
 }
 
 @Model
-final class LongTask {
+final class LongTask: RetainedRecord {
     var id: UUID = UUID()
     var title: String = ""
     var note: String = ""
@@ -38,6 +38,10 @@ final class LongTask {
     var createdAt: Date = Date.now
     var doneAt: Date?
     var modifiedAt: Date = Date.now
+    var deletedAt: Date?
+    var deletionID: UUID?
+    var restoredDeletionID: UUID?
+    var deletionContext: Data?
     // 一池两区（E5a）。CloudKit additive：带默认值，老数据自动落长期区。存字符串保兼容。
     // ⚠️ 命名：不能叫 `zone`——CoreData 属性名禁撞 NSObject 方法名（-zone），SwiftData 直接 EXC_BREAKPOINT。
     var zoneRaw: String = PoolZone.longterm.rawValue
@@ -77,7 +81,7 @@ final class LongTask {
 
     /// 检查点按手排顺序（order）返回。
     var sortedCheckpoints: [LongTaskCheckpoint] {
-        (checkpoints ?? []).sorted { ($0.order, $0.createdAt) < ($1.order, $1.createdAt) }
+        (checkpoints ?? []).filter { !$0.isInTrash }.sorted { ($0.order, $0.createdAt) < ($1.order, $1.createdAt) }
     }
     /// 「下一个」＝第一个未勾的检查点（排进今天的块副标题、L3 建议都用它）。
     var nextCheckpoint: LongTaskCheckpoint? {
@@ -89,7 +93,7 @@ final class LongTask {
 /// 无期限（只有顺序，绝不带各自 DDL）、无百分比（进度口径=已推进 m/n 计数）。
 /// CloudKit 约束：非 optional 带默认值、关系 optional、无 unique。
 @Model
-final class LongTaskCheckpoint {
+final class LongTaskCheckpoint: RetainedRecord {
     var id: UUID = UUID()
     var title: String = ""
     var estimatedMinutes: Int?      // 可选预估时长（排进今天时作块长参考）
@@ -97,6 +101,10 @@ final class LongTaskCheckpoint {
     var order: Int = 0              // 手排顺序（拖动重排写它）
     var createdAt: Date = Date.now
     var task: LongTask?
+    var deletedAt: Date?
+    var deletionID: UUID?
+    var restoredDeletionID: UUID?
+    var deletionContext: Data?
 
     init(id: UUID = UUID(), title: String, estimatedMinutes: Int? = nil, doneAt: Date? = nil,
          order: Int = 0, createdAt: Date = .now) {

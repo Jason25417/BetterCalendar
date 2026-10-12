@@ -144,7 +144,7 @@ struct JournalEditor: View {
         entry.tags.append(t); touch()
     }
     private func deletePhoto(_ ref: String) {
-        photoStore.delete(ref); entry.photoRefs.removeAll { $0 == ref }; touch()
+        if photoStore.delete(ref) { entry.photoRefs.removeAll { $0 == ref }; touch() }
     }
     private func importPhotos(_ items: [PhotosPickerItem]) async {
         for item in items {
