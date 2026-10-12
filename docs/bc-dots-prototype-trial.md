@@ -42,4 +42,4 @@
 
 本机安装目录：~/Library/Application Support/BetterCalendarPrototype，目录700；上传缓存文件600，私人内容不入Git。已安装脚本为源文件副本。当前会话进程的输出/错误日志为 pool-session-output.log / pool-session-error.log。恢复时先核对PID实际命令再启动，不能凭PID文件重开。停止时只停止此脚本进程；原生 BetterCalendar 不受影响。
 
-13:58 EDT 已向 Dots 发送事项接通的更新，并请求 active/limit=1 只读确认；消息在页面可见。截图仅本机 /private/tmp/bc-dots-prototype-pool-message.png。18:00:30已观察到第二次定时运行成功，原有分片复用且队列0；18:01正式MCP收到18:00:28目录心跳，active筛选18条、current/complete=true。这验证本次会话的连续两个周期，不证明重启或全天覆盖。Dots已读更新，尚未见其本次调用回复。
+13:58 EDT 已向 Dots 发送事项接通的更新，并请求 active/limit=1 只读确认；消息在页面可见。截图仅本机 /private/tmp/bc-dots-prototype-pool-message.png。18:00:30已观察到第二次定时运行成功，原有分片复用且队列0；18:01正式MCP收到18:00:28目录心跳，active筛选18条、current/complete=true。这验证本次会话的连续两个周期，不证明重启或全天覆盖。Dots已回复：18:01:53 UTC实际调用status=active/limit=1成功，收到1条在途事项，Mac目录快照18:01:31，available/current/complete=true。当前真实目录→正式MCP→Dots查询路径已核验；不是生活改善验收。源码d8553df已push。
