@@ -41,6 +41,13 @@ final class DataMaintenance {
             let url = support.appendingPathComponent(name)
             if FileManager.default.fileExists(atPath: url.path) { archive.localFiles[name] = try Data(contentsOf: url) }
         }
+        // Pending bridge intents are evidence only. They are never replayed by
+        // isolated restoration, and credentials/device identity are excluded.
+        let bridgeSupport = support.deletingLastPathComponent().appendingPathComponent("DotStateBridge")
+        for name in ["outbox-v1.json", "task-commands-v1.json"] {
+            let url = bridgeSupport.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { archive.localFiles["bridge/" + name] = try Data(contentsOf: url) }
+        }
         // Keep legacy/cache files separately; missing cloud rows are not permission to resurrect them.
         let photoDirectory = support.appendingPathComponent("journal-photos")
         if FileManager.default.fileExists(atPath: photoDirectory.path) {
@@ -63,6 +70,7 @@ final class DataMaintenance {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("\(prefix)-\(UUID().uuidString).json")
         try data.write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         latestArchive = url
         message = "已导出 \(archive.records.count) 条数据库记录（含照片本体）；尚未做恢复校验"
         return url

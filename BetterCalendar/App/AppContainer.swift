@@ -43,6 +43,7 @@ final class AppContainer {
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
+    let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
     let learning: LearningStore                // 学习层采集端（E4：快照 save-once + 残差兜底折算）
@@ -105,12 +106,19 @@ final class AppContainer {
         #else
         self.liveActivity = NoLiveActivity()            // macOS：无 Live Activity → no-op
         #endif
+        self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
+                                              persistence: TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence(),
+                                              enabled: { StateBridgeClient.shared.configured })
         self.execution = ExecutionViewModel(calendarStore: calendarStore, reschedule: reschedule,
                                             planStore: planStore, reminderStore: reminderStore,
                                             liveActivity: liveActivity,
                                             sessionStore: ExecutionSessionStore(),
                                             persistsRunState: !TestHost.isActive,
-                                            startedDays: startedDays, projection: projection)
+                                            startedDays: startedDays, projection: projection,
+                                            canonicalTasks: bridgeTasks)
+        bridgeTasks.onChange = { [weak execution] in execution?.syncCanonicalPresentation() }
+        FocusFollow.personalTaskRefresh = { [weak bridgeTasks] in await bridgeTasks?.refresh(allowCommands: false) }
+        bridgeTasks.startPolling()
         self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)
         // E5b 时间线协调器（影子期：只动实时日真相、不碰投影；三层分频见 §14.1）

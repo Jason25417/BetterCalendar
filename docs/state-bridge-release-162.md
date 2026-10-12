@@ -26,3 +26,9 @@ Dots 批次有真实处理回执：例如 13:59:04Z 创建，13:59:09Z 收到，
 手机 162 后台行为、App/Focus 自动化、双端统一旧 UI 与云端计时、长期事项编辑、30 天回收站及迁移演练未完成。原报错 Dots 会话仍未定位；旧会话 ID 返回找不到会话，没有诊断消息送达。
 
 浏览器验证遵循 Jason 最新要求使用 Edge 扩展。扩展可接管；私有状态网页在 Edge 要求登录，MCP 读取成功与网页登录状态不同，不以此认定服务不可用。
+
+## 162 真机与历史恢复：10:35–10:41 EDT
+
+Mac原生UI确认0.65.5/162安装，重新打开后队列0、上传持续更新；已开启登录启动，普通退出保留菜单栏原本开启。重登、重启、断网仍待验收。再次退出时未见主进程，也未见崩溃报告；不据此推断退出原因。
+
+通过App现有完整档案入口导出432条真实数据库记录，并经App在隔离空库恢复校验成功：PlanBlock268、ExecutionSession70、LongTask25、LongTaskCheckpoint9、DayRecord11、DayPlanSnapshot8、ResidualSample5、JournalEntry19、JournalPhoto2、DeviceLog15。字段、关系、照片本体一致；未写入日用库。档案位于用户Downloads/BetterCalendar-Data，未上传或纳入Git；本批备份文件权限600。此验证不是未来任意schema变更兼容，也不是30天回收站完成。

@@ -35,14 +35,14 @@ final class ActivityKitLiveActivity: ExecutionLiveActivity {
         }
         if activity != nil {
             update(snapshot)
-            DevLog.shared.info("LiveActivity", "更新现有活动：\(snapshot.title)\(snapshot.isRemote ? "（来自另一台设备）" : "")")
+            DevLog.shared.info("LiveActivity", "更新现有活动：\(snapshot.title)\(snapshot.isRemote ? "（同步计时）" : "")")
             return
         }
         do {
             activity = try Activity.request(
                 attributes: ExecutionActivityAttributes(),
                 content: .init(state: Self.state(from: snapshot), staleDate: nil))
-            DevLog.shared.info("LiveActivity", "开始：\(snapshot.title)\(snapshot.isRemote ? "（来自另一台设备）" : "")")
+            DevLog.shared.info("LiveActivity", "开始：\(snapshot.title)\(snapshot.isRemote ? "（同步计时）" : "")")
         } catch {
             DevLog.shared.warn("LiveActivity", "开始失败：\(error.localizedDescription)")
         }

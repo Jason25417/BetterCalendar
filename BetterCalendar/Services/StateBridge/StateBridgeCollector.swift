@@ -1,5 +1,4 @@
 import Foundation
-import EventKit
 import Network
 #if os(macOS)
 import AppKit
@@ -9,7 +8,10 @@ import CryptoKit
 
 @MainActor final class StateBridgeCollector {
     static let shared = StateBridgeCollector()
-    private let calendar = EKEventStore()
+    private let scheduleReader: any StateBridgeScheduleReading
+    init(scheduleReader: any StateBridgeScheduleReading = EventKitBridgeScheduleReader()) {
+        self.scheduleReader = scheduleReader
+    }
     private var timer: Timer?
     private var sampling = false
     private var networkMonitor: NWPathMonitor?
@@ -79,8 +81,11 @@ import CryptoKit
     }
     func requestPermissions() async {
         guard !TestHost.isActive else { return }
-        do { _ = try await calendar.requestFullAccessToEvents(); _ = try await calendar.requestFullAccessToReminders() }
-        catch { StateBridgeClient.shared.emit("source.status",value:.object(["calendar":.string("permission-request-failed")]),validFor:3600) }
+        let failures = await scheduleReader.requestPermissions()
+        if !failures.isEmpty {
+            StateBridgeClient.shared.emit("source.status",value:.object(failures.mapValues { .string($0) }),validFor:3600)
+            DevLog.shared.warn("StateBridge","日历/提醒事项授权未全部完成，请检查采集来源状态")
+        }
         #if os(iOS)
         await StateBridgePhone.shared.requestPermissions()
         #endif
@@ -108,16 +113,10 @@ import CryptoKit
         guard enabled else { return }
         sampleHistory()
         #endif
-        if EKEventStore.authorizationStatus(for:.event) == .fullAccess {
-            let events = calendar.events(matching:calendar.predicateForEvents(withStart:now.addingTimeInterval(-86400),end:now.addingTimeInterval(14*86400),calendars:nil)).sorted { $0.startDate < $1.startDate }
-            let f = ISO8601DateFormatter()
-            client.emit("calendar.events",value:.object(["items":.array(events.prefix(120).map { .object(["id":.text($0.eventIdentifier),"title":.text($0.title),"start":.string(f.string(from:$0.startDate)),"end":.string(f.string(from:$0.endDate)),"allDay":.bool($0.isAllDay),"location":.text($0.location)]) }),"truncated":.bool(events.count > 120)]),validFor:3600)
-        } else { client.emit("calendar.events",value:.object(["availability":.string("not-authorized")]),validFor:3600) }
-        if EKEventStore.authorizationStatus(for:.reminder) == .fullAccess {
-            let reminders: [EKReminder] = await withCheckedContinuation { c in calendar.fetchReminders(matching:calendar.predicateForIncompleteReminders(withDueDateStarting:nil,ending:nil,calendars:nil)) { c.resume(returning:$0 ?? []) } }
-            let f = ISO8601DateFormatter()
-            client.emit("reminders.items",value:.object(["items":.array(reminders.sorted { $0.calendarItemIdentifier < $1.calendarItemIdentifier }.prefix(100).map { r in .object(["id":.string(r.calendarItemIdentifier),"title":.text(r.title),"priority":.number(Double(r.priority)),"due":.text(r.dueDateComponents.flatMap { Calendar.current.date(from:$0) }.map { f.string(from:$0) })]) }),"truncated":.bool(reminders.count > 100)]),validFor:3600)
-        } else { client.emit("reminders.items",value:.object(["availability":.string("not-authorized")]),validFor:3600) }
+        let schedule = await scheduleReader.snapshot(at: now)
+        guard enabled else { return }
+        client.emit("calendar.events",value:schedule.calendar,validFor:3600,observedAt:schedule.observedAt)
+        client.emit("reminders.items",value:schedule.reminders,validFor:3600,observedAt:schedule.observedAt)
         #if os(iOS)
         await StateBridgePhone.shared.readHealth()
         #endif

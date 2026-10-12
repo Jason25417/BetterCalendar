@@ -24,6 +24,15 @@ final class ExecutionViewModel {
     private let liveActivity: ExecutionLiveActivity   // 灵动岛/锁屏实时计时（iOS 有实现，macOS no-op）
     private var presentingFollowActivity = false
     private let sessionStore: ExecutionSessionStore?  // 执行会话落库（趋势统计数据源；nil=不记，测试用）
+    let canonicalTasks: BridgeTaskViewModel?
+    private var presentingCanonicalActivity = false
+    private var canonicalActivityID: String?
+    private var canonicalProjectionSignature: String?
+    private var canonicalProjectionHasPublished = false
+    private var canonicalProjectedReadAt: Date?
+    var usesCanonicalTiming: Bool {
+        canonicalTasks?.isEnabled == true && active == nil && background.isEmpty && pendingRunRestore == nil
+    }
     private let persistsRunState: Bool                // 运行态快照开关（测试关：test host 与真 App 共享 UserDefaults，别互相污染）
     private let startedDays: StartedDayStore?         // 实时模式标记（0.23 A：首次开始一件事=进实时模式）；nil=不标
     private let projection: ProjectionService?        // 进实时模式时重投影该日（绿淡出）；nil=不投
@@ -239,13 +248,18 @@ final class ExecutionViewModel {
          planStore: PlanReading & ActualReading & ActualWriting, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
          persistsRunState: Bool = true,
-         startedDays: StartedDayStore? = nil, projection: ProjectionService? = nil) {
+         startedDays: StartedDayStore? = nil, projection: ProjectionService? = nil,
+         canonicalTasks: BridgeTaskViewModel? = nil) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
         self.planStore = planStore
         self.reminderStore = reminderStore
         self.liveActivity = liveActivity
         self.sessionStore = sessionStore
+        self.canonicalTasks = canonicalTasks
+        if let previous = canonicalTasks?.primary {
+            canonicalProjectionSignature = "\(previous.id):\(previous.revision)"
+        }
         self.persistsRunState = persistsRunState
         self.startedDays = startedDays
         self.projection = projection
@@ -267,6 +281,7 @@ final class ExecutionViewModel {
     /// 把另一台设备的只读运行态映射到本机锁屏/灵动岛；不创建 session、实际记录或日历事件。
     /// 本机有 active 时始终由本机状态占据 Live Activity。
     func syncFollowPresentation() {
+        guard !usesCanonicalTiming else { return }
         updateScreenTimeShield()
         guard active == nil else {
             presentingFollowActivity = false
@@ -281,6 +296,48 @@ final class ExecutionViewModel {
         if presentingFollowActivity { liveActivity.update(snapshot) }
         else { liveActivity.start(snapshot) }
         presentingFollowActivity = true
+    }
+
+    /// Cloud sessions project into Live Activity without writing duplicate
+    /// SwiftData sessions/actual blocks on either device.
+    func syncCanonicalPresentation() {
+        guard active == nil, background.isEmpty, pendingRunRestore == nil else {
+            presentingCanonicalActivity = false; canonicalActivityID = nil; return
+        }
+        guard usesCanonicalTiming, let tasks = canonicalTasks, let session = tasks.primary else {
+            if presentingCanonicalActivity { liveActivity.end() }
+            #if os(macOS)
+            if usesCanonicalTiming, let tasks = canonicalTasks, !tasks.isStale, tasks.sessions.isEmpty,
+               canonicalProjectionSignature != nil {
+                FocusFollow.publish(kind: "complete", active: nil, sampledAt: tasks.estimatedServerDate())
+                canonicalProjectionSignature = nil
+            }
+            #endif
+            presentingCanonicalActivity = false; canonicalActivityID = nil; return
+        }
+        let now = Date(), elapsed = tasks.elapsed(session, at: now)
+        let snapshot = LiveActivitySnapshot(title: tasks.isStale ? "待同步 · " + session.title : session.title,
+                                            timerStart: now.addingTimeInterval(-elapsed),
+                                            pausedAt: session.status == .paused ? now : nil,
+                                            mode: .light, phaseEndsAt: nil, phaseIsRest: false, isRemote: true)
+        if presentingCanonicalActivity && canonicalActivityID == session.id { liveActivity.update(snapshot) }
+        else { if presentingCanonicalActivity { liveActivity.end() }; liveActivity.start(snapshot) }
+        presentingCanonicalActivity = true; canonicalActivityID = session.id
+        #if os(macOS)
+        // One Mac projects committed BC state into the existing CloudKit wake
+        // channel. iPhone receivers do not republish the projection.
+        guard FocusFollowSettings.enabled, !tasks.isStale, let receivedAt = tasks.lastReadReceivedAt,
+              receivedAt != canonicalProjectedReadAt else { return }
+        let signature = "\(session.id):\(session.revision)"
+        let a = FocusStateExporter.State.Active(title: session.title, timingStyle: TimingStyle.light.rawValue,
+                                               startedAt: now.addingTimeInterval(-elapsed), elapsedSec: Int(elapsed),
+                                               pausedSec: 0, plannedSec: nil, endsAt: nil, inRest: nil,
+                                               segmentsRemaining: nil, workSec: nil, restSec: nil)
+        FocusFollow.publish(kind: canonicalProjectionHasPublished && canonicalProjectionSignature == signature ? "tick" : "canonical-state",
+                            active: a, isPaused: session.status == .paused, elapsed: elapsed, sampledAt: tasks.estimatedServerDate(at: now))
+        canonicalProjectionSignature = signature
+        canonicalProjectionHasPublished = true; canonicalProjectedReadAt = receivedAt
+        #endif
     }
 
     // MARK: - 读取今日
@@ -797,6 +854,11 @@ final class ExecutionViewModel {
 
     /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
     func startBlock(_ item: PlannedItem) async {
+        if usesCanonicalTiming, let tasks = canonicalTasks {
+            await tasks.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString)
+            selected = nil
+            return
+        }
         if !demoteAutoPromotedActive() { await recordActiveIfAny() }
         active = ActiveBlock(plannedID: item.id, title: item.title, start: .now,
                              timingStyle: item.timingStyle)
@@ -876,6 +938,10 @@ final class ExecutionViewModel {
 
     /// 同时开始另一件（后台并行）：不动前台正在计时的块，这件在后台自己按墙钟跑。
     func startAlso(_ item: PlannedItem) {
+        if usesCanonicalTiming, let tasks = canonicalTasks {
+            tasks.queueStart(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString)
+            return
+        }
         guard item.id != active?.plannedID,
               !isRunningInBackground(item) else { return }
         background.append(BackgroundRun(plannedID: item.id, title: item.title, start: .now))
@@ -914,6 +980,10 @@ final class ExecutionViewModel {
     private(set) var lastCompletionAt: Date?
 
     func completeCurrent() async {
+        if usesCanonicalTiming, let tasks = canonicalTasks, let session = tasks.primary {
+            await tasks.act(.finish, on: session)
+            return
+        }
         lastCompletionAt = .now
         let doneTitle = active?.title           // 捕获（recordActiveIfAny 后 active 清空）
         let doneSec = Int(currentElapsed)
@@ -1003,6 +1073,10 @@ final class ExecutionViewModel {
 
     /// 单按钮 toggle：开始休息 ⇄ 结束休息。休息=暂停（保留当前块），结束后回来继续同一件。
     func toggleBreak() async {
+        if usesCanonicalTiming, let tasks = canonicalTasks, let session = tasks.primary {
+            await tasks.act(session.status == .paused ? .resume : .pause, on: session)
+            return
+        }
         if isOnBreak {
             if let bs = breakStart {
                 let pause = Date.now.timeIntervalSince(bs)

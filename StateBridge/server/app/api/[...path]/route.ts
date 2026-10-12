@@ -17,6 +17,13 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       return json(path==="ingest"?await core.ingest(body,device):await core.flush());
     }
+    if(path==="tasks/state"||path==="tasks/command"){
+      const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
+      // Only the owner's enrolled interactive devices can participate in task
+      // timing. Clock/probe tokens cannot read or control personal sessions.
+      if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人任务操作权限",403);
+      return json(path==="tasks/state"?await core.taskState():await core.taskCommand(body,`device:${device.id}`));
+    }
     if(!request.headers.get("oai-authenticated-user-id"))throw new BridgeError("需要已登录的用户",401);
     if(path==="devices/enroll") {
       if(!["mac","iphone"].includes(body.platform))throw new BridgeError("设备平台无效");

@@ -3,7 +3,7 @@ import Security
 import Observation
 
 // Separate from SwiftData/CloudKit: telemetry and Dot timing do not migrate the calendar store.
-enum BridgeJSON: Codable, Equatable, Sendable {
+nonisolated enum BridgeJSON: Codable, Equatable, Sendable {
     case object([String: BridgeJSON]), array([BridgeJSON]), string(String), number(Double), bool(Bool), null
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
@@ -68,11 +68,15 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
     private init() {
         guard !TestHost.isActive else { return }
         do { if FileManager.default.fileExists(atPath: location.path) { outbox = try JSONDecoder().decode(BridgeOutbox.self, from: Data(contentsOf: location)); try outbox.validate() }; pendingCount = outbox.observations.count }
-        catch { queueHealthy = false; reportFailure("本地队列读取失败，已保留原文件；请检查后再启用"); return }
+        catch { queueHealthy = false; reportFailure("本地队列读取失败，已保留原文件；请检查后再启用") }
         lastUpload = UserDefaults.standard.object(forKey:"dotStateBridge.lastUpload") as? Date
         let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:"com.jason.BetterCalendar.StateBridge", kSecAttrAccount as String:account, kSecReturnData as String:true]
         var item: CFTypeRef?
-        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data { credentials = try? JSONDecoder().decode(BridgeCredentials.self, from:data); status = credentials == nil ? "凭据读取失败" : "已配置，等待采集" }
+        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data {
+            credentials = try? JSONDecoder().decode(BridgeCredentials.self, from:data)
+            if credentials == nil { reportFailure("凭据读取失败，请检查本机连接配置") }
+            else if queueHealthy { status = "已配置，等待采集" }
+        }
     }
     func configure(_ text: String) throws {
         guard !TestHost.isActive else { return }
@@ -118,6 +122,14 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         guard (200..<300).contains(http.statusCode) else { throw NSError(domain:"StateBridge.HTTP",code:http.statusCode) }
         return (try JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
     }
+    func readTasks() async throws -> BridgeTaskState {
+        let result = try await post("tasks/state",body:Data("{}".utf8))
+        return try BridgeTaskCodec.networkDecoder().decode(BridgeTaskState.self,from:JSONSerialization.data(withJSONObject:result))
+    }
+    func submitTask(_ command: BridgeTaskCommand) async throws -> BridgeTaskReceipt {
+        let result = try await post("tasks/command",body:try BridgeTaskCodec.networkEncoder().encode(command))
+        return try BridgeTaskCodec.networkDecoder().decode(BridgeTaskReceipt.self,from:JSONSerialization.data(withJSONObject:result))
+    }
     func uploadAndFlush() async {
         guard configured, queueHealthy, !busy, !TestHost.isActive else { return }; busy = true; defer { busy = false }
         do {
@@ -140,3 +152,5 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         }
     }
 }
+
+extension StateBridgeClient: BridgeTaskServing {}

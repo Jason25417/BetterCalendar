@@ -29,6 +29,13 @@
       "when": 1791814756607,
       "tag": "0003_funny_unicorn",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791816987164,
+      "tag": "0004_lumpy_thing",
+      "breakpoints": true
     }
   ]
 }

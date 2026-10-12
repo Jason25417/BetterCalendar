@@ -15,10 +15,10 @@ export function sourceView(observation, sourceKey, readAt) {
   else if (emptyStatuses.has(reason)) availability = "empty";
   else if (Array.isArray(value) && !value.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
   else if (value && typeof value === "object" && observation.source === "health.steps" && value.count == null) availability = "unknown";
-  else if (value && typeof value === "object" && (Array.isArray(value.items) || Array.isArray(value.samples))) {
+  else if (["available", "partial"].includes(availability) && value && typeof value === "object" && (Array.isArray(value.items) || Array.isArray(value.samples))) {
     const entries = value.items ?? value.samples;
-    if (!entries.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
-    else if (value.truncated || value.omittedItems) availability = "partial";
+    if (availability === "partial" || value.truncated || value.omittedItems) availability = "partial";
+    else if (!entries.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
   }
   const freshness = observation.expiresAt && Date.parse(observation.expiresAt) <= Date.parse(readAt) ? "stale" : "current";
   return {

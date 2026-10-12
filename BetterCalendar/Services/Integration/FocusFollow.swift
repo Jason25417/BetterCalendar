@@ -124,6 +124,7 @@ enum FocusFollow {
     private static var lastSubscriptionAttempt = Date.distantPast
     private static var lastSequence: Int64 = pending?.seq ?? 0
     private static var lastAction = "tick"
+    static var personalTaskRefresh: (() async -> Void)?
 
     /// Durable, serialized outbox. Network failure never means “record does not exist”.
     static func publish(kind: String, active: FocusStateExporter.State.Active?, isPaused: Bool = false,
@@ -307,6 +308,7 @@ enum FocusFollow {
     static func handlePush(_ userInfo: [AnyHashable: Any]) async {
         guard let note = CKNotification(fromRemoteNotificationDictionary: userInfo),
               note.subscriptionID == subscriptionID else { return }
+        await personalTaskRefresh?()
         await refreshAndApply(reason: "推送")
     }
 

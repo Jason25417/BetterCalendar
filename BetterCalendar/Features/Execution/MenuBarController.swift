@@ -100,7 +100,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         func symbol(_ name: String, _ desc: String) {
             button.image = NSImage(systemSymbolName: name, accessibilityDescription: desc)
         }
-        if model.isOnBreak {
+        if model.usesCanonicalTiming, let tasks = model.canonicalTasks {
+            if let session = tasks.primary {
+                symbol(tasks.isStale ? "exclamationmark.clock" : session.status == .paused ? "pause.fill" : "play.fill", "BC 统一计时")
+                button.title = " " + ExecutionPanel.hms(tasks.elapsed(session))
+            } else { symbol("calendar.badge.clock", "BetterCalendar"); button.title = "" }
+        } else if model.isOnBreak {
             symbol("cup.and.saucer.fill", "休息中")
             button.title = " 休息 " + ExecutionPanel.hms(model.breakElapsed)
         } else if let phase = model.pomodoroPhase {

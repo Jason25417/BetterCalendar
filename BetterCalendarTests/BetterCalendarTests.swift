@@ -2262,22 +2262,25 @@ struct LogicTests {
             ParsedPlan(blocks: [], longTasks: [ParsedLongTask(title: tag, deadline: nil,
                        cadenceMinutesPerWeek: nil, totalMinutes: nil, unitMinutes: nil)], isLoose: false)
         }
+        // Build fixtures before the race: actor-bound construction must not
+        // consume the simulated network response window under parallel load.
+        let devicePlan = plan("端侧"), cloudPlan = plan("云端")
         // v3 默认：并行热备——云端优先窗内出结果=用云端，端侧先出也押着等（不再是先到先得）
         var r = try await FoundationModelsScheduleParser.chain(
             onDeviceOnly: false, cloudPriorityWindow: 0.5, totalDeadline: 2,
-            onDevice: { plan("端侧") },   // 立即出
-            cloud: { try? await Task.sleep(nanoseconds: 100_000_000); return plan("云端") })
+            onDevice: { devicePlan },   // 立即出
+            cloud: { try? await Task.sleep(nanoseconds: 100_000_000); return cloudPlan })
         #expect(r.longTasks.first?.title == "云端")
         // v3：云端超优先窗没出、端侧有货 → 端侧接管
         r = try await FoundationModelsScheduleParser.chain(
             onDeviceOnly: false, cloudPriorityWindow: 0.05, totalDeadline: 2,
-            onDevice: { plan("端侧") },
-            cloud: { try? await Task.sleep(nanoseconds: 1_000_000_000); return plan("云端") })
+            onDevice: { devicePlan },
+            cloud: { try? await Task.sleep(nanoseconds: 1_000_000_000); return cloudPlan })
         #expect(r.longTasks.first?.title == "端侧")
         // v3：云端失败 → 端侧热备接管（不等窗）
         r = try await FoundationModelsScheduleParser.chain(
             onDeviceOnly: false,
-            onDevice: { plan("端侧") },
+            onDevice: { devicePlan },
             cloud: { throw AnthropicError(message: "云端挂了") })
         #expect(r.longTasks.first?.title == "端侧")
         // v3：端云双失 → 干净抛错
@@ -2291,21 +2294,21 @@ struct LogicTests {
             _ = try await FoundationModelsScheduleParser.chain(
                 onDeviceOnly: false, cloudPriorityWindow: 0.05, totalDeadline: 0.15,
                 onDevice: { try? await Task.sleep(nanoseconds: 2_000_000_000); return nil },
-                cloud: { try? await Task.sleep(nanoseconds: 2_000_000_000); return plan("云端") })
+                cloud: { try? await Task.sleep(nanoseconds: 2_000_000_000); return cloudPlan })
         }
         // 只使用端侧：端侧胜出，云端**绝不被调**（绝对隐私承诺）
         let cloudTouched = LockedFlag()
         r = try await FoundationModelsScheduleParser.chain(
             onDeviceOnly: true,
-            onDevice: { plan("端侧") },
-            cloud: { cloudTouched.set(); return plan("云端") })
+            onDevice: { devicePlan },
+            cloud: { cloudTouched.set(); return cloudPlan })
         #expect(r.longTasks.first?.title == "端侧")
         #expect(!cloudTouched.value)
         // 只使用端侧：端侧失手 → 干净抛错，云端仍不被调（不静默回云）
         await #expect(throws: (any Error).self) {
             _ = try await FoundationModelsScheduleParser.chain(
                 onDeviceOnly: true, onDevice: { nil },
-                cloud: { cloudTouched.set(); return plan("云端") })
+                cloud: { cloudTouched.set(); return cloudPlan })
         }
         #expect(!cloudTouched.value)
     }

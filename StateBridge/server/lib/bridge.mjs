@@ -84,16 +84,28 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     }
     return {accepted,ignored,receivedAt:time()};
   }
-  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,provenance:r.provenance});
-  async function readState(){
+  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null});
+  async function taskState(){
+    const rows=await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at,id LIMIT 101");
+    return {schemaVersion:1,authority:"bettercalendar",readAt:time(),sessions:rows.slice(0,100).map(sessionView),hasMore:rows.length>100};
+  }
+  async function readState(options={}){
+    if(options.includeValues!=null&&typeof options.includeValues!=="boolean")throw new BridgeError("includeValues 需要布尔值");
+    if(options.sourceKeys!=null&&(!Array.isArray(options.sourceKeys)||options.sourceKeys.length>40||options.sourceKeys.some(k=>typeof k!=="string"||!k.length||k.length>150)))throw new BridgeError("来源筛选需要至多40个sourceKey");
     const readAt=time();
     const sources=(await all("SELECT * FROM states ORDER BY source_key")).map(r=>sourceView(JSON.parse(r.body),r.source_key,readAt));
+    let selected=options.sourceKeys==null?sources:sources.filter(s=>options.sourceKeys.includes(s.sourceKey));
+    if(options.includeValues===false){
+      const metadata=["schemaVersion","eventId","source","deviceId","sequence","assertion","observedAt","receivedAt","expiresAt","sourceKey","freshness","availability","reason","lastObservedAt","lastReceivedAt","lastSuccessfulReadAt","usableForCurrentState"];
+      selected=selected.map(s=>Object.fromEntries(metadata.filter(k=>s[k]!==undefined).map(k=>[k,s[k]])));
+    }
     const devices=await all("SELECT id,label,scopes,revoked_at FROM devices ORDER BY id");
-    return {schemaVersion:1,readAt,sources,coverage:coverageView(devices,sources),warnings:stateWarnings(sources),
+    const notes=(await all("SELECT * FROM notes n WHERE (n.expires_at IS NULL OR n.expires_at>?) AND NOT EXISTS(SELECT 1 FROM notes replacement WHERE replacement.supersedes=n.id) ORDER BY created_at DESC LIMIT 30",readAt)).map(n=>options.includeValues===false?{id:n.id,kind:n.kind,assertion:n.assertion,confidence:n.confidence,createdAt:n.created_at,expiresAt:n.expires_at,supersedes:n.supersedes,contentIncluded:false}:{...n,body:JSON.parse(n.body),basis:JSON.parse(n.basis)});
+    return {schemaVersion:1,readAt,sources:selected,sourceCount:sources.length,valuesIncluded:options.includeValues!==false,missingSourceKeys:(options.sourceKeys??[]).filter(k=>!sources.some(s=>s.sourceKey===k)),coverage:coverageView(devices,sources),warnings:stateWarnings(sources),
       interpretation:"sources 保留最后一次观察；stale 不是当前活动。coverage 的 not_received 表示此来源尚未上传，不证明用户没有该活动。lastSuccessfulReadAt 为本次可读快照时间，失败时为空，不代表历史从未成功。",
-      sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes:(await all("SELECT * FROM notes n WHERE (n.expires_at IS NULL OR n.expires_at>?) AND NOT EXISTS(SELECT 1 FROM notes replacement WHERE replacement.supersedes=n.id) ORDER BY created_at DESC LIMIT 30",readAt)).map(n=>({...n,body:JSON.parse(n.body),basis:JSON.parse(n.basis)}))};
+      sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes};
   }
-  async function taskCommand(v){
+  async function taskCommand(v,origin="mcp"){
     const commandId=str(v.commandId,"commandId",150),requestHash=await sha(canonical(v));
     const replay=await one("SELECT * FROM commands WHERE id=?",commandId);
     if(replay){if(replay.request_hash!==requestHash)throw new BridgeError("commandId 不能复用于不同命令",409);return JSON.parse(replay.result);}
@@ -103,22 +115,23 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     let row,ops;
     if(v.action==="start"){
       const title=str(v.title,"任务名",300),id=`task_${(await sha(commandId)).slice(0,32)}`;
-      row={id,title,status:"running",started_at:occurredAt,active_since:occurredAt,elapsed_ms:0,updated_at:occurredAt,revision:1,last_command_id:commandId,provenance:"user"};
-      ops=[q("INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance) VALUES(?,?,?,?,?,?,?,?,?,?)",id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user")];
+      const relatedRecordId=v.relatedRecordId==null?null:str(v.relatedRecordId,"关联记录 ID",150);
+      row={id,title,status:"running",started_at:occurredAt,active_since:occurredAt,elapsed_ms:0,updated_at:occurredAt,revision:1,last_command_id:commandId,provenance:"user",related_record_id:relatedRecordId,origin};
+      ops=[q("INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance,related_record_id,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user",relatedRecordId,origin)];
     }else{
       const id=str(v.sessionId,"sessionId",80),old=await one("SELECT * FROM sessions WHERE id=?",id);
       if(!old)throw new BridgeError("找不到计时记录",404);
       if(v.expectedRevision!==old.revision)throw new BridgeError("状态已变，请先重新读取",409);
       if(Date.parse(occurredAt)<Date.parse(old.updated_at))throw new BridgeError("动作早于上一状态；请明确修正历史");
       if(old.status==="finished"||(v.action==="pause"&&old.status!=="running")||(v.action==="resume"&&old.status!=="paused"))throw new BridgeError("当前状态不能执行此动作",409);
-      row={...old,status:v.action==="resume"?"running":v.action==="pause"?"paused":"finished",active_since:v.action==="resume"?occurredAt:null,elapsed_ms:old.elapsed_ms+(old.active_since?Date.parse(occurredAt)-Date.parse(old.active_since):0),updated_at:occurredAt,revision:old.revision+1,last_command_id:commandId};
-      ops=[q("UPDATE sessions SET status=?,active_since=?,elapsed_ms=?,updated_at=?,revision=?,last_command_id=? WHERE id=? AND revision=?",row.status,row.active_since,row.elapsed_ms,row.updated_at,row.revision,commandId,id,old.revision)];
+      row={...old,status:v.action==="resume"?"running":v.action==="pause"?"paused":"finished",active_since:v.action==="resume"?occurredAt:null,elapsed_ms:old.elapsed_ms+(old.active_since?Date.parse(occurredAt)-Date.parse(old.active_since):0),updated_at:occurredAt,revision:old.revision+1,last_command_id:commandId,origin};
+      ops=[q("UPDATE sessions SET status=?,active_since=?,elapsed_ms=?,updated_at=?,revision=?,last_command_id=?,origin=? WHERE id=? AND revision=?",row.status,row.active_since,row.elapsed_ms,row.updated_at,row.revision,commandId,origin,id,old.revision)];
     }
-    const result={...sessionView(row),elapsedMs:row.elapsed_ms};
+    const result={...sessionView(row),elapsedMs:row.elapsed_ms,commandId,saved:true};
     ops.push(q(`INSERT OR IGNORE INTO commands(id,request_hash,session_id,result,created_at)
        SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE id=? AND last_command_id=?)`,commandId,requestHash,row.id,JSON.stringify(result),time(),row.id,commandId));
     ops.push(q(`INSERT OR IGNORE INTO changes(event_id,source_key,occurred_at,body)
-       SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM commands WHERE id=?)`,`command:${commandId}`,"dot:tasks",occurredAt,JSON.stringify({action:v.action,session:result,assertion:"user"}),commandId));
+       SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM commands WHERE id=?)`,`command:${commandId}`,"bc:tasks",occurredAt,JSON.stringify({action:v.action,session:result,assertion:"user",origin}),commandId));
     await db.batch(ops);const committed=await one("SELECT result,request_hash FROM commands WHERE id=?",commandId);
     if(!committed||committed.request_hash!==requestHash)throw new BridgeError("计时并发冲突，请重新读取",409);return JSON.parse(committed.result);
   }
@@ -140,10 +153,18 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     await q("INSERT OR IGNORE INTO notes(id,kind,body,assertion,confidence,basis,created_at,expires_at,supersedes) VALUES(?,?,?,?,?,?,?,?,?)",id,kind,body,v.assertion,v.confidence,JSON.stringify(v.basis),time(),v.expiresAt==null?null:iso(v.expiresAt),v.supersedes??null).run();
     return {id,saved:true,assertion:v.assertion};
   }
-  async function readChanges(afterId=0,limit=100){
+  async function readChanges(afterId=0,limit=100,throughId=null){
     if(!Number.isSafeInteger(afterId)||afterId<0)throw new BridgeError("游标无效");
-    const rows=await all("SELECT * FROM changes WHERE id>? ORDER BY id LIMIT ?",afterId,Math.min(100,Math.max(1,limit)));
-    return {changes:rows.map(r=>({id:r.id,sourceKey:r.source_key,occurredAt:r.occurred_at,observation:JSON.parse(r.body)})),nextCursor:rows.at(-1)?.id??afterId};
+    if(!Number.isSafeInteger(limit)||limit<1||limit>100)throw new BridgeError("每页需要1至100条变化");
+    if(throughId!=null&&(!Number.isSafeInteger(throughId)||throughId<0))throw new BridgeError("批次终点无效");
+    const rows=throughId==null?await all("SELECT * FROM changes WHERE id>? ORDER BY id LIMIT ?",afterId,limit+1):await all("SELECT * FROM changes WHERE id>? AND id<=? ORDER BY id LIMIT ?",afterId,throughId,limit+1);
+    const changes=[];let bytes=1024;
+    for(const r of rows.slice(0,limit)){
+      const entry={id:r.id,sourceKey:r.source_key,occurredAt:r.occurred_at,observation:JSON.parse(r.body)},size=enc.encode(JSON.stringify(entry)).length;
+      if(bytes+size>128*1024){if(!changes.length)throw new BridgeError("单条变化过大，原记录已保留，请检查格式",413);break;}
+      changes.push(entry);bytes+=size;
+    }
+    return {changes,nextCursor:changes.at(-1)?.id??afterId,hasMore:rows.length>changes.length,throughId};
   }
   async function sendSigned(s,id,body){
     await validateCallback(s.callback,fetcher);const timestamp=Math.floor(now().getTime()/1000).toString();
@@ -210,6 +231,6 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }
   async function diagnostics(){return {readAt:time(),devices:await all("SELECT id,label,scopes,created_at,revoked_at FROM devices"),sourceCount:(await one("SELECT COUNT(*) AS n FROM states")).n,subscriptions:await all("SELECT id,expires_at,created_at FROM subscriptions"),deliveries:await all("SELECT batch_id,status,attempts,received_at,last_error FROM deliveries ORDER BY next_attempt_at DESC LIMIT 15"),batches:await all("SELECT id,created_at,processed_at FROM batches ORDER BY minute DESC LIMIT 15")};}
-  return {registerDevice,authenticateDevice,ingest,readState,readObservationHistory:createObservationHistory(db,time),taskCommand,taskHistory,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  return {registerDevice,authenticateDevice,ingest,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }

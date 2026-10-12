@@ -53,6 +53,10 @@ struct ExecutionPanel: View {
     }
 
     var body: some View {
+        Group {
+        if model.usesCanonicalTiming, let tasks = model.canonicalTasks {
+            BridgeTaskPanel(model: tasks, planned: model.planned)
+        } else {
         VStack(alignment: .leading, spacing: 10) {
             header
             followStrip
@@ -72,6 +76,8 @@ struct ExecutionPanel: View {
                 Text(err).font(.caption2).foregroundStyle(.orange).lineLimit(2)
             }
             if compactCapable { expandToggle }
+        }
+        }
         }
         .padding(12)
         #if os(macOS)

@@ -118,10 +118,10 @@ private func tintColor(_ s: ExecutionActivityAttributes.ContentState) -> Color {
 
 private func statusLine(_ s: ExecutionActivityAttributes.ContentState) -> String {
     let status: String
-    if s.pausedAt != nil { status = "休息中 · 已暂停" }
+    if s.pausedAt != nil { status = "已暂停" }
     else if s.mode == .pomodoro { status = s.phaseIsRest ? "番茄钟 · 休息" : "番茄钟 · 专注" }
     else { status = "计时中" }
-    return s.isRemote ? "另一台设备 · \(status)" : status
+    return s.isRemote ? "同步计时 · \(status)" : status
 }
 
 // MARK: - 预览

@@ -122,6 +122,7 @@ struct BetterCalendarApp: App {
                     DataSyncMonitor.shared.refreshNow()
                     StateBridgeCollector.shared.start()
                     Task { await StateBridgeCollector.shared.recover() }
+                    Task { await container.bridgeTasks.refresh() }
                 }
                 FocusFollow.setForeground(phase == .active)
             }

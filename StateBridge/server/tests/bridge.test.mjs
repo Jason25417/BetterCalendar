@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createBridge, signWebhook, validateCallback } from '../lib/bridge.mjs';
+import { sourceView } from '../lib/state-view.mjs';
 function fixture(options={}){
  const sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){return sqlite.prepare(sql).run(...args);}};}
@@ -32,6 +33,46 @@ test('persistent timing, pauses, duplicates, concurrency revision and inferred o
  await f.core.taskCommand({commandId:'resume',action:'resume',sessionId:s.id,expectedRevision:2,provenance:'user'});f.advance(60000);
  const done=await f.core.taskCommand({commandId:'end',action:'finish',sessionId:s.id,expectedRevision:3,provenance:'user'});assert.equal(done.elapsedMs,180000);assert.equal((await f.core.readState()).sessions.length,0);assert.equal((await f.core.taskHistory()).sessions[0].elapsedMs,180000);
  await assert.rejects(f.core.taskCommand({...v,commandId:'infer',provenance:'inferred'}),/仅接受用户/);
+});
+
+test('native and MCP actions share one timing record, preserve legacy link, and reject stale device revisions',async()=>{
+ const f=fixture();const start={commandId:'native-start',action:'start',title:'测试计时',provenance:'user',relatedRecordId:'PlanBlock:legacy-id'};
+ const s=await f.core.taskCommand(start,'device:mac');assert.equal(s.saved,true);assert.equal(s.commandId,start.commandId);
+ f.advance(120000);let state=await f.core.taskState();assert.equal(state.authority,'bettercalendar');assert.equal(state.sessions.length,1);assert.equal(state.sessions[0].elapsedMs,120000);assert.equal(state.sessions[0].relatedRecordId,start.relatedRecordId);
+ const pause={commandId:'mcp-pause',action:'pause',sessionId:s.id,expectedRevision:1,provenance:'user'};
+ const p=await f.core.taskCommand(pause);assert.equal(p.origin,'mcp');assert.equal(p.relatedRecordId,start.relatedRecordId);assert.equal((await f.core.taskCommand(pause)).revision,2);
+ await assert.rejects(f.core.taskCommand({commandId:'late-device',action:'finish',sessionId:s.id,expectedRevision:1,provenance:'user'},'device:iphone'),/状态已变/);
+ f.advance(60000);assert.equal((await f.core.taskState()).sessions[0].elapsedMs,120000);
+ await f.core.taskCommand({commandId:'device-resume',action:'resume',sessionId:s.id,expectedRevision:2,provenance:'user'},'device:iphone');f.advance(30000);
+ const done=await f.core.taskCommand({commandId:'native-finish',action:'finish',sessionId:s.id,expectedRevision:3,provenance:'user'},'device:mac');
+ assert.equal(done.elapsedMs,150000);assert.equal((await f.core.taskState()).sessions.length,0);assert.equal((await f.core.taskHistory()).sessions[0].relatedRecordId,start.relatedRecordId);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,1);assert.ok((await f.core.readChanges()).changes.every(c=>c.sourceKey==='bc:tasks'));
+});
+
+test('development edits remain visible and cannot be overwritten using a stale revision',async()=>{
+ const f=fixture(),s=await f.core.taskCommand({commandId:'before-edit',action:'start',title:'原题目',provenance:'user'});
+ f.sqlite.prepare("UPDATE sessions SET title=?,status='paused',active_since=NULL,elapsed_ms=90000,revision=2 WHERE id=?").run('修正题目',s.id);
+ const view=(await f.core.taskState()).sessions[0];assert.equal(view.title,'修正题目');assert.equal(view.status,'paused');assert.equal(view.elapsedMs,90000);
+ await assert.rejects(f.core.taskCommand({commandId:'old-revision',action:'pause',sessionId:s.id,expectedRevision:1,provenance:'user'}),/状态已变/);
+ assert.equal(JSON.parse(f.sqlite.prepare('SELECT result FROM commands WHERE id=?').get('before-edit').result).title,'原题目');
+});
+
+test('metadata reads retain coverage while selected values remain available',async()=>{
+ const f=fixture(),d=await device(f);await f.core.ingest({observations:[obs(1,{app:'editor'},f)]},d);
+ await f.core.recordNote({id:'note',kind:'intent',body:{privateText:'content'},assertion:'user',confidence:'high',basis:[]});
+ const meta=await f.core.readState({includeValues:false});assert.equal(meta.valuesIncluded,false);assert.equal(meta.sourceCount,1);assert.equal(meta.sources[0].value,undefined);assert.equal(meta.notes[0].body,undefined);assert.equal(meta.coverage[0].sources[0].availability,'available');
+ const detail=await f.core.readState({sourceKeys:[meta.sources[0].sourceKey]});assert.deepEqual(detail.sources[0].value,{app:'editor'});
+ const absent=await f.core.readState({sourceKeys:['missing:key']});assert.equal(absent.sources.length,0);assert.deepEqual(absent.missingSourceKeys,['missing:key']);assert.equal(absent.coverage.length,1);
+ await assert.rejects(f.core.readState({includeValues:'false'}),/布尔值/);
+});
+
+test('change pages keep complete observations and stop at the batch boundary',async()=>{
+ const f=fixture(),d=await device(f),payload='x'.repeat(40000);
+ for(let seq=1;seq<=5;seq++)await f.core.ingest({observations:[obs(seq,{payload,seq},f)]},d);
+ const first=await f.core.readChanges(0,100,4);assert.equal(first.hasMore,true);assert.ok(JSON.stringify(first).length<128*1024);
+ const second=await f.core.readChanges(first.nextCursor,100,4);assert.equal(second.hasMore,false);assert.deepEqual([...first.changes,...second.changes].map(c=>c.id),[1,2,3,4]);
+ assert.ok([...first.changes,...second.changes].every(c=>c.observation.value.payload===payload));
+ const nextBatch=await f.core.readChanges(second.nextCursor,100,5);assert.deepEqual(nextBatch.changes.map(c=>c.id),[5]);
 });
 test('minute batches, stable webhook id, retry and no changes no batch',async()=>{
  const f=fixture(),d=await device(f),secret='whsec_'+Buffer.alloc(32,7).toString('base64');
@@ -115,6 +156,15 @@ test('state coverage separates fresh errors, empty samples, missing sources and 
  f.advance(100000);const stale=await f.core.readState();assert.equal(stale.sources.find(s=>s.source==='health.sleep').usableForCurrentState,false);assert.equal(stale.warnings.length,0);
  await f.core.ingest({observations:[input(4,'health.sleep',{samples:[],availability:'no-readable-samples-not-proof-of-no-sleep'})]},d);
  assert.equal((await f.core.readState()).sources.find(s=>s.source==='health.sleep').availability,'unknown');
+});
+
+test('empty truncated or failed snapshots never claim a complete empty result',()=>{
+ const base={source:'calendar.events',observedAt:'2026-10-05T12:00:00Z',expiresAt:'2026-10-05T13:00:00Z'};
+ for(const value of [{availability:'partial',items:[],truncated:true,omittedItems:1},{items:[],truncated:true},{availability:'partial',items:[]}]){
+  const view=sourceView({...base,value},'mac:calendar.events','2026-10-05T12:01:00Z');assert.equal(view.availability,'partial');
+ }
+ const error=sourceView({...base,value:{availability:'read-unavailable',items:[]}},'mac:calendar.events','2026-10-05T12:01:00Z');
+ assert.equal(error.availability,'error');assert.equal(error.usableForCurrentState,false);
 });
 
 test('default policy forwards every valid change and does not create batches for unchanged heartbeats',async()=>{
