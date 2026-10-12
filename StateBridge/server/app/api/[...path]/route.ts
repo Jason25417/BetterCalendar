@@ -12,17 +12,22 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
     // This entire Site is owner-private at the Sites dispatch boundary. Ingest/flush
     // additionally require a scoped device token. The service credential alone
     // does not grant access to the user's connected apps or their identity.
-    if(path==="devices/register")return json(await core.registerDevice(body));
-    if(path==="ingest"||path==="flush"){
-      const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
-      return json(path==="ingest"?await core.ingest(body,device):await core.flush());
+    if(path==="devices/register") {
+      // A clock/probe has a service credential for dispatch, not authority to
+      // enroll a new interactive device with broader personal-data scopes.
+      if(!request.headers.get("oai-authenticated-user-id"))throw new BridgeError("设备登记需要已登录的账户",401);
+      return json(await core.registerDevice(body));
     }
-    if(path==="tasks/state"||path==="tasks/command"){
+    if(path==="ingest"||path==="flush"||path==="pool/upload"){
+      const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
+      return json(path==="pool/upload"?await core.uploadPool(body,device):path==="ingest"?await core.ingest(body,device):await core.flush());
+    }
+    if(path==="tasks/state"||path==="tasks/command"||path==="pool/read"){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       // Only the owner's enrolled interactive devices can participate in task
       // timing. Clock/probe tokens cannot read or control personal sessions.
       if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人任务操作权限",403);
-      return json(path==="tasks/state"?await core.taskState():await core.taskCommand(body,`device:${device.id}`));
+      return json(path==="pool/read"?await core.readPoolRecords(body):path==="tasks/state"?await core.taskState():await core.taskCommand(body,`device:${device.id}`));
     }
     if(!request.headers.get("oai-authenticated-user-id"))throw new BridgeError("需要已登录的用户",401);
     if(path==="devices/enroll") {

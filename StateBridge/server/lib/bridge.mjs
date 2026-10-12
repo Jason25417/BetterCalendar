@@ -3,6 +3,7 @@ import { ForwardAllToDots } from "./event-decision.mjs";
 import { sourceView, coverageView, stateWarnings } from "./state-view.mjs";
 import { createObservationHistory } from "./observation-history.mjs";
 import { createTaskHistory } from "./task-history.mjs";
+import { createPoolRecords } from "./pool-records.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -58,12 +59,12 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     const d=await one("SELECT * FROM devices WHERE token_hash=? AND revoked_at IS NULL",await sha(token));
     if(!d)throw new BridgeError("设备凭据无效或已撤销",401);return d;
   }
-  async function ingest(v,d){
+  async function ingestAuthorized(v,d,scopes){
     if(!Array.isArray(v.observations)||v.observations.length>100)throw new BridgeError("每批最多 100 条观察");
     const accepted=[],ignored=[];
     for(const raw of v.observations){
       const id=str(raw.eventId,"事件 ID",150),source=str(raw.source,"来源",60);
-      if(!JSON.parse(d.scopes).includes(source))throw new BridgeError("设备没有此来源权限",403);
+      if(!scopes.includes(source))throw new BridgeError("设备没有此来源权限",403);
       if(raw.schemaVersion!==1||!Number.isSafeInteger(raw.sequence)||raw.sequence<1)throw new BridgeError("观察版本或递增序号无效");
       const observedAt=iso(raw.observedAt),receivedAt=time(),expiresAt=raw.expiresAt==null?null:iso(raw.expiresAt);
       if(Date.parse(observedAt)>now().getTime()+120000||(expiresAt&&Date.parse(expiresAt)<Date.parse(observedAt)))throw new BridgeError("观察时间或有效期无效");
@@ -85,6 +86,12 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     }
     return {accepted,ignored,receivedAt:time()};
   }
+  async function ingest(v,d){return ingestAuthorized(v,d,JSON.parse(d.scopes));}
+  async function uploadPool(v,d){
+    if(!JSON.parse(d.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人事项权限",403);
+    return ingestAuthorized(v,d,["bc.pool","bc.pool.chunk"]);
+  }
+  const readPoolRecords=createPoolRecords(db,time);
   const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null});
   async function taskState(){
     const rows=await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at,id LIMIT 101");
@@ -97,7 +104,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     const sources=(await all("SELECT * FROM states ORDER BY source_key")).map(r=>sourceView(JSON.parse(r.body),r.source_key,readAt));
     let selected=options.sourceKeys==null?sources:sources.filter(s=>options.sourceKeys.includes(s.sourceKey));
     if(options.includeValues===false){
-      const metadata=["schemaVersion","eventId","source","deviceId","sequence","assertion","observedAt","receivedAt","expiresAt","sourceKey","freshness","availability","reason","lastObservedAt","lastReceivedAt","lastSuccessfulReadAt","usableForCurrentState"];
+      const metadata=["schemaVersion","eventId","source","deviceId","sequence","assertion","observedAt","receivedAt","expiresAt","sourceKey","freshness","availability","reason","lastObservedAt","lastReceivedAt","lastSuccessfulReadAt","dataRole","usableForCurrentState"];
       selected=selected.map(s=>Object.fromEntries(metadata.filter(k=>s[k]!==undefined).map(k=>[k,s[k]])));
     }
     const devices=await all("SELECT id,label,scopes,revoked_at FROM devices ORDER BY id");
@@ -229,6 +236,6 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }
   async function diagnostics(){return {readAt:time(),devices:await all("SELECT id,label,scopes,created_at,revoked_at FROM devices"),sourceCount:(await one("SELECT COUNT(*) AS n FROM states")).n,subscriptions:await all("SELECT id,expires_at,created_at FROM subscriptions"),deliveries:await all("SELECT batch_id,status,attempts,received_at,last_error FROM deliveries ORDER BY next_attempt_at DESC LIMIT 15"),batches:await all("SELECT id,created_at,processed_at FROM batches ORDER BY minute DESC LIMIT 15")};}
-  return {registerDevice,authenticateDevice,ingest,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  return {registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }

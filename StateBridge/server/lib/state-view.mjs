@@ -27,7 +27,8 @@ export function sourceView(observation, sourceKey, readAt) {
     reason: reason ?? (availability === "unknown" ? "empty_samples_do_not_establish_absence_or_permission" : null),
     lastObservedAt: observation.observedAt, lastReceivedAt: observation.receivedAt,
     lastSuccessfulReadAt: ["available", "partial", "empty"].includes(availability) ? observation.observedAt : null,
-    usableForCurrentState: freshness === "current" && ["available", "partial", "empty"].includes(availability),
+    dataRole: observation.source === "bc.pool.chunk" ? "record-fragment" : "source-data",
+    usableForCurrentState: observation.source !== "bc.pool.chunk" && freshness === "current" && ["available", "partial", "empty"].includes(availability),
   };
 }
 
@@ -35,7 +36,7 @@ export function coverageView(devices, sources) {
   const byKey = new Map(sources.map(s => [s.sourceKey, s]));
   return devices.map(d => ({
     deviceId: d.id, label: d.label, revoked: d.revoked_at != null,
-    sources: JSON.parse(d.scopes).filter(s => s !== "bridge.probe").map(source => {
+    sources: [...JSON.parse(d.scopes), ...(JSON.parse(d.scopes).includes("user.context") ? ["bc.pool"] : [])].filter((s, i, a) => s !== "bridge.probe" && a.indexOf(s) === i).map(source => {
       const state = byKey.get(`${d.id}:${source}`);
       return { source, availability: state?.availability ?? "not_received", freshness: state?.freshness ?? "unknown", usableForCurrentState: state?.usableForCurrentState ?? false, lastObservedAt: state?.lastObservedAt ?? null, lastReceivedAt: state?.lastReceivedAt ?? null };
     }),

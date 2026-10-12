@@ -5,6 +5,7 @@ export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const string={type:"string"};
 const tools=[
+  {name:"read_pool_records",description:"分页读取BC设备SwiftData中的长期事项、愿望/待办、已完成和已放下目录，包含阶段、完整字段和内容版本。它是带来源/时效的只读副本，不迁移或另存任务真相；不同设备可能尚未同步。默认隐藏回收站，可显式includeTrash。hasMore时以相同筛选及nextCursor继续，分页固定该快照。未上传/读取失败不等于没有事项；尚无编辑能力。",inputSchema:object({deviceId:string,zone:{type:"string",enum:["longterm","todo"]},status:{type:"string",enum:["active","done","shelved"]},includeTrash:{type:"boolean"},limit:{type:"integer",minimum:1,maximum:100},cursor:string}),annotations:{readOnlyHint:true}},
   {name:"read_current_state",description:"读取个人状态、来源时效、覆盖和BC计时。事件处理可先includeValues=false读摘要，再用sourceKeys读取所需正文；valuesIncluded=false不是不可读。默认保留旧版完整读取。stale是旧数据，not_received是未上传，不等于无权限。",inputSchema:object({includeValues:{type:"boolean"},sourceKeys:{type:"array",items:string,maxItems:40}}),annotations:{readOnlyHint:true}},
   {name:"read_changes",description:"按游标分页读取完整变化；按发生时间理解补传。响应大小有界，hasMore时继续nextCursor；可设throughId只读到事件的throughChangeId，避免追逐新变化而一直不能结束本批。",inputSchema:object({afterId:{type:"integer",minimum:0},limit:{type:"integer",minimum:1,maximum:100},throughId:{type:"integer",minimum:0}}),annotations:{readOnlyHint:true}},
   {name:"read_observation_history",description:"按 sourceKey 和发生时间查询一个来源的原始历史；保留未知版本和字段，区分发生与接收时间。每页最多100条，hasMore时以相同范围及nextCursor继续；补传后复核需重读完整时间窗。不能把历史当实时状态。",inputSchema:object({sourceKey:string,from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:string},["sourceKey"]),annotations:{readOnlyHint:true}},
@@ -40,6 +41,7 @@ export async function POST(request:Request){
     if(method==="tools/call"){
       const a=p.arguments??{};let value;
       switch(p.name){
+        case "read_pool_records":value=await core.readPoolRecords(a);break;
         case "read_current_state":value=await core.readState(a);break;
         case "read_changes":value=await core.readChanges(a.afterId??0,a.limit??100,a.throughId??null);break;
         case "read_observation_history":value=await core.readObservationHistory(a);break;

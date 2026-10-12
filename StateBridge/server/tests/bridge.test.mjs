@@ -247,3 +247,61 @@ test('legacy resting-heart-rate null is unknown rather than available',()=>{
  const failure=sourceView({...base,value:{availability:'read-unavailable',bpm:null}},'phone:health.resting-heart-rate','2026-10-05T12:01:00Z');
  assert.equal(failure.availability,'error');
 });
+
+async function poolDevice(f,id='pool-mac'){
+ const d=await f.core.registerDevice({id,label:'pool test',scopes:['user.context']});return f.core.authenticateDevice(d.token);
+}
+async function publishPool(f,d,records,{seq=1,eventPrefix='pool',manifestOnly=false,payloadVersion=1}={}){
+ const payload={formatVersion:payloadVersion,authority:'swiftdata',dateUnit:'unix-milliseconds',records};
+ const bytes=Buffer.from(JSON.stringify(payload)),hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
+ const chunks=[];
+ for(let i=0;i<bytes.length;i+=30*1024){chunks.push({schemaVersion:1,eventId:`${eventPrefix}-chunk-${chunks.length}`,source:'bc.pool.chunk',sequence:seq+chunks.length,assertion:'observed',observedAt:f.time(),expiresAt:'2027-10-05T12:00:00Z',value:{formatVersion:1,contentHash:hash,index:chunks.length,bytes:bytes.subarray(i,i+30*1024).toString('base64')}});}
+ const manifest={schemaVersion:1,eventId:`${eventPrefix}-manifest`,source:'bc.pool',sequence:seq+chunks.length,assertion:'observed',observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+180000).toISOString(),value:{formatVersion:1,authority:'swiftdata',availability:'available',contentHash:hash,recordCount:records.length,chunkEventIds:chunks.map(c=>c.eventId)}};
+ await f.core.uploadPool({observations:manifestOnly?[manifest]:[...chunks,manifest]},d);return {manifest,chunks};
+}
+const poolRecord=(id,extra={})=>({id,revision:'a'.repeat(64),values:{id,title:id,zone:'longterm',status:'active',isInTrash:false,note:'',...extra}});
+
+test('pool upload is restricted to enrolled interactive devices, and unavailable is not empty',async()=>{
+ const f=fixture(),ordinary=await device(f),d=await poolDevice(f);
+ const missing=await f.core.readPoolRecords();assert.equal(missing.availability,'not_received');assert.equal(missing.complete,false);
+ const coverage=(await f.core.readState({includeValues:false})).coverage.find(x=>x.deviceId===d.id);
+ assert.equal(coverage.sources.find(x=>x.source==='bc.pool').availability,'not_received');
+ await assert.rejects(publishPool(f,ordinary,[]),/事项权限/);
+ const {manifest}=await publishPool(f,d,[]);const empty=await f.core.readPoolRecords();assert.equal(empty.complete,true);assert.equal(empty.totalRecordCount,0);assert.equal(empty.availability,'available');
+ const fragment=(await f.core.readState({includeValues:false})).sources.find(x=>x.source==='bc.pool.chunk');
+ assert.equal(fragment.dataRole,'record-fragment');assert.equal(fragment.usableForCurrentState,false);
+ await assert.rejects(f.core.ingest({observations:[manifest]},d),/来源权限/);
+ f.advance(60000);await f.core.uploadPool({observations:[{...manifest,eventId:'pool-read-error',sequence:50,observedAt:f.time(),value:{availability:'read-unavailable'}}]},d);
+ const unavailable=await f.core.readPoolRecords();assert.equal(unavailable.complete,false);assert.equal(unavailable.availability,'error');
+});
+test('complete pool pagination pins content across device updates and retains future fields',async()=>{
+ const f=fixture(),d=await poolDevice(f),records=Array.from({length:115},(_,i)=>poolRecord(`record-${i}`,{futureField:{keep:true}}));
+ await publishPool(f,d,records);const first=await f.core.readPoolRecords({limit:40});assert.equal(first.records.length,40);assert.equal(first.hasMore,true);
+ f.advance(60000);await publishPool(f,d,[poolRecord('new')],{seq:20,eventPrefix:'new'});
+ const second=await f.core.readPoolRecords({limit:40,cursor:first.nextCursor}),third=await f.core.readPoolRecords({limit:40,cursor:second.nextCursor});
+ assert.equal(third.hasMore,false);assert.equal(first.records.length+second.records.length+third.records.length,115);
+ assert.equal(third.records.at(-1).values.futureField.keep,true);assert.equal((await f.core.readPoolRecords()).records[0].id,'new');
+ await assert.rejects(f.core.readPoolRecords({cursor:first.nextCursor,zone:'todo'}),/游标/);
+});
+test('pool filtering preserves done, shelved, wishes and retained trash without merging device views',async()=>{
+ const f=fixture(),mac=await poolDevice(f),phone=await poolDevice(f,'pool-phone');
+ const records=[poolRecord('active'),poolRecord('done',{status:'done'}),poolRecord('shelved',{status:'shelved'}),poolRecord('wish',{zone:'todo'}),poolRecord('trash',{zone:'todo',isInTrash:true})];
+ await publishPool(f,mac,records);f.advance(60000);await publishPool(f,phone,[poolRecord('phone-view')],{eventPrefix:'phone'});
+ const all=await f.core.readPoolRecords({deviceId:mac.id,includeTrash:true});assert.equal(all.records.length,5);assert.equal(all.deviceViewsDiffer,true);
+ const todo=await f.core.readPoolRecords({deviceId:mac.id,zone:'todo'});assert.deepEqual(todo.records.map(r=>r.id),['wish']);
+ assert.equal((await f.core.readPoolRecords({deviceId:mac.id,status:'shelved'})).records[0].id,'shelved');
+ f.advance(180000);assert.equal((await f.core.readPoolRecords({deviceId:mac.id})).freshness,'stale');assert.equal((await f.core.readPoolRecords({deviceId:mac.id})).usableForCurrentState,false);
+});
+test('pool missing fragments, checksum corruption, duplicate IDs and unknown format fail visibly',async()=>{
+ let f=fixture(),d=await poolDevice(f);await publishPool(f,d,[poolRecord('a')],{manifestOnly:true});await assert.rejects(f.core.readPoolRecords(),/分片/);
+ f=fixture();d=await poolDevice(f);const p=await publishPool(f,d,[poolRecord('a')]);
+ const raw=JSON.parse(f.sqlite.prepare('SELECT body FROM observations WHERE id=?').get(p.chunks[0].eventId).body);raw.value.bytes=Buffer.from('different bytes').toString('base64');
+ f.sqlite.prepare('UPDATE observations SET body=? WHERE id=?').run(JSON.stringify(raw),p.chunks[0].eventId);await assert.rejects(f.core.readPoolRecords(),/校验/);
+ f=fixture();d=await poolDevice(f);await publishPool(f,d,[poolRecord('a'),poolRecord('a')]);await assert.rejects(f.core.readPoolRecords(),/身份/);
+ f=fixture();d=await poolDevice(f);await publishPool(f,d,[poolRecord('a')],{payloadVersion:2});await assert.rejects(f.core.readPoolRecords(),/版本/);
+});
+test('pool fragmentation reconstructs UTF-8 notes, limits pages without losing oversized rows',async()=>{
+ const f=fixture(),d=await poolDevice(f),text='学习🌲'.repeat(20000),records=[poolRecord('large',{note:text}),poolRecord('next')];
+ await publishPool(f,d,records);const first=await f.core.readPoolRecords();assert.equal(first.records.length,1);assert.equal(first.records[0].values.note,text);assert.equal(first.byteBudgetExceeded,true);assert.equal(first.hasMore,true);
+ const second=await f.core.readPoolRecords({cursor:first.nextCursor});assert.equal(second.records[0].id,'next');assert.equal(second.hasMore,false);
+});

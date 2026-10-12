@@ -39,7 +39,9 @@ struct BridgeObservation: Codable {
 struct BridgeOutbox: Codable {
     var nextSequence = 1
     var observations: [BridgeObservation] = []
+    var poolCache: BridgePoolCache?
     func validate() throws {
+        try poolCache?.validate()
         guard nextSequence > 0, observations.allSatisfy({ $0.schemaVersion == 1 && $0.sequence > 0 && $0.sequence < nextSequence }),
               Set(observations.map(\.eventId)).count == observations.count,
               Set(observations.map(\.sequence)).count == observations.count else {
@@ -100,6 +102,14 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         do { try persist(next); outbox = next; pendingCount = next.observations.count; return true }
         catch { reportFailure("保存观察失败；没有标记为已上传"); return false }
     }
+    func publishPool(_ snapshot: BridgePoolSnapshot, observedAt: Date) {
+        guard let credentials, queueHealthy, !TestHost.isActive else { return }
+        var next = outbox
+        do {
+            try next.enqueuePool(snapshot, deviceId: credentials.deviceId, at: observedAt)
+            try persist(next); outbox = next; pendingCount = next.observations.count
+        } catch { reportFailure("事项目录排队失败，原记录及上一份目录保留") }
+    }
     private func reportFailure(_ message: String) {
         status = message
         if lastFailure != message { DevLog.shared.warn("StateBridge",message); lastFailure = message }
@@ -135,9 +145,11 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         do {
             // Small batches stay below the request limit. Preserve concurrently appended observations.
             while !outbox.observations.isEmpty {
-                let sent = Array(outbox.observations.prefix(4))
+                let poolSources = ["bc.pool", "bc.pool.chunk"]
+                let isPool = poolSources.contains(outbox.observations[0].source)
+                let sent = Array(outbox.observations.prefix(4).prefix { poolSources.contains($0.source) == isPool })
                 struct Payload: Encodable { let observations: [BridgeObservation] }
-                let result = try await post("ingest",body:try JSONEncoder().encode(Payload(observations:sent)))
+                let result = try await post(isPool ? "pool/upload" : "ingest",body:try JSONEncoder().encode(Payload(observations:sent)))
                 let acknowledged = Set((result["accepted"] as? [String] ?? []) + (result["ignored"] as? [String] ?? []))
                 guard sent.allSatisfy({ acknowledged.contains($0.eventId) }) else { throw URLError(.cannotParseResponse) }
                 var next = outbox; next.observations.removeAll { acknowledged.contains($0.eventId) }; try persist(next); outbox = next; pendingCount = next.observations.count

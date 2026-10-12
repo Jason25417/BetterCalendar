@@ -89,6 +89,9 @@ final class AppContainer {
         self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer,
                                                            learning: learning)
         self.longTasks = LongTaskStore()
+        if !TestHost.isActive {
+            StateBridgeCollector.shared.installPoolReader(SwiftDataBridgePoolReader(context: SharedModelContainer.shared.mainContext))
+        }
         self.reviewStore = ReviewLocalStore()
         self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()

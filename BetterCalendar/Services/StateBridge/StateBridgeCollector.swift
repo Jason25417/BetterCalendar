@@ -12,6 +12,9 @@ import CryptoKit
     init(scheduleReader: any StateBridgeScheduleReading = EventKitBridgeScheduleReader()) {
         self.scheduleReader = scheduleReader
     }
+    private var poolReader: (any StateBridgePoolReading)?
+    func installPoolReader(_ reader: any StateBridgePoolReading) { poolReader = reader }
+    private var lastPoolFailure: String?
     private var timer: Timer?
     private var sampling = false
     private var networkMonitor: NWPathMonitor?
@@ -123,10 +126,19 @@ import CryptoKit
         #if os(iOS)
         await StateBridgePhone.shared.readHealth()
         #endif
+        guard enabled else { return }
         client.emit("device.status",value:.object(["availability":.string("online"),
             "platform":.string(ProcessInfo.processInfo.operatingSystemVersionString),
             "collector":.object(["name":.string("BetterCalendar"),"version":.string(AppInfo.version),
                                  "build":.string(BuildInfo.buildNumber),"schemaVersion":.number(2)])]))
+        if let poolReader {
+            do { client.publishPool(try poolReader.snapshot(), observedAt: .now); lastPoolFailure = nil }
+            catch {
+                let message = "事项目录读取失败：" + error.localizedDescription
+                if lastPoolFailure != message { DevLog.shared.warn("StateBridge", message); lastPoolFailure = message }
+                client.emit("bc.pool", value: .object(["availability": .string("read-unavailable"), "reason": .string("authoritative-pool-read-failed")]))
+            }
+        }
         await client.uploadAndFlush()
     }
     #if os(macOS)
