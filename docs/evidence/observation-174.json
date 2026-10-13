@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "scope": "targeted_observation_and_legacy_history_increment",
+  "nativeSourceCommit": "b5854a15f1e3887c5099917b3693ffd29cc336d8",
+  "serviceSourceCommit": "4c0715a4393118fb20c67a5ebea6819250cab905",
+  "nativeVersion": "0.65.17",
+  "nativeBuild": 174,
+  "tests": {
+    "fullMac": 344,
+    "finalSemantics": 3,
+    "service": 97,
+    "failed": 0,
+    "skipped": 0,
+    "iosSimulator": "build_succeeded"
+  },
+  "legacyDatabaseEvidence": {
+    "mode": "sqlite_read_only_existing_daily_store",
+    "recordCount": 70,
+    "sessionsStartingOct12or13EDT": 0,
+    "beforeHash": "2e9ddab4729350ef5c4664aebcb1087e0a0f38e2a0d09b23eef8bbd98321f346",
+    "afterHash": "2e9ddab4729350ef5c4664aebcb1087e0a0f38e2a0d09b23eef8bbd98321f346",
+    "scope": "current_Mac_only_not_phone_or_cross_day_activity",
+    "privateBodiesCommitted": false
+  },
+  "confirmedMissing": {
+    "iosAppObserved": false,
+    "actual174PhoneBackground": false,
+    "actual174LegacyPages": false,
+    "nativeHumanConfirmation": false
+  },
+  "confirmationReadThrough": 51930,
+  "newConfirmationEventsObserved": 0,
+  "permissions": {
+    "newSystemEntitlement": false,
+    "newDeviceCredential": false,
+    "cloudKitSchemaChanged": false,
+    "newService": false
+  },
+  "publication": {
+    "siteVersion": 34,
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "deploymentId": "appgdep_6acec0e4c8a481919947decfef393309",
+    "savedVersionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_3db97602809481919b49de091fd72953",
+    "status": "succeeded",
+    "at": "2026-10-13T23:39:05.724105+00:00",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "hasMcp": true,
+    "siteCommit": "1744d383e8c23e47a9401a258733c14baec553f5",
+    "comparedServerFiles": 152,
+    "blobMismatches": 0,
+    "audience": "owner_only_unchanged"
+  },
+  "liveReads": {
+    "summary": {
+      "readAt": "2026-10-13T23:41:38.857Z",
+      "research": {
+        "callId": "research_bf37020d-8bf7-4600-9bce-a6a5ad1c97e2",
+        "responseHash": "d912de24bbbbf886753f40dae7fa2cabf12a36539fa99edc0c07aae970ac5114",
+        "recorded": true
+      },
+      "observations": [
+        {
+          "sourceKey": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960:health.steps",
+          "ageSeconds": 6958.857,
+          "deliveryDelaySeconds": 5401.483,
+          "collectionRecency": "older_than_5_minutes"
+        },
+        {
+          "sourceKey": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d:mac.activity",
+          "ageSeconds": 2.857,
+          "deliveryDelaySeconds": 0.941,
+          "collectionRecency": "recent"
+        }
+      ]
+    },
+    "legacyViaCachedTool": {
+      "origin": "legacy",
+      "availability": "not_supported_by_device_snapshot",
+      "complete": false,
+      "sourceDeviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "research": {
+        "callId": "research_2b49e56d-718b-4b50-8d1d-19c60ed283cd",
+        "responseHash": "908c5f6d854c9b80e7d884d9efa94b94c7682d739431f8a20230624f2d5ef99f",
+        "recorded": true
+      }
+    },
+    "interpretation": "Old device snapshot is unsupported, not a proven empty history; native 174 upload/phone background still needs sample"
+  },
+  "testflight": {
+    "phase": "uploaded_both_verified",
+    "version": "0.65.17",
+    "build": 174,
+    "sourceCommit": "b5854a15f1e3887c5099917b3693ffd29cc336d8",
+    "toolchain": "Xcode 27.0 / 27A266a",
+    "ios": {
+      "id": "396a45e0-85aa-468a-b056-08f112aedd0e",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "notesVerified": true
+    },
+    "mac": {
+      "id": "71115bd6-6241-4e7d-b69d-71274ef3c65d",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "notesVerified": true
+    },
+    "widgetVersionVerified": true,
+    "deviceInstallation": "unverified"
+  },
+  "rollback": {
+    "native": 173,
+    "serviceSource": "121555fffcde97cfd998fa51e4d6526d40bff890"
+  }
+}
