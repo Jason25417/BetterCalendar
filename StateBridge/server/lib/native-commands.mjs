@@ -116,12 +116,20 @@ export function createNativeCommands(db,time,executeTask){
   if(!['accept','decline','cancel'].includes(response.action))throw new BridgeError('原生确认结果无效');
   if(response.action==='accept'){
    keys(response.content,['confirm']);if(typeof response.content.confirm!=='boolean')throw new BridgeError('原生确认需要本人明确选择');
-   if(response.content.confirm===true)return approve({commandId:r.command_id,requestHash,token:requestState},owner);
+   if(response.content.confirm===true){
+    if(['cancelled','declined'].includes(r.state))throw new BridgeError('本请求已取消或拒绝，不会重新确认或执行',409);
+    return approve({commandId:r.command_id,requestHash,token:requestState},owner);
+   }
   }else if(response.content!==undefined)throw new BridgeError('取消确认不能混入确认内容');
-  // Decline/dismiss/false consumes only this pending nonce, never a completed
-  // operation. A stale response cannot undo an already queued/applied command.
-  await q("UPDATE native_requests SET approval_hash=NULL WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash=?",r.command_id,r.approval_hash).run();
-  return view(await row(r.command_id,owner));
+  // Persist the user's terminal choice. Retain the nonce hash to recognize a
+  // lost-response retry, but never renew a closed request or undo an execution.
+  const state=response.action==='decline'?'declined':'cancelled';
+  if(r.state===state)return view(r);
+  if(r.state!=='awaiting_confirmation')throw new BridgeError('本请求已确认或关闭，不能把后来的取消当作撤销执行',409);
+  await q("UPDATE native_requests SET state=? WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash=?",state,r.command_id,r.approval_hash).run();
+  const fresh=await row(r.command_id,owner);
+  if(fresh.state!==state)throw new BridgeError('确认状态已改变，请核对原请求结果',409);
+  return view(fresh);
  }
  async function pending(v,d){
   keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??10;

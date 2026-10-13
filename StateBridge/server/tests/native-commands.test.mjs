@@ -46,6 +46,10 @@ test('decline cancel and unchecked form consume pending nonce without queuing',a
   const f=fixture(),d=await setup(f),v=request(f,n),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
   const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response};
   const result=await f.core.nativeCommands.respondForm(proof,'owner');assert.equal(result.approvedAt,null);
+  assert.equal(result.state,response.action==='decline'?'declined':'cancelled');
+  assert.equal((await f.reopen().nativeCommands.respondForm(proof,'owner')).state,result.state);
+  const renewed=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  assert.equal(renewed.value.state,result.state);assert.equal(renewed.approval,null);
   assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
   await assert.rejects(f.core.nativeCommands.respondForm({...proof,response:{action:'accept',content:{confirm:true}}},'owner'));
  }

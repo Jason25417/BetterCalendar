@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "commandId": "87a40132-1b67-4350-b207-3b7905bae2f4",
+  "requestHash": "79e409b3e740dfe7dd7172615624b380a43e681519c1fa405bcea021f2fdaab5",
+  "attemptId": "e0a73dab-e6d8-4981-b122-eb97402452aa",
+  "acceptedAt": "2026-10-13T15:16:43.274Z",
+  "resultAt": "2026-10-13T15:17:06.785Z",
+  "state": "applied",
+  "deviceApplication": "device_reported_read",
+  "nativePhase": "reported",
+  "nativeReceiptMatches": true,
+  "nativeRequestHashMatches": true,
+  "nativeAttemptMatches": true,
+  "localMatchingSnapshotHashes": [
+    "d95ce02726799606da15adda917d7d8d0f4e494edd8f33454ec6741435e1c150",
+    "ded1a123824320c02737939deb06f4aca7dc99f239d45565784aad8fc83e592c",
+    "4994070eff94b65f8c47915e2f9cc02316fec0546d1d6c816fd3b09137688be5",
+    "020862eeabf4f74f6556609673e2c45d1279aebb1f44442e5f99f61ee77ce25b",
+    "9b5469e14f43cdb46eba7e47208c60b0212bdc8918b0a0b223c2104f0d9f68f5",
+    "35ab3fb1c37b5a4d035e7990068c2256da99343b3b95256b5f91a39bb797b806"
+  ],
+  "source": "bc.native.journal",
+  "readAt": 1791904616005.949,
+  "matchingCount": 1,
+  "hasMore": false,
+  "complete": true,
+  "coverage": {
+    "freshness": "local_persisted_store_at_readAt",
+    "journalText": "complete_per_returned_record",
+    "otherDevicesSync": "unknown",
+    "photoBinaries": "not_requested_or_retrieved",
+    "photoReferences": "included"
+  },
+  "recordId": "18202408-0A10-4092-8A7D-BEB97B77D66C",
+  "recordRevision": "7a90cbed5137eb5873b5cef6020c758fde690902fbfd2c40bd8ffc5dbbb9d5cd",
+  "bodyUtf8Bytes": 0,
+  "recordCanonicalHash": "4972a092fa434a6364f9beacf2bfcbee3040fee04c12cf998e1fe0e1847799aa",
+  "resultCanonicalHash": "c3b192fa2462cc3d5ec30df2faf575bc44da213e96e09fe9f265615f88398dc2",
+  "research": {
+    "callId": "research_1af7edd2-2e16-43b9-ae0a-175f4bcf4e08",
+    "responseHash": "4df4b84fffb12b5e97f9841758f82e8f28cd18951dc2aa4f1e850c847852577d",
+    "recorded": true
+  },
+  "supplementalToolSnapshot": "d221fdb236dd7b4a38344fb9b6d41f3490b61dd55c1ede37c79d0e1dddbec951",
+  "checkedAt": "2026-10-13T15:24:37.040Z",
+  "kind": "actual_read_only_native_journal",
+  "sourceClass": "bc_native",
+  "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+  "grantRevision": 1,
+  "query": {
+    "end": "2026-10-14T04:00:00.000Z",
+    "includeTrash": false,
+    "limit": 5,
+    "start": "2026-09-13T04:00:00.000Z"
+  },
+  "elapsedAcceptanceToResultSeconds": 23.511,
+  "scope": {
+    "savedRecordPageVerified": true,
+    "bodyNonempty": false,
+    "paginationAcrossPagesVerified": false,
+    "journalMutation": false,
+    "formHumanConfirmation": false,
+    "otherDevicesSync": "unknown",
+    "photoBinaries": false,
+    "newService": false
+  },
+  "privacy": "Only identifiers, hashes and metadata in Git; actual record values kept in existing controlled local ResearchRecorder."
+}

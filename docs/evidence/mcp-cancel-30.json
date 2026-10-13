@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "date": "2026-10-13",
+  "siteVersion": 30,
+  "source": "6dc59931d817b803ea090606b79722f123b23d4a",
+  "deployment": {
+    "id": "appgdep_6ace4b4b89b88191bd3cf1cbbc44b6e7",
+    "versionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_d6c08dc26b0c8191bf9c5def481de10f",
+    "state": "succeeded",
+    "at": "2026-10-13T15:16:41.066154+00:00"
+  },
+  "nativeBuild": "0.65.14/171 unchanged",
+  "tests": {
+    "serverFocused": 72,
+    "failed": 0,
+    "skipped": 0,
+    "build": "passed",
+    "routeIntegration": 6,
+    "command": "node --test tests/mcp-route.test.mjs tests/native-commands.test.mjs tests/native-confirmation.test.mjs tests/mcp-client-capabilities.test.mjs tests/bridge.test.mjs",
+    "scope": "Actual POST handler with real in-memory SQLite bridge; no production mutation or live host approval"
+  },
+  "dotsRead": {
+    "tool": "read_instructions",
+    "callId": "research_8f6b7e11-e689-451d-bf6c-d7cd2452a269",
+    "localLogIds": [
+      23355,
+      23356
+    ],
+    "startedAt": "2026-10-13T15:23:28.058Z",
+    "finishedAt": "2026-10-13T15:23:28.148Z",
+    "responseHash": "5882dd0a1f3228b93eee28ffedae23155ca18cf61d223f29dc4c957cd647fdaf",
+    "evidenceLevel": "Visible Dots reply correlated with locally downloaded started/returned call logs",
+    "screenshot": "local only /private/tmp/bc-dots-cancel-30.png"
+  },
+  "closedStates": [
+    "cancelled",
+    "declined"
+  ],
+  "unverified": [
+    "Live native form rendering",
+    "Human confirmation",
+    "Mutation applied to genuine user record",
+    "Dual device timer UI",
+    "iPhone AlarmKit schedule/ring/cancel",
+    "Nonempty journal text read/write"
+  ],
+  "privacy": "Existing owner-private service and audience unchanged; no new service, schema migration, credentials or raw journal copied to Git."
+}
