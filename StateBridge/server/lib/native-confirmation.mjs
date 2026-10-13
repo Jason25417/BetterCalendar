@@ -1,4 +1,18 @@
 export const nativeConfirmationUri='ui://bc/native-confirmation-v1.html';
+// Public receipt contract; human approval credentials remain outside it in _meta.
+const textSchema={type:'string'},nullableText={type:['string','null']};
+export const nativeCommandOutputSchema={
+ type:'object',additionalProperties:false,
+ properties:{version:{type:'integer',enum:[1]},nativeCommandId:textSchema,commandId:textSchema,deviceId:textSchema,requestHash:textSchema,
+  request:{type:'object',additionalProperties:true},permission:textSchema,grantRevision:{type:'integer',minimum:1},
+  state:{type:'string',enum:['awaiting_confirmation','queued','dispatching','applied','failed','unknown','expired','revoked']},
+  acceptedAt:textSchema,expiresAt:textSchema,approvedAt:nullableText,attemptId:nullableText,result:{type:['object','null'],additionalProperties:true},resultAt:nullableText,
+  serverAccepted:{type:'boolean',enum:[true]},deviceApplication:{type:'string',enum:['unknown','device_reported_read','device_reported_applied','device_reported_failed']},
+  userSeen:{type:'string',enum:['unknown']},operationEffect:{type:'string',enum:['read_only','mutation']},
+  userRequestEvidence:{type:'string',enum:['agent_report_confirmation_required','read_allowed_by_independent_device_grant']},
+  research:{type:'object',properties:{callId:textSchema,responseHash:textSchema,recorded:{type:'boolean'}},required:['callId','responseHash','recorded'],additionalProperties:false}},
+ required:['version','nativeCommandId','commandId','deviceId','requestHash','request','permission','grantRevision','state','acceptedAt','expiresAt','approvedAt','attemptId','result','resultAt','serverAccepted','deviceApplication','userSeen','operationEffect','userRequestEvidence','research']
+};
 // No third-party resources, fetch, localStorage or secrets in model context.
 export const nativeConfirmationHtml=String.raw`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 body{font:15px system-ui;margin:0;padding:16px;color:CanvasText;background:Canvas}h2{font-size:18px;margin:0 0 12px}pre{white-space:pre-wrap;word-break:break-word;font:14px system-ui}button{font:inherit;padding:9px 16px;margin-right:8px;border-radius:8px;border:1px solid #888;cursor:pointer}button:disabled{opacity:.5;cursor:default}#status{line-height:1.6}
@@ -26,4 +40,4 @@ button.onclick=async()=>{button.disabled=true;try{await call('approve_native_com
 refresh.onclick=async()=>{refresh.disabled=true;try{await call('read_native_command_status',{commandId:output.nativeCommandId});}catch(e){status.textContent=e.message;refresh.disabled=false;}};
 </script></html>`;
 /** @param {any} value @param {any} [approval] */
-export function nativeToolResult(value,approval=null){return{content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value,...(approval?{_meta:{approval}}:{}),isError:false};}
+export function nativeToolResult(value,approval=null){return{resultType:'complete',content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value,...(approval?{_meta:{approval}}:{}),isError:false};}

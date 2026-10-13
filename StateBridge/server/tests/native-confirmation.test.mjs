@@ -6,6 +6,7 @@ test('confirmation secret is outside model content; widget only invokes approval
  const approval={commandId:'id',requestHash:'hash',token:'private-widget-fixture'};
  const value={nativeCommandId:'id',deviceId:'fixture',requestHash:'hash',state:'awaiting_confirmation',expiresAt:'2026-10-14T10:00:00Z',request:{kind:'item',action:'update',userRequest:'fixture',patch:{title:'<script>malicious text</script>'}}};
  const result=nativeToolResult(value,approval);
+ assert.equal(result.resultType,'complete');
  assert.equal(JSON.stringify({content:result.content,structuredContent:result.structuredContent}).includes(approval.token),false);
  const elements=new Map(),calls=[];const element=id=>{if(!elements.has(id))elements.set(id,{disabled:true,textContent:''});return elements.get(id);};
  const window={openai:{toolOutput:value,toolResponseMetadata:{mcp_tool_result:result},callTool:async(name,args)=>{calls.push({name,args});return nativeToolResult({...value,state:'queued'});}},addEventListener(){},parent:{postMessage(){throw Error('unnecessary network');}}};

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T14:43:43.657Z",
+  "nativeBuildUnchanged": 171,
+  "tests": {
+    "passed": 19,
+    "failed": 0,
+    "skipped": 0
+  },
+  "build": "passed",
+  "access": "existing_owner_private_preserved",
+  "deployments": [
+    {
+      "serviceVersion": 26,
+      "sourceCommit": "15a600a808f98ff10139ddcdd7ea6f5cdd979bb8",
+      "id": "appgdep_6ace40c336e88191a37210196ac37c76",
+      "project_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+      "title": "个人状态接入",
+      "version_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_0c16d72d8de0819187c84a57a1f3b95f",
+      "type": "publish",
+      "status": "succeeded",
+      "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+      "has_mcp": true,
+      "screenshot_asset_pointer": null,
+      "provider_deployment_id": "site---6ac3bb816d3c8191949bac68d45a62bc",
+      "failure_message": null,
+      "env_set_revision": 1,
+      "updated_at": "2026-10-13T14:31:46.457998+00:00"
+    },
+    {
+      "serviceVersion": 27,
+      "sourceCommit": "264bfd20998f191647ef20815d788466ee0ead8f",
+      "id": "appgdep_6ace42eb45a88191996e32943d0eab68",
+      "project_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+      "title": "个人状态接入",
+      "version_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_4a34b654ebc4819188d9696b0c54c75b",
+      "type": "publish",
+      "status": "succeeded",
+      "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+      "has_mcp": true,
+      "screenshot_asset_pointer": null,
+      "provider_deployment_id": "site---6ac3bb816d3c8191949bac68d45a62bc",
+      "failure_message": null,
+      "env_set_revision": 1,
+      "updated_at": "2026-10-13T14:40:54.846479+00:00"
+    }
+  ],
+  "changes": [
+    "Advertised native output schema covers five receipt tools; hidden approval credentials remain excluded",
+    "Completed MCP response envelopes declare resultType complete for declared 2026-07-28 protocol",
+    "UI discovery diagnostics contain only protocol method, known resource URI and equality boolean"
+  ],
+  "uiResourceReads": [
+    {
+      "at": "2026-10-13T14:32:45.677Z",
+      "knownResource": true,
+      "uri": "ui://bc/native-confirmation-v1.html",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-10-13T14:32:45.565Z",
+      "knownResource": true,
+      "uri": "ui://bc/native-confirmation-v1.html",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-10-13T14:31:55.612Z",
+      "knownResource": true,
+      "uri": "ui://bc/native-confirmation-v1.html",
+      "httpStatus": 200
+    },
+    {
+      "at": "2026-10-13T14:31:55.549Z",
+      "knownResource": true,
+      "uri": "ui://bc/native-confirmation-v1.html",
+      "httpStatus": 200
+    }
+  ],
+  "interpretation": "Successful discovery/resource reads do not prove a widget was constructed, sent, displayed or approved",
+  "v26Trial": {
+    "commandId": "becd0cca-1a55-4c12-99b1-fa0f0bfe512d",
+    "callId": "research_ab5e9966-3e20-45e3-b3f8-bed169b51407",
+    "logRows": [
+      21478,
+      21480
+    ],
+    "state": "awaiting_confirmation",
+    "result": "Dots reports user_message_send_message include_widget=true still returns The widget is unavailable",
+    "errorEvidence": "agent_report_observed_in_ui_not_independent_internal_tool_capture"
+  },
+  "finalServiceStatus": {
+    "version": 1,
+    "nativeCommandId": "becd0cca-1a55-4c12-99b1-fa0f0bfe512d",
+    "commandId": "becd0cca-1a55-4c12-99b1-fa0f0bfe512d",
+    "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+    "requestHash": "68ec5e3641807fdedae96f35bd14e8ed0812f875fd5778b50cd841857d777679",
+    "permission": "timer.start",
+    "grantRevision": 1,
+    "state": "expired",
+    "acceptedAt": "2026-10-13T14:09:16.299Z",
+    "expiresAt": "2026-10-13T14:39:00.000Z",
+    "approvedAt": null,
+    "attemptId": null,
+    "result": null,
+    "resultAt": null,
+    "serverAccepted": true,
+    "deviceApplication": "unknown",
+    "userSeen": "unknown",
+    "operationEffect": "mutation",
+    "research": {
+      "callId": "research_11d3e941-7f7a-460f-9231-2718c606823b",
+      "responseHash": "3676a01341a60074c5ca0d2f74873372039002d298619565631ebc2ab816de8a",
+      "recorded": true
+    }
+  }
+}

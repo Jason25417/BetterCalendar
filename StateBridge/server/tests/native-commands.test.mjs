@@ -4,6 +4,9 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {createBridge} from '../lib/bridge.mjs';
 import {nativeUUIDSchema} from '../lib/native-commands.mjs';
+import {nativeCommandOutputSchema} from '../lib/native-confirmation.mjs';
+import {createRequire} from 'node:module';
+const Ajv=createRequire(import.meta.url)('ajv');
 function fixture(){
  const sqlite=new DatabaseSync(':memory:');
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
@@ -16,6 +19,24 @@ function fixture(){
 const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
 const request=(f,n=1)=>({version:1,commandId:id(n),deviceId:'iphone-test',kind:'item',action:'create',recordId:id(100+n),patch:{title:'ISOLATED FIXTURE'},occurredAt:f.time(),expiresAt:'2026-10-13T11:00:00.000Z',userRequest:'Isolated simulation, never a real user task'});
+test('advertised native output validates actual proposal and device receipt; approval secret is excluded',async()=>{
+ const validate=new Ajv({allowUnionTypes:true}).compile(nativeCommandOutputSchema);
+ const f=fixture(),d=await setup(f),v=request(f,980),submitted=await f.core.nativeCommands.submit(v,'owner');
+ const observed=async()=>f.core.research.invoke('read_native_command_status',{commandId:v.commandId},'owner',()=>f.core.nativeCommands.status({commandId:v.commandId},'owner'));
+ const pending=await observed();assert.equal(validate(pending),true,JSON.stringify(validate.errors));
+ assert.equal(validate({...pending,token:submitted.approval.token}),false);
+ assert.equal(validate({...pending,approval:submitted.approval}),false);
+ assert.equal(validate({...pending,research:undefined}),false);
+ await f.core.nativeCommands.approve(submitted.approval,'owner');
+ assert.equal(validate(await observed()),true,JSON.stringify(validate.errors));
+ const claim={commandId:v.commandId,requestHash:submitted.value.requestHash,attemptId:id(981)};
+ await f.core.nativeCommands.claim(claim,d);
+ assert.equal(validate(await observed()),true,JSON.stringify(validate.errors));
+ await f.core.nativeCommands.receipt({...claim,outcome:'applied',receipt:{saved:true,authority:'swiftdata',syncOtherDevices:'unknown'}},d);
+ const applied=await observed();assert.equal(validate(applied),true,JSON.stringify(validate.errors));
+ assert.equal(applied.deviceApplication,'device_reported_applied');assert.equal(applied.userSeen,'unknown');
+ assert.equal(JSON.stringify(applied).includes(submitted.approval.token),false);
+});
 async function approved(f,v){const s=await f.core.nativeCommands.submit(v,'owner');assert.equal(s.value.state,'awaiting_confirmation');await f.core.nativeCommands.approve(s.approval,'owner');return s;}
 test('agent-friendly names rejected before persistence; advertised UUID and distinct identity errors allow safe correction',async()=>{
  const f=fixture(),d=await setup(f);
