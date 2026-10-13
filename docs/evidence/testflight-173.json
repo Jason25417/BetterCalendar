@@ -1,0 +1,69 @@
+{
+  "observedAt": "2026-10-13T16:08:19.347108+00:00",
+  "release": {
+    "build": 173,
+    "version": "0.65.16",
+    "sourceCommit": "4ab49b76790dfb12eba2efe7e2533cfe10922e1a",
+    "phase": "uploaded-both",
+    "developerDir": "/Applications/Xcode.app/Contents/Developer",
+    "updatedAt": 1791907454.827904,
+    "macUploaded": true,
+    "iosUploaded": true
+  },
+  "archives": [
+    {
+      "platform": "mac",
+      "version": "0.65.16",
+      "build": "173",
+      "DTXcodeBuild": "27A266a"
+    },
+    {
+      "platform": "ios",
+      "version": "0.65.16",
+      "build": "173",
+      "DTXcodeBuild": "27A266a"
+    },
+    {
+      "platform": "ios-widget",
+      "version": "0.65.16",
+      "build": "173"
+    }
+  ],
+  "appStoreConnect": {
+    "appId": "6787325341",
+    "build": 173,
+    "builds": [
+      {
+        "id": "f290b0f6-1a16-4475-a862-0fafd2b90bb9",
+        "platform": "IOS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "a3e37acd-ae66-4f1f-b4ba-19859f53d94e",
+        "platform": "MAC_OS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ]
+  },
+  "verification": {
+    "macTests": {
+      "passed": 340,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/private/tmp/bc-permissions-173-tests.xcresult"
+    },
+    "iosSimulatorBuild": "passed",
+    "ui": "Isolated iPhone 17/iOS26.5 TestHost: actual setup button, disclosure, single draft toggle and save failure feedback; no account, device connection or real operation."
+  },
+  "limits": [
+    "No proof of user installation of build173",
+    "Service iPhone rev4 grants separately verified, not actual device execution or ringing",
+    "No CloudKit model or service v30 changes"
+  ]
+}

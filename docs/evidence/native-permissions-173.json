@@ -1,0 +1,57 @@
+{
+  "observed": {
+    "readAt": "2026-10-13T15:59:05.680Z",
+    "devices": [
+      {
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "label": "Jason iPhone",
+        "revision": 4,
+        "capabilities": [
+          "alarm.cancel",
+          "alarm.schedule",
+          "item.create",
+          "item.delete",
+          "item.restore",
+          "item.update",
+          "journal.create",
+          "journal.read",
+          "journal.update",
+          "timer.finish",
+          "timer.pause",
+          "timer.resume",
+          "timer.start"
+        ],
+        "expiresAt": "2026-11-11T15:44:07.266Z",
+        "confirmation": "chat_button",
+        "availability": "execution_requires_device_online_not_heartbeat_proof"
+      },
+      {
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "label": "Jason Mac collector",
+        "revision": 1,
+        "capabilities": [
+          "item.create",
+          "item.delete",
+          "item.restore",
+          "item.update",
+          "journal.create",
+          "journal.read",
+          "journal.update",
+          "timer.finish",
+          "timer.pause",
+          "timer.resume",
+          "timer.start"
+        ],
+        "expiresAt": "2026-11-11T13:50:21.645Z",
+        "confirmation": "chat_button",
+        "availability": "execution_requires_device_online_not_heartbeat_proof"
+      }
+    ],
+    "research": {
+      "callId": "research_69582199-8cce-4175-a619-2b0e50d6927a",
+      "responseHash": "8296d22b4911538d93b79509d3241a055bbd1651f91a17b7e64f4ee17b4ab99c",
+      "recorded": true
+    }
+  },
+  "limit": "Service grant readback only. Not proof of app 173 installation, current AlarmKit system permission, device online, actual execution or ringing."
+}
