@@ -120,7 +120,7 @@
     },
     "build": "passed",
     "actualHostRendering": "unverified",
-    "screenshotPixels": "unavailable_with_current_Library_tools",
+    "screenshotPixels": "verified_local_materialized_png_files_8_9_10",
     "duplicateApprovalCardCallbackCause": "unverified",
     "deployment": "not_performed",
     "realTimerExecution": "not_requested_or_performed"
@@ -128,5 +128,36 @@
   "references": [
     "https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation",
     "https://developers.openai.com/plugins/build/extensions"
-  ]
+  ],
+  "screenshots": [
+    {
+      "file": "image(8).png",
+      "widthPixels": 868,
+      "heightPixels": 1446,
+      "sha256": "3e058fb38ba8d77ffbfda2335bcf8a25190c51c773e80a72c531ce09d786ac4f",
+      "pixelsInspected": true
+    },
+    {
+      "file": "image(9).png",
+      "widthPixels": 1470,
+      "heightPixels": 1294,
+      "sha256": "4b7f0b54d552835e2a0efa9fb094bc30b594915abef8edf62f6109ee10f83d72",
+      "pixelsInspected": true
+    },
+    {
+      "file": "image(10).png",
+      "widthPixels": 622,
+      "heightPixels": 1292,
+      "sha256": "1f3ae48373d639b29e25ed42a988191152186d60f42dfdcf31db8cebbb9762de",
+      "pixelsInspected": true
+    }
+  ],
+  "visualFindings": {
+    "image8": "narrow native form, wrapped UUID and original request, not-pending footer",
+    "image9": "large blank vertical area below normal-width messages; no visible confirmation controls",
+    "image10": "short original request still wraps in a narrow form; default unchecked checkbox and Continue footer visible, not-pending footer",
+    "rendererAttribution": "native host form is identified by checkbox title and Continue controls; not the BC custom HTML approval button",
+    "rootLayoutCause": "unknown; no live host DOM, computed styles, load errors or cancellation event cause",
+    "shortHeadingFix": "symptom mitigation only; not deployed or visually validated"
+  }
 }
