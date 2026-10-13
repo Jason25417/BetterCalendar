@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "release": "0.65.8",
+  "build": 165,
+  "sourceCommit": "4da7619",
+  "appId": "6787325341",
+  "builds": [
+    {"id": "7d1101b3-f583-4495-9a90-db134e439f94", "platform": "IOS", "processing": "VALID", "internal": "IN_BETA_TESTING", "notesVerified": true},
+    {"id": "3823f546-c3f4-41fb-864d-ed83890e4ddb", "platform": "MAC_OS", "processing": "VALID", "internal": "IN_BETA_TESTING", "notesVerified": true}
+  ],
+  "verification": "App Store Connect API readback on 2026-10-13 UTC; serial archive/upload completed for both platforms",
+  "deviceInstallation": {"mac": "same signed archive installed locally, not evidence of TestFlight installation", "iphone": "unverified"},
+  "tests": {"node": {"passed": 50, "failed": 0}, "macAppUnit": {"passed": 280, "failed": 0, "skipped": 0}, "iosSimulatorBuild": "succeeded", "uiTestRunner": "empty bundle did not load; not passed"},
+  "cloudKitSchemaChanged": false,
+  "newSystemPermissionsRequested": false
+}

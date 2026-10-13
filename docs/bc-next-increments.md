@@ -29,4 +29,24 @@ capture文件必须有version=1、稳定id、已有runId、kind和带时区occur
 已指出限制：当前goal工具只有读取、完成/blocked/paused，没有修改目标文字或恢复active的入口；电脑工具也不允许操作Codex自身。用户本轮恢复开发的指示按§17执行，不通过篡改App状态库绕过此限制。App目标卡可能仍显示旧blocked，不能据此说本轮没有推进。
 
 
-已核验开发检查：2026-10-12 22:52 EDT，Node 50/50、App macOS单测280/280（0失败/跳过）、iOS Simulator BUILD SUCCEEDED、服务TypeScript检查和构建通过。默认全test入口的空UITests bundle加载失败，未将其记为通过；单测门控以only-testing:BetterCalendarTests的独立xcresult为准。此批不修改@Model/CloudKit schema，也不申请新的Apple系统权限。0.65.8/165双端archive/upload进行中，最终ASC证据另补。
+已核验开发检查：2026-10-12 22:52 EDT，Node 50/50、App macOS单测280/280（0失败/跳过）、iOS Simulator BUILD SUCCEEDED、服务TypeScript检查和构建通过。默认全test入口的空UITests bundle加载失败，未将其记为通过；单测门控以only-testing:BetterCalendarTests的独立xcresult为准。此批不修改@Model/CloudKit schema，也不申请新的Apple系统权限。
+
+发布与真实样本（2026-10-12 23:05 EDT）：
+
+- 源码4da7619已push；0.65.8/165双端archive/upload完成，ASC双端VALID、IN_BETA_TESTING、中文说明读回一致，见[evidence/testflight-165.json](evidence/testflight-165.json)。
+- 现有owner-private服务v20已成功部署，来源9904ac9e4d2935f8bc7517b48c5007756105ef73，deployment appgdep_6acd9d7ac1bc8191a63e3c6c70a5a397，成功时点2026-10-13T02:55:41.549815Z；没有新服务或扩大访问对象。
+- Mac从本次签名archive安装165，旧164备份位于/private/tmp/bc-release-165/previous-164.app。这不是Mac从TestFlight安装的证明。真实服务日志#11842在03:05:08.515Z发出快照，同一身份#11846于03:05:09.208Z收到认证Mac的local_cache_persisted回执；本机待报队列为空。完整元数据见[evidence/device-cache-165.json](evidence/device-cache-165.json)。当前空计时状态，没有为了验证而建立假任务；真实用户计时、iPhone应用、界面/Live Activity和人看到仍未验。
+- Recorder由登录LaunchAgent运行，标签com.jason.BetterCalendar.research-recorder；原手动进程已退出，没有并行录制。实际PID7075运行，原游标保留并从11808推进到11834，接收真实新调用；注册或RunAtLoad本身不当成重启后验收。退出登录/整机重启及崩溃自动恢复未验，KeepAlive=false。
+
+登录采集、查看和停止：
+
+```sh
+python3 StateBridge/tools/research-launch-agent.py status
+node StateBridge/tools/research-recorder.mjs view
+node StateBridge/tools/research-recorder.mjs stop
+python3 StateBridge/tools/research-launch-agent.py disable
+```
+
+stop保存STOP并在下一轮检查后退出，disable撤销登录启动并停止该LaunchAgent，保留配置备份、数据库、原文与游标；BC计时不受影响。安装脚本不会移除STOP，因此显式停止后不会在下次登录悄悄恢复。再次启用需明确移走STOP后install，代码与数据路径无需新凭据。既有本地查看页review.html可直接打开，无外部网络或写入按钮。降级App前保留新增待报快照，不用旧缓存覆盖新缓存；优先前向修复。
+
+当前来源缺口有具体证据：iPhone App/Focus尚未收到，家居home.status报告notification-unavailable；手机最后心跳02:14:32Z，不能称实时。健康和日历有各自时效，不与过期心跳混为一谈。Mac文件partial和浏览器empty分别保留。HomeKit读回调忽略错误、可能把旧缓存值标为新的观测时间，已定位，列入下一批原生采集修复；165尚未包含此修复。原生闹钟适配、事项统一live入口、连接器调用自动留存与实际provider费用仍待开发，真实对照输出与有用性评价待实证，现阶段无需用户拍板。

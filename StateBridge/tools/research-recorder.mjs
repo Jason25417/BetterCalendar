@@ -239,6 +239,7 @@ function clientFor(c) {
 }
 async function main() {
   const [mode='once',...args]=process.argv.slice(2),root=join(homedir(),'Library/Application Support/BetterCalendarResearch');
+  if(['once','watch'].includes(mode)&&existsSync(join(root,'STOP'))){console.log('{"stopped":true}');return;}
   const c=['once','watch','capture'].includes(mode)?credentials():{},recorder=new Recorder(root,{secrets:[c.platformToken,c.deviceToken]});
   if(mode==='export'){console.log(encode(recorder.export(args[0] ?? join(root,'export-'+Date.now()+'.json'))));return;}
   if(mode==='stats'){console.log(encode(recorder.stats()));return;}

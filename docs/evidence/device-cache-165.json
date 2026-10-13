@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T03:05:32.883Z",
+  "build": 165,
+  "installation": "signed_165_archive_installed_locally_not_TestFlight_device_receipt",
+  "offered": {
+    "id": 11842,
+    "callId": "task_snapshot_6a64ef62-70b7-425b-a47b-965610361fcb",
+    "kind": "task_snapshot_offered",
+    "batchId": null,
+    "createdAt": "2026-10-13T03:05:08.515Z",
+    "body": {
+      "version": 1,
+      "readAt": "2026-10-13T03:05:08.515Z",
+      "responseHash": "97fb209c598c3c476c6218d36f88371b8c9b1afd4bd68cf55023b2e3b716a48b",
+      "versions": [],
+      "activeComplete": true,
+      "finishedComplete": true,
+      "evidenceLevel": "server_offered_not_device_applied"
+    }
+  },
+  "applied": {
+    "id": 11846,
+    "callId": "applied_task_snapshot_6a64ef62-70b7-425b-a47b-965610361fcb",
+    "kind": "task_snapshot_applied",
+    "batchId": null,
+    "createdAt": "2026-10-13T03:05:09.208Z",
+    "body": {
+      "version": 1,
+      "snapshotId": "task_snapshot_6a64ef62-70b7-425b-a47b-965610361fcb",
+      "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "readAt": "2026-10-13T03:05:08.515Z",
+      "responseHash": "97fb209c598c3c476c6218d36f88371b8c9b1afd4bd68cf55023b2e3b716a48b",
+      "versions": [],
+      "finishedComplete": true,
+      "stage": "local_cache_persisted",
+      "evidenceLevel": "authenticated_device_report_not_screen_or_human_confirmation"
+    }
+  },
+  "scope": "genuine empty task state; no real user timer operation exercised",
+  "screenVisible": "unknown",
+  "humanSeen": "unknown",
+  "iPhoneApplication": "unverified"
+}
