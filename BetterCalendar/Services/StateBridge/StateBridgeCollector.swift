@@ -145,9 +145,17 @@ import CryptoKit
     private func sampleActivity(force: Bool = false) {
         guard enabled, !TestHost.isActive else { return }
         let app = NSWorkspace.shared.frontmostApplication
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,eventType:.null)
-        let value = BridgeJSON.object(["bundleId":.text(app?.bundleIdentifier),"app":.text(app?.localizedName),"idle":.string(idle < 60 ? "active" : idle < 300 ? "1-5min" : idle < 1800 ? "5-30min" : "over30min")])
-        if force || value != lastActivity { StateBridgeClient.shared.emit("mac.activity",value:value); lastActivity = value }
+        // .null measures null events, not keyboard/mouse input. The system's
+        // any-input sentinel includes synthesized input: actor remains unknown.
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,eventType:CGEventType(rawValue:UInt32.max)!)
+        let previousBundle: BridgeJSON? = { if case let .object(fields) = lastActivity { return fields["bundleId"] }; return nil }()
+        let value = BridgeInputActivity.value(bundleID: app?.bundleIdentifier, app: app?.localizedName,
+            idleSeconds: idle, foregroundChanged: previousBundle != nil && previousBundle != .text(app?.bundleIdentifier))
+        let semanticChanged: Bool = {
+            guard case let .object(current) = value, case let .object(previous) = lastActivity else { return true }
+            return ["bundleId", "idle", "activityActor"].contains { current[$0] != previous[$0] }
+        }()
+        if force || semanticChanged { StateBridgeClient.shared.emit("mac.activity",value:value); lastActivity = value }
     }
     func chooseHistoryFolder() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false

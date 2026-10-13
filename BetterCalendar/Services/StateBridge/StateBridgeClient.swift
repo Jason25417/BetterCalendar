@@ -1,6 +1,19 @@
 import Foundation
 import Security
 import Observation
+#if os(iOS)
+import UIKit
+@MainActor private final class BridgeUploadBackgroundLease {
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    private(set) var expired = false
+    init() {
+        id = UIApplication.shared.beginBackgroundTask(withName: "BC queued observations") { [weak self] in
+            Task { @MainActor in self?.expired = true; self?.end() }
+        }
+    }
+    func end() { if id != .invalid { UIApplication.shared.endBackgroundTask(id); id = .invalid } }
+}
+#endif
 
 // Separate from SwiftData/CloudKit: telemetry and Dot timing do not migrate the calendar store.
 nonisolated enum BridgeJSON: Codable, Equatable, Sendable {
@@ -154,17 +167,26 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
     }
     func uploadAndFlush() async {
         guard configured, queueHealthy, !busy, !TestHost.isActive else { return }; busy = true; defer { busy = false }
+        #if os(iOS)
+        // A bounded native lease helps finish queued uploads after foreground
+        // exit/observer delivery. It does not grant continuous background runs.
+        let lease = BridgeUploadBackgroundLease(); defer { lease.end() }
+        #endif
         do {
             // Small batches stay below the request limit. Preserve concurrently appended observations.
+            var batches = 0
             while !outbox.observations.isEmpty {
+                #if os(iOS)
+                if lease.expired { status = "后台时间已结束；保留 \(outbox.observations.count) 条观察待补传"; return }
+                #endif
+                guard batches < 8 else { status = "本轮已保存部分状态；仍有 \(outbox.observations.count) 条观察待补传"; return }
                 let poolSources = ["bc.pool", "bc.pool.chunk"]
                 let isPool = poolSources.contains(outbox.observations[0].source)
-                let sent = Array(outbox.observations.prefix(4).prefix { poolSources.contains($0.source) == isPool })
-                struct Payload: Encodable { let observations: [BridgeObservation] }
-                let result = try await post(isPool ? "pool/upload" : "ingest",body:try JSONEncoder().encode(Payload(observations:sent)))
-                let acknowledged = Set((result["accepted"] as? [String] ?? []) + (result["ignored"] as? [String] ?? []))
-                guard sent.allSatisfy({ acknowledged.contains($0.eventId) }) else { throw URLError(.cannotParseResponse) }
-                var next = outbox; next.observations.removeAll { acknowledged.contains($0.eventId) }; try persist(next); outbox = next; pendingCount = next.observations.count
+                let sent = try outbox.uploadBatch()
+                let result = try await post(isPool ? "pool/upload" : "ingest",body:try JSONEncoder().encode(BridgeUploadPayload(observations:sent)))
+                guard let accepted = result["accepted"] as? [String], let ignored = result["ignored"] as? [String] else { throw URLError(.cannotParseResponse) }
+                var next = outbox; try next.acknowledge(sent, accepted: accepted, ignored: ignored)
+                try persist(next); outbox = next; pendingCount = next.observations.count; batches += 1
             }
             let result = try await post("flush",body:Data("{}".utf8))
             lastUpload = Date(); UserDefaults.standard.set(lastUpload,forKey:"dotStateBridge.lastUpload"); lastFailure = nil

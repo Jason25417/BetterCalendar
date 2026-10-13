@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { ForwardAllToDots } from "./event-decision.mjs";
-import { sourceView, coverageView, stateWarnings } from "./state-view.mjs";
+import { sourceView, coverageView, stateWarnings, observationSignalValue } from "./state-view.mjs";
 import { createObservationHistory } from "./observation-history.mjs";
 import { createTaskHistory } from "./task-history.mjs";
 import { createPoolRecords } from "./pool-records.mjs";
@@ -84,7 +84,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
       const duplicate=await one("SELECT body FROM observations WHERE id=?",id);
       if(duplicate){const old=JSON.parse(duplicate.body);if(canonical({...old,receivedAt:null})!==canonical({...observation,receivedAt:null}))throw new BridgeError("事件 ID 不能复用于不同内容",409);ignored.push(id);continue;}
       const key=`${d.id}:${source}`,prior=await one("SELECT * FROM states WHERE source_key=?",key);
-      const hash=await sha(canonical({value:raw.value,assertion:raw.assertion,confidence:raw.confidence??null}));
+      const hash=await sha(canonical({value:observationSignalValue(source,raw.value),assertion:raw.assertion,confidence:raw.confidence??null}));
       const changed=!prior||prior.value_hash!==hash||(prior.expires_at&&Date.parse(prior.expires_at)<=now().getTime());
       const ops=[q("INSERT OR IGNORE INTO observations(id,source_key,device_id,seq,observed_at,received_at,body) VALUES(?,?,?,?,?,?,?)",id,key,d.id,raw.sequence,observedAt,receivedAt,body),
         q(`INSERT INTO states(source_key,device_id,seq,observed_at,received_at,expires_at,value_hash,body) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM observations WHERE id=? AND body=?)
@@ -161,7 +161,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     await db.batch(ops);const committed=await one("SELECT result,request_hash FROM commands WHERE id=?",commandId);
     if(!committed||committed.request_hash!==requestHash)throw new BridgeError("计时并发冲突，请重新读取",409);return JSON.parse(committed.result);
   }
-  const {taskHistory,readTaskCommands}=createTaskHistory(db,time,sessionView,taskApplication);
+  const {taskHistory,readTaskCommands}=createTaskHistory(db,time,sessionView,taskApplication,readPoolRecords);
   async function acknowledgeBatch(id,ownerId) {
     str(id,"批次 ID",100);if(!await one("SELECT id FROM batches WHERE id=?",id))throw new BridgeError("找不到批次",404);
     await q("UPDATE batches SET processed_at=COALESCE(processed_at,?),processed_by=COALESCE(processed_by,?) WHERE id=?",time(),ownerId,id).run();

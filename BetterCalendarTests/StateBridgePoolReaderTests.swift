@@ -57,3 +57,29 @@ import SwiftData
         #expect(throws: (any Error).self) { try queue.validate() }
     }
 }
+
+@MainActor @Suite struct StateBridgeLegacyExecutionTests {
+    @Test func originalSessionsRemainSeparateReadOnlyAndDetectExternalEditsWithoutMigration() throws {
+        let schema = DataArchiveStore.schema
+        let c = try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)), context = c.mainContext
+        let first = ExecutionSession(start: Date(timeIntervalSince1970: 100), end: Date(timeIntervalSince1970: 200))
+        let identical = ExecutionSession(start: first.start, end: first.end)
+        first.title = "同内容原会话"; identical.title = first.title
+        context.insert(first); context.insert(identical); try context.save()
+        let reader = SwiftDataBridgePoolReader(context: context), snapshot = try reader.snapshot()
+        let payload = try #require(JSONSerialization.jsonObject(with: snapshot.data) as? [String: Any])
+        let rows = try #require(payload["executionSessions"] as? [[String: Any]])
+        #expect(rows.count == 2 && snapshot.executionSessionCount == 2)
+        #expect(Set(rows.compactMap { $0["id"] as? String }).count == 2)
+        #expect(try reader.snapshot().data == snapshot.data)
+        let beforeIDs = Set(rows.compactMap { $0["id"] as? String })
+        first.title = "外部修正后"; try context.save()
+        let updated = try reader.snapshot()
+        let object = try #require(JSONSerialization.jsonObject(with: updated.data) as? [String: Any])
+        let after = try #require(object["executionSessions"] as? [[String: Any]])
+        #expect(Set(after.compactMap { $0["id"] as? String }) == beforeIDs)
+        #expect(updated.data != snapshot.data && context.hasChanges == false)
+        #expect(try context.fetch(FetchDescriptor<ExecutionSession>()).count == 2)
+        #expect(first.start == Date(timeIntervalSince1970: 100) && first.end == Date(timeIntervalSince1970: 200))
+    }
+}

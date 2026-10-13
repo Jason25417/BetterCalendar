@@ -8,7 +8,14 @@ export function createPoolRecords(db,time){
  const one=(sql,...args)=>db.prepare(sql).bind(...args).first();
  const all=async(sql,...args)=>(await db.prepare(sql).bind(...args).all()).results;
  return async function readPoolRecords(input={}){
-  const limit=input.limit??50,filters={deviceId:input.deviceId??null,zone:input.zone??null,status:input.status??null,includeTrash:input.includeTrash??false};
+  const recordType=input.recordType??'item';
+  const limit=input.limit??50,filters={deviceId:input.deviceId??null,zone:input.zone??null,status:input.status??null,includeTrash:input.includeTrash??false,
+    ...(recordType==='execution'?{recordType,from:input.from==null?null:input.from,before:input.before==null?null:input.before}:{})};
+  if(!['item','execution'].includes(recordType)||recordType==='execution'&&(filters.zone!==null||filters.status!==null||filters.includeTrash))throw new BridgeError('历史计时只读，不能混用事项筛选');
+  if(recordType==='execution'){
+    for(const k of ['from','before'])if(filters[k]!==null&& (typeof filters[k]!=='string'||!Number.isFinite(Date.parse(filters[k]))))throw new BridgeError('历史计时时间范围无效');
+    if(filters.from&&filters.before&&Date.parse(filters.from)>Date.parse(filters.before))throw new BridgeError('历史计时范围逆序');
+  }
   if(!Number.isSafeInteger(limit)||limit<1||limit>100||
     (filters.deviceId!==null&&(typeof filters.deviceId!=='string'||!filters.deviceId.length||filters.deviceId.length>80))||
     (filters.zone!==null&&!['longterm','todo'].includes(filters.zone))||
@@ -54,7 +61,11 @@ export function createPoolRecords(db,time){
   if(payload.formatVersion!==1||payload.authority!=='swiftdata'||payload.dateUnit!=='unix-milliseconds'||!Array.isArray(payload.records)||payload.records.length!==m.recordCount||
    payload.records.some(r=>typeof r.id!=='string'||!r.id||r.values?.id!==r.id||!/^[a-f0-9]{64}$/.test(r.revision)||typeof r.values.isInTrash!=='boolean')||
    new Set(payload.records.map(r=>r.id)).size!==payload.records.length)throw new BridgeError('目录身份、版本或数量不一致，原始记录保留');
-  const selected=payload.records.filter(r=>(filters.includeTrash||!r.values.isInTrash)&&(filters.zone===null||r.values.zone===filters.zone)&&(filters.status===null||r.values.status===filters.status));
+  if(recordType==='execution'&&!Array.isArray(payload.executionSessions))return {...metadata,recordType,availability:'not_supported_by_device_snapshot',complete:false,records:[],hasMore:false,nextCursor:null,interpretation:'该设备目录来自旧版采集器，未包含SwiftData计时历史；不是没有记录。'};
+  const executions=payload.executionSessions??[];
+  if(recordType==='execution'&&(!Number.isSafeInteger(m.executionSessionCount)||executions.length!==m.executionSessionCount||
+    executions.some(r=>typeof r.id!=='string'||!/^legacy:[a-f0-9]{64}$/.test(r.id)||r.values?.id!==r.id||r.values.origin!=='swiftdata_execution_session'||typeof r.values.title!=='string'||!Number.isFinite(r.values.start)||r.values.end!==null&&!Number.isFinite(r.values.end)||r.values.commandId!==null||!/^[a-f0-9]{64}$/.test(r.revision))||new Set(executions.map(r=>r.id)).size!==executions.length))throw new BridgeError('旧计时历史数量、身份或版本不一致，原库保留');
+  const selected=recordType==='execution'?executions.filter(r=>(filters.from===null||r.values.start>=Date.parse(filters.from))&&(filters.before===null||r.values.start<=Date.parse(filters.before))):payload.records.filter(r=>(filters.includeTrash||!r.values.isInTrash)&&(filters.zone===null||r.values.zone===filters.zone)&&(filters.status===null||r.values.status===filters.status));
   if(offset>selected.length)throw new BridgeError('目录游标超出范围');
   const records=[];let budget=0;
   for(const record of selected.slice(offset,offset+limit)){
@@ -62,7 +73,7 @@ export function createPoolRecords(db,time){
    if(records.length&&budget+length>160*1024)break;records.push(record);budget+=length;
   }
   const next=offset+records.length,hasMore=next<selected.length;
-  return {...metadata,contentHash:m.contentHash,complete:true,totalRecordCount:m.recordCount,matchedRecordCount:selected.length,
+  return {...metadata,recordType,contentHash:m.contentHash,complete:true,totalRecordCount:recordType==='execution'?executions.length:m.recordCount,matchedRecordCount:selected.length,
    records,byteBudgetExceeded:budget>160*1024,hasMore,nextCursor:hasMore?encode({version:1,eventId:observation.eventId,offset:next,filters}):null};
  };
 }

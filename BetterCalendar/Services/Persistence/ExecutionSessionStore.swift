@@ -27,7 +27,8 @@ final class ExecutionSessionStore {
                                  interruptions: interruptions)
         s.title = title
         context.insert(s)
-        try? context.save()
+        do { try context.save() }
+        catch { DevLog.shared.warn("计时历史", "会话保存失败，未声称已落库：\(error.localizedDescription)") }
     }
 
     /// 某逻辑日的会话（趋势统计/复盘细化用）。

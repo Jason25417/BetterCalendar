@@ -139,10 +139,13 @@ import UIKit
         } catch { failed.append("health.sleep"); recordHealthFailure("health.sleep") }
         do {
             let stepType = HKObjectType.quantityType(forIdentifier:.stepCount)!
-            let steps: Double? = try await withCheckedThrowingContinuation { c in
-                let q = HKStatisticsQuery(quantityType:stepType,quantitySamplePredicate:HKQuery.predicateForSamples(withStart:Calendar.current.startOfDay(for:Date()),end:Date()),options:.cumulativeSum) { _,stats,error in if let error { c.resume(throwing:error) } else { c.resume(returning:stats?.sumQuantity()?.doubleValue(for:.count())) } }; health.execute(q)
+            // Freeze the window before awaiting HealthKit; midnight/timezone
+            // changes must not label the returned sum with another day's start.
+            let window = BridgeHealthWindow(at: Date())
+            let result: (Double?, [String]?) = try await withCheckedThrowingContinuation { c in
+                let q = HKStatisticsQuery(quantityType:stepType,quantitySamplePredicate:HKQuery.predicateForSamples(withStart:window.start,end:window.end),options:.cumulativeSum) { _,stats,error in if let error { c.resume(throwing:error) } else { c.resume(returning:(stats?.sumQuantity()?.doubleValue(for:.count()),stats?.sources?.map(\.bundleIdentifier).sorted())) } }; health.execute(q)
             }
-            client.emit("health.steps",value:.object(["day":.string(f.string(from:Calendar.current.startOfDay(for:Date()))),"count":steps.map(BridgeJSON.number) ?? .null]),validFor:7200)
+            client.emit("health.steps",value:window.steps(result.0,sources:result.1),validFor:300,observedAt:window.end)
         } catch { failed.append("health.steps"); recordHealthFailure("health.steps") }
         do {
             let resting = try await samples(types[2],days:3,limit:5)

@@ -4,7 +4,7 @@ const decode = v => JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(Uin
 
 // The append boundary freezes membership, not mutable session values. Receipts
 // are the immutable evidence; sessions are the latest readable projection.
-export function createTaskHistory(db, time, sessionView, taskApplication) {
+export function createTaskHistory(db, time, sessionView, taskApplication, readPoolRecords) {
   async function page(kind, input = {}) {
     const from = input.from == null ? '1970-01-01T00:00:00.000Z' : iso(input.from);
     const before = input.before == null ? time() : iso(input.before);
@@ -49,7 +49,13 @@ export function createTaskHistory(db, time, sessionView, taskApplication) {
     const nextCursor = hasMore ? encode({version:1,kind,from,before:upper,sessionId,maxRowid,at:last[column],id:last.id}) : null;
     return {schemaVersion:1,readAt:time(),from,before:upper,hasMore,nextCursor,
       ...(kind === 'commands' ? {sessionId,commands:entries,interpretation:'按服务端保存时间查询原始操作回执；保留未知字段。补传或开发期外部修改后从第一页重读。此接口不重放操作。'} :
-        {sessions:entries,interpretation:'计时记录的最新状态，包含已结束记录；按开始时间排序。分页期间状态可能更新，这不是某一时刻的数据库快照。晚到补记或外部修改后从第一页重读。旧SwiftData历史尚未迁移。'})};
+        {origin:'shared',sessions:entries,coverage:{legacyHistory:'query_origin_legacy_separately_same_window_no_automatic_sum'},interpretation:'共享计时的最新状态，不含旧SwiftData会话；空页不代表全天没有计时。用origin=legacy、同一时间窗和指定设备读旧历史副本，两组不要自动相加。分页期间状态可能更新，晚到补记或外部修改后从第一页重读。'})};
   }
-  return {taskHistory:v=>page('sessions',v),readTaskCommands:v=>page('commands',v)};
+  return {taskHistory:async(v={})=>{
+    if(v.origin!==undefined&&!['shared','legacy'].includes(v.origin))throw new BridgeError('计时历史来源无效');
+    if(v.origin!=='legacy')return page('sessions',v);
+    if(typeof v.deviceId!=='string'||!v.deviceId.trim())throw new BridgeError('旧历史需要指定设备，不能自动合并双端');
+    const result=await readPoolRecords({recordType:'execution',deviceId:v.deviceId,from:v.from,before:v.before,limit:v.limit,cursor:v.cursor});
+    return {...result,origin:'legacy',from:v.from??null,before:v.before??null,authority:'device-swiftdata',sessions:result.records,interpretation:'这是指定设备SwiftData原会话的只读副本，不创建共享session或执行命令，不迁移/改写旧库。各设备视图分别读取；相同内容只作为可能重复线索，不自动相加或删除。按保存的开始时间筛选，不推算缺失活动。'};
+  },readTaskCommands:v=>page('commands',v)};
 }

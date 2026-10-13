@@ -364,12 +364,12 @@ test('legacy resting-heart-rate null is unknown rather than available',()=>{
 async function poolDevice(f,id='pool-mac'){
  const d=await f.core.registerDevice({id,label:'pool test',scopes:['user.context']});return f.core.authenticateDevice(d.token);
 }
-async function publishPool(f,d,records,{seq=1,eventPrefix='pool',manifestOnly=false,payloadVersion=1}={}){
- const payload={formatVersion:payloadVersion,authority:'swiftdata',dateUnit:'unix-milliseconds',records};
+async function publishPool(f,d,records,{seq=1,eventPrefix='pool',manifestOnly=false,payloadVersion=1,executionSessions}={}){
+ const payload={formatVersion:payloadVersion,authority:'swiftdata',dateUnit:'unix-milliseconds',records,...(executionSessions===undefined?{}:{executionSessions})};
  const bytes=Buffer.from(JSON.stringify(payload)),hash=Buffer.from(await crypto.subtle.digest('SHA-256',bytes)).toString('hex');
  const chunks=[];
  for(let i=0;i<bytes.length;i+=30*1024){chunks.push({schemaVersion:1,eventId:`${eventPrefix}-chunk-${chunks.length}`,source:'bc.pool.chunk',sequence:seq+chunks.length,assertion:'observed',observedAt:f.time(),expiresAt:'2027-10-05T12:00:00Z',value:{formatVersion:1,contentHash:hash,index:chunks.length,bytes:bytes.subarray(i,i+30*1024).toString('base64')}});}
- const manifest={schemaVersion:1,eventId:`${eventPrefix}-manifest`,source:'bc.pool',sequence:seq+chunks.length,assertion:'observed',observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+180000).toISOString(),value:{formatVersion:1,authority:'swiftdata',availability:'available',contentHash:hash,recordCount:records.length,chunkEventIds:chunks.map(c=>c.eventId)}};
+ const manifest={schemaVersion:1,eventId:`${eventPrefix}-manifest`,source:'bc.pool',sequence:seq+chunks.length,assertion:'observed',observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+180000).toISOString(),value:{formatVersion:1,authority:'swiftdata',availability:'available',contentHash:hash,recordCount:records.length,chunkEventIds:chunks.map(c=>c.eventId),...(executionSessions===undefined?{}:{executionSessionCount:executionSessions.length})}};
  await f.core.uploadPool({observations:manifestOnly?[manifest]:[...chunks,manifest]},d);return {manifest,chunks};
 }
 const poolRecord=(id,extra={})=>({id,revision:'a'.repeat(64),values:{id,title:id,zone:'longterm',status:'active',isInTrash:false,note:'',...extra}});
@@ -515,4 +515,39 @@ test('normal device heartbeat refresh can skip shadow wake, while changes and er
  assert.equal(shadowDecision([c(6,{availability:'online',collector:{build:'164'}},{assertion:'user'})],first.next).wake,true);
  // Unknown source statuses cannot borrow the device-only exception.
  assert.equal(shadowDecision([{...c(7,{availability:'online'}),sourceKey:'mac_device:health.status',observation:{source:'health.status',value:{availability:'online'}}}],first.next).wake,true);
+});
+
+test('legacy history pins one device snapshot and never creates shared timers',async()=>{
+ const f=fixture(),d=await poolDevice(f);await publishPool(f,d,[]);
+ const unsupported=await f.core.taskHistory({origin:'legacy',deviceId:d.id});assert.equal(unsupported.complete,false);assert.equal(unsupported.availability,'not_supported_by_device_snapshot');
+ assert.equal((await f.core.taskHistory()).sessions.length,0);
+ const make=(n,start=Date.parse('2026-10-05T08:00:00Z'))=>({id:'legacy:'+String(n).padStart(64,'0'),revision:'a'.repeat(64),values:{id:'legacy:'+String(n).padStart(64,'0'),origin:'swiftdata_execution_session',title:'identical original text',start,end:start+3600000,commandId:null,unknownField:{keep:true}}});
+ const rows=[make(1),make(2),make(3,Date.parse('2026-10-04T08:00:00Z'))];f.advance(60000);await publishPool(f,d,[],{seq:20,eventPrefix:'legacy-original',executionSessions:rows});
+ const range={origin:'legacy',deviceId:d.id,from:'2026-10-05T00:00:00Z',before:'2026-10-05T23:59:59Z',limit:1};
+ const first=await f.core.taskHistory(range);assert.equal(first.sessions.length,1);assert.equal(first.hasMore,true);assert.equal(first.matchedRecordCount,2);
+ f.advance(60000);await publishPool(f,d,[],{seq:40,eventPrefix:'legacy-new',executionSessions:[make(4)]});
+ const second=await f.core.taskHistory({...range,cursor:first.nextCursor});assert.equal(second.sessions[0].id,rows[1].id);assert.equal(second.hasMore,false);assert.equal(second.sessions[0].values.unknownField.keep,true);assert.equal(second.pinnedSnapshot,true);
+ assert.equal((await f.core.taskHistory(range)).sessions[0].id,make(4).id);
+ await assert.rejects(f.core.taskHistory({...range,deviceId:'another',cursor:first.nextCursor}),/游标/);await assert.rejects(f.core.taskHistory({...range,deviceId:undefined}),/指定设备/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,0);
+});
+test('legacy identity corruption and mixed filters fail visibly',async()=>{
+ const f=fixture(),d=await poolDevice(f),id='legacy:'+'b'.repeat(64),r={id,revision:'a'.repeat(64),values:{id,origin:'swiftdata_execution_session',title:'original',start:100,end:null,commandId:null}};
+ await publishPool(f,d,[],{executionSessions:[r,r]});await assert.rejects(f.core.taskHistory({origin:'legacy',deviceId:d.id}),/身份/);
+ await assert.rejects(f.core.readPoolRecords({recordType:'execution',zone:'todo'}),/混用/);await assert.rejects(f.core.taskHistory({origin:'legacy',deviceId:d.id,from:'not-a-date'}),/时间/);
+});
+test('content expiry differs from sample recency; day-total corrections retain fractions and do not add snapshots',()=>{
+ const base={source:'health.steps',observedAt:'2026-10-13T20:00:00Z',receivedAt:'2026-10-13T21:00:00Z',expiresAt:'2026-10-13T22:00:00Z',value:{count:1664.876,snapshot:true,additive:false}};
+ const old=sourceView(base,'phone:health.steps','2026-10-13T21:01:00Z');assert.equal(old.freshness,'current');assert.equal(old.collectionRecency,'older_than_5_minutes');assert.equal(old.deliveryDelaySeconds,3600);assert.equal(old.observationAgeSeconds,3660);assert.equal(old.value.count,1664.876);
+ const correction=sourceView({...base,value:{count:1209,snapshot:true,additive:false}},'phone:health.steps','2026-10-13T21:01:00Z');assert.equal(correction.value.count,1209);assert.equal(correction.value.additive,false);
+ const none=sourceView({...base,value:{count:null,availability:'no-readable-samples-not-proof-of-no-steps'}},'phone:health.steps','2026-10-13T21:01:00Z');assert.equal(none.availability,'unknown');
+});
+
+test('diagnostic idle seconds alone refresh stored state without manufacturing activity changes',async()=>{
+ const f=fixture(),d=await device(f);
+ await f.core.ingest({observations:[obs(1,{idle:'over30min',inputIdleSeconds:2000,foregroundChanged:false,activityActor:'unknown'},f)]},d);
+ f.advance(1000);await f.core.ingest({observations:[obs(2,{idle:'over30min',inputIdleSeconds:2001,foregroundChanged:false,activityActor:'unknown'},f)]},d);
+ assert.equal((await f.core.readChanges()).changes.length,1);assert.equal((await f.core.readState()).sources[0].value.inputIdleSeconds,2001);
+ f.advance(1000);await f.core.ingest({observations:[obs(3,{idle:'active',inputIdleSeconds:0,foregroundChanged:true,activityActor:'unknown'},f)]},d);
+ assert.equal((await f.core.readChanges()).changes.length,2);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM observations').get().n,3);
 });

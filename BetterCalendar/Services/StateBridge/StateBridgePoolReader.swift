@@ -8,6 +8,7 @@ import CryptoKit
 nonisolated struct BridgePoolSnapshot: Sendable {
     let data: Data
     let recordCount: Int
+    var executionSessionCount: Int = 0
 }
 nonisolated enum BridgePoolCodec {
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
@@ -31,9 +32,25 @@ nonisolated enum BridgePoolCodec {
             let values = try Self.values(task)
             records.append(.object(["id": .string(task.id.uuidString), "revision": .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(values))), "values": values]))
         }
-        let payload = try BridgePoolCodec.encode(.object(["formatVersion": .number(1), "authority": .string("swiftdata"), "dateUnit": .string("unix-milliseconds"), "records": .array(records)]))
+        let executions = try context.fetch(FetchDescriptor<ExecutionSession>()).map { row -> BridgeJSON in
+            // A local stable read identity, not a new shared timer/session ID.
+            // Different devices remain separate views; identical values are not
+            // collapsed because two genuine sessions may have the same content.
+            let id = "legacy:" + BridgePoolCodec.hash(Data(String(describing: row.persistentModelID).utf8))
+            let values: BridgeJSON = .object(["id": .string(id), "origin": .string("swiftdata_execution_session"),
+                "title": .string(row.title), "blockID": Self.uuid(row.blockID), "start": Self.date(row.start), "end": Self.date(row.end),
+                "timingStyle": .string(row.timingStyle.rawValue), "completedCount": Self.integer(row.completedCount),
+                "interruptions": .number(Double(row.interruptions)), "commandId": .null,
+                "durationBasis": .string("stored_start_end_not_reconstructed_activity")])
+            return .object(["id": .string(id), "revision": .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(values))), "values": values])
+        }.sorted { lhs, rhs in
+            guard case let .object(a) = lhs, case let .object(b) = rhs,
+                  case let .string(x) = a["id"], case let .string(y) = b["id"] else { return false }
+            return x < y
+        }
+        let payload = try BridgePoolCodec.encode(.object(["formatVersion": .number(1), "authority": .string("swiftdata"), "dateUnit": .string("unix-milliseconds"), "records": .array(records), "executionSessions": .array(executions)]))
         guard payload.count <= 8 * 1024 * 1024 else { throw DataArchiveError.invalid("事项目录超过传输上限，原库保留，未发布不完整目录") }
-        return BridgePoolSnapshot(data: payload, recordCount: records.count)
+        return BridgePoolSnapshot(data: payload, recordCount: records.count, executionSessionCount: executions.count)
     }
     static func values(_ task: LongTask) throws -> BridgeJSON {
             let stages = (task.checkpoints ?? []).sorted { ($0.order, $0.id.uuidString) < ($1.order, $1.id.uuidString) }
@@ -105,7 +122,7 @@ extension BridgeOutbox {
                     "index": .number(Double(ids.count)), "bytes": .string(bytes.base64EncodedString())]), validFor: 365 * 86400)))
             }
             manifest = .object(["formatVersion": .number(1), "authority": .string("swiftdata"), "availability": .string("available"),
-                "contentHash": .string(hash), "recordCount": .number(Double(snapshot.recordCount)), "chunkEventIds": .array(ids)])
+                "contentHash": .string(hash), "recordCount": .number(Double(snapshot.recordCount)), "executionSessionCount": .number(Double(snapshot.executionSessionCount)), "chunkEventIds": .array(ids)])
             poolCache = BridgePoolCache(deviceId: deviceId, contentHash: hash, manifest: manifest)
         }
         _ = append("bc.pool", manifest, validFor: 180)

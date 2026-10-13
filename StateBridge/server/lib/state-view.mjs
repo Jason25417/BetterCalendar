@@ -1,6 +1,14 @@
 const errorStatuses = new Set(["read-unavailable", "permission-request-failed", "location-unavailable", "notification-unavailable", "history-directory-unavailable", "folder-selection-failed", "permission-or-browser-unavailable", "unavailable"]);
 const emptyStatuses = new Set(["not-frontmost"]);
 
+// Preserve full observations; a diagnostic clock alone is not a new activity
+// or step delta. Unknown fields still participate in change detection.
+export function observationSignalValue(source,value) {
+  if(!value||Array.isArray(value)||typeof value!=='object')return value;
+  const omit=source==='mac.activity'?['inputIdleSeconds','foregroundChanged']:source==='health.steps'?['windowEnd','queriedAt']:[];
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!omit.includes(key)));
+}
+
 // Keep availability and freshness independent. A fresh error is not usable
 // evidence; an old successful observation is history, not the current activity.
 export function sourceView(observation, sourceKey, readAt) {
@@ -11,7 +19,7 @@ export function sourceView(observation, sourceKey, readAt) {
   else if (reason === "not-authorized") availability = "not_authorized";
   else if (errorStatuses.has(reason)) availability = "error";
   else if (reason === "partial") availability = "partial";
-  else if (reason === "no-readable-samples-not-proof-of-no-sleep" || reason === "no-visible-home-or-permission") availability = "unknown";
+  else if (reason === "no-readable-samples-not-proof-of-no-sleep" || reason === "no-readable-samples-not-proof-of-no-steps" || reason === "no-visible-home-or-permission") availability = "unknown";
   else if (emptyStatuses.has(reason)) availability = "empty";
   else if (Array.isArray(value) && !value.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
   else if (value && typeof value === "object" && observation.source === "health.steps" && value.count == null) availability = "unknown";
@@ -22,8 +30,13 @@ export function sourceView(observation, sourceKey, readAt) {
     else if (!entries.length) availability = observation.source.startsWith("health.") ? "unknown" : "empty";
   }
   const freshness = observation.expiresAt && Date.parse(observation.expiresAt) <= Date.parse(readAt) ? "stale" : "current";
+  const observed = Date.parse(observation.observedAt), received = Date.parse(observation.receivedAt), read = Date.parse(readAt);
+  const observationAgeSeconds = Number.isFinite(observed)&&Number.isFinite(read)?Math.max(0,(read-observed)/1000):null;
+  const deliveryDelaySeconds = Number.isFinite(observed)&&Number.isFinite(received)?Math.max(0,(received-observed)/1000):null;
   return {
     ...observation, sourceKey, freshness, availability,
+    observationAgeSeconds,deliveryDelaySeconds,freshnessMeaning:'content_expiry_not_continuous_sampling',
+    collectionRecency:observationAgeSeconds===null?'unknown':observationAgeSeconds<=300?'recent':'older_than_5_minutes',
     reason: reason ?? (availability === "unknown" ? "empty_samples_do_not_establish_absence_or_permission" : null),
     lastObservedAt: observation.observedAt, lastReceivedAt: observation.receivedAt,
     lastSuccessfulReadAt: ["available", "partial", "empty"].includes(availability) ? observation.observedAt : null,
