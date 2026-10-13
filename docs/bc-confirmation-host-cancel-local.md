@@ -2,6 +2,8 @@
 
 2026-10-13。此次是新的真实 Megahit 请求故障，不沿用“没有新请求”的阻塞结论。本轮只做本地代码、隔离测试与构建；未推送、未部署、未发布 TestFlight。线上仍是 v30，原生 173 不变。
 
+19:18 UTC继续排查：另发现并复现分钟回调的并发发送缺口，已补持久占用与安全尝试回执，完整服务测试增至85项。三条真实提案没有重复提交证据，原凭据轮换规则不改；分钟重复和宿主cancel/approval-card-published之间的因果仍未知。见[本轮增量与部署审查](bc-callback-concurrency-local.md)。下方78项为前一批修复记录。
+
 ## 已核实
 
 三条请求均由宿主续传 `action=cancel` 后被服务关闭，approvedAt/attemptId/result 为 null，没有开始计时。本地原始调用与正式状态逐项对应，详情见 [安全证据元数据](evidence/confirmation-host-cancel-local.json)。

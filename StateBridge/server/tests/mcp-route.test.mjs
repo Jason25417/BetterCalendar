@@ -14,13 +14,13 @@ const Ajv=createRequire(import.meta.url)('ajv');
 const routeSource=ts.transpileModule(readFileSync(new URL('../app/mcp/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{elicitation:{}}};
 const uuid=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
-async function fixture(t){
+async function fixture(t,{fetcher=()=>{throw Error('test forbids network');}}={}){
  const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  let failReturned=false,now=new Date('2026-10-13T10:00:00.000Z');
  const prepare=sql=>{let args=[];return {bind(...v){args=v;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){if(failReturned&&sql.startsWith('INSERT INTO research_log')&&args[1]==='call_returned'){failReturned=false;throw Error('isolated persistence failure');}return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const out=ops.map(op=>op.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
- const reopen=()=>bridge.createBridge(db,{now:()=>now,fetcher:()=>{throw Error('test forbids network');}});
+ const reopen=()=>bridge.createBridge(db,{now:()=>now,fetcher});
  let core=reopen();const logs=[];
  const modules={'@/lib/service':{service:()=>core},'@/lib/bridge.mjs':bridge,'@/lib/dot-instructions':{dotInstructions:'isolated route fixture'},'@/lib/native-confirmation.mjs':confirmation,'@/lib/native-commands.mjs':commands,'@/lib/mcp-client-capabilities.mjs':capabilities,'@/lib/native-form-confirmation.mjs':form};
  const exports={};vm.runInNewContext(routeSource,{exports,require(name){assert.ok(modules[name],`unexpected import ${name}`);return modules[name];},Response,TextEncoder,console:{info(...args){logs.push(args);},warn(...args){logs.push(args);}}});
@@ -37,6 +37,31 @@ async function fixture(t){
  return {sqlite,logs,d,request,rpc,call,get core(){return core;},restart(){core=reopen();},failResult(){failReturned=true;},advance(ms){now=new Date(now.getTime()+ms);}};
 }
 const reply=state=>({requestState:state,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true}}}});
+test('minute delivery and repeated status reads do not cancel, rotate or approve a pending native form',async t=>{
+ const callbacks=[];
+ const f=await fixture(t,{fetcher:async(url,options)=>{
+  if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});
+  const event=JSON.parse(options.body);
+  if(event.type==='verification')return Response.json({challenge:event.challenge});
+  callbacks.push(event);return Response.json({});
+ }}),request=f.request(),first=await f.call('submit_native_command',request);
+ const original=f.sqlite.prepare('SELECT approval_hash FROM native_requests').get().approval_hash;
+ const enrolled=await f.core.registerDevice({id:'synthetic-observer',label:'In-memory event fixture',scopes:['mac.activity']});
+ const d=await f.core.authenticateDevice(enrolled.token);
+ await f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://api.openai.com/isolated-form-event',secret:'whsec_'+Buffer.alloc(32,7).toString('base64')}},'fixture-owner');
+ await f.core.ingest({observations:[{schemaVersion:1,eventId:'isolated-change',source:'mac.activity',sequence:1,observedAt:'2026-10-13T10:00:00.000Z',expiresAt:null,assertion:'observed',value:{synthetic:true}}]},d);
+ assert.equal((await f.call('flush_minute_changes',{})).body.result.structuredContent.delivered,1);
+ f.restart();assert.equal((await f.call('flush_minute_changes',{})).body.result.structuredContent.delivered,0);
+ for(let n=0;n<3;n++)assert.equal((await f.call('read_native_command_status',{commandId:request.commandId})).body.result.structuredContent.state,'awaiting_confirmation');
+ assert.equal(f.sqlite.prepare('SELECT approval_hash FROM native_requests').get().approval_hash,original);
+ assert.equal(callbacks.length,1);assert.equal(callbacks[0].name,'state.minute_changed');
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
+ const research=await f.core.research.read({limit:100});
+ const safe=JSON.stringify({research,logs:f.logs});
+ assert.equal(safe.includes(first.body.result.requestState),false);
+ assert.equal(safe.includes('whsec_'),false);assert.equal(safe.includes('/isolated-form-event'),false);
+});
 test('actual POST route handles MRTR, one device receipt and lost-response retry without secret leakage',async t=>{
  const f=await fixture(t),v=f.request(),first=await f.call('submit_native_command',v);
  assert.equal(first.body.result.resultType,'input_required');

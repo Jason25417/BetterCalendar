@@ -13,6 +13,10 @@ export class BridgeError extends Error {
 }
 export class CallbackEndpointError extends BridgeError { constructor(message,reason){super(message,502);this.reason=reason;} }
 const enc=new TextEncoder();
+const changed=r=>Number(r?.meta?.changes ?? r?.changes ?? 0);
+// Persisted in the existing retry deadline: longer than two 5s DNS checks and
+// the 10s send timeout. A crashed worker leaves a bounded, recoverable lease.
+const callbackLeaseMs=60000;
 const equal=(a,b)=>typeof a==="string"&&typeof b==="string"&&enc.encode(a).length===enc.encode(b).length&&timingSafeEqual(enc.encode(a),enc.encode(b));
 export function canonical(v){
   if(Array.isArray(v))return `[${v.map(canonical).join(",")}]`;
@@ -239,13 +243,27 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     }
     const subs=await all("SELECT * FROM subscriptions WHERE expires_at IS NULL OR expires_at>?",t);
     if(batch)for(const s of subs)await q("INSERT OR IGNORE INTO deliveries(id,subscription_id,batch_id,status,next_attempt_at) VALUES(?,?,?,?,?)",`${s.id}:${batch.id}`,s.id,batch.id,"pending",t).run();
+    await q("UPDATE deliveries SET status='failed',last_error='重试次数已用尽；接收结果可能未知' WHERE status='pending' AND attempts>=8 AND next_attempt_at<=?",t).run();
     const work=await all("SELECT d.*,s.callback,s.secret,b.body FROM deliveries d JOIN subscriptions s ON s.id=d.subscription_id JOIN batches b ON b.id=d.batch_id WHERE d.status='pending' AND d.next_attempt_at<=? AND (s.expires_at IS NULL OR s.expires_at>?) ORDER BY b.minute LIMIT 8",t,t);
     let delivered=0;
     for(const d of work){
-      let ok=false,terminal=false,error="";
-      try{const r=await sendSigned({id:d.subscription_id,callback:d.callback,secret:d.secret},d.batch_id,d.body);ok=r.ok;terminal=[410,413].includes(r.status);error=`HTTP ${r.status}`;}catch{error="回调连接或验证失败";}
-      const attempts=d.attempts+1;
-      await q("UPDATE deliveries SET status=?,attempts=?,next_attempt_at=?,received_at=?,last_error=? WHERE id=?",ok?"received":terminal||attempts>=8?"failed":"pending",attempts,new Date(now().getTime()+Math.min(3600000,30000*2**attempts)).toISOString(),ok?time():null,ok?null:error,d.id).run();if(ok)delivered++;
+      const at=time(),attempts=d.attempts+1,leaseUntil=new Date(Date.parse(at)+callbackLeaseMs).toISOString();
+      // Reading a pending row does not own it. Conditional acquisition works
+      // across processes/isolate restarts; no process-local mutex or new table.
+      const acquired=await q("UPDATE deliveries SET attempts=?,next_attempt_at=? WHERE id=? AND status='pending' AND attempts=? AND attempts<8 AND next_attempt_at=? AND next_attempt_at<=? AND EXISTS(SELECT 1 FROM subscriptions WHERE id=deliveries.subscription_id AND (expires_at IS NULL OR expires_at>?))",attempts,leaseUntil,d.id,d.attempts,d.next_attempt_at,at,at).run();
+      if(!changed(acquired))continue;
+      await research.append('callback_attempt_started',d.batch_id,{deliveryId:d.id,subscriptionId:d.subscription_id,attempt:attempts,leaseUntil,channel:'state.minute_changed',receiverProcessing:'unknown'});
+      // Recording or subscription checks may outlive the lease. Never start a
+      // network send after losing ownership or after subscription withdrawal.
+      if(!await one("SELECT d.id FROM deliveries d JOIN subscriptions s ON s.id=d.subscription_id WHERE d.id=? AND d.status='pending' AND d.attempts=? AND d.next_attempt_at=? AND d.next_attempt_at>? AND (s.expires_at IS NULL OR s.expires_at>?)",d.id,attempts,leaseUntil,time(),time())){
+        await research.append('callback_attempt_finished',d.batch_id,{deliveryId:d.id,subscriptionId:d.subscription_id,attempt:attempts,receiverAccepted:null,httpStatus:null,outcome:'not_started',receiverProcessing:'unknown'});continue;
+      }
+      let ok=false,terminal=false,error="",httpStatus=null;
+      try{const r=await sendSigned({id:d.subscription_id,callback:d.callback,secret:d.secret},d.batch_id,d.body);httpStatus=r.status;ok=r.ok;terminal=[410,413].includes(r.status);error=`HTTP ${r.status}`;}catch{error="回调连接或验证失败";}
+      const status=ok?"received":terminal||attempts>=8?"failed":"pending";
+      const saved=await q("UPDATE deliveries SET status=?,next_attempt_at=?,received_at=?,last_error=? WHERE id=? AND status='pending' AND attempts=? AND next_attempt_at=?",status,new Date(now().getTime()+Math.min(3600000,30000*2**attempts)).toISOString(),ok?time():null,ok?null:error,d.id,attempts,leaseUntil).run();
+      await research.append('callback_attempt_finished',d.batch_id,{deliveryId:d.id,subscriptionId:d.subscription_id,attempt:attempts,receiverAccepted:httpStatus===null?null:ok,httpStatus,outcome:changed(saved)?status:'superseded',receiverProcessing:'unknown'});
+      if(ok&&changed(saved))delivered++;
     }
     return {minute,batchId:batch?.id??null,delivered,activeSubscriptions:subs.length,deferred:decision?.forward===false,decision:batch?JSON.parse(batch.body).data.decision??null:decision,processing:"回调收到不代表 Dot 已分析"};
   }

@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "scope": "local_only_callback_concurrency_fix_not_deployed",
+  "sourceBaseline": "0a924a23782db3515d7a43c76b54fef6bbb03cd6",
+  "localRecordedWindow": {
+    "firstRow": 33251,
+    "lastRow": 36388,
+    "from": "2026-10-13T18:05:24.621Z",
+    "through": "2026-10-13T18:52:16.188Z",
+    "flushReturnedCount": 327,
+    "overlapPairs": 40
+  },
+  "overlappingSuccessfulFlushes": [
+    {
+      "batchId": "minute_29865260",
+      "calls": [
+        {
+          "row": 33983,
+          "callId": "research_a17c5d93-d692-4515-a102-957b15dd87db",
+          "startedAt": "2026-10-13T18:20:06.350Z",
+          "finishedAt": "2026-10-13T18:20:08.299Z",
+          "delivered": 1,
+          "responseHash": "bcaba71b374d7849eca27ddf0b41e24d76410650d6159a628088ddbde6dd845e"
+        },
+        {
+          "row": 33984,
+          "callId": "research_c2f4da35-52ce-4103-8e31-cd5c3d5ea3b0",
+          "startedAt": "2026-10-13T18:20:03.607Z",
+          "finishedAt": "2026-10-13T18:20:08.447Z",
+          "delivered": 1,
+          "responseHash": "bcaba71b374d7849eca27ddf0b41e24d76410650d6159a628088ddbde6dd845e"
+        }
+      ]
+    },
+    {
+      "batchId": "minute_29865275",
+      "calls": [
+        {
+          "row": 34996,
+          "callId": "research_b442f37a-1916-4f5b-9b67-edd6d4baa6b4",
+          "startedAt": "2026-10-13T18:35:06.766Z",
+          "finishedAt": "2026-10-13T18:35:08.778Z",
+          "delivered": 1,
+          "responseHash": "c853071ca2796d595705cf19cadaa33edda2e1112c2090ed850fde50fdb33343"
+        },
+        {
+          "row": 34997,
+          "callId": "research_85637f8c-d49a-41a5-b479-98e20e9960c3",
+          "startedAt": "2026-10-13T18:35:04.121Z",
+          "finishedAt": "2026-10-13T18:35:09.201Z",
+          "delivered": 1,
+          "responseHash": "c853071ca2796d595705cf19cadaa33edda2e1112c2090ed850fde50fdb33343"
+        }
+      ]
+    },
+    {
+      "batchId": "minute_29865285",
+      "calls": [
+        {
+          "row": 35757,
+          "callId": "research_f86ede77-77f0-4be8-8eb4-7f23f0b604a4",
+          "startedAt": "2026-10-13T18:45:06.517Z",
+          "finishedAt": "2026-10-13T18:45:08.745Z",
+          "delivered": 1,
+          "responseHash": "5bbc9c776bba025c095f43301d9d01b9d4c8edf88b76b503472a6e8e2f51111f"
+        },
+        {
+          "row": 35759,
+          "callId": "research_033f22af-2465-49d7-b611-15ae6c78df9b",
+          "startedAt": "2026-10-13T18:45:04.193Z",
+          "finishedAt": "2026-10-13T18:45:08.737Z",
+          "delivered": 1,
+          "responseHash": "5bbc9c776bba025c095f43301d9d01b9d4c8edf88b76b503472a6e8e2f51111f"
+        }
+      ]
+    }
+  ],
+  "proposalCalls": [
+    {
+      "row": 33251,
+      "at": "2026-10-13T18:05:24.621Z",
+      "commandId": "95f8ccdf-61d1-4b60-8a1e-f892bc7c6145",
+      "confirmation": null
+    },
+    {
+      "row": 35333,
+      "at": "2026-10-13T18:39:57.249Z",
+      "commandId": "95f8ccdf-61d1-4b60-8a1e-f892bc7c6145",
+      "confirmation": {
+        "transport": "mcp_form",
+        "action": "cancel",
+        "confirmed": false
+      }
+    },
+    {
+      "row": 35542,
+      "at": "2026-10-13T18:42:37.568Z",
+      "commandId": "b4a701e9-3c68-4f96-86bd-72c5d6e9a043",
+      "confirmation": null
+    },
+    {
+      "row": 36259,
+      "at": "2026-10-13T18:50:59.806Z",
+      "commandId": "b4a701e9-3c68-4f96-86bd-72c5d6e9a043",
+      "confirmation": {
+        "transport": "mcp_form",
+        "action": "cancel",
+        "confirmed": false
+      }
+    },
+    {
+      "row": 36317,
+      "at": "2026-10-13T18:51:36.290Z",
+      "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+      "confirmation": null
+    },
+    {
+      "row": 36387,
+      "at": "2026-10-13T18:52:15.839Z",
+      "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+      "confirmation": {
+        "transport": "mcp_form",
+        "action": "cancel",
+        "confirmed": false
+      }
+    }
+  ],
+  "interpretation": {
+    "nonceRotation": "No duplicate initial proposal for these three commands was recorded in this window; rotation is deliberately tested and unchanged.",
+    "receiverIdentity": "Flush receipts omit per-subscription identity. Current single subscription does not establish the historical subscription set.",
+    "confirmationClosure": "No causal proof linking duplicate minute delivery or complete_batch to host cancellation.",
+    "namedApprovalCardEvent": "approval-card-published is not a declared BC event; producer/retry source unknown."
+  },
+  "currentReadOnlyCheck": {
+    "readAt": "2026-10-13T19:16:00.423Z",
+    "subscriptionCount": 1,
+    "researchCallId": "research_96c1c9e5-ac60-4c56-9fc9-36476f521f60",
+    "responseHash": "462e8aedb4d152ab0baa5d143fcf66b0aa27fe389c98010fa83985414901920e",
+    "siteId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "latestVersion": 30,
+    "ownerOnly": true
+  },
+  "reproduction": {
+    "data": "synthetic in-memory SQLite; injected DNS/HTTP responses; no actual network",
+    "beforeFix": "concurrent-service-instances test failed: 2 callback sends, expected 1",
+    "afterFix": "same test passed: one send while lease active",
+    "pendingFormDuringMinuteDelivery": "actual POST route fixture keeps pending state and original approval hash; no sessions or device commands"
+  },
+  "verification": {
+    "serviceTests": {
+      "passed": 85,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recorderTests": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "build": "passed",
+    "hostDOM": "unavailable_no_Dots_tab_in_Edge",
+    "hostCancellationCause": "unknown",
+    "actualHostRendering": "unverified",
+    "deployment": "not_performed",
+    "realTimerExecution": "not_performed"
+  },
+  "changes": [
+    "Atomic persistent 60-second callback lease using existing attempts and next_attempt_at; conditional completion prevents stale overwrite",
+    "Attempt start/finish research metadata with receiver acceptance separate from downstream processing; no secret/body/URL logging",
+    "Recovery remains at-least-once with stable webhook identity; no exactly-once claim"
+  ],
+  "deploymentTarget": {
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "scope": "same private StateBridge only; local confirmation changes plus callback lease; no native release/schema/grant change",
+    "approval": "required_by_current_local_only_instruction"
+  }
+}

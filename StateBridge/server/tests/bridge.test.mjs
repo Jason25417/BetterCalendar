@@ -8,12 +8,13 @@ import { shadowDecision } from '../lib/shadow-decision.mjs';
 import { safeArguments } from '../lib/research.mjs';
 function fixture(options={}){
  const sqlite=new DatabaseSync(':memory:');for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort()) sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
- function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){return sqlite.prepare(sql).run(...args);}};}
+ let failWrite=null;
+ function prepare(sql){let args=[];return {bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){if(failWrite?.(sql,args)){failWrite=null;throw Error('isolated write failure');}return sqlite.prepare(sql).run(...args);}};}
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const r=ops.map(o=>o.run());sqlite.exec('COMMIT');return r;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  let clock=new Date('2026-10-05T12:00:00Z'),posts=[],fail=false,redirectReceiver=false;
  const fetcher=async(url,opts)=>{assert.equal(opts.redirect,'manual','edge-compatible redirect mode');if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});posts.push({url,...opts});if(redirectReceiver)return new Response('',{status:302,headers:{Location:'https://127.0.0.1/private'}});if(fail)return new Response('',{status:503});let data=JSON.parse(opts.body);return Response.json(data.type==='verification'?{challenge:data.challenge}:{});};
- const core=createBridge(db,{now:()=>clock,fetcher,...options});
- return {core,sqlite,posts,advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},setReceiverRedirect(v){redirectReceiver=v;},time(){return clock.toISOString();}};
+ const reopen=()=>createBridge(db,{now:()=>clock,fetcher,...options}),core=reopen();
+ return {core,sqlite,posts,reopen,failNextWrite(predicate){failWrite=predicate;},advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},setReceiverRedirect(v){redirectReceiver=v;},time(){return clock.toISOString();}};
 }
 const obs=(seq,value,f,extra={})=>({schemaVersion:1,eventId:`test-${seq}`,source:'mac.activity',sequence:seq,observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+90000).toISOString(),assertion:'observed',value,...extra});
 test('device receipts require offered complete snapshot, keep finish, and do not imply screen delivery',async()=>{
@@ -109,6 +110,92 @@ test('minute batches, stable webhook id, retry and no changes no batch',async()=
  assert.equal(sends[1].headers['webhook-signature'],await signWebhook(secret,sends[1].headers['webhook-id'],sends[1].headers['webhook-timestamp'],sends[1].body));
  assert.equal((await f.core.flush()).delivered,0);await f.core.acknowledgeBatch(a.batchId,'owner');assert.ok((await f.core.diagnostics()).batches[0].processed_at);
  await assert.rejects(validateCallback('https://127.0.0.1/'),/仅接受/);await assert.rejects(validateCallback('https://evil.test/'),/仅接受/);
+});
+test('concurrent service instances cannot send the same pending callback while one is in flight',async()=>{
+ let release,entered;
+ const gate=new Promise(r=>release=r),sending=new Promise(r=>entered=r),posts=[];
+ const f=fixture({fetcher:async(url,options)=>{
+  if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});
+  const body=JSON.parse(options.body);
+  if(body.type==='verification')return Response.json({challenge:body.challenge});
+  posts.push(options);entered();if(posts.length===1)await gate;
+  return Response.json({});
+ }});
+ const d=await device(f);
+ await f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://api.openai.com/isolated-callback',secret:'whsec_'+Buffer.alloc(32,7).toString('base64')}},'owner');
+ await f.core.ingest({observations:[obs(1,'isolated activity',f)]},d);
+ const first=f.core.flush();await sending;
+ let second;try{second=await f.reopen().flush();}finally{release();}
+ const result=await first;
+ assert.equal(posts.length,1,'one callback per live attempt across instances');
+ assert.equal(second.delivered,0);assert.equal(result.delivered,1);
+ assert.equal((await f.reopen().flush()).delivered,0);
+ assert.equal(f.sqlite.prepare('SELECT attempts FROM deliveries').get().attempts,1);
+});
+async function subscribedFixture(f){
+ const d=await device(f);
+ await f.core.subscribe({name:'state.minute_changed',arguments:{},delivery:{mode:'webhook',url:'https://api.openai.com/isolated-callback',secret:'whsec_'+Buffer.alloc(32,7).toString('base64')}},'owner');
+ await f.core.ingest({observations:[obs(1,'isolated activity',f,{expiresAt:null})]},d);
+ return d;
+}
+test('failed attempt logging sends nothing and restart recovers the durable lease without discarding the batch',async()=>{
+ const f=fixture();await subscribedFixture(f);
+ f.failNextWrite((sql,args)=>sql.startsWith('INSERT INTO research_log')&&args[1]==='callback_attempt_started');
+ await assert.rejects(f.core.flush(),/isolated write failure/);
+ assert.equal(f.posts.filter(p=>!JSON.parse(p.body).type).length,0);
+ assert.equal((await f.reopen().flush()).delivered,0);f.advance(60001);
+ assert.equal((await f.reopen().flush()).delivered,1);
+ assert.equal(f.posts.filter(p=>!JSON.parse(p.body).type).length,1);
+ assert.equal(f.sqlite.prepare('SELECT attempts,status FROM deliveries').get().attempts,2);
+});
+test('successful receiver response with failed persistence stays unknown and retries with the same webhook identity',async()=>{
+ const f=fixture();await subscribedFixture(f);
+ f.failNextWrite((sql,args)=>sql.startsWith('UPDATE deliveries SET status=?')&&args[0]==='received');
+ await assert.rejects(f.core.flush(),/isolated write failure/);
+ assert.equal(f.sqlite.prepare('SELECT status,received_at FROM deliveries').get().status,'pending');
+ assert.equal(f.sqlite.prepare('SELECT status,received_at FROM deliveries').get().received_at,null);
+ assert.equal((await f.reopen().flush()).delivered,0);f.advance(60001);
+ assert.equal((await f.reopen().flush()).delivered,1);
+ const sends=f.posts.filter(p=>!JSON.parse(p.body).type);assert.equal(sends.length,2);
+ assert.equal(sends[0].headers['webhook-id'],sends[1].headers['webhook-id']);assert.equal(sends[0].body,sends[1].body);
+});
+test('stale in-flight completion cannot overwrite a newer retry result after its lease was recovered',async()=>{
+ let release,entered,count=0;
+ const gate=new Promise(r=>release=r),sending=new Promise(r=>entered=r);
+ const f=fixture({fetcher:async(url,options)=>{
+  if(url.includes('dns-query'))return Response.json({Status:0,Answer:[{type:1,data:'104.18.1.1'}]});
+  const body=JSON.parse(options.body);if(body.type==='verification')return Response.json({challenge:body.challenge});
+  if(++count===1){entered();await gate;return Response.json({});}
+  return new Response('',{status:503});
+ }});
+ await subscribedFixture(f);const first=f.core.flush();await sending;f.advance(60001);
+ let newer;try{newer=await f.reopen().flush();}finally{release();}
+ const old=await first;assert.equal(old.delivered,0);assert.equal(newer.delivered,0);
+ const stored=f.sqlite.prepare('SELECT status,attempts,received_at,last_error FROM deliveries').get();
+ assert.equal(stored.status,'pending');assert.equal(stored.attempts,2);assert.equal(stored.received_at,null);assert.equal(stored.last_error,'HTTP 503');
+ const trace=(await f.core.research.read({limit:100})).entries.filter(e=>e.kind==='callback_attempt_finished');
+ assert.ok(trace.some(e=>e.body.attempt===1&&e.body.outcome==='superseded'&&e.body.receiverAccepted===true));
+});
+test('attempt result logging failure is reported but a durably received callback is not resent',async()=>{
+ const f=fixture();await subscribedFixture(f);
+ f.failNextWrite((sql,args)=>sql.startsWith('INSERT INTO research_log')&&args[1]==='callback_attempt_finished');
+ await assert.rejects(f.core.flush(),/isolated write failure/);
+ assert.equal(f.sqlite.prepare('SELECT status FROM deliveries').get().status,'received');
+ f.advance(60001);assert.equal((await f.reopen().flush()).delivered,0);
+ assert.equal(f.posts.filter(p=>!JSON.parse(p.body).type).length,1);
+});
+test('subscription removal before lease acquisition cannot send and exhausted abandoned leases stop retrying',async()=>{
+ const f=fixture();await subscribedFixture(f);f.setFail(true);await f.core.flush();
+ await f.core.unsubscribe({name:'state.minute_changed',delivery:{url:'https://api.openai.com/isolated-callback'}},'owner');
+ f.advance(60001);assert.equal((await f.reopen().flush()).delivered,0);
+ assert.equal(f.posts.filter(p=>!JSON.parse(p.body).type).length,1);
+ const second=fixture();await subscribedFixture(second);
+ second.failNextWrite((sql,args)=>sql.startsWith('INSERT INTO research_log')&&args[1]==='callback_attempt_started');
+ await assert.rejects(second.core.flush(),/isolated write failure/);
+ second.sqlite.prepare('UPDATE deliveries SET attempts=8').run();second.advance(60001);
+ assert.equal((await second.reopen().flush()).delivered,0);
+ assert.equal(second.sqlite.prepare('SELECT status FROM deliveries').get().status,'failed');
+ assert.equal(second.posts.filter(p=>!JSON.parse(p.body).type).length,0);
 });
 test('correction supersedes inference without removing history',async()=>{
  const f=fixture();await f.core.recordNote({id:'guess',kind:'activity',body:{state:'rest'},assertion:'inferred',confidence:'low',basis:['sensor:test']});
