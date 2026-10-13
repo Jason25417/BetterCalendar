@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T06:09:51.268910+00:00",
+  "sourceCommit": "ffffdbdf717e1670d3815155881631c0d0642676",
+  "deployment": {
+    "existingPrivateSite": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "id": "appgdep_6acdc58e9b6c81919c26440c1e35b4f1",
+    "sourceCommit": "3eef36bcc9ca6f82bf524c9606466c6e9a3a4fa9",
+    "status": "succeeded",
+    "updatedAt": "2026-10-13T05:46:40.584767+00:00",
+    "audienceExpanded": false
+  },
+  "checks": {
+    "server": {
+      "passed": 49,
+      "failed": 0
+    },
+    "recorder": {
+      "passed": 12,
+      "failed": 0
+    },
+    "macOS": {
+      "passed": 308,
+      "failed": 0,
+      "skipped": 0
+    },
+    "iOSSimulator": "BUILD_SUCCEEDED",
+    "typescript": "passed"
+  },
+  "dots": {
+    "transport": "existing Edge extension, existing Dots conversation",
+    "journalToolVisible": "reported_visible_by_Dots",
+    "journalReadCalls": 0,
+    "capabilityReadCalls": 1,
+    "callId": "research_254c5d31-0b97-46dc-8a57-4737acac76d3",
+    "payload": {
+      "readAt": "2026-10-13T05:52:33.567Z",
+      "devices": []
+    },
+    "responseHash": "d92b6406cb74544fc5b7d7cc8ccd451ab635d19e51bb99dad6a7a23c204b8be2",
+    "localCallRows": [
+      18039,
+      18040
+    ],
+    "logPageSnapshot": "8affa391358af9ec6e195d341f55cb24c11315b064a339504ea711a1f46d32ca",
+    "verification": "payload reconstructed from visible Dots response; canonical SHA256 independently matched to persisted server research return; not original HTTP response capture",
+    "permissionsEnabledByAgent": false
+  },
+  "unverified": [
+    "native permission setup",
+    "real confirmation card callback",
+    "actual requested item/journal/alarm execution",
+    "iPhone alarm ring/cancel",
+    "real current-session dual-device delay",
+    "photo binary reading not implemented"
+  ],
+  "remainingAuthorizationGap": {
+    "tool": "task_command",
+    "finding": "legacy MCP route calls core.taskCommand directly; provenance=user is model-reported, not independent human confirmation",
+    "next": "connect conversation timer to existing confirmation flow while preserving shared sessions and native BC button actions"
+  }
+}

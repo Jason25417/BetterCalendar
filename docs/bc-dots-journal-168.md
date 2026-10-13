@@ -18,7 +18,7 @@ MCP `submit_native_command(kind=journal,action=create/update)`只按用户明确
 
 已验证：服务器49/49（真实隔离SQLite队列），Recorder12/12，Mac308/308（0失败/跳过），iOS Simulator编译、TS检查通过。原生日记9项、远程执行12项覆盖完整文本/保留照片、冲突/直接改库、分页版本、原文恢复、落盘失败/重启/响应丢失、独立权限、撤回/未保存编辑、并发读取时间戳。只有隔离fixture，无用户真实假任务/日记。
 
-值得真机测试，所以本轮0.65.11/168按双端发布；最终ASC与服务部署证据待实际核验后补，不以开始上传当可安装。
+0.65.11/168双端archive/upload已完成；ASC均VALID、IN_BETA_TESTING，中文说明已读回一致，见[evidence/testflight-168.json](evidence/testflight-168.json)。源码ffffdbd已push。现有私有服务v23部署succeeded，source3eef36b，未扩大访问对象。
 
 试用：在准备承担执行的设备上更新新版并主动保存所需权限。向Dots问一段真实日期的日记，或说一句真实想记的话。修改具体内容必须在Dots卡片点确认。需要查进度时问它核对同一请求，等待时打开执行设备BC继续接收；iPhone后台及时执行尚未保证。无须为了测试写假日记或额外手填日志。
 
@@ -28,6 +28,10 @@ MCP `submit_native_command(kind=journal,action=create/update)`只按用户明确
 
 ## 完整目标仍未完成
 
-未验证：Dots新日记工具发现、真实确认卡片/按钮、用户主动启用168本机权限、实际用户日记/事项/闹钟操作、iPhone响铃/取消与真实计时多端时延。其他连接器原始调用和实际provider费用仍有覆盖缺口；人未反馈永远unknown，不算认可。Aqara取消，自动强提醒保持shadow，未扩大锁应用或通用平台。
+已核验线上：Edge刷新现有插件后，Dots报告read_native_journal可见；仅实际read_native_capabilities一次，callId research_254c5d31-0b97-46dc-8a57-4737acac76d3、readAt05:52:33.567Z、devices[]。本地calls18039/18040与页面重建payload的规范化哈希独立匹配；没有日记授权设备，实际日记读取0次，不把“可见”当日记读取成功。见[evidence/journal-readiness-168.json](evidence/journal-readiness-168.json)。
+
+未验证：真实确认卡片/按钮、用户主动启用168本机权限、实际用户日记/事项/闹钟操作、iPhone响铃/取消与真实计时多端时延。其他连接器原始调用和实际provider费用仍有覆盖缺口；人未反馈永远unknown，不算认可。Aqara取消，自动强提醒保持shadow，未扩大锁应用或通用平台。
 
 需Jason决策：额外日记删除/照片内容接入不在本轮默认开放范围。当前继续按读取/检索与确认后文字新增修改推进，不以未答可选范围问题阻断独立开发。
+
+下一批授权差异：源码审计发现旧MCP task_command仍直接执行core.taskCommand，只核验模型填写的provenance=user，没有独立用户按钮凭据；这不符合当前权限约定，不能称全部写入口已统一授权。下一批把对话计时接到独立确认流程，保留现有云端session/revision和BC原生按钮；不能因设备空闲/离线暂停，也不新增并行计时真相。168仅日记批次，不包含此修复。
