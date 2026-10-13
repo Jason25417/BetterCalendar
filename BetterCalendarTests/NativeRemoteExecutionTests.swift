@@ -45,6 +45,81 @@ import SwiftData
         await executor.poll(); #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 1)
         #expect(service.claims.count == 2 && service.claims[0] == service.claims[1])
     }
+    @Test func mismatchedReceiptAcknowledgementKeepsOriginalResultAndRetryNeverReexecutes() async throws {
+        for field in ["attemptId", "result", "deviceId", "permission"] {
+            let (service, store, writer, c) = try fixture(envelope())
+            service.receiptReturnTransform = { value in
+                var fields = try NativeRemoteJSON.object(value)
+                switch field {
+                case "attemptId": fields[field] = .string(UUID().uuidString.lowercased())
+                case "result": fields[field] = .object(["wrong": .bool(true)])
+                case "deviceId": fields[field] = .string("different-device")
+                default: fields[field] = .string("item.update")
+                }
+                return .object(fields)
+            }
+            let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+            await executor.poll()
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 1)
+            #expect(store.file.requests.first?.phase == "result")
+            let original = try #require(store.file.requests.first)
+            #expect(original.receipt != nil && !store.file.failures.isEmpty)
+            service.receiptReturnTransform = nil
+            let restarted = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+            await restarted.poll()
+            #expect(store.file.requests.first?.phase == "reported")
+            #expect(store.file.requests.first?.attemptId == original.attemptId)
+            #expect(store.file.requests.first?.receipt == original.receipt)
+            #expect(service.receipts.count == 2 && service.receipts[0] == service.receipts[1])
+            #expect(service.claims.count == 1)
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 1)
+        }
+    }
+    @Test func terminalClaimResponseCannotCloseADifferentPersistedAttempt() async throws {
+        for changedIdentity in ["attemptId", "request"] {
+            let (service, store, writer, c) = try fixture(envelope())
+            let unrelated = try envelope(state: "applied")
+            service.claimReturnTransform = { value in
+                var fields = try NativeRemoteJSON.object(changedIdentity == "request" ? unrelated : value)
+                fields["state"] = .string("applied")
+                fields["attemptId"] = changedIdentity == "request" ? try NativeRemoteJSON.object(value)["attemptId"] : .string(UUID().uuidString.lowercased())
+                fields["result"] = .object(["saved": .bool(true)])
+                return .object(fields)
+            }
+            let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+            await executor.poll()
+            #expect(store.file.requests.first?.phase == "prepared")
+            #expect(store.file.requests.first?.receipt == nil)
+            #expect(service.receipts.isEmpty)
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+            service.claimReturnTransform = nil
+            await executor.poll()
+            #expect(store.file.requests.first?.phase == "reported")
+            #expect(service.claims.count == 2 && service.claims[0] == service.claims[1])
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 1)
+        }
+    }
+    @Test func matchingTerminalClaimRecoversTheSavedServerResultWithoutAnyNewEffect() async throws {
+        let (service, store, writer, c) = try fixture(envelope())
+        service.loseClaimResponse = true
+        let first = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await first.poll()
+        let original = try #require(store.file.requests.first)
+        let saved: BridgeJSON = .object(["saved": .bool(true), "authority": .string("isolated historical result")])
+        service.claimReturnTransform = { value in
+            var fields = try NativeRemoteJSON.object(value)
+            fields["state"] = .string("applied"); fields["result"] = saved
+            return .object(fields)
+        }
+        let restarted = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await restarted.poll()
+        #expect(store.file.requests.first?.phase == "reported")
+        #expect(store.file.requests.first?.receipt == saved)
+        #expect(store.file.requests.first?.attemptId == original.attemptId)
+        #expect(service.claims.count == 2 && service.claims[0] == service.claims[1])
+        #expect(service.receipts.isEmpty)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+    }
     @Test func entireMalformedPageAndLostLocalAttemptDoNotExecute() async throws {
         let good = try envelope(), (service, store, writer, c) = try fixture(good)
         var malformed = try NativeRemoteJSON.object(envelope()); malformed["requestHash"] = .string(String(repeating: "f", count: 64))
@@ -398,6 +473,8 @@ import SwiftData
     var claimFailureIds: Set<String> = []
     var receiptFailureIds: Set<String> = []
     var beforeClaimReturn: (() -> Void)?
+    var claimReturnTransform: ((BridgeJSON) throws -> BridgeJSON)?
+    var receiptReturnTransform: ((BridgeJSON) throws -> BridgeJSON)?
     init(_ envelope: BridgeJSON) { self.envelope = envelope }
     func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
         var e = try NativeRemoteJSON.object(envelope)
@@ -417,7 +494,7 @@ import SwiftData
             e["state"] = .string("dispatching"); e["attemptId"] = input["attemptId"]
             if isExtra { extra = .object(e) } else { envelope = .object(e) }
             if loseClaimResponse { loseClaimResponse = false; throw URLError(.networkConnectionLost) }
-            beforeClaimReturn?(); return .object(e)
+            beforeClaimReturn?(); return try claimReturnTransform?(.object(e)) ?? .object(e)
         }
         if path == "native/timer" {
             timerRequests.append(body)
@@ -429,7 +506,7 @@ import SwiftData
             receipts.append(body); e["state"] = input["outcome"]; e["result"] = input["receipt"]
             if isExtra { extra = .object(e) } else { envelope = .object(e) }
             if loseReceiptResponse { loseReceiptResponse = false; throw URLError(.networkConnectionLost) }
-            return .object(e)
+            return try receiptReturnTransform?(.object(e)) ?? .object(e)
         }
         throw URLError(.unsupportedURL)
     }

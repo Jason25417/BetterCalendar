@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.15", date: "2026-10", changes: [
+            "对话操作会核对服务返回的设备、执行身份和完整结果；回执不一致时保留原结果重试",
+            "接手时收到错配的历史结果，不会把当前请求误记为完成，也不会重复执行",
+            "事项、计时、日记和闹钟仍只按本人具体确认执行；同步、屏幕显示和实际响铃分别核验"
+        ]),
         ChangelogEntry(version: "0.65.14", date: "2026-10", changes: [
             "收到的请求会先检查完整一页，再接手；格式有误时保留诊断，不执行该页",
             "一条已确认请求接手失败或结果上传失败，不再阻挡其他独立请求；每条结果仍分别核对",

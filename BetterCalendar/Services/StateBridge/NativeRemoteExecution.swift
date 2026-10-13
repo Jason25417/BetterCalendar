@@ -327,6 +327,13 @@ nonisolated enum NativeRemoteJSON {
         let claim = try await service.nativeRequest("native/claim", body: identity(attempt))
         try validate(claim, deviceId: deviceId)
         let c = try NativeRemoteJSON.object(claim)
+        // Even a terminal response must belong to this exact persisted attempt;
+        // an unrelated historical result cannot close our pending operation.
+        guard try NativeRemoteJSON.string(c["commandId"]) == attempt.commandId,
+              try NativeRemoteJSON.string(c["requestHash"]) == attempt.requestHash,
+              try NativeRemoteJSON.string(c["attemptId"]) == attempt.attemptId else {
+            throw DataArchiveError.invalid("接手回执与本机原执行身份不一致，保留请求，未标记完成")
+        }
         if ["applied", "failed", "unknown"].contains(try NativeRemoteJSON.string(c["state"])) {
             guard let receipt = c["result"], receipt != .null else { throw URLError(.cannotParseResponse) }
             attempt.phase = "reported"; attempt.outcome = try NativeRemoteJSON.string(c["state"]); attempt.receipt = receipt; try update(attempt); return
@@ -420,9 +427,15 @@ nonisolated enum NativeRemoteJSON {
         guard case var .object(body) = identity(attempt), let outcome = attempt.outcome, let receipt = attempt.receipt else { throw URLError(.cannotParseResponse) }
         body["outcome"] = .string(outcome); body["receipt"] = receipt
         let result = try NativeRemoteJSON.object(await service.nativeRequest("native/receipt", body: .object(body)))
+        let original = try NativeRemoteJSON.object(attempt.envelope)
+        try validate(.object(result), deviceId: NativeRemoteJSON.string(original["deviceId"]))
         guard try NativeRemoteJSON.string(result["commandId"]) == attempt.commandId,
               try NativeRemoteJSON.string(result["state"]) == outcome,
-              try NativeRemoteJSON.string(result["requestHash"]) == attempt.requestHash else { throw URLError(.cannotParseResponse) }
+              try NativeRemoteJSON.string(result["requestHash"]) == attempt.requestHash,
+              try NativeRemoteJSON.string(result["attemptId"]) == attempt.attemptId,
+              result["result"] == receipt else {
+            throw DataArchiveError.invalid("服务回执与本机保存的完整结果不一致，保留原身份重试，未标记已回传")
+        }
         var saved = attempt; saved.phase = "reported"; saved.updatedAt = now(); try update(saved)
         let isRead = (try? NativeRemoteJSON.object(attempt.envelope)["permission"]) == .string("journal.read")
         message = outcome == "applied" ? (isRead ? "日记读取结果已回传；是否读完以分页信息为准" : "设备执行结果已回传；其他设备同步仍需核对") : "结果已回传：" + outcome + "；请查看原请求"
