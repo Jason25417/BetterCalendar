@@ -18,6 +18,9 @@ struct LiveActivitySnapshot {
     var phaseIsRest: Bool
     /// true when this phone is presenting another device's run rather than owning it.
     var isRemote: Bool = false
+    /// System marks the presentation out of date even while this app is
+    /// suspended. This never pauses or ends the underlying timer.
+    var staleAt: Date? = nil
 }
 
 enum LiveActivityMode { case light, pomodoro }

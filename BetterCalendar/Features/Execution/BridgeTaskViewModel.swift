@@ -29,7 +29,14 @@ import Observation
     var pendingCount: Int { file.pending.filter { !$0.needsReview }.count }
     var reviewCount: Int { file.pending.filter(\.needsReview).count }
     var canSubmit: Bool { isEnabled && healthy && file.state != nil && !busy && pendingCount == 0 && file.pending.count < 100 }
-    var isStale: Bool { file.receivedAt.map { let age = now().timeIntervalSince($0); return age > 60 || age < -5 } ?? true }
+    var isStale: Bool { file.receivedAt.map { let age = now().timeIntervalSince($0); return age >= 60 || age < -5 } ?? true }
+    /// Local receipt time, not projection/update time. Failed refreshes must
+    /// not keep an old lock-screen state looking current indefinitely.
+    var presentationValidUntil: Date {
+        guard healthy, !hasMore, let receivedAt = file.receivedAt,
+              now().timeIntervalSince(receivedAt) >= -5 else { return now() }
+        return receivedAt.addingTimeInterval(60)
+    }
     var hasMore: Bool { file.state?.hasMore ?? false }
     var lastReadReceivedAt: Date? { file.receivedAt }
     func estimatedServerDate(at localDate: Date? = nil) -> Date {

@@ -13,8 +13,10 @@ import SwiftData
         var applicationSnapshot: BridgeTaskState.ApplicationSnapshot?
         var applicationRequests: [[String]] = []
         var loseApplicationReply = false
+        var failRead = false
         func readTasks() async throws -> BridgeTaskState {
-            BridgeTaskState(schemaVersion: 1, authority: "bettercalendar", readAt: clock, sessions: sessions, hasMore: false, applicationSnapshot: applicationSnapshot)
+            if failRead { throw URLError(.notConnectedToInternet) }
+            return BridgeTaskState(schemaVersion: 1, authority: "bettercalendar", readAt: clock, sessions: sessions, hasMore: false, applicationSnapshot: applicationSnapshot)
         }
         func reportSavedTaskSnapshots(_ ids: [String]) async throws -> Set<String> {
             applicationRequests.append(ids)
@@ -157,6 +159,7 @@ import SwiftData
         await execution.startAdHoc(title: "同一份计时")
         #expect(execution.active == nil && tasks.sessions.count == 1)
         #expect(activity.snapshot?.title == "同一份计时")
+        #expect(activity.snapshot?.staleAt == tasks.presentationValidUntil)
         await execution.toggleBreak()
         #expect(tasks.sessions[0].status == .paused && activity.snapshot?.pausedAt != nil)
         await execution.completeCurrent()
@@ -164,6 +167,37 @@ import SwiftData
         #expect(try container.mainContext.fetchCount(FetchDescriptor<ExecutionSession>()) == 0)
         #expect(try plans.actualBlocks(on: Date()).isEmpty)
         #expect(service.requests.map(\.action) == [.start, .pause, .finish])
+    }
+
+    @Test func failedRefreshAndRestartKeepOriginalPresentationExpiryWithoutPausingTimer() async throws {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        service.sessions = [.init(id: "fixture", title: "ISOLATED FIXTURE", status: .running, startedAt: at,
+                                 activeSince: at, elapsedMs: 10000, updatedAt: at, revision: 1, provenance: "user")]
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await model.refresh(allowCommands: false)
+        #expect(model.presentationValidUntil == at.addingTimeInterval(60) && !model.isStale)
+        service.clock = at.addingTimeInterval(60); service.failRead = true
+        await model.refresh(allowCommands: false)
+        #expect(model.isStale && model.presentationValidUntil == at.addingTimeInterval(60))
+        #expect(model.sessions[0].status == .running && model.elapsed(model.sessions[0]) == 70)
+        let restarted = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await restarted.refresh(allowCommands: false)
+        #expect(restarted.isStale && restarted.presentationValidUntil == at.addingTimeInterval(60))
+        #expect(service.requests.isEmpty && disk.file.pending.isEmpty)
+        service.clock = at.addingTimeInterval(65); service.failRead = false
+        service.sessions[0].status = .paused; service.sessions[0].revision = 2; service.sessions[0].elapsedMs = 70000
+        await restarted.refresh(allowCommands: false)
+        #expect(!restarted.isStale && restarted.presentationValidUntil == at.addingTimeInterval(125))
+        #expect(restarted.sessions[0].status == .paused && service.requests.isEmpty)
+    }
+    @Test func futureCachedClockCannotClaimFreshPresentationUntilNewRead() async {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await model.refresh(allowCommands: false)
+        let backwardsClock = at.addingTimeInterval(-120)
+        let restarted = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { backwardsClock })
+        #expect(restarted.isStale && restarted.presentationValidUntil == backwardsClock)
+        #expect(service.requests.isEmpty)
     }
 
     @Test func confirmedVersionReportsNewerCacheAndFinishedVersionsWithoutChangingTasks() async throws {

@@ -41,7 +41,7 @@ final class ActivityKitLiveActivity: ExecutionLiveActivity {
         do {
             activity = try Activity.request(
                 attributes: ExecutionActivityAttributes(),
-                content: .init(state: Self.state(from: snapshot), staleDate: nil))
+                content: .init(state: Self.state(from: snapshot), staleDate: snapshot.staleAt))
             DevLog.shared.info("LiveActivity", "开始：\(snapshot.title)\(snapshot.isRemote ? "（同步计时）" : "")")
         } catch {
             DevLog.shared.warn("LiveActivity", "开始失败：\(error.localizedDescription)")
@@ -53,7 +53,7 @@ final class ActivityKitLiveActivity: ExecutionLiveActivity {
             start(snapshot)
             return
         }
-        let content = ActivityContent(state: Self.state(from: snapshot), staleDate: nil)
+        let content = ActivityContent(state: Self.state(from: snapshot), staleDate: snapshot.staleAt)
         Task { await activity.update(content) }
     }
 

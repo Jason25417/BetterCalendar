@@ -42,7 +42,8 @@ final class FollowRunState {
         var liveActivitySnapshot: LiveActivitySnapshot {
             .init(title: title, timerStart: startedAt, pausedAt: pausedAt,
                   // 协议尚未同步番茄段终点，先展示准确的已用时间。
-                  mode: .light, phaseEndsAt: nil, phaseIsRest: isRest, isRemote: true)
+                  mode: .light, phaseEndsAt: nil, phaseIsRest: isRest, isRemote: true,
+                  staleAt: updatedAt.addingTimeInterval(FocusSyncPolicy.staleAfter))
         }
     }
 

@@ -319,7 +319,8 @@ final class ExecutionViewModel {
         let snapshot = LiveActivitySnapshot(title: tasks.isStale ? "待同步 · " + session.title : session.title,
                                             timerStart: now.addingTimeInterval(-elapsed),
                                             pausedAt: session.status == .paused ? now : nil,
-                                            mode: .light, phaseEndsAt: nil, phaseIsRest: false, isRemote: true)
+                                            mode: .light, phaseEndsAt: nil, phaseIsRest: false, isRemote: true,
+                                            staleAt: tasks.presentationValidUntil)
         if presentingCanonicalActivity && canonicalActivityID == session.id { liveActivity.update(snapshot) }
         else { if presentingCanonicalActivity { liveActivity.end() }; liveActivity.start(snapshot) }
         presentingCanonicalActivity = true; canonicalActivityID = session.id

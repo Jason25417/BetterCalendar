@@ -91,6 +91,7 @@ import Testing
         #expect(snapshot.timerStart == t)
         #expect(snapshot.isRemote)
         #expect(snapshot.mode == .light)
+        #expect(snapshot.staleAt == t.addingTimeInterval(FocusSyncPolicy.staleAfter))
 
         var next = first
         next.seq = 11

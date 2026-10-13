@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T12:34:54.012853+00:00",
+  "baseCommit": "dc9ace7a00a5f1fa9da26fea355a758217fd1901",
+  "build": 170,
+  "appVersion": "0.65.13",
+  "checks": {
+    "timingAndFollow": {
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0
+    },
+    "macUnit": {
+      "passed": 320,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/private/tmp/bc-native-169/Logs/Test/Test-BetterCalendar-2026.10.13_08-32-18--0400.xcresult"
+    },
+    "iosSimulator": "BUILD_SUCCEEDED",
+    "uiTests": "not_verified_existing_runner_load_failure"
+  },
+  "implementation": {
+    "canonicalExpiry": "last local successful read + 60 seconds; failed refresh does not extend",
+    "followExpiry": "existing source updatedAt + 720 seconds",
+    "staleProjection": "keeps last running or paused timer; no mutation or notification",
+    "activityAttributesChanged": false,
+    "cloudKitModelsChanged": false,
+    "automaticTimerWrites": false,
+    "newService": false
+  },
+  "unverified": [
+    "real lock screen stale/refresh rendering while suspended",
+    "device native permission setup",
+    "actual Dots confirmation callback",
+    "actual requested timer/item/journal/alarm operation",
+    "real dual-device display delay",
+    "AlarmKit ring/cancel"
+  ],
+  "goal": "active"
+}

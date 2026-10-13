@@ -15,7 +15,7 @@ struct BetterCalendarWidgetsLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: ExecutionActivityAttributes.self) { context in
             // 锁屏 / 通知中心卡片
-            LockScreenView(state: context.state)
+            LockScreenView(state: context.state, isStale: context.isStale)
                 .padding(16)
                 .activityBackgroundTint(Color.black.opacity(0.35))
                 .activitySystemActionForegroundColor(.white)
@@ -23,7 +23,7 @@ struct BetterCalendarWidgetsLiveActivity: Widget {
             let s = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: iconName(s))
+                    Image(systemName: context.isStale ? "arrow.triangle.2.circlepath" : iconName(s))
                         .font(.title3)   // 字阶收敛（C）：title 档
                         .foregroundStyle(tintColor(s))
                 }
@@ -37,17 +37,19 @@ struct BetterCalendarWidgetsLiveActivity: Widget {
                     Text(s.title).font(.headline).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(statusLine(s))
+                    Text(statusLine(s, isStale: context.isStale))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } compactLeading: {
-                Image(systemName: iconName(s)).foregroundStyle(tintColor(s))
+                Image(systemName: context.isStale ? "arrow.triangle.2.circlepath" : iconName(s)).foregroundStyle(tintColor(s))
+                    .accessibilityLabel(statusLine(s, isStale: context.isStale))
             } compactTrailing: {
                 timerText(s).monospacedDigit()
                     .foregroundStyle(tintColor(s))
                     .frame(maxWidth: 60)
             } minimal: {
-                Image(systemName: iconName(s)).foregroundStyle(tintColor(s))
+                Image(systemName: context.isStale ? "arrow.triangle.2.circlepath" : iconName(s)).foregroundStyle(tintColor(s))
+                    .accessibilityLabel(statusLine(s, isStale: context.isStale))
             }
             .keylineTint(tintColor(s))
         }
@@ -58,15 +60,16 @@ struct BetterCalendarWidgetsLiveActivity: Widget {
 
 private struct LockScreenView: View {
     let state: ExecutionActivityAttributes.ContentState
+    var isStale = false
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: iconName(state))
+            Image(systemName: isStale ? "arrow.triangle.2.circlepath" : iconName(state))
                 .font(.title3)   // 字阶收敛（C）：title 档
                 .foregroundStyle(tintColor(state))
                 .frame(width: 34)
             VStack(alignment: .leading, spacing: 2) {
                 Text(state.title).font(.headline).lineLimit(1)
-                Text(statusLine(state)).font(.caption).foregroundStyle(.secondary)
+                Text(statusLine(state, isStale: isStale)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             timerText(state)
@@ -116,7 +119,8 @@ private func tintColor(_ s: ExecutionActivityAttributes.ContentState) -> Color {
     return theme.actualTint
 }
 
-private func statusLine(_ s: ExecutionActivityAttributes.ContentState) -> String {
+private func statusLine(_ s: ExecutionActivityAttributes.ContentState, isStale: Bool = false) -> String {
+    if isStale { return s.pausedAt != nil ? "状态待更新 · 上次已暂停" : "状态待更新 · 按上次状态计时" }
     let status: String
     if s.pausedAt != nil { status = "已暂停" }
     else if s.mode == .pomodoro { status = s.phaseIsRest ? "番茄钟 · 休息" : "番茄钟 · 专注" }
