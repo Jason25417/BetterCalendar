@@ -22,6 +22,21 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       return json(await core.research.invoke(path,body,`device:${device.id}`,()=>path==="pool/upload"?core.uploadPool(body,device):path==="ingest"?core.ingest(body,device):core.flush()));
     }
+    if(path.startsWith("native/")){
+      const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
+      // Confirmation never accepts a device route or a model's userConfirmed flag.
+      const operation=()=>{
+        switch(path){
+          case "native/grant/read":return core.nativeCommands.readGrant(device);
+          case "native/grant":return core.nativeCommands.setGrant(body,device);
+          case "native/pending":return core.nativeCommands.pending(body,device);
+          case "native/claim":return core.nativeCommands.claim(body,device);
+          case "native/receipt":return core.nativeCommands.receipt(body,device);
+          default:throw new BridgeError("未知原生设备接口",404);
+        }
+      };
+      return json(await core.research.invoke(path,body,`device:${device.id}`,operation));
+    }
     if(path.startsWith("research/")){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人研究读取权限",403);

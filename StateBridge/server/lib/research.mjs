@@ -2,7 +2,7 @@ import { BridgeError, canonical, sha } from './bridge.mjs';
 
 // No tool bodies, credentials, callback URLs or private model reasoning here.
 // The local recorder resolves references to the existing authoritative records.
-const argumentKeys = ['afterId','limit','throughId','batchId','includeValues','sourceKeys','sourceKey','from','before','cursor','deviceId','zone','status','includeTrash','commandId','action','sessionId','expectedRevision','occurredAt','provenance','relatedRecordId','id','kind','assertion','confidence','basis','expiresAt','supersedes'];
+const argumentKeys = ['afterId','limit','throughId','batchId','includeValues','sourceKeys','sourceKey','from','before','cursor','deviceId','zone','status','includeTrash','commandId','action','sessionId','expectedRevision','occurredAt','attemptId','requestHash','outcome','grantRevision','provenance','relatedRecordId','id','kind','assertion','confidence','basis','expiresAt','supersedes'];
 export function safeArguments(args) {
   const clean=Object.fromEntries(argumentKeys.filter(k => args[k] !== undefined).map(k => [k,args[k]]));
   if(Array.isArray(args.observations))clean.observations=args.observations.map(o=>({eventId:o.eventId,source:o.source,sequence:o.sequence,observedAt:o.observedAt}));
@@ -16,7 +16,8 @@ function references(value) {
   return {
     observationIds: [...new Set([...(value.sources ?? []).map(s=>s.eventId), ...(value.changes ?? []).map(c=>c.observation?.eventId), ...(value.observations ?? []).map(o=>o.eventId)].filter(Boolean))],
     changeIds: (value.changes ?? []).map(c=>c.id),
-    commandIds: [...new Set([value.commandId,...(value.commands ?? []).map(c=>c.commandId)].filter(Boolean))],
+    nativeCommandIds: [...new Set([value.nativeCommandId,...(value.commands ?? []).map(c=>c.nativeCommandId)].filter(Boolean))],
+    commandIds: [...new Set([value.nativeCommandId ? null : value.commandId,...(value.commands ?? []).filter(c=>!c.nativeCommandId).map(c=>c.commandId)].filter(Boolean))],
     ingestion: {accepted:value.accepted ?? null,ignored:value.ignored ?? null,receivedAt:value.receivedAt ?? null},
     delivery: {batchId:value.batchId ?? null,delivered:value.delivered ?? null,decision:value.decision ?? null},
     sessionVersions: [...(value.sessions ?? []),...(value.id && value.revision ? [value] : [])].map(s=>({id:s.id,revision:s.revision})),
@@ -84,8 +85,8 @@ export function createResearch(db,time) {
     return {readAt:time(),entries,nextCursor:entries.at(-1)?.minute ?? after,throughMinute:upper,hasMore:rows.length>entries.length};
   }
   async function evidence(input={}) {
-    input={eventIds:[],commandIds:[],noteIds:[],...input};
-    for(const key of ['eventIds','commandIds','noteIds'])if(!Array.isArray(input[key])||input[key].length>20||input[key].some(id=>typeof id!=='string'||id.length>150))throw new BridgeError('原文身份无效');
+    input={eventIds:[],commandIds:[],noteIds:[],nativeCommandIds:[],...input};
+    for(const key of ['eventIds','commandIds','noteIds','nativeCommandIds'])if(!Array.isArray(input[key])||input[key].length>20||input[key].some(id=>typeof id!=='string'||id.length>150))throw new BridgeError('原文身份无效');
     const observations=[],missing=[];let bytes=1024;
     for(const id of input.eventIds) {
       const row=await one('SELECT body FROM observations WHERE id=?',id);
@@ -94,11 +95,15 @@ export function createResearch(db,time) {
       observations.push(JSON.parse(row.body));bytes+=new TextEncoder().encode(row.body).length;
     }
     const read=observations.length+missing.length;
-    const commands=[],notes=[];
+    const commands=[],notes=[],nativeCommands=[];
     for(const id of input.commandIds){const r=await one('SELECT id,session_id,result,created_at FROM commands WHERE id=?',id);if(r)commands.push({commandId:r.id,sessionId:r.session_id,receivedAt:r.created_at,result:JSON.parse(r.result)});else missing.push(`command:${id}`);}
     for(const id of input.noteIds){const r=await one('SELECT id,body,assertion,confidence,basis,created_at,expires_at,supersedes FROM notes WHERE id=?',id);if(r)notes.push({...r,body:JSON.parse(r.body),basis:JSON.parse(r.basis)});else missing.push(`note:${id}`);}
-    if(new TextEncoder().encode(JSON.stringify({commands,notes})).length+bytes>240*1024)throw new BridgeError('原文回执过大，请分别按单条读取',413);
-    return {readAt:time(),observations,commands,notes,missing,remainingEventIds:input.eventIds.slice(read),hasMore:read<input.eventIds.length};
+    for(const id of input.nativeCommandIds){
+      const r=await one('SELECT command_id,device_id,request_hash,body,permission,grant_revision,state,accepted_at,expires_at,approved_at,attempt_id,claimed_at,result_hash,result,result_at FROM native_requests WHERE command_id=?',id);
+      if(r)nativeCommands.push({...r,body:JSON.parse(r.body),result:r.result?JSON.parse(r.result):null});else missing.push(`native:${id}`);
+    }
+    if(new TextEncoder().encode(JSON.stringify({commands,notes,nativeCommands})).length+bytes>240*1024)throw new BridgeError('原文回执过大，请分别按单条读取',413);
+    return {readAt:time(),observations,commands,notes,nativeCommands,missing,remainingEventIds:input.eventIds.slice(read),hasMore:read<input.eventIds.length};
   }
   async function complete(input,actor) {
     const {batchId,resultId,readCallIds,conclusions=[],notification,operation,attention={},supersedes=null}=input;

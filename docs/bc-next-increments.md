@@ -52,3 +52,5 @@ stop保存STOP并在下一轮检查后退出，disable撤销登录启动并停�
 当前来源缺口有具体证据：iPhone App/Focus尚未收到，家居home.status报告notification-unavailable；手机最后心跳02:14:32Z，不能称实时。健康和日历有各自时效，不与过期心跳混为一谈。Mac文件partial和浏览器empty分别保留。HomeKit读回调忽略错误、可能把旧缓存值标为新的观测时间，已定位，但Jason在下一轮明确取消该Aqara来源修复；不继续施工，也不称已修。165未包含此修复。原生闹钟适配、事项统一live入口、连接器调用自动留存与实际provider费用仍待开发，真实对照输出与有用性评价待实证，现阶段无需用户拍板。
 
 2026-10-12 后续范围已更新：Aqara/HomeKit修复取消；原生一次闹钟与统一原生事项写入已实现，详见[bc-native-actions-166.md](bc-native-actions-166.md)。Dots远程执行与自动策略尚未接通，不把原生入口误称完整MCP闭环。
+
+2026-10-13 对话执行增量：用户选择Dots内具体按钮确认。后端固定设备队列、独立批准凭据、本机授权与执行日志已实现；详见[bc-dots-native-167.md](bc-dots-native-167.md)。日记单独定范围，未擅自开放；完整目标仍active。

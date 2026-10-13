@@ -132,6 +132,12 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         guard (200..<300).contains(http.statusCode) else { throw NSError(domain:"StateBridge.HTTP",code:http.statusCode) }
         return (try JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
     }
+    var nativeDeviceId: String? { credentials?.deviceId }
+    func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        guard path.hasPrefix("native/") else { throw URLError(.unsupportedURL) }
+        let result = try await post(path, body: BridgePoolCodec.encode(body))
+        return try JSONDecoder().decode(BridgeJSON.self, from: JSONSerialization.data(withJSONObject: result))
+    }
     func readTasks() async throws -> BridgeTaskState {
         let result = try await post("tasks/state",body:Data("{}".utf8))
         return try BridgeTaskCodec.networkDecoder().decode(BridgeTaskState.self,from:JSONSerialization.data(withJSONObject:result))
@@ -172,3 +178,5 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
 }
 
 extension StateBridgeClient: BridgeTaskServing {}
+
+extension StateBridgeClient: NativeRemoteServing {}

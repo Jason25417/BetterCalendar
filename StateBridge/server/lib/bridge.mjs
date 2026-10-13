@@ -5,6 +5,7 @@ import { createObservationHistory } from "./observation-history.mjs";
 import { createTaskHistory } from "./task-history.mjs";
 import { createPoolRecords } from "./pool-records.mjs";
 import { createResearch } from "./research.mjs";
+import { createNativeCommands } from "./native-commands.mjs";
 import { createTaskApplication } from "./task-application.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
@@ -50,6 +51,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   const research=createResearch(db,time);
   const taskApplication=createTaskApplication(db,time);
+  const nativeCommands=createNativeCommands(db,time);
   async function registerDevice(v){
     const id=str(v.id,"设备 ID",80),label=str(v.label,"设备名",100);
     if(!Array.isArray(v.scopes)||!v.scopes.length||v.scopes.some(s=>typeof s!=="string"||!/^[a-z][a-z0-9_.-]{1,60}$/.test(s)))throw new BridgeError("来源范围无效");
@@ -249,6 +251,6 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   const recordContext=(input,actor)=>input.kind==='bc.research.batch_result'
     ? research.complete({...input.body,resultId:input.body?.resultId ?? input.id},actor)
     : recordNote(input);
-  return {research,taskApplication,recordContext,registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  return {research,taskApplication,nativeCommands,recordContext,registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }

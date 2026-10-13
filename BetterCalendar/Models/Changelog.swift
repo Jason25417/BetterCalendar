@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.10", date: "2026-10", changes: [
+            "新增 Dots 对话操作入口：本机主动启用事项或单次闹钟权限，再在对话里确认具体改动，交给指定设备执行",
+            "请求、执行身份和结果先保存在本机；断线、重复请求、重启和撤权会核对原请求，不盲目重复写入",
+            "权限撤回立即在本机生效；iPhone 需 BC 运行时接收，Dots 确认卡片及真实执行仍需内测核验",
+        ]),
         ChangelogEntry(version: "0.65.9", date: "2026-10", changes: [
             "设置里增加一次原生闹钟：iPhone 主动授权后设置和取消，读回系统排程核验；Mac 不用普通通知冒充闹钟",
             "事项原生入口可收进待办、改标题备注与状态、移到回收站或恢复；统一核对事项版本并保存原请求与回执，直接改数据也会检测冲突",

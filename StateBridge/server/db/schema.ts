@@ -10,3 +10,16 @@ export const sessions = sqliteTable("sessions", { id:text("id").primaryKey(),tit
 export const commands = sqliteTable("commands", { id:text("id").primaryKey(),requestHash:text("request_hash").notNull(),sessionId:text("session_id").notNull(),result:text("result").notNull(),createdAt:text("created_at").notNull() });
 export const notes = sqliteTable("notes", { id:text("id").primaryKey(),kind:text("kind").notNull(),body:text("body").notNull(),assertion:text("assertion").notNull(),confidence:text("confidence").notNull(),basis:text("basis").notNull(),createdAt:text("created_at").notNull(),expiresAt:text("expires_at"),supersedes:text("supersedes") });
 export const researchLog = sqliteTable("research_log", { id:integer("id").primaryKey({autoIncrement:true}),callId:text("call_id").notNull().unique(),kind:text("kind").notNull(),batchId:text("batch_id"),actor:text("actor"),createdAt:text("created_at").notNull(),body:text("body").notNull() },t=>[index("idx_research_batch").on(t.batchId,t.id)]);
+
+export const nativeGrants = sqliteTable("native_grants", {
+  deviceId:text("device_id").primaryKey(), revision:integer("revision").notNull(),
+  body:text("body").notNull(), updatedAt:text("updated_at").notNull(), expiresAt:text("expires_at").notNull()
+});
+export const nativeRequests = sqliteTable("native_requests", {
+  commandId:text("command_id").primaryKey(), deviceId:text("device_id").notNull(),
+  ownerId:text("owner_id").notNull(), requestHash:text("request_hash").notNull(), body:text("body").notNull(),
+  permission:text("permission").notNull(), grantRevision:integer("grant_revision").notNull(),
+  state:text("state").notNull(), acceptedAt:text("accepted_at").notNull(), expiresAt:text("expires_at").notNull(),
+  approvalHash:text("approval_hash"), approvedAt:text("approved_at"), attemptId:text("attempt_id"),
+  claimedAt:text("claimed_at"), resultHash:text("result_hash"), result:text("result"), resultAt:text("result_at")
+}, t=>[index("idx_native_target_state").on(t.deviceId,t.state,t.acceptedAt,t.commandId)]);

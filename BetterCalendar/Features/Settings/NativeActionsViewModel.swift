@@ -4,6 +4,7 @@ import Observation
 @MainActor @Observable final class NativeActionsViewModel {
     let writer: any NativeItemWriting
     let alarms: any NativeAlarmScheduling
+    let remote: NativeRemoteExecutor?
     var records: [NativePoolRecord] = []
     var selected: UUID?
     var title = ""
@@ -18,7 +19,8 @@ import Observation
     var capability: NativeAlarmCapability
     var message: String?
     var working = false
-    init(writer: any NativeItemWriting, alarms: any NativeAlarmScheduling) {
+    init(writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, remote: NativeRemoteExecutor? = nil) {
+        self.remote = remote
         self.writer = writer; self.alarms = alarms; self.capability = alarms.inspect()
     }
     func refresh() {

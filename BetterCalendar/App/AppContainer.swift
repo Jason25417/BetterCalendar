@@ -99,7 +99,11 @@ final class AppContainer {
         #else
         nativeAlarms = UnsupportedNativeAlarms()
         #endif
-        self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms)
+        let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
+                                          persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
+                                          writer: nativeItems, alarms: nativeAlarms)
+        self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote)
+        remote.startPolling()
         if !TestHost.isActive {
             StateBridgeCollector.shared.installPoolReader(SwiftDataBridgePoolReader(context: SharedModelContainer.shared.mainContext))
         }

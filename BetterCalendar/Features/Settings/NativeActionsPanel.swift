@@ -5,6 +5,7 @@ struct NativeActionsPanel: View {
     @State private var deleteConfirmation = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let remote = model.remote { NativeRemotePanel(model: remote) }
             DisclosureGroup("事项写入（内测）") {
                 Picker("事项", selection: Binding(get: { model.selected }, set: { model.select($0) })) {
                     Text("新待办").tag(Optional<UUID>.none)
@@ -87,3 +88,33 @@ struct NativeActionsPanel: View {
     }
 }
 
+
+private struct NativeRemotePanel: View {
+    @Bindable var model: NativeRemoteExecutor
+    @State private var items = false
+    @State private var alarms = false
+    @State private var working = false
+    var body: some View {
+        DisclosureGroup("Dots 对话操作（内测）") {
+            Text("本机：" + (model.deviceId ?? "尚未连接")).font(.caption).textSelection(.enabled)
+            Toggle("允许对话确认后改动事项池", isOn: $items)
+            if model.alarmSupported { Toggle("允许对话确认后设置／取消单次闹钟", isOn: $alarms) }
+            Text("仅限你每次在对话里确认的具体改动，授权29天。长期事项不删除；没有自动提醒或应用屏蔽。iPhone需BC运行时接收请求，后台及时执行尚未保证。")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("保存本机权限") { save(items: items, alarms: alarms) }.disabled(working || model.deviceId == nil)
+                Button("撤回全部对话操作") { save(items: false, alarms: false) }.disabled(working || model.deviceId == nil)
+            }
+            Button("核对待执行请求") { Task { await model.poll() } }.disabled(working)
+            Text(model.message).font(.caption).textSelection(.enabled)
+            if let expires = model.expiresAt { Text("授权期限：" + expires.formatted()).font(.caption) }
+        }.task { model.refreshLocal(); items = model.allowItems; alarms = model.allowAlarms }
+    }
+    private func save(items: Bool, alarms: Bool) {
+        working = true
+        Task {
+            await model.setCapabilities(items: items, alarm: alarms)
+            self.items = model.allowItems; self.alarms = model.allowAlarms; working = false
+        }
+    }
+}

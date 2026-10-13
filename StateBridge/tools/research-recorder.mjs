@@ -115,7 +115,7 @@ export class Recorder {
             remaining=evidence.remainingEventIds;
           }
         }
-        for(const key of ['commandIds','noteIds'])for(const id of entry.body.references?.[key] ?? []){const {snapshot}=await this.call(client,'research/evidence',{[key]:[id]});localEvidence.push(snapshot);}
+        for(const key of ['commandIds','noteIds','nativeCommandIds'])for(const id of [...new Set([...(entry.body.references?.[key] ?? []),...(key==='nativeCommandIds'&&entry.body.nativeCommandId?[entry.body.nativeCommandId]:[])])]){const {snapshot}=await this.call(client,'research/evidence',{[key]:[id]});localEvidence.push(snapshot);}
         const body=encode(redact({...entry,localEvidence,logPageSnapshot},this.secrets));
         if(this.usage()+Buffer.byteLength(body)>this.config.maxBytes)throw Error('capacity_exceeded');
         this.db.exec('BEGIN IMMEDIATE');try{this.db.prepare('INSERT OR IGNORE INTO calls VALUES(?,?)').run(entry.id,body);this.set('logCursor',entry.id);this.db.exec('COMMIT');}catch(e){this.db.exec('ROLLBACK');throw e;}
