@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T13:03:30.298069+00:00",
+  "baseCommit": "5ee82be30dce0e092e7305577cc49ce73ab2caee",
+  "delivery": "source_increment_not_in_testflight_170",
+  "currentInstallable": {
+    "version": "0.65.13",
+    "build": 170
+  },
+  "checks": {
+    "macUnit": {
+      "passed": 331,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/private/tmp/bc-native-169/Logs/Test/Test-BetterCalendar-2026.10.13_09-00-14--0400.xcresult"
+    },
+    "iosSimulator": {
+      "result": "BUILD_SUCCEEDED",
+      "log": "/private/tmp/bc-queue-ios-release-gate.log"
+    },
+    "newBoundaryTests": 11,
+    "initialMethodFilter": "zero_tests_excluded_from_evidence",
+    "uiTests": "not_verified"
+  },
+  "boundaries": {
+    "wholePagePreflightBeforeClaim": true,
+    "independentRequestFailures": true,
+    "failureMustPersistBeforeContinuing": true,
+    "diagnosticCredentialsRedactedBeforeSaving": true,
+    "boundedScanResumesAfterRestart": true,
+    "rangeReadCompleteIsNotExecutionComplete": true,
+    "nativeTitleLimitUTF16": 500,
+    "cloudKitModelsChanged": false,
+    "newService": false,
+    "realUserOperationsCreated": false,
+    "automaticTimerMutation": false
+  },
+  "actualReadOnlySample": {
+    "tool": "read_native_capabilities",
+    "readAt": "2026-10-13T12:45:15.976Z",
+    "devices": [],
+    "callId": "research_a81886a2-1e50-46c3-a6d3-f345266d3b04",
+    "responseHash": "66f62d7240da5ee0e98aedeab47912a5e2afa4e03a9f43ae7bd95f25ae1b78e2",
+    "recorded": true,
+    "isActualDeviceExecution": false
+  },
+  "unverified": [
+    "native human grants",
+    "actual Dots confirmation callback",
+    "genuine requested device operation",
+    "dual-device and lock-screen presentation",
+    "AlarmKit ring/cancel",
+    "native file-picker save/cancel",
+    "complete external connector raw calls and provider cost"
+  ],
+  "goal": "active"
+}

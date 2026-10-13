@@ -129,7 +129,7 @@ nonisolated struct NativePoolRecord: Identifiable {
         } else {
             guard !task.isInTrash else { throw DataArchiveError.invalid("请先恢复事项再修改") }
             if let value = command.patch["title"] {
-                guard case let .string(title) = value, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.count <= 300 else { throw DataArchiveError.invalid("标题无效") }
+                guard case let .string(title) = value, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.utf16.count <= 500 else { throw DataArchiveError.invalid("标题无效") }
                 task.title = title
             }
             if let value = command.patch["note"] {

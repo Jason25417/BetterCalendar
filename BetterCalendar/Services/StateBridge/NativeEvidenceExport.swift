@@ -16,6 +16,17 @@ nonisolated enum NativeEvidenceExport {
         ("task-commands-v1.json", 4 * 1024 * 1024)
     ]
 
+    /// Use the same credential exclusion before saving diagnostic responses,
+    /// not just when exporting. Hash describes canonical input, not HTTP bytes.
+    static func sanitized(_ value: BridgeJSON) throws -> (value: BridgeJSON, canonicalHash: String, redactions: Int) {
+        let bytes = try BridgePoolCodec.encode(value)
+        let original = try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed])
+        var count = 0
+        let safe = try redact(original, depth: 0, count: &count)
+        let encoded = try JSONSerialization.data(withJSONObject: safe, options: [.sortedKeys, .fragmentsAllowed])
+        return (try JSONDecoder().decode(BridgeJSON.self, from: encoded), BridgePoolCodec.hash(bytes), count)
+    }
+
     static func capture(root: URL, at: Date = Date(), byteLimit: Int? = nil) throws -> NativeEvidenceCapture {
         var entries: [[String: Any]] = [], included = 0, unavailable = 0
         for (name, normalLimit) in sources {

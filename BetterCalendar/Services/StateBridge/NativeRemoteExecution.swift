@@ -25,18 +25,45 @@ nonisolated struct NativeRemoteFailure: Codable {
     var at: Date
     var commandId: String?
     var error: String
+    var response: BridgeJSON? = nil
+    var responseCanonicalHash: String? = nil
+    var responseRedactions: Int? = nil
+}
+nonisolated struct NativeRemoteScan: Codable {
+    var deviceId: String
+    var after: String
+    var through: String
+}
+nonisolated struct NativeRemotePoll: Codable {
+    var startedAt: Date
+    var finishedAt: Date
+    var deviceId: String
+    var pagesRead: Int
+    var offeredRequests: Int
+    var through: String
+    var nextCursor: String
+    var rangeReadComplete: Bool
+    var requestErrors: Int
 }
 nonisolated struct NativeRemoteFile: Codable {
     var version = 1
     var grant: NativeRemoteGrant?
     var requests: [NativeRemoteAttempt] = []
     var failures: [NativeRemoteFailure] = []
+    var pendingScan: NativeRemoteScan?
+    var lastPoll: NativeRemotePoll?
     func validate() throws {
         guard version == 1, failures.count <= 10000, requests.count <= 1000, Set(requests.map(\.commandId)).count == requests.count,
               requests.allSatisfy({ UUID(uuidString: $0.commandId) != nil && UUID(uuidString: $0.attemptId) != nil &&
                   $0.requestHash.count == 64 && ["prepared", "claimed", "result", "reported"].contains($0.phase) &&
                   (!["result", "reported"].contains($0.phase) || ($0.outcome != nil && $0.receipt != nil)) }) else {
             throw DataArchiveError.invalid("远程操作日志有损坏，保留原文件，未重放")
+        }
+        if let scan = pendingScan {
+            guard !scan.deviceId.isEmpty, UUID(uuidString: scan.after) != nil,
+                  UUID(uuidString: scan.through) != nil, scan.after <= scan.through else {
+                throw DataArchiveError.invalid("远程队列分页位置损坏，保留原文件，未继续执行")
+            }
         }
     }
 }
@@ -174,49 +201,108 @@ nonisolated enum NativeRemoteJSON {
     func poll() async {
         guard !polling, !granting, let deviceId else { return }
         polling = true; defer { polling = false }
+        var activeCommandId: String?
+        var offeredPage: BridgeJSON?
+        var failedIds = Set<String>()
+        let startedAt = now()
         do {
             let file = try persistence.load()
             // Retransmit saved outcomes even after local capability revocation.
-            for attempt in file.requests where attempt.phase == "result" { try await report(attempt) }
+            for attempt in file.requests where attempt.phase == "result" {
+                activeCommandId = attempt.commandId
+                do { try await report(attempt) }
+                catch {
+                    try recordFailure(error, commandId: attempt.commandId)
+                    failedIds.insert(attempt.commandId); fail(error)
+                }
+            }
+            activeCommandId = nil
             guard let grant = try persistence.load().grant, grant.synchronized, grant.deviceId == deviceId,
                   grant.expiresAt > now(), !grant.capabilities.isEmpty else { return }
-            var after = "", through: String? = nil
+            let scan = try persistence.load().pendingScan
+            var after = scan?.deviceId == deviceId ? scan!.after : ""
+            var through: String? = scan?.deviceId == deviceId ? scan!.through : nil
+            var pagesRead = 0, offeredRequests = 0
             for _ in 0..<20 {
                 var input: [String: BridgeJSON] = ["after": .string(after), "limit": .number(10)]
                 if let through { input["through"] = .string(through) }
-                let page = try NativeRemoteJSON.object(await service.nativeRequest("native/pending", body: .object(input)))
+                offeredPage = try await service.nativeRequest("native/pending", body: .object(input))
+                let page = try NativeRemoteJSON.object(offeredPage!)
                 guard case let .array(commands) = page["commands"], commands.count <= 10,
                       case let .bool(hasMore) = page["hasMore"] else { throw URLError(.cannotParseResponse) }
                 let next = try NativeRemoteJSON.string(page["nextCursor"]), upper = try NativeRemoteJSON.string(page["through"])
                 guard through == nil || through == upper, !hasMore || next > after else { throw URLError(.cannotParseResponse) }
                 // Validate the whole offered page before operating any member.
                 for command in commands { try validate(command, deviceId: deviceId) }
-                for command in commands { try await execute(command, deviceId: deviceId) }
+                let ids = try commands.map { try NativeRemoteJSON.string(NativeRemoteJSON.object($0)["commandId"]) }
+                guard Set(ids).count == ids.count, ids == ids.sorted(),
+                      ids.allSatisfy({ $0 > after && $0 <= upper }), next == (ids.last ?? after),
+                      !hasMore || !ids.isEmpty else { throw DataArchiveError.invalid("队列分页或同页请求身份不一致，未执行整页") }
+                for command in commands {
+                    let id = try NativeRemoteJSON.string(NativeRemoteJSON.object(command)["commandId"])
+                    guard !failedIds.contains(id) else { continue }
+                    activeCommandId = id
+                    do { try await execute(command, deviceId: deviceId) }
+                    catch {
+                        // Requests are independent, not an atomic multi-command
+                        // transaction. Persist this failure before continuing.
+                        try recordFailure(error, commandId: id)
+                        failedIds.insert(id); fail(error)
+                    }
+                    activeCommandId = nil
+                }
+                offeredPage = nil
+                pagesRead += 1; offeredRequests += commands.count
+                var progress = try persistence.load()
+                progress.pendingScan = hasMore ? .init(deviceId: deviceId, after: next, through: upper) : nil
+                progress.lastPoll = .init(startedAt: startedAt, finishedAt: now(), deviceId: deviceId,
+                    pagesRead: pagesRead, offeredRequests: offeredRequests, through: upper, nextCursor: next,
+                    rangeReadComplete: !hasMore, requestErrors: failedIds.count)
+                try persistence.save(progress)
                 if !hasMore { break }; after = next; through = upper
             }
-            lastFailure = nil
+            if failedIds.isEmpty { lastFailure = nil }
+            else { message = "有\(failedIds.count)条请求尚未完成，原请求和失败记录已保留；其他请求的结果单独回传" }
+            if try persistence.load().pendingScan != nil { message += "；本轮队列尚未读完，下次从已保存位置继续" }
         } catch {
             do {
-                var failed = try persistence.load()
-                let index = failed.requests.firstIndex { $0.phase != "reported" }
-                if let index { failed.requests[index].lastError = error.localizedDescription; failed.requests[index].updatedAt = now() }
-                failed.failures.append(.init(at: now(), commandId: index.map { failed.requests[$0].commandId }, error: error.localizedDescription))
-                try persistence.save(failed)
+                try recordFailure(error, commandId: activeCommandId, response: offeredPage)
             } catch { DevLog.shared.warn("对话操作日志", "失败记录无法保存；原日志保留，未标记完成") }
             fail(error)
         }
     }
+    private func recordFailure(_ error: Error, commandId: String?, response: BridgeJSON? = nil) throws {
+        let safeResponse = try response.map { try NativeEvidenceExport.sanitized($0) }
+        let safeError = try NativeRemoteJSON.string(NativeEvidenceExport.sanitized(.string(error.localizedDescription)).value)
+        var file = try persistence.load()
+        if let commandId, let index = file.requests.firstIndex(where: { $0.commandId == commandId }) {
+            file.requests[index].lastError = safeError; file.requests[index].updatedAt = now()
+        }
+        file.failures.append(.init(at: now(), commandId: commandId, error: safeError, response: safeResponse?.value,
+                                  responseCanonicalHash: safeResponse?.canonicalHash, responseRedactions: safeResponse?.redactions))
+        try persistence.save(file)
+    }
     private func validate(_ envelope: BridgeJSON, deviceId: String) throws {
         let v = try NativeRemoteJSON.object(envelope), r = try NativeRemoteJSON.object(v["request"] ?? .null)
         let id = try NativeRemoteJSON.string(v["commandId"]), hash = try NativeRemoteJSON.string(v["requestHash"])
-        guard try NativeRemoteJSON.string(v["deviceId"]) == deviceId, try NativeRemoteJSON.string(r["deviceId"]) == deviceId,
+        guard try NativeRemoteJSON.integer(v["version"]) == 1,
+              try NativeRemoteJSON.string(v["deviceId"]) == deviceId, try NativeRemoteJSON.string(r["deviceId"]) == deviceId,
               UUID(uuidString: id) != nil, try NativeRemoteJSON.string(r["commandId"]) == id,
               try NativeRemoteJSON.integer(r["version"]) == 1, hash.count == 64,
               BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r))) == hash else { throw DataArchiveError.invalid("请求原文、设备身份或哈希不一致，未执行整页") }
+        guard try NativeRemoteJSON.integer(v["grantRevision"]) >= 1,
+              ["queued", "dispatching", "applied", "failed", "unknown", "expired", "revoked"].contains(try NativeRemoteJSON.string(v["state"])) else {
+            throw DataArchiveError.invalid("请求状态或授权版本无效，未执行整页")
+        }
+        if let approved = v["approvedAt"], approved != .null { _ = try NativeRemoteJSON.date(approved) }
+        if let attempt = v["attemptId"], attempt != .null {
+            guard UUID(uuidString: try NativeRemoteJSON.string(attempt)) != nil else { throw DataArchiveError.invalid("请求执行身份无效，未执行整页") }
+        }
         let kind = try NativeRemoteJSON.string(r["kind"]), action = try NativeRemoteJSON.string(r["action"])
         guard kind == "item" && ["create", "update", "delete", "restore"].contains(action) || kind == "alarm" && ["schedule", "cancel"].contains(action) || kind == "journal" && ["read", "create", "update"].contains(action) || kind == "timer" && ["start", "pause", "resume", "finish"].contains(action),
               try NativeRemoteJSON.string(v["permission"]) == kind + "." + action else { throw URLError(.cannotParseResponse) }
         _ = try NativeRemoteJSON.date(r["occurredAt"]); _ = try NativeRemoteJSON.date(v["expiresAt"])
+        try NativeRemoteRequestValidation.validate(r, expiresAt: v["expiresAt"])
     }
     private func execute(_ envelope: BridgeJSON, deviceId: String) async throws {
         let v = try NativeRemoteJSON.object(envelope), id = try NativeRemoteJSON.string(v["commandId"])

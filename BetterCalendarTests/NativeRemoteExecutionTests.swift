@@ -56,6 +56,167 @@ import SwiftData
         var dispatched = try NativeRemoteJSON.object(good); dispatched["state"] = .string("dispatching"); service.envelope = .object(dispatched)
         await executor.poll(); #expect(service.claims.isEmpty && store.file.requests.isEmpty)
     }
+    @Test func entirePageChecksOperationFieldsBeforeAnyClaim() async throws {
+        let good = try envelope(), (service, store, writer, c) = try fixture(good)
+        var malformed = try NativeRemoteJSON.object(envelope())
+        var request = try NativeRemoteJSON.object(malformed["request"]!)
+        request["patch"] = .object(["title": .number(123)])
+        malformed["request"] = .object(request)
+        malformed["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))))
+        service.extra = .object(malformed)
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        #expect(service.claims.isEmpty && store.file.requests.isEmpty)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        #expect(store.file.failures.count == 1 && store.file.failures[0].commandId == nil)
+        #expect(store.file.failures[0].response != nil)
+    }
+    @Test func failedClaimDoesNotBlockAnotherConfirmedRequestOrMisattributeItsError() async throws {
+        let good = try envelope(), (service, store, writer, c) = try fixture(good)
+        let blockedId = try NativeRemoteJSON.string(NativeRemoteJSON.object(good)["commandId"])
+        let other = try envelope(); service.extra = other; service.claimFailureIds = [blockedId]
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll(); await executor.poll()
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 1)
+        #expect(service.receipts.count == 1)
+        #expect(store.file.failures.count == 2 && store.file.failures.allSatisfy { $0.commandId == blockedId })
+        let otherId = try NativeRemoteJSON.string(NativeRemoteJSON.object(other)["commandId"])
+        #expect(store.file.requests.first { $0.commandId == otherId }?.phase == "reported")
+        #expect(store.file.requests.first { $0.commandId == blockedId }?.phase == "prepared")
+    }
+    @Test func failureLogMustPersistBeforeAnotherRequestCanExecute() async throws {
+        let good = try envelope(commandId: "00000000-0000-4000-8000-000000000001"), (service, store, writer, c) = try fixture(good)
+        let blockedId = try NativeRemoteJSON.string(NativeRemoteJSON.object(good)["commandId"])
+        service.extra = try envelope(); service.claimFailureIds = [blockedId]; store.failAt = 3
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        #expect(service.claims.count == 1 && service.receipts.isEmpty)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        #expect(store.file.failures.first?.commandId == blockedId)
+    }
+    @Test func aSavedReceiptWithLostReportCannotBlockAnIndependentRequest() async throws {
+        let good = try envelope(), (service, store, writer, c) = try fixture(good)
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        service.loseReceiptResponse = true; await executor.poll()
+        let firstId = try NativeRemoteJSON.string(NativeRemoteJSON.object(good)["commandId"])
+        #expect(store.file.requests.first?.phase == "result")
+        service.receiptFailureIds = [firstId]; service.extra = try envelope()
+        await executor.poll()
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 2)
+        #expect(store.file.requests.first { $0.commandId == firstId }?.phase == "result")
+        #expect(store.file.requests.filter { $0.phase == "reported" }.count == 1)
+        #expect(store.file.failures.allSatisfy { $0.commandId == firstId })
+        #expect(service.claims.count == 2)
+    }
+    @Test func duplicateRequestIdentityInOnePageNeverClaimsEitherPayload() async throws {
+        let e = try envelope(), (service, store, writer, c) = try fixture(e); service.extra = e
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        #expect(service.claims.isEmpty && store.file.requests.isEmpty)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+    }
+    @Test func allKindsRejectMalformedFieldsBeforeAnEarlierItemIsWritten() async throws {
+        let patches: [(String, String, [String: BridgeJSON])] = [
+            ("item", "update", ["recordId": .string(UUID().uuidString), "expectedRevision": .string("fixture"), "patch": .object(["status": .string("unknown-status")])]),
+            ("alarm", "cancel", ["alarmId": .string("not-a-uuid")]),
+            ("alarm", "schedule", ["fireAt": NativeRemoteJSON.timestamp(at), "title": .number(1)]),
+            ("journal", "read", ["query": .object(["limit": .number(0)])]),
+            ("journal", "create", ["recordId": .string(UUID().uuidString), "entryDate": NativeRemoteJSON.timestamp(at), "patch": .object(["body": .number(1)])]),
+            ("timer", "pause", ["sessionId": .string("fixture"), "expectedRevision": .number(1.5)]),
+            ("timer", "start", ["title": .string("fixture"), "sessionId": .string("unexpected-widening")])
+        ]
+        for (kind, action, fields) in patches {
+            let good = try envelope(), (service, store, writer, c) = try fixture(good)
+            var e = try NativeRemoteJSON.object(envelope()), r = try NativeRemoteJSON.object(e["request"]!)
+            r.removeValue(forKey: "recordId"); r.removeValue(forKey: "patch")
+            r["kind"] = .string(kind); r["action"] = .string(action); r.merge(fields) { _, new in new }
+            e["request"] = .object(r); e["permission"] = .string(kind + "." + action)
+            e["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r))))
+            service.extra = .object(e)
+            let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+            await executor.poll()
+            #expect(service.claims.isEmpty && store.file.requests.isEmpty)
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        }
+    }
+    @Test func rejectedPageDiagnosticKeepsEvidenceButExcludesApprovalSecretsBeforeSaving() async throws {
+        let (service, store, writer, c) = try fixture(envelope())
+        var malformed = try NativeRemoteJSON.object(envelope()), request = try NativeRemoteJSON.object(malformed["request"]!)
+        request["patch"] = .object(["title": .number(123)])
+        malformed["request"] = .object(request)
+        malformed["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))))
+        malformed["_meta"] = .object(["approvalToken": .string("ISOLATED_APPROVAL_SECRET_123")]); service.extra = .object(malformed)
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        let failure = try #require(store.file.failures.first)
+        #expect(failure.response != nil && failure.responseCanonicalHash?.count == 64 && failure.responseRedactions == 1)
+        let text = String(decoding: try JSONEncoder().encode(store.file), as: UTF8.self)
+        #expect(!text.contains("ISOLATED_APPROVAL_SECRET_123") && text.contains("[redacted]"))
+        #expect(service.claims.isEmpty && store.file.requests.isEmpty)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+    }
+    @Test func malformedEnvelopeStateAndPermissionMetadataInvalidateTheWholePage() async throws {
+        for (key, value) in [("state", BridgeJSON.null), ("grantRevision", .number(0)), ("approvedAt", .string("invalid-time")), ("attemptId", .string("not-an-attempt"))] {
+            let (service, store, writer, c) = try fixture(envelope())
+            var malformed = try NativeRemoteJSON.object(envelope()); malformed[key] = value; service.extra = .object(malformed)
+            let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+            await executor.poll()
+            #expect(service.claims.isEmpty && store.file.requests.isEmpty)
+            #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        }
+    }
+    @Test func acceptedServerTitleLimitCanActuallyBeSavedNatively() async throws {
+        let (service, store, writer, c) = try fixture(envelope())
+        var e = try NativeRemoteJSON.object(service.envelope), r = try NativeRemoteJSON.object(e["request"]!)
+        let title = String(repeating: "中", count: 500)
+        r["patch"] = .object(["title": .string(title)]); e["request"] = .object(r)
+        e["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r)))); service.envelope = .object(e)
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        #expect(try c.mainContext.fetch(FetchDescriptor<LongTask>()).first?.title == title)
+        #expect(store.file.requests.first?.outcome == "applied")
+    }
+    @Test func boundedQueueScanResumesAfterRestartAndNeverClaimsWholeQueueCompleteEarly() async throws {
+        let base = try envelope(), (_, initial, writer, c) = try fixture(base)
+        let location = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("native-remote-v1.json")
+        defer { try? FileManager.default.removeItem(at: location.deletingLastPathComponent()) }
+        let disk = NativeRemoteFilePersistence(location: location); try disk.save(initial.file)
+        let commands = try (1...201).map { try envelope(commandId: String(format: "00000000-0000-4000-8000-%012d", $0)) }
+        let service = PagedRemoteService(commands: commands)
+        let first = NativeRemoteExecutor(service: service, persistence: disk, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await first.poll()
+        let partial = try disk.load()
+        #expect(partial.lastPoll?.rangeReadComplete == false && partial.lastPoll?.pagesRead == 20)
+        #expect(partial.lastPoll?.offeredRequests == 200 && partial.lastPoll?.requestErrors == 200)
+        #expect(partial.pendingScan?.after == "00000000-0000-4000-8000-000000000200")
+        let restarted = NativeRemoteExecutor(service: service, persistence: NativeRemoteFilePersistence(location: location), writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await restarted.poll()
+        let completed = try disk.load()
+        #expect(completed.pendingScan == nil && completed.lastPoll?.rangeReadComplete == true)
+        #expect(completed.lastPoll?.pagesRead == 1 && completed.lastPoll?.offeredRequests == 1)
+        #expect(service.claims.count == 201 && Set(service.claims).count == 201)
+        #expect(service.afterCursors[20] == "00000000-0000-4000-8000-000000000200")
+        #expect(completed.requests.allSatisfy { $0.phase == "prepared" } && completed.failures.count == 201)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+    }
+    @Test func legacyLogLoadsWithoutNewDiagnosticsAndInvalidCursorNeverStartsNetwork() async throws {
+        let (service, store, writer, c) = try fixture(envelope())
+        store.file.failures = [.init(at: at, commandId: nil, error: "historical fixture")]
+        let bytes = try JSONEncoder().encode(store.file)
+        let legacy = try JSONDecoder().decode(NativeRemoteFile.self, from: bytes)
+        #expect(legacy.pendingScan == nil && legacy.lastPoll == nil && legacy.failures[0].response == nil)
+        store.file.pendingScan = .init(deviceId: "fixture-device", after: "not-a-cursor", through: "also-invalid")
+        let validating = NativeRemoteFilePersistence(location: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("invalid.json"))
+        try FileManager.default.createDirectory(at: validating.location.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: validating.location.deletingLastPathComponent()) }
+        try JSONEncoder().encode(store.file).write(to: validating.location)
+        let original = try Data(contentsOf: validating.location)
+        let executor = NativeRemoteExecutor(service: service, persistence: validating, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        await executor.poll()
+        #expect(service.claims.isEmpty && service.receipts.isEmpty)
+        #expect(try Data(contentsOf: validating.location) == original)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+    }
     @Test func localGrantRevokedDuringNetworkWaitAndPermissionVersionMismatch() async throws {
         let (service, store, writer, c) = try fixture(envelope())
         service.beforeClaimReturn = { store.file.grant?.capabilities = []; store.file.grant?.revision = 2 }
@@ -234,14 +395,27 @@ import SwiftData
     var loseReceiptResponse = false; var loseClaimResponse = false
     var timerResult: BridgeJSON?; var timerRequests: [BridgeJSON] = []; var loseTimerReply = false
     var claims: [BridgeJSON] = []; var receipts: [BridgeJSON] = []
+    var claimFailureIds: Set<String> = []
+    var receiptFailureIds: Set<String> = []
     var beforeClaimReturn: (() -> Void)?
     init(_ envelope: BridgeJSON) { self.envelope = envelope }
     func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
         var e = try NativeRemoteJSON.object(envelope)
-        if path == "native/pending" { return .object(["commands": .array([envelope] + (extra.map { [$0] } ?? [])), "hasMore": .bool(false), "nextCursor": e["commandId"]!, "through": e["commandId"]!]) }
+        if path == "native/pending" {
+            let commands = ([envelope] + (extra.map { [$0] } ?? [])).sorted {
+                (try? NativeRemoteJSON.string(NativeRemoteJSON.object($0)["commandId"])) ?? "" < (try? NativeRemoteJSON.string(NativeRemoteJSON.object($1)["commandId"])) ?? ""
+            }
+            let last = try NativeRemoteJSON.object(commands.last!)["commandId"]!
+            return .object(["commands": .array(commands), "hasMore": .bool(false), "nextCursor": last, "through": last])
+        }
         let input = try NativeRemoteJSON.object(body)
+        let isExtra = extra.flatMap { try? NativeRemoteJSON.object($0)["commandId"] } == input["commandId"]
+        if isExtra, let extra { e = try NativeRemoteJSON.object(extra) }
         if path == "native/claim" {
-            claims.append(body); e["state"] = .string("dispatching"); e["attemptId"] = input["attemptId"]; envelope = .object(e)
+            claims.append(body)
+            if case let .string(id) = input["commandId"], claimFailureIds.contains(id) { throw DataArchiveError.invalid("fixture claim refused, no side effect") }
+            e["state"] = .string("dispatching"); e["attemptId"] = input["attemptId"]
+            if isExtra { extra = .object(e) } else { envelope = .object(e) }
             if loseClaimResponse { loseClaimResponse = false; throw URLError(.networkConnectionLost) }
             beforeClaimReturn?(); return .object(e)
         }
@@ -251,7 +425,9 @@ import SwiftData
             guard let result = timerResult else { throw URLError(.unsupportedURL) }; return result
         }
         if path == "native/receipt" {
-            receipts.append(body); e["state"] = input["outcome"]; e["result"] = input["receipt"]; envelope = .object(e)
+            if case let .string(id) = input["commandId"], receiptFailureIds.contains(id) { throw URLError(.notConnectedToInternet) }
+            receipts.append(body); e["state"] = input["outcome"]; e["result"] = input["receipt"]
+            if isExtra { extra = .object(e) } else { envelope = .object(e) }
             if loseReceiptResponse { loseReceiptResponse = false; throw URLError(.networkConnectionLost) }
             return .object(e)
         }
@@ -271,4 +447,27 @@ import SwiftData
     func readTasks() async throws -> BridgeTaskState { reads += 1; if failRead { throw URLError(.notConnectedToInternet) }; return state }
     func submitTask(_ command: BridgeTaskCommand) async throws -> BridgeTaskReceipt { throw URLError(.unsupportedURL) }
     func reportSavedTaskSnapshots(_ ids: [String]) async throws -> Set<String> { Set(ids) }
+}
+
+@MainActor private final class PagedRemoteService: NativeRemoteServing {
+    var nativeDeviceId: String? = "fixture-device"
+    let commands: [BridgeJSON]
+    var afterCursors: [String] = []
+    var claims: [String] = []
+    init(commands: [BridgeJSON]) { self.commands = commands }
+    func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        let input = try NativeRemoteJSON.object(body)
+        if path == "native/pending" {
+            let after = try NativeRemoteJSON.string(input["after"]), upper = try input["through"].map { try NativeRemoteJSON.string($0) } ?? NativeRemoteJSON.string(NativeRemoteJSON.object(commands.last!)["commandId"])
+            afterCursors.append(after)
+            let offered = try commands.filter { let id = try NativeRemoteJSON.string(NativeRemoteJSON.object($0)["commandId"]); return id > after && id <= upper }
+            let page = Array(offered.prefix(10)), next = try page.last.map { try NativeRemoteJSON.string(NativeRemoteJSON.object($0)["commandId"]) } ?? after
+            return .object(["commands": .array(page), "nextCursor": .string(next), "through": .string(upper), "hasMore": .bool(offered.count > 10)])
+        }
+        if path == "native/claim" {
+            claims.append(try NativeRemoteJSON.string(input["commandId"]))
+            throw DataArchiveError.invalid("isolated claim refusal fixture, no user effect")
+        }
+        throw URLError(.unsupportedURL)
+    }
 }
