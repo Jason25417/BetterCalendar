@@ -88,14 +88,19 @@ export function createNativeCommands(db,time,executeTask){
    await q(`INSERT OR IGNORE INTO native_requests(command_id,device_id,owner_id,request_hash,body,permission,grant_revision,state,accepted_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,v.commandId,v.deviceId,owner,await sha(canonical(body)),canonical(body),permission,g.revision,permission==='journal.read'?'queued':'awaiting_confirmation',time(),body.expiresAt).run();
   }
   const r=await row(v.commandId,owner);if(r.request_hash!==await sha(canonical(v)))throw new BridgeError('同一commandId不可改变请求',409);
-  const value=await view(r);let approval=null;
+  let value=await view(r);let approval=null;
   if(value.state==='awaiting_confirmation'){
    // Opaque MRTR state is a high-entropy nonce, not client-controlled serialized
    // authorization. Its complete value (including originating tool) is hashed
    // in the existing durable request row, which binds owner/body/expiry/grant.
    const token=(formOrigin?`bc-form-v1:${formOrigin}:`:'')+crypto.randomUUID()+crypto.randomUUID();
-   const result=await q("UPDATE native_requests SET approval_hash=? WHERE command_id=? AND state='awaiting_confirmation' AND request_hash=?",await sha(token),r.command_id,r.request_hash).run();
-   if(changed(result))approval={token,commandId:r.command_id,requestHash:r.request_hash};
+   const tokenHash=await sha(token),at=time();
+   const result=await q("UPDATE native_requests SET approval_hash=? WHERE command_id=? AND state='awaiting_confirmation' AND request_hash=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants WHERE device_id=? AND revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM devices WHERE id=native_grants.device_id AND revoked_at IS NULL))",tokenHash,r.command_id,r.request_hash,at,r.device_id,r.grant_revision,at).run();
+   const fresh=await row(r.command_id,owner);value=await view(fresh);
+   if(changed(result)&&value.state==='awaiting_confirmation'){
+    if(fresh.approval_hash!==tokenHash)throw new BridgeError('确认凭据已更新，请核对原请求；不要重复发布确认',409);
+    approval={token,commandId:r.command_id,requestHash:r.request_hash};
+   }
   }
   return {value,approval};
  }
@@ -108,6 +113,13 @@ export function createNativeCommands(db,time,executeTask){
   const value=await view(await row(r.command_id,owner));if(value.state!=='queued')throw new BridgeError('授权状态已改变，未交给设备执行',409);return value;
  }
  async function status(v,owner){keys(v,['commandId']);return view(await row(v.commandId,owner));}
+ async function confirmationSnapshot(v,owner){
+  keys(v,['commandId','requestHash','token']);const r=await row(v.commandId,owner);
+  if(r.request_hash!==v.requestHash)throw new BridgeError('确认请求身份已改变',409);
+  const value=await view(r);
+  if(value.state==='awaiting_confirmation'&&(!text(v.token,200)||await sha(v.token)!==r.approval_hash))throw new BridgeError('确认凭据已更新，请核对原请求；不要重复发布确认',409);
+  return value;
+ }
  async function respondForm({request,originTool,requestState,response},owner){
   if(!['submit_native_command','task_command'].includes(originTool)||!text(requestState,200)||!requestState.startsWith(`bc-form-v1:${originTool}:`))throw new BridgeError('原生表单确认身份无效',403);
   const r=await row(request.commandId,owner),requestHash=await sha(canonical(request));
@@ -211,5 +223,5 @@ export function createNativeCommands(db,time,executeTask){
    throw error;
   }
  }
- return {capabilities,setGrant,readGrant,submit,approve,status,respondForm,pending,claim,receipt,readJournal,executeTimer};
+ return {capabilities,setGrant,readGrant,submit,approve,status,confirmationSnapshot,respondForm,pending,claim,receipt,readJournal,executeTimer};
 }

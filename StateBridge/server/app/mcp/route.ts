@@ -1,10 +1,11 @@
 import { service } from "@/lib/service";
-import { BridgeError, CallbackEndpointError } from "@/lib/bridge.mjs";
+import { BridgeError, CallbackEndpointError, canonical, sha } from "@/lib/bridge.mjs";
 import { dotInstructions } from "@/lib/dot-instructions";
 import { nativeConfirmationUri, nativeConfirmationHtml, nativeToolResult, nativeCommandOutputSchema } from "@/lib/native-confirmation.mjs";
 import { nativeUUIDSchema } from "@/lib/native-commands.mjs";
 import { clientConfirmationCapabilities } from "@/lib/mcp-client-capabilities.mjs";
-import { supportsNativeForm, nativeFormResponse, nativeFormResult } from "@/lib/native-form-confirmation.mjs";
+import { supportsNativeForm, nativeFormResponse, finalizeNativeForm } from "@/lib/native-form-confirmation.mjs";
+import { safeArguments } from "@/lib/research.mjs";
 export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const string={type:"string"};
@@ -66,13 +67,22 @@ export async function POST(request:Request){
       if(hasInput&&!proposal)throw new BridgeError("此工具不接受确认续传");
       const form=supportsNativeForm(p)&&proposal;
       const response=hasInput?nativeFormResponse(p):null;
-      const submit=async(input:unknown)=>{
-        if(response)return {value:await core.nativeCommands.respondForm({request:input,originTool:p.name,requestState:p.requestState,response},owner),approval:null};
+      const submit=async(input:any)=>{
+        if(response){
+          const references=safeArguments(input);
+          const evidence={originTool:p.name,commandId:typeof input.commandId==="string"&&new RegExp(nativeUUIDSchema.pattern).test(input.commandId)?input.commandId:null,requestHash:await sha(canonical(input)),expectedRevision:references.expectedRevision??null,sessionId:references.sessionId??null,action:response.action,confirmed:response.content?.confirm===true,source:"host_response",userGesture:"unknown",cause:"unknown"};
+          await core.research.append("native_confirmation_response_received",null,evidence,owner);
+          let value;
+          try {value=await core.nativeCommands.respondForm({request:input,originTool:p.name,requestState:p.requestState,response},owner);}
+          catch(error){await core.research.append("native_confirmation_response_rejected",null,{...evidence,status:error instanceof BridgeError?error.status:500,category:error instanceof BridgeError?"request":"internal"},owner);throw error;}
+          await core.research.append("native_confirmation_response_processed",null,{...evidence,state:value.state,grantRevision:value.grantRevision,approvedAt:value.approvedAt,deviceApplication:value.deviceApplication},owner);
+          return {value,approval:null};
+        }
         return core.nativeCommands.submit(input,owner,{formOrigin:form?p.name:null});
       };
       let approval:unknown=null;
       const loggedArgs=response?{...a,confirmation:{transport:"mcp_form",action:response.action,confirmed:response.content?.confirm===true,...(response.action==="cancel"?{source:"host_response",userGesture:"unknown",cause:"unknown"}:{})}}:a;
-      const value=await core.research.invoke(p.name,loggedArgs,owner,async()=>{let value;
+      let value=await core.research.invoke(p.name,loggedArgs,owner,async()=>{let value;
       switch(p.name){
         case "read_native_capabilities":value=await core.nativeCommands.capabilities();break;
         case "read_native_journal":value=await core.nativeCommands.readJournal(a,owner);break;
@@ -96,8 +106,11 @@ export async function POST(request:Request){
         default:throw new BridgeError("未知工具",404);
       }
       return value;});
-      const inputRequired=form?nativeFormResult(value,approval):null;
-      if(inputRequired)return Response.json({jsonrpc:"2.0",id,result:inputRequired});
+      if(form&&!response){
+        const finalized=await finalizeNativeForm(core,value,approval,owner,p.name);
+        value=finalized.value;approval=finalized.approval;
+        if(finalized.inputRequired)return Response.json({jsonrpc:"2.0",id,result:finalized.inputRequired});
+      }
       return result(nativeToolResult(value,approval));
     }
     return Response.json({jsonrpc:"2.0",id,error:{code:-32601,message:"未知方法"}});

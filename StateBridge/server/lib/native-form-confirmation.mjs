@@ -1,5 +1,6 @@
 import {BridgeError} from './bridge.mjs';
 import {clientConfirmationCapabilities} from './mcp-client-capabilities.mjs';
+import {canonical,sha} from './bridge.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 export function supportsNativeForm(params) {
  const caps=clientConfirmationCapabilities(params);
@@ -27,4 +28,28 @@ export function nativeFormResult(value,approval) {
  const message=`请本人确认：${actions[request.action]??request.action}${kinds[request.kind]??request.kind}。`;
  const description=`${details.join('\n')}\n指定设备：${value.deviceId}\n你的原请求：${request.userRequest}\n有效期限（UTC）：${value.expiresAt}\n关闭或不勾选都不会执行；服务接受后仍需核对设备回执。\n请求编号：${value.commandId}`;
  return {resultType:'input_required',inputRequests:{bc_native_confirmation:{method:'elicitation/create',params:{mode:'form',message,requestedSchema:{type:'object',properties:{confirm:{type:'boolean',title:'确认执行',description,default:false}},required:['confirm']}}}},requestState:approval.token};
+}
+
+// Internal validation, not an extra external tool call or proof that the host
+// displayed a card. Audit persistence failures prevent returning input_required.
+export async function finalizeNativeForm(core,value,approval,owner,originTool) {
+ if(!approval)return {value,approval:null,inputRequired:null};
+ let candidate=null;
+ const fresh=await core.research.invoke('mcp/confirmation_finalize',{commandId:value.commandId,requestHash:value.requestHash,grantRevision:value.grantRevision},owner,async()=>{
+  const checked=await core.nativeCommands.confirmationSnapshot(approval,owner);
+  candidate=nativeFormResult(checked,approval);
+  if(candidate){
+   const params=candidate.inputRequests.bc_native_confirmation.params;
+   await core.research.append('native_confirmation_prepared',null,{originTool,commandId:checked.commandId,deviceId:checked.deviceId,requestHash:checked.requestHash,grantRevision:checked.grantRevision,expectedRevision:checked.request.expectedRevision??null,sessionId:checked.request.sessionId??null,expiresAt:checked.expiresAt,state:checked.state,presentationHash:await sha(canonical(params)),messageCharacters:params.message.length,descriptionCharacters:params.requestedSchema.properties.confirm.description.length,hostDisplayed:'unknown',cancelCause:'unknown'},owner);
+  }
+  // Recording can take time; never emit the earlier snapshot after expiry,
+  // revocation, closure, or another attempt's challenge rotation during it.
+  const latest=await core.nativeCommands.confirmationSnapshot(approval,owner);
+  if(latest.state!=='awaiting_confirmation'){
+   candidate=null;
+   await core.research.append('native_confirmation_suppressed',null,{commandId:latest.commandId,requestHash:latest.requestHash,grantRevision:latest.grantRevision,state:latest.state,hostDisplayed:'unknown'},owner);
+  }
+  return latest;
+ });
+ return {value:fresh,approval:candidate?approval:null,inputRequired:candidate};
 }

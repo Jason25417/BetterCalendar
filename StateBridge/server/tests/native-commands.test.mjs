@@ -11,11 +11,11 @@ const Ajv=createRequire(import.meta.url)('ajv');
 function fixture(){
  const sqlite=new DatabaseSync(':memory:');
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
- let failRecord=false,beforeBatch=null;
- const prepare=sql=>{let args=[];return{bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return{results:sqlite.prepare(sql).all(...args)};},run(){if(failRecord&&sql.startsWith('INSERT OR IGNORE INTO research_log'))throw Error('disk full simulation');return sqlite.prepare(sql).run(...args);}};};
+ let failRecord=false,beforeBatch=null,beforeApprovalWrite=null;
+ const prepare=sql=>{let args=[];return{bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return{results:sqlite.prepare(sql).all(...args)};},run(){if(sql.startsWith('UPDATE native_requests SET approval_hash=')){const hook=beforeApprovalWrite;beforeApprovalWrite=null;hook?.();}if(failRecord&&sql.startsWith('INSERT OR IGNORE INTO research_log'))throw Error('disk full simulation');return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){const hook=beforeBatch;beforeBatch=null;hook?.();sqlite.exec('BEGIN');try{const out=ops.map(o=>o.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  let now=new Date('2026-10-13T10:00:00.000Z'),clockStep=0;const core=createBridge(db,{now:()=>{const at=now;now=new Date(now.getTime()+clockStep);return at;}});
- return{core,sqlite,reopen:()=>createBridge(db,{now:()=>new Date(now)}),time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;}};
+ return{core,sqlite,reopen:()=>createBridge(db,{now:()=>new Date(now)}),time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;},beforeApprovalWrite(fn){beforeApprovalWrite=fn;}};
 }
 const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
@@ -113,6 +113,21 @@ test('expiry crossing between response validation and SQL write cannot become ca
  assert.equal(result.state,'expired');assert.equal(result.approvedAt,null);
  assert.equal(f.sqlite.prepare('SELECT state FROM native_requests WHERE command_id=?').get(v.commandId).state,'awaiting_confirmation');
  assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
+});
+test('proposal does not return a stale pending form when expiry, grant or closure races nonce preparation',async()=>{
+ for(const mode of ['expiry','revocation','closure']){
+  const f=fixture();await setup(f);const v=request(f,812);
+  f.beforeApprovalWrite(()=>{
+   if(mode==='expiry')f.advance(3600001);
+   if(mode==='revocation')f.sqlite.prepare('UPDATE native_grants SET revision=revision+1 WHERE device_id=?').run(v.deviceId);
+   if(mode==='closure')f.sqlite.prepare("UPDATE native_requests SET state='cancelled' WHERE command_id=?").run(v.commandId);
+  });
+  const s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  assert.equal(s.value.state,{expiry:'expired',revocation:'revoked',closure:'cancelled'}[mode]);
+  assert.equal(s.approval,null);assert.equal(nativeFormResult(s.value,s.approval),null);
+  const saved=f.sqlite.prepare('SELECT approval_hash,approved_at,attempt_id,result FROM native_requests WHERE command_id=?').get(v.commandId);
+  assert.equal(saved.approved_at,null);assert.equal(saved.attempt_id,null);assert.equal(saved.result,null);
+ }
 });
 test('advertised native output validates actual proposal and device receipt; approval secret is excluded',async()=>{
  const validate=new Ajv({allowUnionTypes:true}).compile(nativeCommandOutputSchema);
