@@ -120,7 +120,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     const sources=(await all("SELECT * FROM states ORDER BY source_key")).map(r=>sourceView(JSON.parse(r.body),r.source_key,readAt));
     let selected=options.sourceKeys==null?sources:sources.filter(s=>options.sourceKeys.includes(s.sourceKey));
     if(options.includeValues===false){
-      const metadata=["schemaVersion","eventId","source","deviceId","sequence","assertion","observedAt","receivedAt","expiresAt","sourceKey","freshness","availability","reason","lastObservedAt","lastReceivedAt","lastSuccessfulReadAt","dataRole","usableForCurrentState"];
+      const metadata=["schemaVersion","eventId","source","deviceId","sequence","assertion","observedAt","receivedAt","expiresAt","sourceKey","freshness","availability","reason","lastObservedAt","lastReceivedAt","lastSuccessfulReadAt","dataRole","usableForCurrentState","observationAgeSeconds","deliveryDelaySeconds","collectionRecency","freshnessMeaning","legacyTimingEntryCursor","legacyTimingEntryMeaning"];
       selected=selected.map(s=>Object.fromEntries(metadata.filter(k=>s[k]!==undefined).map(k=>[k,s[k]])));
     }
     const devices=await all("SELECT id,label,scopes,revoked_at FROM devices ORDER BY id");

@@ -39,7 +39,7 @@ export function createPoolRecords(db,time){
   const view=sourceView(observation,`${observation.deviceId}:bc.pool`,readAt);
   const metadata={schemaVersion:1,authority:'device-swiftdata',readAt,sourceDeviceId:observation.deviceId,snapshotEventId:observation.eventId,
    observedAt:observation.observedAt,receivedAt:observation.receivedAt,freshness:view.freshness,availability:view.availability,usableForCurrentState:view.usableForCurrentState,
-   devices,deviceViewsDiffer:new Set(devices.filter(d=>d.contentHash).map(d=>d.contentHash)).size>1,pinnedSnapshot:pinned,
+   devices,deviceViewsDiffer:new Set(devices.filter(d=>d.contentHash).map(d=>d.contentHash)).size>1,pinnedSnapshot:pinned,deviceViewsDifferBasis:'whole_snapshot_including_legacy_history_not_proof_of_item_conflict',
    interpretation:'这是设备读取的SwiftData目录副本，不是另一套事项真相。不同设备目录不同可能是同步延迟；不自动合并或覆盖。分页固定这一份快照，旧快照不能冒充当前状态。'};
   if(view.availability!=='available')return {...metadata,complete:false,records:[],hasMore:false,nextCursor:null};
   const m=observation.value;

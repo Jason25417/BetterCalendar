@@ -37,6 +37,7 @@ export function sourceView(observation, sourceKey, readAt) {
     ...observation, sourceKey, freshness, availability,
     observationAgeSeconds,deliveryDelaySeconds,freshnessMeaning:'content_expiry_not_continuous_sampling',
     collectionRecency:observationAgeSeconds===null?'unknown':observationAgeSeconds<=300?'recent':'older_than_5_minutes',
+    ...(observation.source==='bc.pool'?{legacyTimingEntryCursor:'bc-legacy-entry-v1:'+btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({deviceId:observation.deviceId})))),legacyTimingEntryMeaning:'read_task_history(cursor=entry); read_only_not_a_timer_command'}:{}),
     reason: reason ?? (availability === "unknown" ? "empty_samples_do_not_establish_absence_or_permission" : null),
     lastObservedAt: observation.observedAt, lastReceivedAt: observation.receivedAt,
     lastSuccessfulReadAt: ["available", "partial", "empty"].includes(availability) ? observation.observedAt : null,

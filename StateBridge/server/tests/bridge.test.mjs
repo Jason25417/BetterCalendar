@@ -551,3 +551,26 @@ test('diagnostic idle seconds alone refresh stored state without manufacturing a
  f.advance(1000);await f.core.ingest({observations:[obs(3,{idle:'active',inputIdleSeconds:0,foregroundChanged:true,activityActor:'unknown'},f)]},d);
  assert.equal((await f.core.readChanges()).changes.length,2);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM observations').get().n,3);
 });
+
+test('lightweight state metadata retains collection age and delivery delay without returning source content',async()=>{
+ const f=fixture(),d=await device(f);
+ const o=obs(1,{app:'private fixture'},f);f.advance(3600000);await f.core.ingest({observations:[o]},d);
+ const s=(await f.core.readState({includeValues:false})).sources[0];assert.equal(s.observationAgeSeconds,3600);assert.equal(s.deliveryDelaySeconds,3600);assert.equal(s.collectionRecency,'older_than_5_minutes');assert.equal('value' in s,false);assert.match(s.freshnessMeaning,/not_continuous/);
+});
+
+test('server-issued entry and page cursors read legacy history through an older cached tool schema',async()=>{
+ const f=fixture(),d=await poolDevice(f),make=n=>{const id='legacy:'+String(n).padStart(64,'0');return {id,revision:'a'.repeat(64),values:{id,origin:'swiftdata_execution_session',title:'fixture',start:100,end:200,commandId:null}};};
+ await publishPool(f,d,[],{executionSessions:[make(1),make(2)]});
+ const entry=(await f.core.readState({includeValues:false})).sources.find(s=>s.source==='bc.pool').legacyTimingEntryCursor;
+ const first=await f.core.taskHistory({cursor:entry,limit:1});assert.equal(first.origin,'legacy');assert.equal(first.sessions[0].id,make(1).id);assert.equal(first.hasMore,true);
+ const second=await f.core.taskHistory({cursor:first.nextCursor,limit:1});assert.equal(second.origin,'legacy');assert.equal(second.sessions[0].id,make(2).id);assert.equal(second.hasMore,false);
+ await assert.rejects(f.core.taskHistory({cursor:entry,deviceId:'other'}),/身份/);await assert.rejects(f.core.taskHistory({cursor:first.nextCursor,from:'2026-10-05T00:00:00Z'}),/范围/);
+ await assert.rejects(f.core.taskHistory({cursor:'bc-legacy-entry-v1:broken'}),/游标/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,0);
+});
+
+test('legacy entry supports existing Unicode device identifiers without breaking state reads',async()=>{
+ const f=fixture(),d=await poolDevice(f,'设备一');await publishPool(f,d,[]);
+ const entry=(await f.core.readState({includeValues:false})).sources.find(s=>s.source==='bc.pool').legacyTimingEntryCursor;
+ const result=await f.core.taskHistory({cursor:entry});assert.equal(result.origin,'legacy');assert.equal(result.sourceDeviceId,d.id);assert.equal(result.availability,'not_supported_by_device_snapshot');
+});

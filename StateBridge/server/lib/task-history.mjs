@@ -52,6 +52,23 @@ export function createTaskHistory(db, time, sessionView, taskApplication, readPo
         {origin:'shared',sessions:entries,coverage:{legacyHistory:'query_origin_legacy_separately_same_window_no_automatic_sum'},interpretation:'共享计时的最新状态，不含旧SwiftData会话；空页不代表全天没有计时。用origin=legacy、同一时间窗和指定设备读旧历史副本，两组不要自动相加。分页期间状态可能更新，晚到补记或外部修改后从第一页重读。'})};
   }
   return {taskHistory:async(v={})=>{
+    // Older installed tool schemas discard the new origin/deviceId fields.
+    // Entry references and pinned page cursors returned by this server work
+    // through the already-supported cursor argument; never replay a command.
+    if(typeof v.cursor==='string'){
+      if(v.cursor.startsWith('bc-legacy-entry-v1:')){
+        let entry;try{if(v.cursor.length>1000)throw new Error();entry=decode(v.cursor.slice('bc-legacy-entry-v1:'.length));}catch{throw new BridgeError('旧历史入口游标无效');}
+        if(typeof entry.deviceId!=='string'||!entry.deviceId||entry.deviceId.length>80||Object.keys(entry).some(k=>k!=='deviceId')||v.origin&&v.origin!=='legacy'||v.deviceId&&v.deviceId!==entry.deviceId)throw new BridgeError('旧历史入口身份不一致');
+        v={...v,origin:'legacy',deviceId:entry.deviceId,cursor:undefined};
+      }else{
+        let pinned;try{pinned=decode(v.cursor);}catch{/* Normal shared-history validation handles invalid cursors. */}
+        if(pinned?.filters?.recordType==='execution'){
+          const p=pinned.filters;
+          if(v.origin&&v.origin!=='legacy'||v.deviceId&&v.deviceId!==p.deviceId||v.from!==undefined&&v.from!==p.from||v.before!==undefined&&v.before!==p.before)throw new BridgeError('旧历史游标范围不一致');
+          v={...v,origin:'legacy',deviceId:p.deviceId,from:p.from??undefined,before:p.before??undefined};
+        }
+      }
+    }
     if(v.origin!==undefined&&!['shared','legacy'].includes(v.origin))throw new BridgeError('计时历史来源无效');
     if(v.origin!=='legacy')return page('sessions',v);
     if(typeof v.deviceId!=='string'||!v.deviceId.trim())throw new BridgeError('旧历史需要指定设备，不能自动合并双端');
