@@ -5,6 +5,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {createBridge} from '../lib/bridge.mjs';
 import {nativeUUIDSchema} from '../lib/native-commands.mjs';
 import {nativeCommandOutputSchema} from '../lib/native-confirmation.mjs';
+import {nativeFormResult,nativeFormResponse,supportsNativeForm} from '../lib/native-form-confirmation.mjs';
 import {createRequire} from 'node:module';
 const Ajv=createRequire(import.meta.url)('ajv');
 function fixture(){
@@ -14,11 +15,64 @@ function fixture(){
  const prepare=sql=>{let args=[];return{bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return{results:sqlite.prepare(sql).all(...args)};},run(){if(failRecord&&sql.startsWith('INSERT OR IGNORE INTO research_log'))throw Error('disk full simulation');return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){const hook=beforeBatch;beforeBatch=null;hook?.();sqlite.exec('BEGIN');try{const out=ops.map(o=>o.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  let now=new Date('2026-10-13T10:00:00.000Z'),clockStep=0;const core=createBridge(db,{now:()=>{const at=now;now=new Date(now.getTime()+clockStep);return at;}});
- return{core,sqlite,time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;}};
+ return{core,sqlite,reopen:()=>createBridge(db,{now:()=>new Date(now)}),time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;}};
 }
 const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
 const request=(f,n=1)=>({version:1,commandId:id(n),deviceId:'iphone-test',kind:'item',action:'create',recordId:id(100+n),patch:{title:'ISOLATED FIXTURE'},occurredAt:f.time(),expiresAt:'2026-10-13T11:00:00.000Z',userRequest:'Isolated simulation, never a real user task'});
+test('MRTR form is capability-gated, host-only and defaults to no operation',async()=>{
+ const p={_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{elicitation:{}}}};
+ assert.equal(supportsNativeForm(p),true);assert.equal(supportsNativeForm({}),false);
+ assert.equal(supportsNativeForm({...p,_meta:{...p._meta,'io.modelcontextprotocol/protocolVersion':'2025-11-25'}}),false);
+ assert.throws(()=>nativeFormResponse({...p,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true}}}}));
+ const f=fixture();await setup(f);const v=request(f,801),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ const result=nativeFormResult(s.value,s.approval);assert.equal(result.resultType,'input_required');
+ assert.equal(result.requestState,s.approval.token);assert.equal('content' in result,false);assert.equal('structuredContent' in result,false);
+ const form=result.inputRequests.bc_native_confirmation.params;assert.equal(form.requestedSchema.properties.confirm.default,false);
+ assert.ok(form.message.includes(v.commandId)&&form.message.includes(v.deviceId)&&form.message.includes(v.userRequest));
+ assert.equal(nativeFormResult({...s.value,state:'expired'},s.approval),null);
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).state,'awaiting_confirmation');
+});
+test('MRTR nonce binds tool, owner and exact original parameters; no model flag can approve',async()=>{
+ const f=fixture();await setup(f);const v=request(f,802),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true}}};
+ for(const bad of [{...proof,originTool:'task_command'},{...proof,request:{...v,deviceId:'other'}},{...proof,request:{...v,patch:{title:'changed'}}},{...proof,requestState:proof.requestState+'x'},{...proof,response:{action:'accept',content:{confirm:true,userConfirmed:true}}}])await assert.rejects(f.core.nativeCommands.respondForm(bad,'owner'));
+ await assert.rejects(f.core.nativeCommands.respondForm(proof,'other-owner'));
+ await assert.rejects(f.core.nativeCommands.submit({...v,userConfirmed:true},'owner'));
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).state,'awaiting_confirmation');
+});
+test('decline cancel and unchecked form consume pending nonce without queuing',async()=>{
+ for(const [n,response] of [[803,{action:'decline'}],[804,{action:'cancel'}],[805,{action:'accept',content:{confirm:false}}]]){
+  const f=fixture(),d=await setup(f),v=request(f,n),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response};
+  const result=await f.core.nativeCommands.respondForm(proof,'owner');assert.equal(result.approvedAt,null);
+  assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
+  await assert.rejects(f.core.nativeCommands.respondForm({...proof,response:{action:'accept',content:{confirm:true}}},'owner'));
+ }
+});
+test('human form accept retains one command across lost response and service reconstruction',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,806),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true}}};
+ assert.equal((await f.reopen().nativeCommands.respondForm(proof,'owner')).state,'queued');
+ // Simulate a new service instance over the same durable D1 backing fixture.
+ assert.equal((await f.core.nativeCommands.respondForm(proof,'owner')).state,'queued');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,1);
+ const claim={commandId:v.commandId,requestHash:s.value.requestHash,attemptId:id(807)};
+ await f.core.nativeCommands.claim(claim,d);
+ await f.core.nativeCommands.receipt({...claim,outcome:'applied',receipt:{saved:true}},d);
+ assert.equal((await f.core.nativeCommands.respondForm(proof,'owner')).state,'applied');
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+});
+test('form expiry revoked grant and rotated challenge reject stale human replies',async()=>{
+ for(const mode of ['expiry','revocation','rotation']){
+  const f=fixture(),d=await setup(f),v=request(f,808),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  if(mode==='expiry')f.advance(3600001);
+  if(mode==='revocation')await f.core.nativeCommands.setGrant({revision:2,capabilities:[],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+  if(mode==='rotation')await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  await assert.rejects(f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true}}},'owner'));
+  assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).approvedAt,null);
+ }
+});
 test('advertised native output validates actual proposal and device receipt; approval secret is excluded',async()=>{
  const validate=new Ajv({allowUnionTypes:true}).compile(nativeCommandOutputSchema);
  const f=fixture(),d=await setup(f),v=request(f,980),submitted=await f.core.nativeCommands.submit(v,'owner');

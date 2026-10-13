@@ -13,7 +13,7 @@ import { validateEvidence,comparisonPack } from './research-evidence.mjs';
 export const ORIGIN='https://jason-state-bridge.jason25417.chatgpt.site';
 export const defaults={version:1,maxBytes:2*1024**3,retentionDays:365,debugFeedback:false,pollSeconds:60};
 const encode=v=>JSON.stringify(v),hash=v=>createHash('sha256').update(v).digest('hex');
-const secretKey=/token|secret|password|authorization|credential|api.?key|cookie|private.?reasoning|chain.?of.?thought|reasoning_content/i;
+const secretKey=/token|secret|password|authorization|credential|api.?key|cookie|request.?state|private.?reasoning|chain.?of.?thought|reasoning_content/i;
 export function redact(value,secrets=[]) {
   if(typeof value==='string') {
     let clean=value.replace(/\b(?:Bearer\s+\S+|whsec_[\w+/=-]+|sk-[\w-]{12,})/gi,'[redacted]');

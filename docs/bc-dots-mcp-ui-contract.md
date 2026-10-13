@@ -12,4 +12,4 @@
 
 证据见[evidence/mcp-ui-contract-26-27.json](evidence/mcp-ui-contract-26-27.json)。原始工具内容和截图保持在本地受控研究档案；Git仅留必要关联与回执元数据。现有private audience保持owner-only，未复制资料到新服务，无新增原生发行包。
 
-后续只沿实际结果排查：先核对v27显示复测；若仍失败，验证当前宿主是否声明MCP form elicitation能力，再考虑协议定义的MRTR原生确认方式。它必须保留人本人确认、同请求/设备/哈希、期限与撤权核验，不能改成模型传userConfirmed。仅官方文档说明存在这种协议，不代表当前Dots已支持或本轮已实现。当前目标继续active，完整真机执行和多端验收未完成。
+后续只沿实际结果排查：v27显示复测已实际失败；v28已验证Dots当前请求声明MCP form elicitation能力，v29实现MRTR原生确认方式，见bc-dots-native-form.md。它必须保留人本人确认、同请求/设备/哈希、期限与撤权核验，不能改成模型传userConfirmed。能力声明和适配代码不证明Dots实际显示表单；本人确认及真机应用仍待验。当前目标继续active，完整真机执行和多端验收未完成。

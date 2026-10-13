@@ -75,7 +75,8 @@ export function createNativeCommands(db,time,executeTask){
   if(['awaiting_confirmation','queued'].includes(state)){if(r.expires_at<=time())state='expired';else try{await grant(r.device_id,r.permission,r.grant_revision);}catch{state='revoked';}}
   return {version:1,nativeCommandId:r.command_id,commandId:r.command_id,deviceId:r.device_id,requestHash:r.request_hash,request:JSON.parse(r.body),permission:r.permission,grantRevision:r.grant_revision,state,acceptedAt:r.accepted_at,expiresAt:r.expires_at,approvedAt:r.approved_at,attemptId:r.attempt_id,result:r.result?JSON.parse(r.result):null,resultAt:r.result_at,serverAccepted:true,deviceApplication:r.state==='applied'?(r.permission==='journal.read'?'device_reported_read':'device_reported_applied'):r.state==='failed'?'device_reported_failed':'unknown',userSeen:'unknown',operationEffect:r.permission==='journal.read'?'read_only':'mutation',userRequestEvidence:r.permission==='journal.read'?'read_allowed_by_independent_device_grant':'agent_report_confirmation_required'};
  }
- async function submit(v,owner){
+ async function submit(v,owner,{formOrigin=null}={}){
+  if(formOrigin!==null&&!['submit_native_command','task_command'].includes(formOrigin))throw new BridgeError('未知确认通道');
   if(!text(owner,200))throw new BridgeError('需要账户身份',401);
   // Retry still retrieves historical outcomes after expiry; never re-executes.
   const existing=await one('SELECT * FROM native_requests WHERE command_id=?',v.commandId);
@@ -89,7 +90,10 @@ export function createNativeCommands(db,time,executeTask){
   const r=await row(v.commandId,owner);if(r.request_hash!==await sha(canonical(v)))throw new BridgeError('同一commandId不可改变请求',409);
   const value=await view(r);let approval=null;
   if(value.state==='awaiting_confirmation'){
-   const token=crypto.randomUUID()+crypto.randomUUID();
+   // Opaque MRTR state is a high-entropy nonce, not client-controlled serialized
+   // authorization. Its complete value (including originating tool) is hashed
+   // in the existing durable request row, which binds owner/body/expiry/grant.
+   const token=(formOrigin?`bc-form-v1:${formOrigin}:`:'')+crypto.randomUUID()+crypto.randomUUID();
    const result=await q("UPDATE native_requests SET approval_hash=? WHERE command_id=? AND state='awaiting_confirmation' AND request_hash=?",await sha(token),r.command_id,r.request_hash).run();
    if(changed(result))approval={token,commandId:r.command_id,requestHash:r.request_hash};
   }
@@ -104,6 +108,21 @@ export function createNativeCommands(db,time,executeTask){
   const value=await view(await row(r.command_id,owner));if(value.state!=='queued')throw new BridgeError('授权状态已改变，未交给设备执行',409);return value;
  }
  async function status(v,owner){keys(v,['commandId']);return view(await row(v.commandId,owner));}
+ async function respondForm({request,originTool,requestState,response},owner){
+  if(!['submit_native_command','task_command'].includes(originTool)||!text(requestState,200)||!requestState.startsWith(`bc-form-v1:${originTool}:`))throw new BridgeError('原生表单确认身份无效',403);
+  const r=await row(request.commandId,owner),requestHash=await sha(canonical(request));
+  if(r.request_hash!==requestHash||await sha(requestState)!==r.approval_hash)throw new BridgeError('确认原文、设备或凭据已改变',403);
+  keys(response,['action','content']);
+  if(!['accept','decline','cancel'].includes(response.action))throw new BridgeError('原生确认结果无效');
+  if(response.action==='accept'){
+   keys(response.content,['confirm']);if(typeof response.content.confirm!=='boolean')throw new BridgeError('原生确认需要本人明确选择');
+   if(response.content.confirm===true)return approve({commandId:r.command_id,requestHash,token:requestState},owner);
+  }else if(response.content!==undefined)throw new BridgeError('取消确认不能混入确认内容');
+  // Decline/dismiss/false consumes only this pending nonce, never a completed
+  // operation. A stale response cannot undo an already queued/applied command.
+  await q("UPDATE native_requests SET approval_hash=NULL WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash=?",r.command_id,r.approval_hash).run();
+  return view(await row(r.command_id,owner));
+ }
  async function pending(v,d){
   keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??10;
   if(!Number.isSafeInteger(limit)||limit<1||limit>10||v.after!==undefined&&typeof v.after!=='string'||v.through!==undefined&&typeof v.through!=='string')throw new BridgeError('队列分页无效');
@@ -176,5 +195,5 @@ export function createNativeCommands(db,time,executeTask){
    throw error;
   }
  }
- return {capabilities,setGrant,readGrant,submit,approve,status,pending,claim,receipt,readJournal,executeTimer};
+ return {capabilities,setGrant,readGrant,submit,approve,status,respondForm,pending,claim,receipt,readJournal,executeTimer};
 }

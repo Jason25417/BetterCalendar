@@ -42,6 +42,12 @@ test('capacity stops without advancing state; local API rejects writers; export 
  const cleaned=redact({token:'very-secret',text:'Bearer abcd whsec_123456 sk-123456789012',nested:{password:'x'},normal:'original note'},['very-secret']);
  assert.equal(cleaned.normal,'original note');assert.ok(!JSON.stringify(cleaned).includes('very-secret'));assert.ok(!JSON.stringify(cleaned).includes('whsec_'));
 });
+test('MRTR continuation nonce is secret while non-sensitive human response stays reviewable',()=>{
+ const clean=redact({requestState:'fixture-opaque-nonce',params:{request_state:'fixture-opaque-nonce',inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true}}}}});
+ assert.equal(clean.requestState,'[redacted]');assert.equal(clean.params.request_state,'[redacted]');
+ assert.equal(clean.params.inputResponses.bc_native_confirmation.content.confirm,true);
+ assert.ok(!JSON.stringify(clean).includes('fixture-opaque-nonce'));
+});
 test('viewer is offline escaped HTML; export contains raw referenced snapshots and explicit gaps',async t=>{
  const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);
  const page=readFileSync(r.view(),'utf8');assert.ok(page.includes("default-src 'none'"));assert.ok(page.includes('尚无完整研究回执'));assert.ok(!page.includes('<script'));

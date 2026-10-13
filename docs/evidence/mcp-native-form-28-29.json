@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "date": "2026-10-13",
+  "nativeBuild": "0.65.14/171 unchanged",
+  "deployments": [
+    {
+      "siteVersion": 28,
+      "source": "447729cd8b265e7e4148989fc3d4f5b1087a34f1",
+      "deploymentId": "appgdep_6ace46a586108191aa32fc53e04ca3c3",
+      "state": "succeeded",
+      "at": "2026-10-13T14:56:52.777881+00:00"
+    },
+    {
+      "siteVersion": 29,
+      "source": "9aeefcf479e7d5ea32811dc19e88b74705df53e4",
+      "deploymentId": "appgdep_6ace4887ddf481918a87ee0c8f6e0e65",
+      "state": "succeeded",
+      "at": "2026-10-13T15:04:51.982732+00:00"
+    }
+  ],
+  "dotsRead": {
+    "tool": "read_connection_status",
+    "callId": "research_1b21d6cc-ce39-4c56-b03a-1fa221ce03ce",
+    "localLogIds": [
+      22357,
+      22358
+    ],
+    "startedAt": "2026-10-13T14:58:19.401Z",
+    "finishedAt": "2026-10-13T14:58:22.196Z",
+    "responseHash": "4987f3b8ec929b3be983295bfa79ad52871cc5126f4ccdadeb210eacabb8ed5e",
+    "reportedClient": {
+      "protocolVersion": "2026-07-28",
+      "capabilities": "declared",
+      "form": "declared_implicit",
+      "ui": "not_declared",
+      "rendering": "unverified",
+      "humanConfirmation": "unverified"
+    },
+    "evidenceLevel": "Dots visible actual tool response report correlated to local started/returned logs; raw host metadata not retained"
+  },
+  "codexRead": {
+    "callId": "research_a0aadbb0-f2ec-43d4-98ea-21d917b070ee",
+    "snapshot": "703de3a1254aaca7f15a7a82e4ead871dc36b2b3fc18f322bcf21832d49fb409",
+    "scope": "Codex host only, not Dots capability or renderer proof"
+  },
+  "recorderRecovery": {
+    "failedAt": "2026-10-13T14:23:41.529Z",
+    "status": 500,
+    "afterMinute": 29865020,
+    "retryStartedAt": "2026-10-13T14:24:41.601Z",
+    "retryReturnedAt": "2026-10-13T14:24:42.240Z",
+    "sameCursor": true,
+    "cause": "unverified",
+    "process": "launchagent running PID25433; no restart"
+  },
+  "tests": {
+    "serverFocused": 66,
+    "localRecorder": 13,
+    "failed": 0,
+    "skipped": 0,
+    "build": "passed"
+  },
+  "realMutation": "not performed; expired 5529 proposal unchanged",
+  "unverified": [
+    "live form rendered",
+    "human form confirmation",
+    "device execution from new form",
+    "iPhone AlarmKit",
+    "dual device timer presentation",
+    "nonempty native journal page/write"
+  ],
+  "privacy": "Owner-private audience unchanged; no new service or DB migration; raw credentials excluded; raw state/screenshot local only",
+  "dotsInstructionsRead": {
+    "tool": "read_instructions",
+    "callId": "research_b800e1cb-4265-43e3-8e90-e5d225dc744e",
+    "evidenceLevel": "actual Dots visible tool result report",
+    "atLocal": "11:06 America/New_York",
+    "writes": false,
+    "screenshot": "local only /private/tmp/bc-dots-native-form-29.png"
+  }
+}

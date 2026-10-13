@@ -3,6 +3,8 @@ import { BridgeError, CallbackEndpointError } from "@/lib/bridge.mjs";
 import { dotInstructions } from "@/lib/dot-instructions";
 import { nativeConfirmationUri, nativeConfirmationHtml, nativeToolResult, nativeCommandOutputSchema } from "@/lib/native-confirmation.mjs";
 import { nativeUUIDSchema } from "@/lib/native-commands.mjs";
+import { clientConfirmationCapabilities } from "@/lib/mcp-client-capabilities.mjs";
+import { supportsNativeForm, nativeFormResponse, nativeFormResult } from "@/lib/native-form-confirmation.mjs";
 export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const string={type:"string"};
@@ -24,7 +26,7 @@ const tools=[
   {name:"read_task_commands",description:"按服务端保存时间分页读取BC计时原始操作回执与独立deviceReceipts；可按sessionId筛选，读到hasMore=false。设备回执只报告本机计时缓存保存版本，不证明屏幕/灵动岛呈现或人看到。缺失仍unknown，不会重放操作或修改记录。",inputSchema:object({sessionId:{type:"string"},from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string"}}),annotations:{readOnlyHint:true}},
   {name:"acknowledge_batch",description:"仅在读取最新状态、补齐截断变化并完成本批理解后调用，记录 Dot 的实际处理时间；不能提前确认。",inputSchema:object({batchId:string},["batchId"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"record_context",description:"保存用户说明或单独标记的推断；推断必须引用依据，不会自动完成或暂停显式计时。缓存兼容：kind=bc.research.batch_result时body为完整研究结果，转交complete_batch同一校验入口，不新增活动推断。",inputSchema:object({id:string,kind:string,body:{type:"object"},assertion:{type:"string",enum:["user","inferred"]},confidence:{type:"string",enum:["high","medium","low","unknown"]},basis:{type:"array",items:string},expiresAt:{type:"string",format:"date-time"},supersedes:string},["id","kind","body","assertion","confidence","basis"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
-  {name:"read_connection_status",description:"查看已登记设备、事件订阅与回调接收状态；不返回密钥。",inputSchema:object(),annotations:{readOnlyHint:true}},
+  {name:"read_connection_status",description:"查看已登记设备、事件订阅与回调接收状态，以及当前请求的MCP原生确认/组件能力声明；不返回密钥。声明不证明界面呈现或本人确认，缺少元数据是未知。",inputSchema:object(),annotations:{readOnlyHint:true}},
   {name:"flush_minute_changes",description:"发送本分钟尚未发送的变化并重试待发送回调；一分钟最多一个新批次，没有变化不发。不能把回调接收当作 Dot 完成分析。",inputSchema:object(),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
 ];
 const event={name:"state.minute_changed",description:"按分钟汇总全部有变化的个人状态；先读最新状态，再静默理解，只有必要时问或建议。",delivery:["webhook"],inputSchema:object(),payloadSchema:{type:"object",properties:{schemaVersion:{type:"integer"},readLatestState:{type:"boolean"},fromChangeId:{type:"integer"},throughChangeId:{type:"integer"},changes:{type:"array",items:{type:"object"}},omittedCount:{type:"integer"},decision:{type:"object"}},required:["schemaVersion","readLatestState","fromChangeId","throughChangeId","changes","omittedCount"],additionalProperties:false}};
@@ -59,12 +61,22 @@ export async function POST(request:Request){
     if(method==="events/unsubscribe")return result(await core.unsubscribe(p,owner));
     if(method==="tools/call"){
       const a=p.arguments??{};
+      const proposal=["submit_native_command","task_command"].includes(p.name);
+      const hasInput=p.inputResponses!==undefined||p.requestState!==undefined;
+      if(hasInput&&!proposal)throw new BridgeError("此工具不接受确认续传");
+      const form=supportsNativeForm(p)&&proposal;
+      const response=hasInput?nativeFormResponse(p):null;
+      const submit=async(input:unknown)=>{
+        if(response)return {value:await core.nativeCommands.respondForm({request:input,originTool:p.name,requestState:p.requestState,response},owner),approval:null};
+        return core.nativeCommands.submit(input,owner,{formOrigin:form?p.name:null});
+      };
       let approval:unknown=null;
-      const value=await core.research.invoke(p.name,a,owner,async()=>{let value;
+      const loggedArgs=response?{...a,confirmation:{transport:"mcp_form",action:response.action,confirmed:response.content?.confirm===true}}:a;
+      const value=await core.research.invoke(p.name,loggedArgs,owner,async()=>{let value;
       switch(p.name){
         case "read_native_capabilities":value=await core.nativeCommands.capabilities();break;
         case "read_native_journal":value=await core.nativeCommands.readJournal(a,owner);break;
-        case "submit_native_command":{const submitted=await core.nativeCommands.submit(a,owner);value=submitted.value;approval=submitted.approval;break;}
+        case "submit_native_command":{const submitted=await submit(a);value=submitted.value;approval=submitted.approval;break;}
         case "approve_native_command":value=await core.nativeCommands.approve(a,owner);break;
         case "read_native_command_status":value=await core.nativeCommands.status(a,owner);break;
         case "read_research_log":value=await core.research.read(a);break;
@@ -74,16 +86,18 @@ export async function POST(request:Request){
         case "read_changes":value=await core.readChanges(a.afterId??0,a.limit??100,a.throughId??null);break;
         case "read_observation_history":value=await core.readObservationHistory(a);break;
         case "read_instructions":value={instructions:dotInstructions};break;
-        case "task_command":{const submitted=await core.nativeCommands.submit({...a,version:1,kind:"timer"},owner);value=submitted.value;approval=submitted.approval;break;}
+        case "task_command":{const submitted=await submit({...a,version:1,kind:"timer"});value=submitted.value;approval=submitted.approval;break;}
         case "read_task_history":value=await core.taskHistory(a);break;
         case "read_task_commands":value=await core.readTaskCommands(a);break;
         case "acknowledge_batch":value=await core.acknowledgeBatch(a.batchId,owner);break;
         case "record_context":value=await core.recordContext(a,owner);break;
-        case "read_connection_status":value=await core.diagnostics();break;
+        case "read_connection_status":value={...await core.diagnostics(),mcpClient:clientConfirmationCapabilities(p)};break;
         case "flush_minute_changes":value=await core.flush();break;
         default:throw new BridgeError("未知工具",404);
       }
       return value;});
+      const inputRequired=form?nativeFormResult(value,approval):null;
+      if(inputRequired)return Response.json({jsonrpc:"2.0",id,result:inputRequired});
       return result(nativeToolResult(value,approval));
     }
     return Response.json({jsonrpc:"2.0",id,error:{code:-32601,message:"未知方法"}});
