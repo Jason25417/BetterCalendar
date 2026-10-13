@@ -39,3 +39,7 @@ Jason已拍板：每次具体改动在Dots对话里点确认，不再另开BC逐
 产品哲学：无持续写日志义务；建议不变成义务；原文/事实不被推断覆盖；操作都可检查且权限可撤回；删除可恢复、长期区不删；开发期失败可见。没有静默修改既有约定。
 
 发布证据将在部署与Apple处理核验后追加，上传开始不算TestFlight可用。
+
+发布核验：7fe98a8已push；服务v21已部署，source067198c0fda279cd587d75bf3729ef63b0f1d4dd，部署appgdep_6acdbacdf2f881919a64e7cbb404d660为succeeded。0.65.10/167双端上传后ASC均VALID、IN_BETA_TESTING、中文说明读回一致，见[evidence/testflight-167.json](evidence/testflight-167.json)。设备安装与真实操作未验。
+
+线上只读证据：正式MCP读到新instructions；已认证Mac native/grant/read返回revision0、capabilities[]，没有开启权限或操作真任务。平台设备凭据读MCP metadata返回401，而native设备API正常，不能把两种身份混作权限失败。Edge Dots01:05 EDT报告四个新原生工具未发现，实际调用0；开发设置随后已点击“刷新工具”，等待Dots再验，不把点击刷新等同新工具已可调用。研究LaunchAgent25433实查running，保留原档案与游标，已加载新增native原文定位逻辑。[线上检查证据](evidence/native-readiness-167.json)。

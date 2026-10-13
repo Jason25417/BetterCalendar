@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "checkedAt": "2026-10-13T05:05:27.046414+00:00",
+  "sourceCommit": "7fe98a8",
+  "siteSourceCommit": "067198c0fda279cd587d75bf3729ef63b0f1d4dd",
+  "siteVersion": 21,
+  "deploymentId": "appgdep_6acdbacdf2f881919a64e7cbb404d660",
+  "siteStatus": "succeeded",
+  "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+  "officialMcpReadInstructions": "new native instructions read successfully",
+  "authenticatedDeviceGrantRead": {
+    "revision": 0,
+    "capabilities": [],
+    "confirmation": "chat_button"
+  },
+  "platformTokenMcpMetadataRead": {
+    "status": 401,
+    "interpretation": "device/platform credential is not MCP user identity; device API read succeeded"
+  },
+  "currentConversationTools": "native tool descriptors not yet discovered",
+  "dotsReadonlyDiagnostic": "Dots replied 01:05 EDT: new instructions readable; four native tools not discovered; actual capability calls 0",
+  "realOperationsPerformed": false,
+  "widgetRenderedInDots": "not_verified",
+  "nativeTests": {
+    "macFullPassed": 294,
+    "focusedRemotePassed": 9,
+    "serverPassed": 45,
+    "recorderPassed": 12,
+    "iosSimulatorBuild": "succeeded"
+  }
+}
