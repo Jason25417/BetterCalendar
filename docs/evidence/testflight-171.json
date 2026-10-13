@@ -1,0 +1,59 @@
+{
+  "appId": "6787325341",
+  "build": 171,
+  "builds": [
+    {
+      "id": "89f7c8ff-45d8-4055-b1f2-0a28fd0da55b",
+      "platform": "IOS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    },
+    {
+      "id": "7a385ccf-67b5-41e2-830f-17d7ad600862",
+      "platform": "MAC_OS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    }
+  ],
+  "version": "0.65.14",
+  "sourceCommit": "ef447c256dba602af131d502416c9c0c1c0894cc",
+  "verifiedAt": "2026-10-13T13:20:07.356069+00:00",
+  "deviceInstalled": "not_verified",
+  "archiveVersionsVerified": true,
+  "archiveVersions": [
+    {
+      "platform": "MAC_OS",
+      "version": "0.65.14",
+      "build": "171",
+      "bundleId": "com.jason.BetterCalendar"
+    },
+    {
+      "platform": "IOS",
+      "version": "0.65.14",
+      "build": "171",
+      "bundleId": "com.jason.BetterCalendar"
+    },
+    {
+      "platform": "IOS_WIDGET",
+      "version": "0.65.14",
+      "build": "171",
+      "bundleId": "com.jason.BetterCalendar.BetterCalendarWidgets"
+    }
+  ],
+  "uploads": "both_success",
+  "ascPrereleaseVersionsVerified": true,
+  "checks": {
+    "macUnit": {
+      "passed": 331,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/private/tmp/bc-native-169/Logs/Test/Test-BetterCalendar-2026.10.13_09-09-02--0400.xcresult"
+    },
+    "iosSimulator": "BUILD_SUCCEEDED",
+    "uiTests": "not_verified"
+  }
+}

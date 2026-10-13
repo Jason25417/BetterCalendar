@@ -1,6 +1,6 @@
 # 对话请求整页检查、失败隔离与分页续读
 
-2026-10-13。170发布后的源码增量，尚未进入安装包；当前双端可安装仍为0.65.13/170。没有新服务部署或MCP工具合同变更。
+2026-10-13。170发布后的队列修复现已随0.65.14/171双端TestFlight提供，ASC实际VALID、IN_BETA_TESTING和中文说明均已核验，见[evidence/testflight-171.json](evidence/testflight-171.json)。设备是否安装与真实执行仍未验证。没有新服务部署或MCP工具合同变更。
 
 ## 与目标的差异及修复
 
@@ -28,4 +28,4 @@ Mac全量331/331（0失败/跳过，xcresult核对），iOS Simulator编译成�
 
 初次方法名筛选命令虽然显示TEST SUCCEEDED，但xcresult实际0项，已经明确排除，不作为验证。随后使用整个套件/全量门控核验实际数量。UITests runner已有加载问题，此轮不称UI或系统闹钟验证。
 
-真实只读read_native_capabilities于12:45:15.976 UTC返回devices[]，callId research_a81886a2-1e50-46c3-a6d3-f345266d3b04；只能证明当时服务端无启用记录，不能判断手机安装、在线或系统权限。本人主动权限、Dots卡片按钮、真正请求的设备执行、双端/锁屏延迟、原生导出面板、AlarmKit响铃/取消仍未验证。完整goal active，无反馈不当认可；这批源码提交不当作设备已更新。
+真实只读read_native_capabilities于12:45:15.976 UTC返回devices[]，callId research_a81886a2-1e50-46c3-a6d3-f345266d3b04；只能证明当时服务端无启用记录，不能判断手机安装、在线或系统权限。本人主动权限、Dots卡片按钮、真正请求的设备执行、双端/锁屏延迟、原生导出面板、AlarmKit响铃/取消仍未验证。完整goal active，无反馈不当认可；代码和可安装状态不当作设备已更新或执行完成。

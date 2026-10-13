@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T13:17:02.097513+00:00",
+  "kind": "actual_read_only_call_and_later_local_capture",
+  "tool": "read_native_capabilities",
+  "sourceClass": "bc_native",
+  "callId": "research_3b4f479b-b4e7-430b-94ed-844d9706e372",
+  "arguments": {},
+  "startedAt": "2026-10-13T13:06:04.708Z",
+  "returnedAt": "2026-10-13T13:06:04.868Z",
+  "result": {
+    "readAt": "2026-10-13T13:06:04.868Z",
+    "devices": [],
+    "research": {
+      "callId": "research_3b4f479b-b4e7-430b-94ed-844d9706e372",
+      "responseHash": "bb9f0bbe2f2278d5bb35502d5d9a46afb30646bd09399d8c2424f57282d90650",
+      "recorded": true
+    }
+  },
+  "localArchive": {
+    "database": "/Users/jasontu/Library/Application Support/BetterCalendarResearch/research.sqlite",
+    "callRows": [
+      19252,
+      19253
+    ],
+    "snapshot": "f5d44934561a0bf3c2ca68ad0cc5fbb5b490f3a847879f9c85219d64658e87a1",
+    "capturedAt": "2026-10-13T13:14:43.935Z",
+    "notCapturedAtOriginalReturn": true,
+    "sourceResponseHash": "bb9f0bbe2f2278d5bb35502d5d9a46afb30646bd09399d8c2424f57282d90650",
+    "canonicalResponseHashVerified": true
+  },
+  "scope": {
+    "httpHeadersCaptured": false,
+    "actualDeviceExecution": false,
+    "genuineUserOperation": false,
+    "newService": false,
+    "feedbackCollected": false,
+    "permissionChanged": false
+  }
+}
