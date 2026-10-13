@@ -19,6 +19,7 @@ import Observation
     var capability: NativeAlarmCapability
     var message: String?
     var working = false
+    var conversationSetupNotice: String?
     init(writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, remote: NativeRemoteExecutor? = nil) {
         self.remote = remote
         self.writer = writer; self.alarms = alarms; self.capability = alarms.inspect()
@@ -68,6 +69,38 @@ import Observation
         working = true; defer { working = false }
         do { capability = try await alarms.requestAuthorization(); refresh() }
         catch { fail(error) }
+    }
+    // A single explicit native button replaces the multi-toggle setup, not the
+    // user's per-operation confirmation in Dots. It never creates an operation.
+    func enableAllConversationCapabilities() async {
+        guard !working else { return }
+        guard let remote, let deviceId = remote.deviceId else {
+            conversationSetupNotice = "这台设备尚未保存连接。请先在「个人状态与 Dot」保存设备配置，再点一键开启。"
+            return
+        }
+        working = true; defer { working = false }
+        conversationSetupNotice = "正在核对本机权限并保存…"
+        capability = alarms.inspect()
+        if capability.supported && capability.authorization != "authorized" {
+            do { capability = try await alarms.requestAuthorization() }
+            catch {
+                conversationSetupNotice = "系统闹钟授权失败：" + error.localizedDescription + "。尚未改变对话权限，请重试。"
+                fail(error); return
+            }
+        }
+        guard remote.deviceId == deviceId else {
+            conversationSetupNotice = "连接在授权期间改变，尚未保存对话权限；请核对本机连接后重试。"
+            return
+        }
+        let includeAlarms = capability.supported && capability.authorization == "authorized"
+        await remote.setCapabilities(items: true, alarm: includeAlarms, journalRead: true, journalWrite: true, timer: true)
+        if remote.allowItems && remote.allowTimer && remote.allowJournalRead && remote.allowJournalWrite && (!includeAlarms || remote.allowAlarms) {
+            conversationSetupNotice = capability.supported && !includeAlarms
+                ? "事项、计时和日记权限已保存；系统尚未允许闹钟，闹钟权限未开启。可在系统设置允许后再点一键开启。"
+                : "本机支持的全部对话权限已保存。每次具体改动仍需你在 Dots 确认。"
+        } else {
+            conversationSetupNotice = "对话权限尚未保存成功：" + remote.message + "。请修复原因后重试，开关选择不代表已经启用。"
+        }
     }
     func scheduleAlarm() async {
         guard !working else { return }

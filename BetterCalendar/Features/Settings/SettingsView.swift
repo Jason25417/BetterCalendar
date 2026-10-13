@@ -54,6 +54,9 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            if let nativeActions, let remote = nativeActions.remote {
+                Section("Dots 对话权限（内测）") { NativeConversationPermissionsPanel(actions: nativeActions, model: remote) }
+            }
             Section("个人状态与 Dot（内测）") { StateBridgeSettingsPanel() }
             if let nativeActions { Section("原生操作（内测）") { NativeActionsPanel(model: nativeActions) } }
             Section("数据与同步（开发期）") {

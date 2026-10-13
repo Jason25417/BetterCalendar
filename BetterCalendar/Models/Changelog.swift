@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.16", date: "2026-10", changes: [
+            "Dots 对话权限移到设置顶部，增加一键开启本机支持的全部对话权限，仍保留每次具体改动确认",
+            "权限按钮各自独立，修复表单内相邻按钮误触；可分别选择、明确撤回，并查看实际保存结果",
+            "未连接、闹钟未授权或保存失败会说明原因；一键授权不会创建事项、计时或闹钟"
+        ]),
         ChangelogEntry(version: "0.65.15", date: "2026-10", changes: [
             "对话操作会核对服务返回的设备、执行身份和完整结果；回执不一致时保留原结果重试",
             "接手时收到错配的历史结果，不会把当前请求误记为完成，也不会重复执行",

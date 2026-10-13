@@ -49,5 +49,6 @@ struct StateBridgeSettingsPanel: View {
             if let date = client.lastUpload { Text("上次保存：\(date.formatted())").font(.caption).foregroundStyle(.secondary) }
             if let error { Text(error).foregroundStyle(.red).font(.caption) }
         }
+        .buttonStyle(.bordered)
     }
 }
