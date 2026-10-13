@@ -6,6 +6,7 @@ struct NativeActionsPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let remote = model.remote { NativeRemotePanel(model: remote) }
+            NativeEvidencePanel()
             DisclosureGroup("事项写入（内测）") {
                 Picker("事项", selection: Binding(get: { model.selected }, set: { model.select($0) })) {
                     Text("新待办").tag(Optional<UUID>.none)

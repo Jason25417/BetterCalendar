@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T12:24:50.090615+00:00",
+  "baseCommit": "f3ab73b5a43cae529008355a54e2bf536a8e1d60",
+  "delivery": "unreleased source increment; TestFlight remains 0.65.12/169",
+  "checks": {
+    "macUnit": {
+      "passed": 318,
+      "failed": 0,
+      "skipped": 0,
+      "result": "Passed",
+      "xcresult": "/private/tmp/bc-native-169/Logs/Test/Test-BetterCalendar-2026.10.13_08-21-19--0400.xcresult"
+    },
+    "finalFocusedAfterUiErrorHandling": {
+      "passed": 4,
+      "failed": 0,
+      "log": "/private/tmp/bc-native-evidence-focused-final.log"
+    },
+    "iosSimulator": "BUILD_SUCCEEDED",
+    "fullScheme": {
+      "result": "Failed",
+      "unitPassed": 318,
+      "failure": "existing BetterCalendarUITests runner executable missing; UI tests not run"
+    }
+  },
+  "onlyFixtureDataUsed": true,
+  "realPrivateLogsExported": false,
+  "sourceOriginalsUnchanged": "verified in isolated fixtures",
+  "permissionsChanged": false,
+  "newService": false,
+  "formalReadOnlyAudit": {
+    "capabilities": {
+      "readAt": "2026-10-13T12:13:39.034Z",
+      "devices": [],
+      "callId": "research_da51dc18-c857-441e-80fa-befd641852bf",
+      "responseHash": "0f00109976a9604c5a7fca20dd2e6ea03191aee17f24ac337f610eff80270165"
+    },
+    "commands": {
+      "readAt": "2026-10-13T12:13:37.966Z",
+      "from": "2026-10-13T00:00:00.000Z",
+      "before": "2026-10-13T12:13:37.846Z",
+      "commands": [],
+      "hasMore": false,
+      "callId": "research_ec46e9ef-f682-48e3-b032-c58c2dcaa1e3",
+      "responseHash": "4c5efb39d7fc071e994055118f5cf20155536d3838a0de6882de4f3e380b50b3"
+    }
+  },
+  "unverified": [
+    "real file save and cancellation UI",
+    "real native permission setup",
+    "actual required operations via Dots confirmation and target device",
+    "real dual-device timer display and AlarmKit ring/cancel"
+  ],
+  "goal": "active"
+}
