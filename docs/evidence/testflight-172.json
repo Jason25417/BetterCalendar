@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "appStoreConnect": {"appId":"6787325341","build":172,"builds":[{"id":"e8cc8162-cd33-4141-bca6-5e7331049a73","platform":"IOS","processing":"VALID","internal":"IN_BETA_TESTING","external":"READY_FOR_BETA_SUBMISSION","notesVerified":true},{"id":"78350f14-50cb-47c8-b11e-d8f7a15b1ad9","platform":"MAC_OS","processing":"VALID","internal":"IN_BETA_TESTING","external":"READY_FOR_BETA_SUBMISSION","notesVerified":true}]},
+  "appVersion": "0.65.15",
+  "build": 172,
+  "sourceCommit": "886295865df303aac0bb1605dbc5887c1818135b",
+  "checkedAt": "2026-10-13T15:43:05.417754+00:00",
+  "tests": {
+    "mac": {
+      "passed": 334,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/private/tmp/bc-receipt-172-final-tests.xcresult"
+    },
+    "iosSimulatorBuild": "passed"
+  },
+  "release": {
+    "build": 172,
+    "version": "0.65.15",
+    "sourceCommit": "886295865df303aac0bb1605dbc5887c1818135b",
+    "phase": "uploaded-both",
+    "developerDir": "/Applications/Xcode.app/Contents/Developer",
+    "updatedAt": 1791906031.589856,
+    "macUploaded": true,
+    "iosUploaded": true
+  },
+  "firstAttempt": {
+    "state": "failed",
+    "phase": "mac-upload",
+    "exitCode": 70,
+    "reason": "Apple is not currently accepting applications built with this version of Xcode",
+    "toolchain": "Xcode 27 Beta6 selected via xcode-select",
+    "unchangedBundleNotRetransmitted": true
+  },
+  "retry": {
+    "reason": "Prior upload explicitly terminal and ASC build172 list empty; rebuilt with same accepted toolchain as171",
+    "toolchain": "Xcode 27.0 / 27A266a",
+    "sourceAndBuildUnchanged": true,
+    "oldLogsPreserved": true
+  },
+  "archives": {
+    "mac": {
+      "version": "0.65.15",
+      "build": "172",
+      "minimumOS": "26.0",
+      "xcodeBuild": "27A266a"
+    },
+    "ios": {
+      "version": "0.65.15",
+      "build": "172",
+      "minimumOS": "26.0",
+      "xcodeBuild": "27A266a",
+      "widgetVersion": "0.65.15",
+      "widgetBuild": "172"
+    }
+  },
+  "nativeDataModelChanged": false,
+  "cloudKitDeployed": false,
+  "privateService": "v30 unchanged",
+  "phoneGrantRead": {
+    "at": "2026-10-13T15:33:25.079Z",
+    "callId": "research_48ae6ffd-35da-4ce8-bdf5-6e186f1e25bb",
+    "responseHash": "6421d9bbae3d4b43c44e274637d414c5a4d5ce573d1fa0547a8374369c039954",
+    "macRevision": 1,
+    "iphoneGrantReturned": false
+  },
+  "unverified": [
+    "User installed172",
+    "Actual human form confirmation and mutation",
+    "Dual device UI",
+    "iPhone AlarmKit schedule/ring/cancel",
+    "Nonempty journal text/write"
+  ],
+  "privacy": "No real fixture tasks, no new data service or permission widening"
+}

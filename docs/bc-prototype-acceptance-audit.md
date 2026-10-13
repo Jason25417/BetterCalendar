@@ -1,5 +1,7 @@
 # 当前个人原型闭环验收对照
 
+2026-10-13 172 后续：已修复设备 claim 历史结果与 receipt 确认的身份/原文核对缺口，错配保留原结果重传、不重复执行；334/334 Mac 测试与 iOS 编译通过。0.65.15/172 双端上传成功，ASC 均 VALID/IN_BETA_TESTING，中文说明读回一致。首轮 beta 工具链上传被 Apple 明确拒绝，已保留失败记录并按171实际接受的正式 Xcode 27.0/27A266a重打包同源码；无数据模型/权限变更，服务v30不变。详情见 [完整回执核对](bc-native-receipt-172.md) 和 [172发布证据](evidence/testflight-172.json)。日用设备安装172未知；已有171只读证据不追认成172验收。iPhone闹钟本机授权已提出一次具体问题，待本人保存；仍不造任务、自批或把响铃当保证叫醒。
+
 2026-10-13 15:24 UTC 当前状态：现有私有服务 v30 已上线。根据 Dots 真实声明的 form 能力，v29 已接原生本人表单；v30 修复取消/拒绝后重试再弹确认，持久关闭请求。72 项相关服务测试（含 6 项实际 POST 路由/真实内存 SQLite 集成测试）与构建通过。Dots 真实读取新约定、callId 与本地日志匹配；仍未验证真正表单呈现、本人确认及真实改动。详见 [原生表单](bc-dots-native-form.md) 和 [v30 证据](evidence/mcp-cancel-30.json)。
 
 本轮 Mac 只读日记实际返回 1 条保存记录，服务/本机 reported/本地研究快照一致，23.511 秒，页 complete=true、hasMore=false。正文为空，不能称非空文字或跨页已验。见 [实际记录页](evidence/native-journal-record-page-171.json)。15:16 UTC 独立能力读取仍有 Mac revision1、未返回 iPhone grant；不据此推断 iPhone 没有活动或没安装。原5529提案保持 expired、未执行。当前不需要新决策，但完整目标尚未完成。
