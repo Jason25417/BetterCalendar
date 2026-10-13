@@ -1,5 +1,7 @@
 # 当前个人原型闭环验收对照
 
+2026-10-13 16:18 UTC 真机续接：本人打开手机后，原只读请求已由iPhone接手并返回 applied/device_reported_read；Mac同一日记窗口也成功。两端最新device.status明确0.65.16/173、freshness=current。两条原commandId/requestHash/attemptId及完整结果与本地ResearchRecorder已有research/evidence快照一致，Mac本机reported/attempts=1/receipt另逐项相符；iPhone本机文件未独立检查。两端均匹配0条、complete=true/hasMore=false；不证明有正文的数据或双端内容同步。Mac接受至结果14.516秒；iPhone286.248秒包括等待本人打开，不能当传输延迟。没有新增改动、计时或闹钟。证据见[evidence/native-journal-read-173.json](evidence/native-journal-read-173.json)。导出UI仍未验：原生自动化能读Settings，但disclosure点击无效、坐标输入报告noWindowsAvailable，重连仍相同；这是工具操作受阻，不能归因为App按钮缺陷。完整目标仍active，实际Dots本人确认→改动/响铃/计时双端仍待真实需要的样本。
+
 2026-10-13 173权限界面更新：本人反馈按钮不可点/误触；Dots权限独立置顶、显式按钮样式、大号一键开启、细项/保存/撤回分行，340/340 Mac及iOS编译通过，独立iPhone模拟器隔离界面真实点击核对。15:59:05.680Z正式接口已返回本人iPhone rev4全部13能力；此前保存已送达，不应再要求反复开关。这个回读不证明173安装、当前系统授权或实际响铃。173双端均VALID/IN_BETA_TESTING且中文说明核对一致；发布证据见[evidence/testflight-173.json](evidence/testflight-173.json)，实现与边界见[权限界面](bc-permissions-173.md)。Dots本人确认→真实执行及双端结果仍未验；不把界面或服务授权当操作完成。
 
 2026-10-13 172 后续：已修复设备 claim 历史结果与 receipt 确认的身份/原文核对缺口，错配保留原结果重传、不重复执行；334/334 Mac 测试与 iOS 编译通过。0.65.15/172 双端上传成功，ASC 均 VALID/IN_BETA_TESTING，中文说明读回一致。首轮 beta 工具链上传被 Apple 明确拒绝，已保留失败记录并按171实际接受的正式 Xcode 27.0/27A266a重打包同源码；无数据模型/权限变更，服务v30不变。详情见 [完整回执核对](bc-native-receipt-172.md) 和 [172发布证据](evidence/testflight-172.json)。日用设备安装172未知；已有171只读证据不追认成172验收。iPhone闹钟本机授权已提出一次具体问题，待本人保存；仍不造任务、自批或把响铃当保证叫醒。

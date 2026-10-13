@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T16:18:17.949Z",
+  "sourceCommit": "4ab49b76790dfb12eba2efe7e2533cfe10922e1a",
+  "build": "173",
+  "operation": "journal.read",
+  "window": {
+    "end": "2026-10-14T04:00:00.000Z",
+    "limit": 10,
+    "start": "2026-10-13T04:00:00.000Z"
+  },
+  "deviceStatus": {
+    "readAt": "2026-10-13T16:18:17.949Z",
+    "research": {
+      "callId": "research_e8ec0c48-ba71-4a30-bb74-b4bea20944c1",
+      "responseHash": "b8e767d98cd580de5e6cf0853ce9596d53fd3fcfe7fa6313d9981abb86812e2a",
+      "recorded": true
+    },
+    "sources": [
+      {
+        "expiresAt": "2026-10-13T16:20:26.000Z",
+        "sequence": 6388,
+        "eventId": "96F5E548-9CB7-4227-88BE-E3BB02312DA6",
+        "value": {
+          "collector": {
+            "name": "BetterCalendar",
+            "version": "0.65.16",
+            "build": "173",
+            "schemaVersion": 2
+          },
+          "availability": "online",
+          "platform": "Version 27.2 (Build 24B5099f)"
+        },
+        "source": "device.status",
+        "schemaVersion": 1,
+        "observedAt": "2026-10-13T16:17:26.000Z",
+        "assertion": "observed",
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "receivedAt": "2026-10-13T16:17:29.564Z",
+        "sourceKey": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960:device.status",
+        "freshness": "current",
+        "availability": "available",
+        "reason": "online",
+        "lastObservedAt": "2026-10-13T16:17:26.000Z",
+        "lastReceivedAt": "2026-10-13T16:17:29.564Z",
+        "lastSuccessfulReadAt": "2026-10-13T16:17:26.000Z",
+        "dataRole": "source-data",
+        "usableForCurrentState": true
+      },
+      {
+        "expiresAt": "2026-10-13T16:21:02.000Z",
+        "eventId": "CC09B925-5AF0-4FA7-82AB-225D72963D31",
+        "source": "device.status",
+        "assertion": "observed",
+        "value": {
+          "collector": {
+            "build": "173",
+            "name": "BetterCalendar",
+            "schemaVersion": 2,
+            "version": "0.65.16"
+          },
+          "platform": "Version 27.2 (Build 26B5086k)",
+          "availability": "online"
+        },
+        "schemaVersion": 1,
+        "observedAt": "2026-10-13T16:18:02.000Z",
+        "sequence": 57988,
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "receivedAt": "2026-10-13T16:18:04.730Z",
+        "sourceKey": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d:device.status",
+        "freshness": "current",
+        "availability": "available",
+        "reason": "online",
+        "lastObservedAt": "2026-10-13T16:18:02.000Z",
+        "lastReceivedAt": "2026-10-13T16:18:04.730Z",
+        "lastSuccessfulReadAt": "2026-10-13T16:18:02.000Z",
+        "dataRole": "source-data",
+        "usableForCurrentState": true
+      }
+    ]
+  },
+  "commands": [
+    {
+      "commandId": "01cd861e-8f57-43f9-a1d7-6f5c94094c1c",
+      "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "requestHash": "75b216957724fb6ee253c0096f5ad6f8005fe25b01f65e26e2044a22d8e9ccbc",
+      "attemptId": "84f68955-27ed-44b8-81ae-d99cd9585c12",
+      "grantRevision": 1,
+      "state": "applied",
+      "operationEffect": "read_only",
+      "acceptedAt": "2026-10-13T16:12:30.117Z",
+      "resultAt": "2026-10-13T16:12:44.633Z",
+      "acceptedToResultSeconds": 14.516,
+      "result": {
+        "authority": "swiftdata",
+        "complete": true,
+        "coverage": {
+          "freshness": "local_persisted_store_at_readAt",
+          "journalText": "complete_per_returned_record",
+          "otherDevicesSync": "unknown",
+          "photoBinaries": "not_requested_or_retrieved",
+          "photoReferences": "included"
+        },
+        "dateUnit": "unix-milliseconds",
+        "dayBoundaryHour": 4,
+        "formatVersion": 1,
+        "hasMore": false,
+        "matchingCount": 0,
+        "nextCursor": null,
+        "readAt": 1791907964076.8818,
+        "records": [],
+        "snapshotHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "source": "bc.native.journal",
+        "timeZone": "America/New_York",
+        "windowSemantics": "entry.date in [start,end); logicalDay is derived at retrieval"
+      },
+      "research": {
+        "callId": "research_291f6af4-ba58-4dcd-a385-a5fe697bd311",
+        "responseHash": "6216ffebd083a199f61430bf1d2785f7b2ece27d208571b59a7d6bf4c1b990d4",
+        "recorded": true
+      }
+    },
+    {
+      "commandId": "f0dc3e86-0681-45b2-bafa-cfd2af7c9ab6",
+      "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "requestHash": "58f33d7d13bada68b9755ff03dc09e7c0ec2e908688bc3660f94d60ebad60a73",
+      "attemptId": "75f4e492-7c79-4782-86c2-8570b52728eb",
+      "grantRevision": 4,
+      "state": "applied",
+      "operationEffect": "read_only",
+      "acceptedAt": "2026-10-13T16:09:42.662Z",
+      "resultAt": "2026-10-13T16:14:28.910Z",
+      "acceptedToResultSeconds": 286.248,
+      "result": {
+        "authority": "swiftdata",
+        "complete": true,
+        "coverage": {
+          "freshness": "local_persisted_store_at_readAt",
+          "journalText": "complete_per_returned_record",
+          "otherDevicesSync": "unknown",
+          "photoBinaries": "not_requested_or_retrieved",
+          "photoReferences": "included"
+        },
+        "dateUnit": "unix-milliseconds",
+        "dayBoundaryHour": 4,
+        "formatVersion": 1,
+        "hasMore": false,
+        "matchingCount": 0,
+        "nextCursor": null,
+        "readAt": 1791908068557.0723,
+        "records": [],
+        "snapshotHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "source": "bc.native.journal",
+        "timeZone": "America/New_York",
+        "windowSemantics": "entry.date in [start,end); logicalDay is derived at retrieval"
+      },
+      "research": {
+        "callId": "research_34177c70-ff29-46f5-998c-56f005fa5baf",
+        "responseHash": "abdc4b8241e4ec7a601b996b5dfb6319b889a0e332e34b2937a40265d554d3bb",
+        "recorded": true
+      }
+    }
+  ],
+  "localEvidence": {
+    "mac": {
+      "snapshot": "386317018f7ec4d2cf142eca517aeed782dee92f7bdfe85d88ae2f1d518d8dc9",
+      "capturedAt": "2026-10-13T16:13:30.613Z",
+      "identityRequestResultMatch": true,
+      "devicePhase": "reported",
+      "deviceAttempts": 1,
+      "deviceReceiptMatches": true
+    },
+    "iphone": {
+      "snapshot": "29429fd7cf3e3872428328a525b8cc68a64590bae5a0e092bbeaab90a027bf40",
+      "capturedAt": "2026-10-13T16:14:41.265Z",
+      "identityRequestResultMatch": true,
+      "deviceFileInspected": false
+    }
+  },
+  "limits": [
+    "The iPhone wait includes waiting for the user to open BC; it is not a network latency measurement.",
+    "Both returned empty one-page results; this does not prove nonempty journal text, pagination, cross-device synchronization or mutations.",
+    "No timer, item, journal or alarm mutation was submitted or approved.",
+    "Export UI verification remains incomplete: native automation read Settings successfully but clicks did not expand the disclosure; coordinate input reported noWindowsAvailable. This does not establish an app UI defect.",
+    "Raw tool returns remain in the existing controlled local BetterCalendarResearch folder with mode 0600. No new service."
+  ]
+}
