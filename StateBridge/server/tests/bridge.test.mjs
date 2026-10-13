@@ -391,3 +391,17 @@ test('later research completion preserves original legacy processed time and esc
  assert.equal((await f.core.research.complete(completion(f,calls),'owner')).recordedAt,result.recordedAt);
  assert.deepEqual(safeArguments({basis:['Bearer "odd-secret" text']}),{basis:['[redacted] text']});
 });
+
+test('normal device heartbeat refresh can skip shadow wake, while changes and errors remain protected',()=>{
+ const c=(id,value,extra={})=>({id,sourceKey:'mac_device:device.status',observation:{eventId:String(id),source:'device.status',assertion:'observed',value,...extra}});
+ const first=shadowDecision([c(1,{availability:'online',collector:{build:'164'},sampledAt:'old'})]);
+ const refresh=shadowDecision([c(2,{sampledAt:'new',collector:{build:'164'},availability:'online'})],first.next);
+ assert.equal(first.wake,true);assert.equal(refresh.wake,false);assert.equal(refresh.version,2);
+ assert.equal(refresh.notify,false);assert.equal(refresh.execute,false);assert.equal(refresh.sideEffects,false);
+ assert.equal(shadowDecision([c(3,{availability:'online',collector:{build:'165'}})],first.next).wake,true);
+ assert.equal(shadowDecision([c(4,{availability:'offline'})],first.next).wake,true);
+ assert.equal(shadowDecision([c(5,{availability:'online',collector:{build:'164'}},{freshness:'stale'})],first.next).wake,true);
+ assert.equal(shadowDecision([c(6,{availability:'online',collector:{build:'164'}},{assertion:'user'})],first.next).wake,true);
+ // Unknown source statuses cannot borrow the device-only exception.
+ assert.equal(shadowDecision([{...c(7,{availability:'online'}),sourceKey:'mac_device:health.status',observation:{source:'health.status',value:{availability:'online'}}}],first.next).wake,true);
+});

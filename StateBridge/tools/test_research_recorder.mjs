@@ -73,3 +73,13 @@ test('research summary separates processed silence, missing results and shadow s
  r.db.prepare('INSERT INTO calls VALUES(?,?)').run(3,JSON.stringify(command));
  assert.equal(r.stats().notificationReportedSent,1);assert.equal(r.stats().operationReceipts,1);assert.equal(r.stats().processedWithoutAction,1);
 });
+
+test('replay labels a new policy without rewriting archived judgments or making network calls',async t=>{
+ const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);
+ const original=JSON.parse(r.db.prepare('SELECT body FROM runs').get().body);original.shadow.version=1;
+ r.db.prepare('UPDATE runs SET body=? WHERE id=?').run(JSON.stringify(original),original.id);
+ const before=c.requests.length,stored=r.db.prepare('SELECT body FROM runs').get().body;
+ const replay=r.replay(original.id);assert.equal(replay.policyChanged,true);assert.equal(replay.recordedShadow.version,1);assert.equal(replay.replayShadowVersion,2);
+ assert.equal(replay.network,false);assert.equal(replay.sideEffects,false);assert.equal(c.requests.length,before);
+ assert.equal(r.db.prepare('SELECT body FROM runs').get().body,stored);assert.deepEqual(r.stats().shadowPolicyVersions,{'1':1});
+});

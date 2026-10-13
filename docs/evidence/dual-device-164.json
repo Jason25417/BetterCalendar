@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-13T00:05:08.330Z",
+  "heartbeatCallId": "research_1bd76bfc-1152-4880-b6be-23eced56e971",
+  "heartbeat": [
+    {
+      "platform": "iOS",
+      "observedAt": "2026-10-13T00:04:37.000Z",
+      "receivedAt": "2026-10-13T00:04:40.166Z",
+      "freshness": "current",
+      "collector": {
+        "version": "0.65.7",
+        "name": "BetterCalendar",
+        "schemaVersion": 2,
+        "build": "164"
+      }
+    },
+    {
+      "platform": "macOS",
+      "observedAt": "2026-10-13T00:04:37.000Z",
+      "receivedAt": "2026-10-13T00:04:43.491Z",
+      "freshness": "current",
+      "collector": {
+        "schemaVersion": 2,
+        "version": "0.65.7",
+        "build": "164",
+        "name": "BetterCalendar"
+      }
+    }
+  ],
+  "pool": [
+    {
+      "platform": "iOS",
+      "callId": "research_b40f0f77-54be-4b15-96cf-1869d3d0d39c",
+      "observedAt": "2026-10-13T00:04:37.000Z",
+      "receivedAt": "2026-10-13T00:04:41.014Z",
+      "freshness": "current",
+      "availability": "available",
+      "complete": true,
+      "hasMore": false,
+      "totalRecordCount": 25,
+      "matchedRecordCount": 25,
+      "checkpointCount": 9,
+      "contentHash": "af93f597bd3fc113e6197254cafbdc345cdb7ffe16731d66dd06f74dab542683",
+      "deviceViewsDiffer": false
+    },
+    {
+      "platform": "macOS",
+      "callId": "research_8d4c5135-0040-4eaa-b1f5-67ee6a696df6",
+      "observedAt": "2026-10-13T00:05:09.000Z",
+      "receivedAt": "2026-10-13T00:05:12.528Z",
+      "freshness": "current",
+      "availability": "available",
+      "complete": true,
+      "hasMore": false,
+      "totalRecordCount": 25,
+      "matchedRecordCount": 25,
+      "checkpointCount": 9,
+      "contentHash": "af93f597bd3fc113e6197254cafbdc345cdb7ffe16731d66dd06f74dab542683",
+      "deviceViewsDiffer": false
+    }
+  ],
+  "boundary": "Read-only device collection and directory snapshot proof. Not deletion, restoration, timer operation, notification delivery or user benefit acceptance."
+}

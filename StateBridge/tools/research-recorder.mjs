@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { shadowDecision } from '../server/lib/shadow-decision.mjs';
+import { shadowDecision,SHADOW_VERSION } from '../server/lib/shadow-decision.mjs';
 
 export const ORIGIN='https://jason-state-bridge.jason25417.chatgpt.site';
 export const defaults={version:1,maxBytes:2*1024**3,retentionDays:365,debugFeedback:false,pollSeconds:60};
@@ -127,7 +127,7 @@ export class Recorder {
     const run=JSON.parse(row.body),state=this.db.prepare('SELECT body FROM snapshots WHERE hash=?').get(run.stateSnapshot);
     const context=(state?JSON.parse(state.body).response?.notes ?? []:[]).filter(n=>['habit','preference','personalization'].includes(n.kind)).map(n=>({...n,sourceClass:'habit',layer:'personalization',assertion:n.assertion}));
     const inputs=comparisonInputs(run.changes,run.window,{context});
-    return {version:1,id,sideEffects:false,network:false,groups:inputs.map(i=>({...i,shadow:shadowDecision(i.changes,run.shadowPrior ?? {})})),evaluation:{falsePositives:null,falseNegatives:null,usefulness:null,cost:null,reason:'requires labeled real samples; silence is not approval'}};
+    return {version:1,id,sideEffects:false,network:false,recordedShadow:run.shadow,replayShadowVersion:SHADOW_VERSION,policyChanged:run.shadow.version!==SHADOW_VERSION,groups:inputs.map(i=>({...i,shadow:shadowDecision(i.changes,run.shadowPrior ?? {})})),evaluation:{falsePositives:null,falseNegatives:null,usefulness:null,cost:null,reason:'requires labeled real samples; silence is not approval'}};
   }
   stats() {
     const calls=this.db.prepare('SELECT body FROM calls ORDER BY id').all().map(r=>JSON.parse(r.body));
@@ -139,6 +139,7 @@ export class Recorder {
       shadowWouldSkipWake:0,processedWithoutActionAndShadowWouldSkip:0,
       notificationReportedSent:0,notificationFailed:0,operationReceipts:0,
       correctionCount:calls.filter(c=>c.kind==='batch_result'&&c.body.supersedes).length,
+      shadowPolicyVersions:Object.fromEntries([...new Set(runs.map(r=>r.shadow.version))].map(v=>[v,runs.filter(r=>r.shadow.version===v).length])),
       errors:{localReadFailures:this.db.prepare('SELECT COUNT(*) n FROM failures').get().n,archivedCallFailures:calls.filter(c=>c.kind==='call_failed').length},
       modelTokens:null,modelCost:null,attentionSeconds:null,usefulness:null,userApproval:'unknown',
       caveats:['Shadow does not change ForwardAll or prove saved calls/cost',
@@ -216,7 +217,7 @@ async function main() {
   if(mode==='view'){console.log(encode({file:recorder.view()}));return;}
   if(mode==='replay'){console.log(encode(recorder.replay(args[0])));return;}
   if(mode==='prune'){console.log(encode(recorder.prune()));return;}
-  if(mode==='stop'){writeFileSync(join(root,'STOP'),'stop requested',{mode:0o600});console.log('{"stopped":true}');return;}
+  if(mode==='stop'){writeFileSync(join(root,'STOP'),'stop requested',{mode:0o600});console.log('{"stopRequested":true}');return;}
   if(!['once','watch'].includes(mode))throw Error('unknown mode');
     const client=clientFor(c);do {
     try{const result=await recorder.tick(client);console.log(encode({at:new Date().toISOString(),...result}));if(result.stopped)break;}

@@ -23,3 +23,11 @@
 ## Mac实际安装与恢复采集
 
 23:59 UTC /Applications/BetterCalendar.app包内0.65.7/164，实际App进程95324启动。正式MCP收到23:59:12观察、23:59:17.541接收的device.status心跳，collector明确version=0.65.7、build=164，freshness=current。日用default.store的五类表已全部加载ZDELETIONID字段，核心记录数量仍为计划268、执行70、日记19、照片2、长期事项25、阶段9；这是字段与数量核验，不冒充本轮逐条内容比对或真实双端同步。临时pool PID65901与研究录制PID83250仍存活，未主动停用。手机心跳仍为21:48旧数据，手机164安装/后台覆盖未核验。启动时电脑UI读取超时，但随后实际进程、库和MCP证明App已正常启动；不把UI超时隐藏成首次打开界面验收。
+
+## iPhone打开新版后的双端采集核验（2026-10-13 00:05 UTC）
+
+Jason确认此前手机未更新/打开并随后实际打开新版。正式MCP在00:05:08读取两端device.status，观察时间均00:04:37，手机00:04:40.166、Mac00:04:43.491接收；两个collector均0.65.7/164/current。手机旧心跳是未打开新版时的状态，不能追认为新版采集失败。
+
+分别read_pool_records(deviceId,limit=100)读取手机00:04:37、Mac00:05:09目录：各25事项/9阶段，available/current/complete=true、hasMore=false；内容SHA-256相同，deviceViewsDiffer=false，完整分页读取已核验。证据见[双端只读采集](evidence/dual-device-164.json)，仅版本/时间/数量/哈希/调用身份，不将私人事项正文复制进Git。
+
+已验证从安装新版→原生设备采集→正式MCP状态/目录可读取。本次没有操作计时、删除记录、发通知或给Dots发送消息；真实操作回执、后台长时覆盖和生活收益仍不据此宣称通过。

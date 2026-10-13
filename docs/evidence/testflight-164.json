@@ -22,7 +22,7 @@
       "notesVerified": true
     }
   ],
-  "deviceInstalledVerified": false,
+  "deviceInstalledVerified": true,
   "macInstalledVerified": true,
   "macNativeHeartbeat": {
     "callId": "research_62e15df9-0bd4-4218-b344-57ea9d669e71",
@@ -32,5 +32,6 @@
     "collectorBuild": "164",
     "freshness": "current"
   },
-  "iPhoneInstalledVerified": false
+  "iPhoneInstalledVerified": true,
+  "dualDeviceEvidence": "dual-device-164.json"
 }
