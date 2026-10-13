@@ -10,8 +10,16 @@ import SwiftData
         var requests: [BridgeTaskCommand] = []
         var committed: Set<String> = []
         var loseFirstReply = false
+        var applicationSnapshot: BridgeTaskState.ApplicationSnapshot?
+        var applicationRequests: [[String]] = []
+        var loseApplicationReply = false
         func readTasks() async throws -> BridgeTaskState {
-            BridgeTaskState(schemaVersion: 1, authority: "bettercalendar", readAt: clock, sessions: sessions, hasMore: false)
+            BridgeTaskState(schemaVersion: 1, authority: "bettercalendar", readAt: clock, sessions: sessions, hasMore: false, applicationSnapshot: applicationSnapshot)
+        }
+        func reportSavedTaskSnapshots(_ ids: [String]) async throws -> Set<String> {
+            applicationRequests.append(ids)
+            if loseApplicationReply { loseApplicationReply = false; throw URLError(.timedOut) }
+            return Set(ids)
         }
         func submitTask(_ command: BridgeTaskCommand) async throws -> BridgeTaskReceipt {
             requests.append(command)
@@ -33,6 +41,34 @@ import SwiftData
             }
             return BridgeTaskReceipt(commandId: command.commandId, saved: true)
         }
+    }
+
+    @Test func savedSnapshotReceiptSurvivesLostReplyAndRestart() async {
+        let service = Service(), disk = BridgeTaskMemoryPersistence()
+        service.applicationSnapshot = .init(id: "task_snapshot_first", finishedVersions: [], finishedComplete: true)
+        service.loseApplicationReply = true
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true })
+        await model.refresh()
+        #expect(disk.file.state?.applicationSnapshot?.id == "task_snapshot_first")
+        #expect(disk.file.pendingApplicationSnapshots == ["task_snapshot_first"])
+        service.applicationSnapshot = .init(id: "task_snapshot_second", finishedVersions: [], finishedComplete: true)
+        let resumed = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true })
+        await resumed.refresh()
+        #expect(service.applicationRequests == [["task_snapshot_first"], ["task_snapshot_first", "task_snapshot_second"]])
+        #expect(disk.file.pendingApplicationSnapshots?.isEmpty == true)
+        #expect(service.requests.isEmpty)
+    }
+
+    @Test func failedCacheSaveNeverReportsApplication() async {
+        final class Disk: BridgeTaskPersisting {
+            func load() throws -> BridgeTaskLocalFile { .init() }
+            func save(_ file: BridgeTaskLocalFile) throws { throw CocoaError(.fileWriteOutOfSpace) }
+        }
+        let service = Service()
+        service.applicationSnapshot = .init(id: "task_snapshot_failed", finishedVersions: [], finishedComplete: true)
+        let model = BridgeTaskViewModel(service: service, persistence: Disk(), enabled: { true })
+        await model.refresh()
+        #expect(service.applicationRequests.isEmpty && model.sessions.isEmpty && model.lastError != nil)
     }
 
     @Test func lostReplyAndAppRestartRetryTheOriginalCommandWithoutSecondSession() async {

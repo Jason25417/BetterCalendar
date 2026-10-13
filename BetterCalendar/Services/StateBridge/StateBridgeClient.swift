@@ -140,6 +140,12 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         let result = try await post("tasks/command",body:try BridgeTaskCodec.networkEncoder().encode(command))
         return try BridgeTaskCodec.networkDecoder().decode(BridgeTaskReceipt.self,from:JSONSerialization.data(withJSONObject:result))
     }
+    func reportSavedTaskSnapshots(_ ids: [String]) async throws -> Set<String> {
+        let result = try await post("tasks/applied", body: JSONSerialization.data(withJSONObject: ["snapshotIds": ids]))
+        guard result["recorded"] as? Bool == true, let accepted = result["accepted"] as? [String],
+              Set(accepted) == Set(ids) else { throw URLError(.cannotParseResponse) }
+        return Set(accepted)
+    }
     func uploadAndFlush() async {
         guard configured, queueHealthy, !busy, !TestHost.isActive else { return }; busy = true; defer { busy = false }
         do {

@@ -6,6 +6,7 @@ const argumentKeys = ['afterId','limit','throughId','batchId','includeValues','s
 export function safeArguments(args) {
   const clean=Object.fromEntries(argumentKeys.filter(k => args[k] !== undefined).map(k => [k,args[k]]));
   if(Array.isArray(args.observations))clean.observations=args.observations.map(o=>({eventId:o.eventId,source:o.source,sequence:o.sequence,observedAt:o.observedAt}));
+  if(Array.isArray(args.snapshotIds))clean.snapshotIds=args.snapshotIds;
   // Bodies are deliberately excluded. Remove recognizable credential strings
   // even if accidentally placed in a cursor/basis field.
   const redact=value=>typeof value==='string'?value.replace(/Bearer\s+\S+|whsec_[\w+/=-]+|sk-[\w-]{12,}/gi,'[redacted]'):Array.isArray(value)?value.map(redact):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,redact(v)])):value;

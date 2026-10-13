@@ -16,6 +16,30 @@ function fixture(options={}){
  return {core,sqlite,posts,advance(ms){clock=new Date(clock.getTime()+ms);},setFail(v){fail=v;},setReceiverRedirect(v){redirectReceiver=v;},time(){return clock.toISOString();}};
 }
 const obs=(seq,value,f,extra={})=>({schemaVersion:1,eventId:`test-${seq}`,source:'mac.activity',sequence:seq,observedAt:f.time(),expiresAt:new Date(Date.parse(f.time())+90000).toISOString(),assertion:'observed',value,...extra});
+test('device receipts require offered complete snapshot, keep finish, and do not imply screen delivery',async()=>{
+ const f=fixture();const enrolled=await f.core.registerDevice({id:'reader',label:'Reader',scopes:['user.context']});const d=await f.core.authenticateDevice(enrolled.token);
+ const s=await f.core.taskCommand({commandId:'receipt-start',action:'start',title:'fixture only',provenance:'user'});
+ let state=await f.core.taskState(d);const id=state.applicationSnapshot.id;
+ assert.equal((await f.core.readTaskCommands()).commands[0].deviceApplication,'unknown');
+ await assert.rejects(f.core.taskApplication.acknowledge({snapshotIds:[id,'missing']},d),/不属于/);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='task_snapshot_applied'").get().n,0);
+ await f.core.taskApplication.acknowledge({snapshotIds:[id]},d);
+ await f.core.taskApplication.acknowledge({snapshotIds:[id]},d); // lost response replay
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='task_snapshot_applied'").get().n,1);
+ const command=(await f.core.readTaskCommands()).commands[0];assert.equal(command.deviceReceipts[0].deviceId,'reader');assert.equal(command.deviceReceipts[0].revision,1);assert.equal(command.userSeen,'unknown');
+ await f.core.taskCommand({commandId:'receipt-finish',action:'finish',sessionId:s.id,expectedRevision:1,provenance:'user'});
+ state=await f.core.taskState(d);assert.equal(state.sessions.length,0);assert.equal(state.applicationSnapshot.finishedVersions[0].commandId,'receipt-finish');
+ await f.core.taskApplication.acknowledge({snapshotIds:[state.applicationSnapshot.id]},d);
+ assert.equal((await f.core.readTaskCommands()).commands.find(c=>c.commandId==='receipt-finish').deviceReceipts[0].status,'finished');
+ await f.core.revokeDevice(d.id);await assert.rejects(f.core.taskApplication.acknowledge({snapshotIds:[id]},d),/权限已撤回/);
+});
+test('snapshot receipts cannot cross devices or confirm a truncated active list',async()=>{
+ const f=fixture();let ds=[];for(const id of ['a','b']){const c=await f.core.registerDevice({id,label:id,scopes:['user.context']});ds.push(await f.core.authenticateDevice(c.token));}
+ const state=await f.core.taskState(ds[0]);await assert.rejects(f.core.taskApplication.acknowledge({snapshotIds:[state.applicationSnapshot.id]},ds[1]),/不属于/);
+ const incomplete=await f.core.taskApplication.offer({...state,hasMore:true},ds[0],[]);
+ await assert.rejects(f.core.taskApplication.acknowledge({snapshotIds:[incomplete.applicationSnapshot.id]},ds[0]),/未完整读取/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,0);
+});
 async function device(f){const d=await f.core.registerDevice({id:'mac',label:'test',scopes:['mac.activity']});return f.core.authenticateDevice(d.token);}
 test('outbox replay, scope, changed value, old data cannot overwrite and stale recovers',async()=>{
  const f=fixture(),d=await device(f),one=obs(1,{app:'editor'},f);await f.core.ingest({observations:[one]},d);await f.core.ingest({observations:[one]},d);

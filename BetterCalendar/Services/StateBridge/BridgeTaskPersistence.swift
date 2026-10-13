@@ -10,11 +10,16 @@ nonisolated struct BridgeTaskLocalFile: Codable {
     var state: BridgeTaskState?
     var localMidpoint: Date?
     var receivedAt: Date?
+    var pendingApplicationSnapshots: [String]? = nil
     func validate() throws {
         guard schemaVersion == 1, pending.count <= 100,
               Set(pending.map { $0.command.commandId }).count == pending.count,
               pending.allSatisfy({ !$0.command.commandId.isEmpty && $0.command.provenance == "user" }) else { throw URLError(.cannotParseResponse) }
         try state?.validate()
+        if let ids = pendingApplicationSnapshots {
+            guard ids.count <= 100, Set(ids).count == ids.count,
+                  ids.allSatisfy({ $0.hasPrefix("task_snapshot_") && $0.count <= 100 }) else { throw URLError(.cannotParseResponse) }
+        }
     }
 }
 

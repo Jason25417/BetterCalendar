@@ -33,12 +33,12 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
       if(path==="research/evidence")return json(await core.research.evidence(body));
       throw new BridgeError("未知研究读取接口",404);
     }
-    if(path==="tasks/state"||path==="tasks/command"||path==="pool/read"){
+    if(path==="tasks/state"||path==="tasks/command"||path==="tasks/applied"||path==="pool/read"){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
       // Only the owner's enrolled interactive devices can participate in task
       // timing. Clock/probe tokens cannot read or control personal sessions.
       if(!JSON.parse(device.scopes).includes("user.context"))throw new BridgeError("此设备未登记个人任务操作权限",403);
-      return json(await core.research.invoke(path,body,`device:${device.id}`,()=>path==="pool/read"?core.readPoolRecords(body):path==="tasks/state"?core.taskState():core.taskCommand(body,`device:${device.id}`)));
+      return json(await core.research.invoke(path,body,`device:${device.id}`,()=>path==="pool/read"?core.readPoolRecords(body):path==="tasks/state"?core.taskState(device):path==="tasks/applied"?core.taskApplication.acknowledge(body,device):core.taskCommand(body,`device:${device.id}`)));
     }
     if(!request.headers.get("oai-authenticated-user-id"))throw new BridgeError("需要已登录的用户",401);
     if(path==="devices/enroll") {

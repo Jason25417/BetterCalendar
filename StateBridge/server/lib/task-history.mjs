@@ -4,7 +4,7 @@ const decode = v => JSON.parse(new TextDecoder('utf-8', {fatal:true}).decode(Uin
 
 // The append boundary freezes membership, not mutable session values. Receipts
 // are the immutable evidence; sessions are the latest readable projection.
-export function createTaskHistory(db, time, sessionView) {
+export function createTaskHistory(db, time, sessionView, taskApplication) {
   async function page(kind, input = {}) {
     const from = input.from == null ? '1970-01-01T00:00:00.000Z' : iso(input.from);
     const before = input.before == null ? time() : iso(input.before);
@@ -42,6 +42,10 @@ export function createTaskHistory(db, time, sessionView) {
       entries.push(entry); accepted.push(row); bytes += size;
     }
     const last = accepted.at(-1), hasMore = rows.length > accepted.length;
+    if(kind==='commands'){
+      const receipts=await taskApplication.forCommands(entries.map(e=>e.commandId));
+      for(const entry of entries){entry.deviceReceipts=receipts.get(entry.commandId) ?? [];entry.deviceApplication=entry.deviceReceipts.length?'device_reported_local_cache_persisted':'unknown';entry.screenVisible='unknown';entry.userSeen='unknown';}
+    }
     const nextCursor = hasMore ? encode({version:1,kind,from,before:upper,sessionId,maxRowid,at:last[column],id:last.id}) : null;
     return {schemaVersion:1,readAt:time(),from,before:upper,hasMore,nextCursor,
       ...(kind === 'commands' ? {sessionId,commands:entries,interpretation:'按服务端保存时间查询原始操作回执；保留未知字段。补传或开发期外部修改后从第一页重读。此接口不重放操作。'} :

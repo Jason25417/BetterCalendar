@@ -4,6 +4,7 @@ import { mkdtempSync,rmSync,readFileSync,statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Recorder,redact,comparisonInputs } from './research-recorder.mjs';
+import { reminderShadow,itemDraft } from './action-prototypes.mjs';
 
 const now=new Date('2026-10-12T20:00:30Z'),minute=Math.floor(now.getTime()/60000);
 function setup(t,config={}) {
@@ -44,7 +45,7 @@ test('capacity stops without advancing state; local API rejects writers; export 
 test('viewer is offline escaped HTML; export contains raw referenced snapshots and explicit gaps',async t=>{
  const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);
  const page=readFileSync(r.view(),'utf8');assert.ok(page.includes("default-src 'none'"));assert.ok(page.includes('尚无完整研究回执'));assert.ok(!page.includes('<script'));
- const file=join(r.root,'export.json');r.export(file);const exported=JSON.parse(readFileSync(file));assert.equal(exported.version,1);assert.ok(exported.snapshots.length>=4);assert.equal(exported.runs[0].attention.userFeedback,'unknown');
+ const file=join(r.root,'export.json');r.export(file);const exported=JSON.parse(readFileSync(file));assert.equal(exported.version,2);assert.ok(exported.snapshots.length>=4);assert.equal(exported.runs[0].attention.userFeedback,'unknown');
  assert.throws(()=>r.export(file),/exists/);
 });
 test('minimal capability contrast retains user statements and does not equate absent habits to value',()=>{
@@ -82,4 +83,44 @@ test('replay labels a new policy without rewriting archived judgments or making 
  const replay=r.replay(original.id);assert.equal(replay.policyChanged,true);assert.equal(replay.recordedShadow.version,1);assert.equal(replay.replayShadowVersion,2);
  assert.equal(replay.network,false);assert.equal(replay.sideEffects,false);assert.equal(c.requests.length,before);
  assert.equal(r.db.prepare('SELECT body FROM runs').get().body,stored);assert.deepEqual(r.stats().shadowPolicyVersions,{'1':1});
+});
+
+test('supplied connector raw records, actual cost reports and explicit feedback remain local versioned evidence',async t=>{
+ const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);const runId=`minute_${minute}`;
+ const call={version:1,id:'external-1',runId,kind:'external_call',occurredAt:now.toISOString(),tool:'fixture.mail.read',sourceClass:'connector',startedAt:now.toISOString(),returnedAt:now.toISOString(),result:'returned',arguments:{token:'excluded',query:'fixture'},response:{body:'<script>fixture</script>'},pagination:{hasMore:false,complete:true}};
+ const saved=r.capture(call);assert.equal(saved.recorded,true);assert.equal(r.capture(call).replayed,true);assert.throws(()=>r.capture({...call,response:{body:'changed'}}),/identity conflict/);
+ assert.throws(()=>r.capture({...call,id:'bad-page',pagination:{hasMore:true,complete:true}}),/pagination/);
+ r.capture({version:1,id:'usage-1',runId,kind:'model_usage',occurredAt:now.toISOString(),model:'fixture',callRef:'external-1',reportSource:'provider_response',usage:{input:42,output:8,cost:0.02,currency:'USD'}});
+ const feedback={version:1,id:'feedback-1',runId,kind:'user_feedback',occurredAt:now.toISOString(),reportSource:'user_statement',usefulness:'mixed',attentionSeconds:3,statement:'fixture explicit report'};
+ r.capture(feedback);r.capture({...feedback,id:'feedback-2',supersedes:'feedback-1',attentionSeconds:7});
+ assert.equal(r.stats().suppliedEvidence.reportedAttentionSeconds,7);assert.equal(r.stats().suppliedEvidence.reportedCostByCurrency.USD,0.02);assert.equal(r.stats().userApproval,'unknown');assert.equal(r.stats().modelCost,null);
+ assert.equal(r.evidence(runId)[0].arguments.token,'[redacted]');assert.ok(readFileSync(r.view(),'utf8').includes('&lt;script&gt;fixture&lt;/script&gt;'));
+ assert.equal(c.requests.filter(x=>!x.path.startsWith('research/')).length,0);
+});
+test('model comparison accepts only exact archived inputs and never runs a model or command',async t=>{
+ const r=setup(t),c=client();t.after(()=>r.db.close());await r.tick(c.fetcher);const runId=`minute_${minute}`,pack=r.compare(runId),before=c.requests.length;
+ for(const g of pack.groups)r.capture({version:1,id:`output-${g.group}`,runId,kind:'replay_result',occurredAt:now.toISOString(),group:g.group,inputHash:g.inputHash,model:'fixture-model',output:{suggestion:'fixture'}});
+ assert.equal(r.compare(runId).sameModelComplete,true);assert.equal(r.compare(runId).quality,'unrated');assert.equal(c.requests.length,before);
+ assert.throws(()=>r.capture({version:1,id:'changed-input',runId,kind:'replay_result',occurredAt:now.toISOString(),group:'bc_only',inputHash:'bad',model:'fixture-model',output:{}}),/archived input/);
+});
+test('strong reminder shadow checks bounded authorization without granting locking or producing effects',()=>{
+ const at=now.toISOString(),later=new Date(now.getTime()+60000).toISOString();
+ const p={commandId:'shadow-1',at:later,channel:'alarm',eventKind:'explicit_alarm',durationSeconds:30,evidenceRefs:['user-1']};
+ const policy={id:'policy',revision:1,enabled:true,userAuthorizationRef:'explicit-request',from:at,until:new Date(now.getTime()+3600000).toISOString(),permissions:['alarm.schedule'],eventKinds:['explicit_alarm'],maxEvidenceAgeSeconds:120,maxDurationSeconds:60,quietWindows:[],maxPerHour:2,maxPerDay:3,revokeMethod:'disable policy',releaseMethod:'cancel alarm'};
+ const context={now:at,source:{id:'user-1',assertion:'user',observedAt:at}};
+ assert.equal(reminderShadow(p,policy,context).wouldAllow,true);assert.equal(reminderShadow(p,policy,context).effect,'none');
+ assert.ok(reminderShadow({...p,channel:'block_apps'},policy,context).reasons.includes('channel_not_authorized'));
+ assert.ok(reminderShadow(p,{...policy,enabled:false},context).reasons.includes('no_explicit_enabled_policy'));
+ assert.ok(reminderShadow(p,policy,{...context,source:{...context.source,assertion:'inferred'}}).reasons.includes('missing_stale_or_unconfirmed_evidence'));
+ assert.ok(reminderShadow(p,{...policy,quietWindows:[{from:at,until:policy.until}]},context).reasons.includes('quiet_time'));
+ assert.ok(reminderShadow(p,policy,{...context,previous:[{...p,policyId:'policy'}]}).reasons.includes('duplicate_command'));
+});
+test('item edit drafts preserve source, detect conflicts, and keep deletion recoverable without execution',()=>{
+ const record={id:'record',revision:'original',values:{id:'record',title:'original',note:'keep',status:'active',zone:'todo',isInTrash:false,checkpoints:[{id:'child'}]}};
+ const command={commandId:'draft',recordId:'record',expectedRevision:'original',userAuthorizationRef:'explicit-request',action:'update',patch:{title:'new'}};
+ const before=JSON.stringify(record),draft=itemDraft(record,command,{now:now.toISOString()});assert.equal(JSON.stringify(record),before);assert.equal(draft.proposed.note,'keep');assert.equal(draft.execution,'not_requested');
+ assert.throws(()=>itemDraft(record,{...command,expectedRevision:'old'},{now:now.toISOString()}),/version conflict/);
+ assert.throws(()=>itemDraft(record,{...command,patch:{id:'overwrite'}},{now:now.toISOString()}),/unsupported item field/);
+ const deleted=itemDraft(record,{...command,action:'delete'},{now:now.toISOString()});assert.equal(deleted.minimumRetentionDays,30);assert.equal(typeof deleted.proposed.deletedAt,'number');assert.deepEqual(deleted.original,record.values);
+ const restored=itemDraft({...record,values:deleted.proposed},{...command,action:'restore'},{now:now.toISOString()});assert.equal(restored.proposed.isInTrash,false);assert.equal(restored.proposed.restoredDeletionId,deleted.proposed.deletionId);
 });

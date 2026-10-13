@@ -109,11 +109,32 @@ import Observation
             try state.validate()
             var next = file; next.state = state; next.receivedAt = receivedAt
             next.localMidpoint = sentAt.addingTimeInterval(max(0, receivedAt.timeIntervalSince(sentAt)) / 2)
+            if healthy, !state.hasMore, let snapshot = state.applicationSnapshot {
+                var ids = next.pendingApplicationSnapshots ?? []
+                if ids.count < 100 { ids.append(snapshot.id); next.pendingApplicationSnapshots = ids }
+                else { report("设备读取已更新；应用回执队列已满，未将本次读取确认为已应用") }
+            }
             if healthy { try persistence.save(next) }
             file = next
             if !hadConflict {
                 if reviewCount == 0 && healthy { lastError = nil }
                 message = !healthy ? "已读取云端状态；本地操作队列需修复" : pendingCount > 0 ? "状态已更新；还有 \(pendingCount) 条操作待同步" : "已同步；与 Dots 共用 BC 计时"
+            }
+            if healthy {
+                // The state and pending receipt are saved atomically before
+                // reporting. A lost reply/restart retries the same snapshot ID.
+                while let ids = file.pendingApplicationSnapshots, !ids.isEmpty {
+                    let sent = Array(ids.prefix(10))
+                    do {
+                        let accepted = try await service.reportSavedTaskSnapshots(sent)
+                        guard accepted == Set(sent) else { throw URLError(.cannotParseResponse) }
+                        var applied = file; applied.pendingApplicationSnapshots = ids.filter { !accepted.contains($0) }
+                        try persistence.save(applied); file = applied
+                    } catch {
+                        report("计时显示已读取；设备应用回执尚未确认，保留原身份重试")
+                        break
+                    }
+                }
             }
         } catch {
             report("计时同步暂未完成；保留最后状态与 \(pendingCount) 条待同步操作，连接恢复后重试")

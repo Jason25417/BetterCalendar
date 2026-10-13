@@ -8,11 +8,12 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { shadowDecision,SHADOW_VERSION } from '../server/lib/shadow-decision.mjs';
+import { validateEvidence,comparisonPack } from './research-evidence.mjs';
 
 export const ORIGIN='https://jason-state-bridge.jason25417.chatgpt.site';
 export const defaults={version:1,maxBytes:2*1024**3,retentionDays:365,debugFeedback:false,pollSeconds:60};
 const encode=v=>JSON.stringify(v),hash=v=>createHash('sha256').update(v).digest('hex');
-const secretKey=/token|secret|password|authorization|credential|api.?key|cookie/i;
+const secretKey=/token|secret|password|authorization|credential|api.?key|cookie|private.?reasoning|chain.?of.?thought|reasoning_content/i;
 export function redact(value,secrets=[]) {
   if(typeof value==='string') {
     let clean=value.replace(/\b(?:Bearer\s+\S+|whsec_[\w+/=-]+|sk-[\w-]{12,})/gi,'[redacted]');
@@ -45,6 +46,7 @@ export class Recorder {
     atomic(configPath,this.config);
     this.db=new DatabaseSync(join(this.root,'research.sqlite'));chmodSync(join(this.root,'research.sqlite'),0o600);
     this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS snapshots(hash TEXT PRIMARY KEY, body TEXT NOT NULL, created_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS calls(id INTEGER PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS failures(id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL, category TEXT NOT NULL);');
+    this.db.exec('CREATE TABLE IF NOT EXISTS supplied_evidence(id TEXT PRIMARY KEY, run_id TEXT NOT NULL, snapshot TEXT NOT NULL, imported_at TEXT NOT NULL);');
   }
   get(key,fallback=null){const row=this.db.prepare('SELECT value FROM meta WHERE key=?').get(key);return row?JSON.parse(row.value):fallback;}
   set(key,value){this.db.prepare('INSERT INTO meta VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,encode(value));}
@@ -129,6 +131,23 @@ export class Recorder {
     const inputs=comparisonInputs(run.changes,run.window,{context});
     return {version:1,id,sideEffects:false,network:false,recordedShadow:run.shadow,replayShadowVersion:SHADOW_VERSION,policyChanged:run.shadow.version!==SHADOW_VERSION,groups:inputs.map(i=>({...i,shadow:shadowDecision(i.changes,run.shadowPrior ?? {})})),evaluation:{falsePositives:null,falseNegatives:null,usefulness:null,cost:null,reason:'requires labeled real samples; silence is not approval'}};
   }
+  evidence(id=null) {
+    const rows=id==null?this.db.prepare('SELECT snapshot FROM supplied_evidence ORDER BY imported_at,id').all():this.db.prepare('SELECT snapshot FROM supplied_evidence WHERE run_id=? ORDER BY imported_at,id').all(id);
+    return rows.map(r=>JSON.parse(this.db.prepare('SELECT body FROM snapshots WHERE hash=?').get(r.snapshot).body));
+  }
+  capture(value) {
+    const row=this.db.prepare('SELECT body FROM runs WHERE id=?').get(value.runId);
+    const replay=row?this.replay(value.runId):null;
+    const normalized=redact(validateEvidence(value,row?JSON.parse(row.body):null,replay?.groups ?? []),this.secrets);
+    const body=encode(normalized),prior=this.db.prepare('SELECT snapshot FROM supplied_evidence WHERE id=?').get(normalized.id);
+    if(prior){if(prior.snapshot!==hash(body))throw Error('evidence identity conflict; use a new ID/correction');return {id:normalized.id,snapshot:prior.snapshot,replayed:true};}
+    if(normalized.supersedes){const previous=this.evidence(normalized.runId).find(e=>e.id===normalized.supersedes);if(!previous||previous.kind!==normalized.kind)throw Error('unknown or mismatched correction target');}
+    if(normalized.kind==='model_usage'&&!this.evidence(normalized.runId).some(e=>e.id===normalized.callRef&&e.kind==='external_call')&&!this.db.prepare("SELECT id FROM calls WHERE json_extract(body,'$.callId')=? OR json_extract(body,'$.body.callId')=? LIMIT 1").get(normalized.callRef,normalized.callRef))throw Error('usage report needs an existing call reference');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {const snapshot=this.snapshot(normalized);this.db.prepare('INSERT INTO supplied_evidence VALUES(?,?,?,?)').run(normalized.id,normalized.runId,snapshot,this.clock().toISOString());this.db.exec('COMMIT');return {id:normalized.id,snapshot,recorded:true,evidenceLevel:normalized.evidenceLevel};}
+    catch(e){this.db.exec('ROLLBACK');throw e;}
+  }
+  compare(id) { return comparisonPack(this.replay(id),this.evidence(id)); }
   stats() {
     const calls=this.db.prepare('SELECT body FROM calls ORDER BY id').all().map(r=>JSON.parse(r.body));
     const runs=this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body));
@@ -148,6 +167,13 @@ export class Recorder {
         'Corrected results counted once per batch; old evidence retained',
         'User silence is unknown, not approval',
         'Delay measures server batch creation to saved result, not source occurrence or user delivery'],batches:[]};
+    const allEvidence=this.evidence(),superseded=new Set(allEvidence.map(e=>e.supersedes).filter(Boolean)),current=allEvidence.filter(e=>!superseded.has(e.id));
+    const usage=current.filter(e=>e.kind==='model_usage'),feedback=current.filter(e=>e.kind==='user_feedback');
+    summary.suppliedEvidence={total:allEvidence.length,externalCalls:current.filter(e=>e.kind==='external_call').length,usageReports:usage.length,feedbackReports:feedback.length,replayOutputs:current.filter(e=>e.kind==='replay_result').length,
+      reportedCostByCurrency:usage.reduce((a,e)=>{if(e.usage.cost!=null)a[e.usage.currency]=(a[e.usage.currency]??0)+e.usage.cost;return a;},{}),
+      reportedAttentionSeconds:feedback.some(e=>e.attentionSeconds!=null)?feedback.reduce((n,e)=>n+(e.attentionSeconds??0),0):null,
+      coverage:'supplied records only; no claim of all connector calls/model costs/attention'};
+    summary.deviceCacheReceipts=calls.filter(c=>c.kind==='task_snapshot_applied').length;
     for(const run of runs) {
       const result=byBatch.get(run.id),skip=run.shadow.wake===false;
       const noAction=!!result&&result.body.notification.channel==='silent'&&result.body.notification.result==='not_requested'&&result.body.operation.kind==='none';
@@ -172,13 +198,13 @@ export class Recorder {
     const summary=this.stats();
     const rows=runs.reverse().map(run=>{
       const results=calls.filter(c=>c.batchId===run.id&&c.kind==='batch_result');
-      return `<article><h2>${escape(run.id)}</h2><p>接收：完整读取 ${run.changes.length} 条变化 · 读取时间：${escape(run.collectedAt)}</p><p>ForwardAll：保留原路径 · Shadow：${run.shadow.wake?'建议唤醒':'也许可省掉唤醒'}（没有改变真实路径）</p><p>结果：${results.length?'有代理处理回执':'尚无完整研究回执；不推断已处理或未处理'} · 用户认可：未知</p><details><summary>来源、时效和缺口</summary><pre>${escape(JSON.stringify({coverage:run.coverage,gaps:run.gaps},null,2))}</pre></details><details><summary>判断与通知／操作结果</summary><pre>${escape(JSON.stringify(results,null,2))}</pre></details><details><summary>完整事件和本地原文索引</summary><pre>${escape(JSON.stringify(run,null,2))}</pre></details>${this.config.debugFeedback?'<p>调试反馈已启用：静默处理只显示在这里，不发送手机通知；查看成本尚未计时。</p>':''}</article>`;
+      return `<article><h2>${escape(run.id)}</h2><p>接收：完整读取 ${run.changes.length} 条变化 · 读取时间：${escape(run.collectedAt)}</p><p>ForwardAll：保留原路径 · Shadow：${run.shadow.wake?'建议唤醒':'也许可省掉唤醒'}（没有改变真实路径）</p><p>结果：${results.length?'有代理处理回执':'尚无完整研究回执；不推断已处理或未处理'} · 用户认可：未知</p><details><summary>来源、时效和缺口</summary><pre>${escape(JSON.stringify({coverage:run.coverage,gaps:run.gaps},null,2))}</pre></details><details><summary>判断与通知／操作结果</summary><pre>${escape(JSON.stringify(results,null,2))}</pre></details><details><summary>外部原文、费用／注意力反馈与对照输出（导入资料）</summary><pre>${escape(JSON.stringify(this.evidence(run.id),null,2))}</pre></details><details><summary>完整事件和本地原文索引</summary><pre>${escape(JSON.stringify(run,null,2))}</pre></details>${this.config.debugFeedback?'<p>调试反馈已启用：静默处理只显示在这里，不发送手机通知；查看成本尚未计时。</p>':''}</article>`;
     }).join('');
     const file=join(this.root,'review.html');
     writeFileSync(file,`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><title>BC 研究记录</title><style>body{font:16px system-ui;max-width:900px;margin:32px auto;padding:0 20px;background:#faf8f5;color:#292724}article{border-top:1px solid #ccc;padding:16px 0}h2{font-size:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}summary{padding:8px;cursor:pointer}</style><h1>BC 研究记录</h1><p>检查助手的行为，不评判你的生活。原文保存在本地 SQLite；此页面无网络、无操作按钮。</p><p>${runs.length} 个事件样本 · ${calls.length} 条调用／结果回执。缺失日志不追认；未反馈不代表同意。</p><p>代理已保存结果 ${summary.recordedAgentResults} 批 · 其中无提醒／操作 ${summary.processedWithoutAction} 批 · 尚无研究结果 ${summary.awaitingResearchResult} 批。</p><p>Shadow 建议未来可省唤醒 ${summary.shadowWouldSkipWake} 批（真实 ForwardAll 仍运行，不表示已节省调用）；通知仅有代理报告，送达与看到另验。模型费用、注意力成本和有用程度均未知。</p><details><summary>实验汇总与错误</summary><pre>${escape(JSON.stringify(summary,null,2))}</pre></details>${rows||'<p>尚无本轮采集样本。</p>'}</html>`,{mode:0o600});chmodSync(file,0o600);return file;
   }
   export(path) {
-    const data={version:1,exportedAt:this.clock().toISOString(),config:this.config,summary:this.stats(),runs:this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body)),calls:this.db.prepare('SELECT body FROM calls').all().map(r=>JSON.parse(r.body)),snapshots:this.db.prepare('SELECT * FROM snapshots').all().map(r=>({...r,body:JSON.parse(r.body)})),failures:this.db.prepare('SELECT * FROM failures').all()};
+    const data={version:2,exportedAt:this.clock().toISOString(),config:this.config,summary:this.stats(),suppliedEvidence:this.evidence(),runs:this.db.prepare('SELECT body FROM runs').all().map(r=>JSON.parse(r.body)),calls:this.db.prepare('SELECT body FROM calls').all().map(r=>JSON.parse(r.body)),snapshots:this.db.prepare('SELECT * FROM snapshots').all().map(r=>({...r,body:JSON.parse(r.body)})),failures:this.db.prepare('SELECT * FROM failures').all()};
     const file=resolve(path);if(existsSync(file))throw Error('export destination exists');writeFileSync(file,encode(data),{mode:0o600});return {file,bytes:statSync(file).size};
   }
   prune() {
@@ -186,11 +212,13 @@ export class Recorder {
     // Explicit command only. Preserve snapshots referenced by retained traces.
     const live=new Set();for(const r of this.db.prepare('SELECT body FROM runs').all()){const run=JSON.parse(r.body);if(run.collectedAt>=cutoff)for(const id of run.snapshots)live.add(id);}
     for(const row of this.db.prepare('SELECT body FROM calls').all()){const c=JSON.parse(row.body);if(c.createdAt>=cutoff)for(const id of [c.logPageSnapshot,...(c.localEvidence ?? [])])if(id)live.add(id);}
+    for(const e of this.db.prepare('SELECT snapshot,imported_at FROM supplied_evidence').all())if(e.imported_at>=cutoff)live.add(e.snapshot);
     const snapshots=this.db.prepare('SELECT hash,body,created_at FROM snapshots').all();
     for(const s of snapshots)if(s.created_at>=cutoff)live.add(s.hash);
     for(let changed=true;changed;){changed=false;for(const s of snapshots)if(live.has(s.hash)){const parent=JSON.parse(s.body).requestSnapshot;if(parent&&!live.has(parent)){live.add(parent);changed=true;}}}
     this.db.exec('BEGIN');try{for(const r of this.db.prepare('SELECT id,body FROM runs').all())if(JSON.parse(r.body).collectedAt<cutoff)this.db.prepare('DELETE FROM runs WHERE id=?').run(r.id);
       for(const row of this.db.prepare('SELECT id,body FROM calls').all())if(JSON.parse(row.body).createdAt<cutoff)this.db.prepare('DELETE FROM calls WHERE id=?').run(row.id);
+      this.db.prepare('DELETE FROM supplied_evidence WHERE imported_at<?').run(cutoff);
       for(const s of this.db.prepare('SELECT hash,created_at FROM snapshots').all())if(s.created_at<cutoff&&!live.has(s.hash))this.db.prepare('DELETE FROM snapshots WHERE hash=?').run(s.hash);
       this.db.prepare('DELETE FROM failures WHERE occurred_at<?').run(cutoff);
       this.db.exec('COMMIT');}catch(e){this.db.exec('ROLLBACK');throw e;}
@@ -211,11 +239,13 @@ function clientFor(c) {
 }
 async function main() {
   const [mode='once',...args]=process.argv.slice(2),root=join(homedir(),'Library/Application Support/BetterCalendarResearch');
-  const c=['once','watch'].includes(mode)?credentials():{},recorder=new Recorder(root,{secrets:[c.platformToken,c.deviceToken]});
+  const c=['once','watch','capture'].includes(mode)?credentials():{},recorder=new Recorder(root,{secrets:[c.platformToken,c.deviceToken]});
   if(mode==='export'){console.log(encode(recorder.export(args[0] ?? join(root,'export-'+Date.now()+'.json'))));return;}
   if(mode==='stats'){console.log(encode(recorder.stats()));return;}
   if(mode==='view'){console.log(encode({file:recorder.view()}));return;}
   if(mode==='replay'){console.log(encode(recorder.replay(args[0])));return;}
+  if(mode==='compare'){console.log(encode(recorder.compare(args[0])));return;}
+  if(mode==='capture'){console.log(encode(recorder.capture(JSON.parse(readFileSync(resolve(args[0]),'utf8')))));return;}
   if(mode==='prune'){console.log(encode(recorder.prune()));return;}
   if(mode==='stop'){writeFileSync(join(root,'STOP'),'stop requested',{mode:0o600});console.log('{"stopRequested":true}');return;}
   if(!['once','watch'].includes(mode))throw Error('unknown mode');

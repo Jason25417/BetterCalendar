@@ -5,6 +5,7 @@ import { createObservationHistory } from "./observation-history.mjs";
 import { createTaskHistory } from "./task-history.mjs";
 import { createPoolRecords } from "./pool-records.mjs";
 import { createResearch } from "./research.mjs";
+import { createTaskApplication } from "./task-application.mjs";
 // Durable core: Cloudflare D1 in production, actual SQLite in focused tests.
 export class BridgeError extends Error {
   constructor(message,status=400){super(message);this.status=status;}
@@ -48,6 +49,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   const research=createResearch(db,time);
+  const taskApplication=createTaskApplication(db,time);
   async function registerDevice(v){
     const id=str(v.id,"设备 ID",80),label=str(v.label,"设备名",100);
     if(!Array.isArray(v.scopes)||!v.scopes.length||v.scopes.some(s=>typeof s!=="string"||!/^[a-z][a-z0-9_.-]{1,60}$/.test(s)))throw new BridgeError("来源范围无效");
@@ -94,10 +96,16 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return ingestAuthorized(v,d,["bc.pool","bc.pool.chunk"]);
   }
   const readPoolRecords=createPoolRecords(db,time);
-  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null});
-  async function taskState(){
-    const rows=await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at,id LIMIT 101");
-    return {schemaVersion:1,authority:"bettercalendar",readAt:time(),sessions:rows.slice(0,100).map(sessionView),hasMore:rows.length>100};
+  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,lastCommandId:r.last_command_id,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null});
+  async function taskState(device=null){
+    // One SQLite read snapshot: a concurrent finish cannot appear as both active
+    // and finished in a device application receipt.
+    const rows=await all(`WITH active AS (SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at,id LIMIT 101),
+      finished AS (SELECT * FROM sessions WHERE status='finished' ORDER BY updated_at DESC,id DESC LIMIT 101)
+      SELECT * FROM active UNION ALL SELECT * FROM finished`);
+    const active=rows.filter(r=>r.status!=='finished');
+    const state={schemaVersion:1,authority:"bettercalendar",readAt:time(),sessions:active.slice(0,100).map(sessionView),hasMore:active.length>100};
+    return device?taskApplication.offer(state,device,rows.filter(r=>r.status==='finished').map(sessionView)):state;
   }
   async function readState(options={}){
     if(options.includeValues!=null&&typeof options.includeValues!=="boolean")throw new BridgeError("includeValues 需要布尔值");
@@ -145,7 +153,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     await db.batch(ops);const committed=await one("SELECT result,request_hash FROM commands WHERE id=?",commandId);
     if(!committed||committed.request_hash!==requestHash)throw new BridgeError("计时并发冲突，请重新读取",409);return JSON.parse(committed.result);
   }
-  const {taskHistory,readTaskCommands}=createTaskHistory(db,time,sessionView);
+  const {taskHistory,readTaskCommands}=createTaskHistory(db,time,sessionView,taskApplication);
   async function acknowledgeBatch(id,ownerId) {
     str(id,"批次 ID",100);if(!await one("SELECT id FROM batches WHERE id=?",id))throw new BridgeError("找不到批次",404);
     await q("UPDATE batches SET processed_at=COALESCE(processed_at,?),processed_by=COALESCE(processed_by,?) WHERE id=?",time(),ownerId,id).run();
@@ -241,6 +249,6 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   const recordContext=(input,actor)=>input.kind==='bc.research.batch_result'
     ? research.complete({...input.body,resultId:input.body?.resultId ?? input.id},actor)
     : recordNote(input);
-  return {research,recordContext,registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
+  return {research,taskApplication,recordContext,registerDevice,authenticateDevice,ingest,uploadPool,readPoolRecords,readState,readObservationHistory:createObservationHistory(db,time),taskState,taskCommand,taskHistory,readTaskCommands,acknowledgeBatch,recordNote,readChanges,subscribe,unsubscribe,flush,diagnostics,
     revokeDevice:async id=>{await q("UPDATE devices SET revoked_at=? WHERE id=?",time(),id).run();return {revoked:true};}};
 }
