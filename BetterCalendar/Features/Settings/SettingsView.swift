@@ -18,6 +18,7 @@ import FamilyControls   // 番茄钟绝对专注：FamilyActivitySelection / fam
 
 struct SettingsView: View {
     var trash: (any TrashManaging)? = nil
+    var nativeActions: NativeActionsViewModel? = nil
     @State private var apiKey: String = ""
     @State private var distractionOn: Bool = DistractionSettings.enabled   // 0.32.1：静态属性不触发视图重算，输入框曾打开开关也不出现
     @State private var model: String = CloudSettings.model
@@ -54,6 +55,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section("个人状态与 Dot（内测）") { StateBridgeSettingsPanel() }
+            if let nativeActions { Section("原生操作（内测）") { NativeActionsPanel(model: nativeActions) } }
             Section("数据与同步（开发期）") {
                 DataMaintenancePanel()
                 if let trash { RetainedTrashPanel(service: trash) }

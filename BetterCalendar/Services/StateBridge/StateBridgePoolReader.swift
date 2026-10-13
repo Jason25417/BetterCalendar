@@ -28,9 +28,17 @@ nonisolated enum BridgePoolCodec {
         guard Set(tasks.map(\.id)).count == tasks.count else { throw DataArchiveError.invalid("事项身份重复，需核对后再发布目录") }
         var records: [BridgeJSON] = []
         for task in tasks {
+            let values = try Self.values(task)
+            records.append(.object(["id": .string(task.id.uuidString), "revision": .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(values))), "values": values]))
+        }
+        let payload = try BridgePoolCodec.encode(.object(["formatVersion": .number(1), "authority": .string("swiftdata"), "dateUnit": .string("unix-milliseconds"), "records": .array(records)]))
+        guard payload.count <= 8 * 1024 * 1024 else { throw DataArchiveError.invalid("事项目录超过传输上限，原库保留，未发布不完整目录") }
+        return BridgePoolSnapshot(data: payload, recordCount: records.count)
+    }
+    static func values(_ task: LongTask) throws -> BridgeJSON {
             let stages = (task.checkpoints ?? []).sorted { ($0.order, $0.id.uuidString) < ($1.order, $1.id.uuidString) }
             guard Set(stages.map(\.id)).count == stages.count else { throw DataArchiveError.invalid("阶段身份重复，需核对后再发布目录") }
-            let values = BridgeJSON.object([
+            return BridgeJSON.object([
                 "id": .string(task.id.uuidString), "title": .string(task.title), "note": .string(task.note),
                 "zone": .string(task.zoneRaw), "status": .string(task.status.rawValue),
                 "createdAt": date(task.createdAt), "modifiedAt": date(task.modifiedAt),
@@ -46,15 +54,10 @@ nonisolated enum BridgePoolCodec {
                     "deletionContext": .text(cp.deletionContext?.base64EncodedString()), "isInTrash": .bool(cp.isInTrash)
                 ]) })
             ])
-            records.append(.object(["id": .string(task.id.uuidString), "revision": .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(values))), "values": values]))
-        }
-        let payload = try BridgePoolCodec.encode(.object(["formatVersion": .number(1), "authority": .string("swiftdata"), "dateUnit": .string("unix-milliseconds"), "records": .array(records)]))
-        guard payload.count <= 8 * 1024 * 1024 else { throw DataArchiveError.invalid("事项目录超过传输上限，原库保留，未发布不完整目录") }
-        return BridgePoolSnapshot(data: payload, recordCount: records.count)
     }
-    private func date(_ date: Date?) -> BridgeJSON { date.map { .number($0.timeIntervalSince1970 * 1000) } ?? .null }
-    private func integer(_ value: Int?) -> BridgeJSON { value.map { .number(Double($0)) } ?? .null }
-    private func uuid(_ value: UUID?) -> BridgeJSON { .text(value?.uuidString) }
+    private static func date(_ date: Date?) -> BridgeJSON { date.map { .number($0.timeIntervalSince1970 * 1000) } ?? .null }
+    private static func integer(_ value: Int?) -> BridgeJSON { value.map { .number(Double($0)) } ?? .null }
+    private static func uuid(_ value: UUID?) -> BridgeJSON { .text(value?.uuidString) }
 }
 
 struct BridgePoolCache: Codable {

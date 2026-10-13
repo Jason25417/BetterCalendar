@@ -40,6 +40,7 @@ export function itemDraft(record,command,{now}) {
     if(command.patch.zone!==undefined&&!['longterm','todo'].includes(command.patch.zone))throw Error('invalid zone');
     Object.assign(proposed,command.patch);
   }else if(command.action==='delete'){
+    if(original.zone!=='todo'||original.isInTrash)throw Error('longterm items use shelved; only live todo items may enter trash');
     // Match the pool's unix-milliseconds and SwiftData UUID field encoding.
     const h=revision(command.commandId);
     proposed.isInTrash=true;proposed.deletionId=[h.slice(0,8),h.slice(8,12),h.slice(12,16),h.slice(16,20),h.slice(20,32)].join('-');proposed.deletedAt=Date.parse(now);

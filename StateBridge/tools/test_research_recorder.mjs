@@ -121,6 +121,7 @@ test('item edit drafts preserve source, detect conflicts, and keep deletion reco
  const before=JSON.stringify(record),draft=itemDraft(record,command,{now:now.toISOString()});assert.equal(JSON.stringify(record),before);assert.equal(draft.proposed.note,'keep');assert.equal(draft.execution,'not_requested');
  assert.throws(()=>itemDraft(record,{...command,expectedRevision:'old'},{now:now.toISOString()}),/version conflict/);
  assert.throws(()=>itemDraft(record,{...command,patch:{id:'overwrite'}},{now:now.toISOString()}),/unsupported item field/);
+ assert.throws(()=>itemDraft({...record,values:{...record.values,zone:'longterm'}},{...command,action:'delete'},{now:now.toISOString()}),/longterm items/);
  const deleted=itemDraft(record,{...command,action:'delete'},{now:now.toISOString()});assert.equal(deleted.minimumRetentionDays,30);assert.equal(typeof deleted.proposed.deletedAt,'number');assert.deepEqual(deleted.original,record.values);
  const restored=itemDraft({...record,values:deleted.proposed},{...command,action:'restore'},{now:now.toISOString()});assert.equal(restored.proposed.isInTrash,false);assert.equal(restored.proposed.restoredDeletionId,deleted.proposed.deletionId);
 });

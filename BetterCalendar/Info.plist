@@ -28,6 +28,8 @@
 	<string>把你的计划写入一个专用「计划」日历(Dev)并读回做对比</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>用 Face ID 解锁你的日记（隐私锁）</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>仅在你明确设置一次闹钟时，允许 BetterCalendar 使用系统原生闹钟。</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>读取你的睡眠、步数与锻炼，为你自己的 Dot 助手提供生活状态。</string>
 	<key>NSHealthUpdateUsageDescription</key>

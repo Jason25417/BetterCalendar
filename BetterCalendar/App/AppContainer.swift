@@ -44,6 +44,7 @@ final class AppContainer {
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
+    let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
@@ -89,6 +90,16 @@ final class AppContainer {
         self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer,
                                                            learning: learning)
         self.longTasks = LongTaskStore()
+        let actionJournal: any NativeActionJournaling = TestHost.isActive ? NativeActionMemoryJournal() : NativeActionFileJournal()
+        let nativeItems = SwiftDataNativeItemWriter(context: SharedModelContainer.shared.mainContext, journal: actionJournal,
+                                                    didSave: { [weak longTasks] in longTasks?.reload() })
+        let nativeAlarms: any NativeAlarmScheduling
+        #if os(iOS)
+        nativeAlarms = AlarmKitNativeAlarms(journal: actionJournal)
+        #else
+        nativeAlarms = UnsupportedNativeAlarms()
+        #endif
+        self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms)
         if !TestHost.isActive {
             StateBridgeCollector.shared.installPoolReader(SwiftDataBridgePoolReader(context: SharedModelContainer.shared.mainContext))
         }
@@ -180,7 +191,7 @@ final class AppContainer {
                  notifier: notifier, longTasks: longTasks, draftSnapshots: draftSnapshots,
                  looseDays: looseDays, startedDays: startedDays, execution: execution,
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
-                 reconcile: reconcile, trash: trash,
+                 reconcile: reconcile, trash: trash, nativeActions: nativeActions,
                  timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
                  routines: RoutineTemplateStore.shared)  // K1：例行模板物化
     }

@@ -45,6 +45,7 @@ struct HomeDeps {
     let router: AppRouter
     let reconcile: ReconcileService
     var trash: (any TrashManaging)? = nil
+    var nativeActions: NativeActionsViewModel? = nil
     var timeline: TimelineCoordinator? = nil   // E5d：晨间摘要/痕迹条与一键撤；nil=不显（旧测试兼容）
     var routines: RoutineTemplateStore? = nil  // K1：例行模板物化进草稿；nil=不物化（旧测试兼容）
 }
@@ -572,7 +573,7 @@ struct HomeView: View {
             }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
-                    SettingsView(trash: deps.trash)
+                    SettingsView(trash: deps.trash, nativeActions: deps.nativeActions)
                         .navigationTitle("设置")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
