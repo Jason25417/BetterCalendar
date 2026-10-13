@@ -1,0 +1,42 @@
+{
+  "appId": "6787325341",
+  "build": 170,
+  "builds": [
+    {
+      "id": "d0604cbe-4cac-4b77-82f2-e6ae65816231",
+      "platform": "IOS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    },
+    {
+      "id": "5853e40c-6ee1-4259-a023-54352ad76904",
+      "platform": "MAC_OS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    }
+  ],
+  "version": "0.65.13",
+  "sourceCommit": "487b5e56316cdefcd22b860ee6a440840bd3d8d5",
+  "verifiedAt": "2026-10-13T12:44:18.921237+00:00",
+  "deviceInstalled": "not_verified",
+  "archiveVersionsVerified": true,
+  "archiveVersions": [
+    {
+      "platform": "MAC_OS",
+      "version": "0.65.13",
+      "build": "170",
+      "bundleId": "com.jason.BetterCalendar"
+    },
+    {
+      "platform": "IOS",
+      "version": "0.65.13",
+      "build": "170",
+      "bundleId": "com.jason.BetterCalendar"
+    }
+  ],
+  "uploads": "both_success"
+}
