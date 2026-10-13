@@ -1,0 +1,36 @@
+{
+  "checkedAt": "2026-10-12T23:58:20.676890+00:00",
+  "version": "0.65.7",
+  "build": "164",
+  "sourceCommit": "8aa6dd6",
+  "appId": "6787325341",
+  "builds": [
+    {
+      "id": "495ab505-954f-414f-807e-e1cbd217e674",
+      "platform": "MAC_OS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    },
+    {
+      "id": "17aa33df-21d2-46c3-a93f-9f04f2a57c71",
+      "platform": "IOS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    }
+  ],
+  "deviceInstalledVerified": false,
+  "macInstalledVerified": true,
+  "macNativeHeartbeat": {
+    "callId": "research_26d018ef-e51b-4c65-ad1d-4ab3380211e2",
+    "observedAt": "2026-10-12T23:59:12.000Z",
+    "receivedAt": "2026-10-12T23:59:17.541Z",
+    "collectorVersion": "0.65.7",
+    "collectorBuild": "164",
+    "freshness": "current"
+  },
+  "iPhoneInstalledVerified": false
+}
