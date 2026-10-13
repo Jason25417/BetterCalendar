@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "scope": "private_statebridge_31_deployed_host_form_acceptance_pending",
+  "source": {
+    "betterCalendarCommit": "c29b3a4a12a984549ca6b13ea48ab6086b3c0843",
+    "siteCommit": "391d4d1e4801d91bf84489c01b7b93c7460e1fcf",
+    "comparedTrackedServerFiles": 152,
+    "sourceBlobMismatches": 0
+  },
+  "publication": {
+    "siteVersion": 31,
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "deploymentId": "appgdep_6ace8702515c8191be70895773d13cc4",
+    "savedVersionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_ea635a169d9c8191bb659f67f9c74a70",
+    "status": "succeeded",
+    "hasMcp": true,
+    "at": "2026-10-13T19:31:25.886863+00:00",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "audience": "owner_only_unchanged",
+    "storageContentHash": "sha256:8fa4123b62b4cd121afcc81f43682c4fa45c94cd64f82095484c8dde6be97af5"
+  },
+  "authorization": {
+    "userStatementReceivedViaAuthorizedHandoff": "Deploy to the existing private StateBridge if necessary; ordinary authorized fixes/deployment need no repeated permission",
+    "userStatementAt": "2026-10-13T19:27:05Z",
+    "scopePreserved": [
+      "No new scopes or device credentials",
+      "No bypass of human confirmation",
+      "No synthetic real timer",
+      "No reopening closed requests",
+      "No new service or native release"
+    ]
+  },
+  "health": {
+    "readAt": "2026-10-13T19:36:04.762Z",
+    "sourceCount": 25,
+    "activeSubscriptions": 1,
+    "readConnectionResearch": {
+      "callId": "research_0e7a7694-e1fe-4973-a360-017c51164dba",
+      "responseHash": "8398904471f59bb8cb30330d318b067ba75cfdeac7207d29e36685fed0251ff6",
+      "recorded": true
+    },
+    "readInstructionsResearch": {
+      "callId": "research_3cfd4f9a-dca7-47d0-adfc-7e18fb36f4d8",
+      "responseHash": "4920e798e27816dba2461db4491fd65b40c8ee546ff1f4531df7ab00ca1233a1",
+      "recorded": true
+    },
+    "latestDeliveredBatch": {
+      "batch_id": "minute_29865331",
+      "status": "received",
+      "attempts": 1,
+      "received_at": "2026-10-13T19:31:14.947Z",
+      "last_error": null
+    },
+    "healthScope": "MCP reads and natural device uploads work; not an assertion that every source is fresh or every route is fault-free"
+  },
+  "closedCommands": [
+    {
+      "commandId": "95f8ccdf-61d1-4b60-8a1e-f892bc7c6145",
+      "state": "cancelled",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_4be4ad9b-117b-4129-8352-be3f0a70fb23",
+        "responseHash": "6d34d228c288af8a965554bc522d1d2c10143a06bcc182e480a9f055586b4dfc",
+        "recorded": true
+      }
+    },
+    {
+      "commandId": "b4a701e9-3c68-4f96-86bd-72c5d6e9a043",
+      "state": "cancelled",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_b1259d2e-6a73-40f7-91a9-77b60613a6ce",
+        "responseHash": "2b20f80074515a955a5258c351ae7478a112654ad5734d062438edfa714c1069",
+        "recorded": true
+      }
+    },
+    {
+      "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+      "state": "cancelled",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_eda1d25d-9544-49ad-b9b9-b723ffedad27",
+        "responseHash": "a8dc48ea5c27addad78e744569f272e4e017e1f7b7da4b32edf810b67566ae9c",
+        "recorded": true
+      }
+    }
+  ],
+  "verification": {
+    "serviceTests": 85,
+    "recorderTests": 13,
+    "failed": 0,
+    "skipped": 0,
+    "priorTestsInputsUnchanged": true,
+    "publishBuild": "passed",
+    "noChangesFlushOverlapsObserved": true,
+    "newInFlightLeaseSample": "not_observed_in_bounded_post_deploy_window",
+    "callbackAttemptLogsSeen": 0,
+    "researchReadThroughId": 39225,
+    "readAt": "2026-10-13T19:36:04.841Z",
+    "actualHostRendering": "unverified_no_Dots_page_available",
+    "realTimerExecution": "not_requested_or_performed"
+  },
+  "noChangesOverlapSamples": [
+    {
+      "rows": [
+        39001,
+        39005
+      ],
+      "startedAt": [
+        "2026-10-13T19:32:01.192Z",
+        "2026-10-13T19:32:03.385Z"
+      ],
+      "finishedAt": [
+        "2026-10-13T19:32:03.399Z",
+        "2026-10-13T19:32:07.239Z"
+      ],
+      "delivered": [
+        0,
+        0
+      ],
+      "batchIds": [
+        null,
+        null
+      ]
+    },
+    {
+      "rows": [
+        39177,
+        39180
+      ],
+      "startedAt": [
+        "2026-10-13T19:35:05.790Z",
+        "2026-10-13T19:35:03.916Z"
+      ],
+      "finishedAt": [
+        "2026-10-13T19:35:08.447Z",
+        "2026-10-13T19:35:08.827Z"
+      ],
+      "delivered": [
+        0,
+        0
+      ],
+      "batchIds": [
+        null,
+        null
+      ]
+    }
+  ],
+  "workerLogLimits": {
+    "baseline": "13 canceled device invocations in bounded prior window; not evidence of form cancellation",
+    "afterPublish": "5-minute error query returned two HTTP 401 GET /api/state with worker outcome ok, no exception in that query; does not prove absence of all errors"
+  },
+  "hostBlocker": {
+    "edgeDotsTab": false,
+    "directDotsMessagingToolAvailable": false,
+    "threadInventory": "50 entries did not identify a Dots conversation",
+    "requiredEvidence": [
+      "Actual Dots conversation URL/page for native form",
+      "Host DOM and computed layout",
+      "Host loading and cancellation event timestamps/cause",
+      "Producer and retry contract for approval-card-published"
+    ],
+    "shortHeading": "deployed mitigation only; actual complete description visibility not yet verified",
+    "supportedNativeAppAttempt": {
+      "displayName": "ChatGPT",
+      "bundleId": "com.openai.codex",
+      "api": "cua.getApp(\"ChatGPT\")",
+      "result": "Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.",
+      "bypassAttempted": false
+    },
+    "mcpAppTabsAvailable": false,
+    "supportedHostDebugLogToolAvailable": false,
+    "minimumNextStep": "Open existing Dots conversation in Edge or supply its URL; no new permissions or recreated timer request needed"
+  },
+  "rollback": {
+    "preferredSource": "0a924a23782db3515d7a43c76b54fef6bbb03cd6",
+    "method": "Build and publish existing private service from that source while preserving closed request and delivery state",
+    "warning": "v30 is a historical checkpoint with known expiry/cancel defects; older versions may not recognize cancelled/declined; no rollback performed"
+  }
+}
