@@ -1,8 +1,8 @@
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
 const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-const permissions=['item.create','item.update','item.delete','item.restore','alarm.schedule','alarm.cancel'];
+const permissions=['item.create','item.update','item.delete','item.restore','alarm.schedule','alarm.cancel','journal.read','journal.create','journal.update'];
 const changed=r=>Number(r?.meta?.changes ?? r?.changes ?? 0);
-function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)))throw new BridgeError('请求包含不支持的字段');}
+function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)||v[k]===undefined))throw new BridgeError('请求包含不支持的字段');}
 function text(v,max){return typeof v==='string'&&v.trim().length>0&&v.length<=max;}
 // A transport identity is not user intent. Confirmation secrets go only to the
 // human widget's _meta, never model text, research logs or command bodies.
@@ -23,7 +23,7 @@ export function createNativeCommands(db,time){
  }
  async function readGrant(d){await device(d.id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',d.id);return {deviceId:d.id,revision:g?.revision??0,capabilities:g?JSON.parse(g.body).capabilities:[],expiresAt:g?.expires_at??null,confirmation:'chat_button'};}
  function validate(v){
-  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest']);
+  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query']);
   if(v.version!==1||!uuid(v.commandId)||!text(v.deviceId,80)||!text(v.userRequest,2000))throw new BridgeError('需要固定请求/设备身份和用户请求原文（原文仅代理报告）');
   const at=time(),occurredAt=iso(v.occurredAt),expiresAt=iso(v.expiresAt);
   if(Date.parse(occurredAt)>Date.parse(at)+120000||expiresAt<=at||Date.parse(expiresAt)-Date.parse(at)>86400000)throw new BridgeError('请求时间无效或已过期');
@@ -34,13 +34,25 @@ export function createNativeCommands(db,time){
    const patch=v.patch??{};keys(patch,['title','note','status']);
    if(patch.title!==undefined&&!text(patch.title,500)||patch.note!==undefined&&(typeof patch.note!=='string'||patch.note.length>16000)||patch.status!==undefined&&!['active','done','shelved'].includes(patch.status))throw new BridgeError('事项字段无效');
    if(v.action==='create'&&!patch.title||['delete','restore'].includes(v.action)&&Object.keys(patch).length)throw new BridgeError('创建需要标题，删除/恢复不可混入改动');
-   if(['fireAt','title','alarmId'].some(k=>v[k]!==undefined))throw new BridgeError('事项请求混入闹钟字段');
+   if(['fireAt','title','alarmId','entryDate','query'].some(k=>v[k]!==undefined))throw new BridgeError('事项请求混入闹钟字段');
    permission=`item.${v.action}`;
   }else if(v.kind==='alarm'){
-   if(!['schedule','cancel'].includes(v.action)||['recordId','expectedRevision','patch'].some(k=>v[k]!==undefined))throw new BridgeError('闹钟请求无效');
+   if(!['schedule','cancel'].includes(v.action)||['recordId','expectedRevision','patch','entryDate','query'].some(k=>v[k]!==undefined))throw new BridgeError('闹钟请求无效');
    if(v.action==='schedule'){if(!text(v.title,150)||v.alarmId!==undefined||iso(v.fireAt)<=at)throw new BridgeError('闹钟需要未来时间和标题');}
    else if(!uuid(v.alarmId)||v.fireAt!==undefined||v.title!==undefined)throw new BridgeError('取消闹钟需要原闹钟身份');
    permission=`alarm.${v.action}`;
+  }else if(v.kind==='journal'){
+   if(!['read','create','update'].includes(v.action)||['fireAt','title','alarmId'].some(k=>v[k]!==undefined))throw new BridgeError('日记操作无效');
+   if(v.action==='read'){
+    if(['recordId','expectedRevision','patch','entryDate'].some(k=>v[k]!==undefined))throw new BridgeError('日记读取不能混入写入字段');
+    journalQuery(v.query??{});
+   }else{
+    if(!uuid(v.recordId)||v.query!==undefined||v.action==='create'&&(v.expectedRevision!=null||v.entryDate===undefined)||v.action==='update'&&(!text(v.expectedRevision,150)||v.entryDate!==undefined))throw new BridgeError('日记需要创建日期或原始版本');
+    if(v.entryDate!==undefined&&iso(v.entryDate)!==v.entryDate)throw new BridgeError('日记日期需要UTC毫秒时间戳');
+    const patch=v.patch??{};keys(patch,['body','mood','tags']);
+    if(!Object.keys(patch).length||patch.body!==undefined&&(typeof patch.body!=='string'||new TextEncoder().encode(patch.body).length>16000)||patch.mood!==undefined&&patch.mood!==null&&(typeof patch.mood!=='string'||patch.mood.length>100)||patch.tags!==undefined&&(!Array.isArray(patch.tags)||patch.tags.length>30||patch.tags.some(t=>!text(t,100))))throw new BridgeError('日记文字、心情或标签无效');
+   }
+   permission=`journal.${v.action}`;
   }else throw new BridgeError('尚不支持此原生操作');
   return {body:{...v,occurredAt,expiresAt,...(v.fireAt?{fireAt:iso(v.fireAt)}:{})},permission};
  }
@@ -48,7 +60,7 @@ export function createNativeCommands(db,time){
  async function view(r){
   let state=r.state;
   if(['awaiting_confirmation','queued'].includes(state)){if(r.expires_at<=time())state='expired';else try{await grant(r.device_id,r.permission,r.grant_revision);}catch{state='revoked';}}
-  return {version:1,nativeCommandId:r.command_id,commandId:r.command_id,deviceId:r.device_id,requestHash:r.request_hash,request:JSON.parse(r.body),permission:r.permission,grantRevision:r.grant_revision,state,acceptedAt:r.accepted_at,expiresAt:r.expires_at,approvedAt:r.approved_at,attemptId:r.attempt_id,result:r.result?JSON.parse(r.result):null,resultAt:r.result_at,serverAccepted:true,deviceApplication:r.state==='applied'?'device_reported_applied':r.state==='failed'?'device_reported_failed':'unknown',userSeen:'unknown',userRequestEvidence:'agent_report_confirmation_required'};
+  return {version:1,nativeCommandId:r.command_id,commandId:r.command_id,deviceId:r.device_id,requestHash:r.request_hash,request:JSON.parse(r.body),permission:r.permission,grantRevision:r.grant_revision,state,acceptedAt:r.accepted_at,expiresAt:r.expires_at,approvedAt:r.approved_at,attemptId:r.attempt_id,result:r.result?JSON.parse(r.result):null,resultAt:r.result_at,serverAccepted:true,deviceApplication:r.state==='applied'?(r.permission==='journal.read'?'device_reported_read':'device_reported_applied'):r.state==='failed'?'device_reported_failed':'unknown',userSeen:'unknown',operationEffect:r.permission==='journal.read'?'read_only':'mutation',userRequestEvidence:r.permission==='journal.read'?'read_allowed_by_independent_device_grant':'agent_report_confirmation_required'};
  }
  async function submit(v,owner){
   if(!text(owner,200))throw new BridgeError('需要账户身份',401);
@@ -59,7 +71,7 @@ export function createNativeCommands(db,time){
    const {body,permission}=validate(v),g=await grant(v.deviceId,permission);
    // Require canonical timestamps so retry hashing and the displayed payload match.
    if(canonical(body)!==canonical(v))throw new BridgeError('请使用标准UTC毫秒时间戳');
-   await q(`INSERT OR IGNORE INTO native_requests(command_id,device_id,owner_id,request_hash,body,permission,grant_revision,state,accepted_at,expires_at) VALUES(?,?,?,?,?,?,?,'awaiting_confirmation',?,?)`,v.commandId,v.deviceId,owner,await sha(canonical(body)),canonical(body),permission,g.revision,time(),body.expiresAt).run();
+   await q(`INSERT OR IGNORE INTO native_requests(command_id,device_id,owner_id,request_hash,body,permission,grant_revision,state,accepted_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,v.commandId,v.deviceId,owner,await sha(canonical(body)),canonical(body),permission,g.revision,permission==='journal.read'?'queued':'awaiting_confirmation',time(),body.expiresAt).run();
   }
   const r=await row(v.commandId,owner);if(r.request_hash!==await sha(canonical(v)))throw new BridgeError('同一commandId不可改变请求',409);
   const value=await view(r);let approval=null;
@@ -95,13 +107,13 @@ export function createNativeCommands(db,time){
   if(['applied','failed','unknown'].includes(r.state))return view(r);
   await grant(d.id,r.permission,r.grant_revision);if(r.expires_at<=time())throw new BridgeError('请求过期，不再执行',409);
   if(r.state==='dispatching'){if(r.attempt_id!==v.attemptId)throw new BridgeError('已有执行尝试，结果未知，不可换身份重试',409);return view(r);}
-  if(r.state!=='queued'||!r.approved_at)throw new BridgeError('请求未由用户确认',403);
+  if(r.state!=='queued'||r.permission!=='journal.read'&&!r.approved_at)throw new BridgeError('请求未由用户确认',403);
   await q("UPDATE native_requests SET state='dispatching',attempt_id=?,claimed_at=? WHERE command_id=? AND state='queued' AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants WHERE device_id=? AND revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM devices WHERE id=native_grants.device_id AND revoked_at IS NULL))",v.attemptId,time(),r.command_id,time(),d.id,r.grant_revision,time()).run();
   const fresh=await row(r.command_id);if(fresh.state!=='dispatching'||fresh.attempt_id!==v.attemptId)throw new BridgeError('执行权已改变，请核对原请求',409);return view(fresh);
  }
  async function receipt(v,d){
   keys(v,['commandId','requestHash','attemptId','outcome','receipt']);await device(d.id);const r=await row(v.commandId);
-  if(r.device_id!==d.id||r.request_hash!==v.requestHash||r.attempt_id!==v.attemptId||!r.approved_at||!['applied','failed','unknown'].includes(v.outcome)||!v.receipt||typeof v.receipt!=='object'||Array.isArray(v.receipt))throw new BridgeError('执行回执身份或结果无效',403);
+  if(r.device_id!==d.id||r.request_hash!==v.requestHash||r.attempt_id!==v.attemptId||r.permission!=='journal.read'&&!r.approved_at||!['applied','failed','unknown'].includes(v.outcome)||!v.receipt||typeof v.receipt!=='object'||Array.isArray(v.receipt))throw new BridgeError('执行回执身份或结果无效',403);
   if(new TextEncoder().encode(canonical(v.receipt)).length>48000)throw new BridgeError('执行回执过大',413);
   const resultHash=await sha(canonical(v));if(r.result_hash){if(r.result_hash!==resultHash)throw new BridgeError('原回执不可覆盖，纠正需独立记录',409);return view(r);}
   if(r.state!=='dispatching')throw new BridgeError('请求尚未分配给设备',409);
@@ -116,5 +128,27 @@ export function createNativeCommands(db,time){
   const rows=(await q('SELECT g.device_id,g.revision,g.body,g.expires_at,d.label FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE d.revoked_at IS NULL AND g.expires_at>? ORDER BY g.device_id',time()).all()).results;
   return {readAt:time(),devices:rows.map(r=>({deviceId:r.device_id,label:r.label,revision:r.revision,capabilities:JSON.parse(r.body).capabilities,expiresAt:r.expires_at,confirmation:'chat_button',availability:'execution_requires_device_online_not_heartbeat_proof'}))};
  }
- return {capabilities,setGrant,readGrant,submit,approve,status,pending,claim,receipt};
+ function journalQuery(v){
+  keys(v,['start','end','text','includeTrash','limit','cursor']);
+  if(v.start!==undefined&&iso(v.start)!==v.start||v.end!==undefined&&iso(v.end)!==v.end||v.start!==undefined&&v.end!==undefined&&v.start>=v.end||v.text!==undefined&&(typeof v.text!=='string'||v.text.length>1000)||v.includeTrash!==undefined&&typeof v.includeTrash!=='boolean'||v.limit!==undefined&&(!Number.isSafeInteger(v.limit)||v.limit<1||v.limit>50)||v.cursor!==undefined&&(typeof v.cursor!=='string'||v.cursor.length>2000))throw new BridgeError('日记读取范围或分页无效');
+ }
+ async function readJournal(v,owner){
+  keys(v,['commandId','deviceId','query']);if(!text(owner,200))throw new BridgeError('需要账户身份',401);if(!uuid(v.commandId)||!text(v.deviceId,80))throw new BridgeError('读取需要固定请求和设备身份');journalQuery(v.query??{});
+  const previous=await one('SELECT * FROM native_requests WHERE command_id=?',v.commandId);
+  if(previous){const r=await row(v.commandId,owner),body=JSON.parse(r.body);if(r.permission!=='journal.read'||r.device_id!==v.deviceId||canonical(body.query)!==canonical(v.query??{}))throw new BridgeError('同一读取身份不可改变范围或设备',409);return view(r);}
+  try {
+   const submitted=await submit({version:1,commandId:v.commandId,deviceId:v.deviceId,kind:'journal',action:'read',query:v.query??{},occurredAt:time(),expiresAt:new Date(Date.parse(time())+3600000).toISOString(),userRequest:'Read-only journal retrieval; permission is independent native journal.read grant'},owner);
+   return submitted.value;
+  }catch(error){
+   // Concurrent identical reads may each generate internal timestamps before
+   // either row is visible. Retrieve the winning immutable request, rather
+   // than treating its timestamp as a caller payload change or issuing a new ID.
+   if(error instanceof BridgeError&&error.status===409){
+    const latest=await one('SELECT * FROM native_requests WHERE command_id=?',v.commandId);
+    if(latest){const r=await row(v.commandId,owner),body=JSON.parse(r.body);if(r.permission==='journal.read'&&r.device_id===v.deviceId&&canonical(body.query)===canonical(v.query??{}))return view(r);}
+   }
+   throw error;
+  }
+ }
+ return {capabilities,setGrant,readGrant,submit,approve,status,pending,claim,receipt,readJournal};
 }

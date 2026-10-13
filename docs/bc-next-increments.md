@@ -56,3 +56,5 @@ stop保存STOP并在下一轮检查后退出，disable撤销登录启动并停�
 2026-10-13 对话执行增量：用户选择Dots内具体按钮确认。后端固定设备队列、独立批准凭据、本机授权与执行日志已实现；详见[bc-dots-native-167.md](bc-dots-native-167.md)。日记单独定范围，未擅自开放；完整目标仍active。
 
 2026-10-13 05:14 UTC线上复测：既有插件刷新后，Dots实际调用read_native_capabilities一次，devices[]；页面报告payload哈希与本地研究行17821/17822匹配。未登记设备能力不等于离线，卡片和真实操作仍待验。日记本地独立读写入口/原文意图/分页版本已补，Mac305/305、iOS编译通过；不自动上传日记、不开放代理权限、未发布此日记增量，见[bc-journal-increment.md](bc-journal-increment.md)。
+
+2026-10-13 168日记对话增量：独立journal.read/create/update、本机权限开关、指定设备读取页结果与用户按钮确认后的文字修改已经接入既有队列。读失败不冒充空页，原读回执冻结重传，并发同读取保留最先请求。服务器49/49、Recorder12/12、Mac308/308、iOS编译/TS通过。发布准备与真实执行分开核验，见[bc-dots-journal-168.md](bc-dots-journal-168.md)。完整目标仍含真机事项/闹钟与计时多端时延，未complete。

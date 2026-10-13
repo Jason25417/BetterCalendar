@@ -103,6 +103,7 @@ nonisolated enum NativeRemoteJSON {
     private let persistence: any NativeRemotePersisting
     private let writer: any NativeItemWriting
     private let alarms: any NativeAlarmScheduling
+    private let journal: (any NativeJournalAccessing)?
     private let now: () -> Date
     private var timer: Timer?
     private var polling = false
@@ -111,13 +112,15 @@ nonisolated enum NativeRemoteJSON {
     var message = "对话操作尚未启用"
     var allowItems = false
     var allowAlarms = false
+    var allowJournalRead = false
+    var allowJournalWrite = false
     var grantRevision = 0
     var expiresAt: Date?
     var deviceId: String? { service.nativeDeviceId }
     var alarmSupported: Bool { alarms.inspect().supported }
     init(service: any NativeRemoteServing, persistence: any NativeRemotePersisting,
-         writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, now: @escaping () -> Date = Date.init) {
-        self.service = service; self.persistence = persistence; self.writer = writer; self.alarms = alarms; self.now = now
+         writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init) {
+        self.service = service; self.persistence = persistence; self.writer = writer; self.alarms = alarms; self.journal = journal; self.now = now
         refreshLocal()
     }
     func refreshLocal() {
@@ -127,11 +130,13 @@ nonisolated enum NativeRemoteJSON {
             let active = grant?.synchronized == true && grant?.deviceId == deviceId && (grant?.expiresAt ?? .distantPast) > now()
             allowItems = active && (grant?.capabilities.contains("item.create") ?? false)
             allowAlarms = active && (grant?.capabilities.contains("alarm.schedule") ?? false)
+            allowJournalRead = active && (grant?.capabilities.contains("journal.read") ?? false)
+            allowJournalWrite = active && (grant?.capabilities.contains("journal.update") ?? false)
             message = active ? "每次改动都需在 Dots 对话里点确认；本机执行" : "对话操作未启用、未完成授权同步或已到期"
         } catch { fail(error) }
     }
     // Called only by the human's native settings button, never a remote tool.
-    func setCapabilities(items: Bool, alarm: Bool) async {
+    func setCapabilities(items: Bool, alarm: Bool, journalRead: Bool = false, journalWrite: Bool = false) async {
         guard !granting, let deviceId else { message = "先配置个人状态连接"; return }
         granting = true; defer { granting = false }
         do {
@@ -140,9 +145,11 @@ nonisolated enum NativeRemoteJSON {
             var locked = try persistence.load(); locked.grant?.synchronized = false; try persistence.save(locked)
             refreshLocal()
             if alarm { guard alarms.inspect().supported, alarms.inspect().authorization == "authorized" else { throw DataArchiveError.invalid("先在原生闹钟面板主动取得系统授权") } }
+            if journalRead || journalWrite { guard journal != nil else { throw DataArchiveError.invalid("本机尚未提供日记入口") } }
             let server = try NativeRemoteJSON.object(await service.nativeRequest("native/grant/read", body: .object([:])))
             let revision = try NativeRemoteJSON.integer(server["revision"]) + 1
-            let caps = (items ? ["item.create", "item.update", "item.delete", "item.restore"] : []) + (alarm ? ["alarm.schedule", "alarm.cancel"] : [])
+            let caps = (items ? ["item.create", "item.update", "item.delete", "item.restore"] : []) + (alarm ? ["alarm.schedule", "alarm.cancel"] : []) +
+                (journalRead ? ["journal.read"] : []) + (journalWrite ? ["journal.create", "journal.update"] : [])
             let grant = NativeRemoteGrant(deviceId: deviceId, revision: revision, capabilities: caps, expiresAt: now().addingTimeInterval(29 * 86400))
             var file = try persistence.load(); file.grant = grant; try persistence.save(file)
             let result = try NativeRemoteJSON.object(await service.nativeRequest("native/grant", body: .object([
@@ -202,7 +209,7 @@ nonisolated enum NativeRemoteJSON {
               try NativeRemoteJSON.integer(r["version"]) == 1, hash.count == 64,
               BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r))) == hash else { throw DataArchiveError.invalid("请求原文、设备身份或哈希不一致，未执行整页") }
         let kind = try NativeRemoteJSON.string(r["kind"]), action = try NativeRemoteJSON.string(r["action"])
-        guard kind == "item" && ["create", "update", "delete", "restore"].contains(action) || kind == "alarm" && ["schedule", "cancel"].contains(action),
+        guard kind == "item" && ["create", "update", "delete", "restore"].contains(action) || kind == "alarm" && ["schedule", "cancel"].contains(action) || kind == "journal" && ["read", "create", "update"].contains(action),
               try NativeRemoteJSON.string(v["permission"]) == kind + "." + action else { throw URLError(.cannotParseResponse) }
         _ = try NativeRemoteJSON.date(r["occurredAt"]); _ = try NativeRemoteJSON.date(v["expiresAt"])
     }
@@ -233,10 +240,11 @@ nonisolated enum NativeRemoteJSON {
             guard let receipt = c["result"], receipt != .null else { throw URLError(.cannotParseResponse) }
             attempt.phase = "reported"; attempt.outcome = try NativeRemoteJSON.string(c["state"]); attempt.receipt = receipt; try update(attempt); return
         }
+        let readOnly = try NativeRemoteJSON.string(c["permission"]) == "journal.read"
         guard try NativeRemoteJSON.string(c["state"]) == "dispatching",
               try NativeRemoteJSON.string(c["attemptId"]) == attempt.attemptId,
               try NativeRemoteJSON.string(c["requestHash"]) == attempt.requestHash,
-              c["approvedAt"] != .null, c["approvedAt"] != nil else { throw DataArchiveError.invalid("未取得经用户确认的设备执行权") }
+              (readOnly || (c["approvedAt"] != .null && c["approvedAt"] != nil)) else { throw DataArchiveError.invalid("未取得经用户确认的设备执行权") }
         attempt.envelope = claim; attempt.phase = "claimed"; try update(attempt)
         let local = try persistence.load().grant
         guard let local, local.synchronized, local.deviceId == deviceId, service.nativeDeviceId == deviceId,
@@ -257,6 +265,27 @@ nonisolated enum NativeRemoteJSON {
                                                 patch: try NativeRemoteJSON.object(r["patch"] ?? .object([:])),
                                                 occurredAt: try NativeRemoteJSON.date(r["occurredAt"]), userAuthorizationRef: ref)
                 attempt.receipt = try writer.execute(command, userConfirmed: true)
+            } else if try NativeRemoteJSON.string(r["kind"]) == "journal" {
+                guard let journal else { throw DataArchiveError.invalid("本机尚未提供日记入口") }
+                if readOnly {
+                    let q = try NativeRemoteJSON.object(r["query"] ?? .object([:]))
+                    var query = NativeJournalQuery()
+                    if let start = q["start"] { query.start = try NativeRemoteJSON.date(start) }
+                    if let end = q["end"] { query.end = try NativeRemoteJSON.date(end) }
+                    if let text = q["text"] { query.text = try NativeRemoteJSON.string(text) }
+                    if let trash = q["includeTrash"] { guard case let .bool(value) = trash else { throw URLError(.cannotParseResponse) }; query.includeTrash = value }
+                    if let limit = q["limit"] { query.limit = try NativeRemoteJSON.integer(limit) }
+                    if let cursor = q["cursor"] { query.cursor = try NativeRemoteJSON.string(cursor) }
+                    attempt.receipt = try journal.read(query, readAllowed: true)
+                } else {
+                    guard let recordId = UUID(uuidString: try NativeRemoteJSON.string(r["recordId"])),
+                          let action = NativeJournalCommand.Action(rawValue: try NativeRemoteJSON.string(r["action"])) else { throw URLError(.cannotParseResponse) }
+                    attempt.receipt = try journal.execute(.init(commandId: commandId, recordId: recordId, action: action,
+                        entryDate: try r["entryDate"].map { try NativeRemoteJSON.date($0) },
+                        expectedRevision: r["expectedRevision"].flatMap { if case let .string(s) = $0 { s } else { nil } },
+                        patch: try NativeRemoteJSON.object(r["patch"] ?? .object([:])), occurredAt: try NativeRemoteJSON.date(r["occurredAt"]),
+                        userAuthorizationRef: ref), userConfirmed: true)
+                }
             } else if try NativeRemoteJSON.string(r["action"]) == "schedule" {
                 attempt.receipt = try await alarms.schedule(.init(commandId: commandId, fireAt: try NativeRemoteJSON.date(r["fireAt"]),
                                                                   title: try NativeRemoteJSON.string(r["title"]), userAuthorizationRef: ref), userConfirmed: true)
@@ -268,7 +297,7 @@ nonisolated enum NativeRemoteJSON {
         } catch {
             // An error may occur after the side effect (receipt disk failure or
             // system response loss). Preserve unknown rather than false failure.
-            attempt.outcome = "unknown"; attempt.receipt = .object(["error": .string(error.localizedDescription), "effect": .string("unknown_check_native_intent")])
+            attempt.outcome = readOnly ? "failed" : "unknown"; attempt.receipt = .object(["error": .string(error.localizedDescription), "effect": .string(readOnly ? "read_only_no_mutation" : "unknown_check_native_intent")])
             attempt.lastError = error.localizedDescription; DevLog.shared.warn("对话操作", error.localizedDescription)
         }
         attempt.phase = "result"; attempt.updatedAt = now(); try update(attempt)
@@ -290,7 +319,8 @@ nonisolated enum NativeRemoteJSON {
               try NativeRemoteJSON.string(result["state"]) == outcome,
               try NativeRemoteJSON.string(result["requestHash"]) == attempt.requestHash else { throw URLError(.cannotParseResponse) }
         var saved = attempt; saved.phase = "reported"; saved.updatedAt = now(); try update(saved)
-        message = outcome == "applied" ? "设备执行结果已回传；其他设备同步仍需核对" : "结果已回传：" + outcome + "；请查看原请求"
+        let isRead = (try? NativeRemoteJSON.object(attempt.envelope)["permission"]) == .string("journal.read")
+        message = outcome == "applied" ? (isRead ? "日记读取结果已回传；是否读完以分页信息为准" : "设备执行结果已回传；其他设备同步仍需核对") : "结果已回传：" + outcome + "；请查看原请求"
     }
     private func fail(_ error: Error) {
         message = error.localizedDescription

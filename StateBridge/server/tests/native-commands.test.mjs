@@ -9,8 +9,8 @@ function fixture(){
  let failRecord=false;
  const prepare=sql=>{let args=[];return{bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return{results:sqlite.prepare(sql).all(...args)};},run(){if(failRecord&&sql.startsWith('INSERT OR IGNORE INTO research_log'))throw Error('disk full simulation');return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const out=ops.map(o=>o.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
- let now=new Date('2026-10-13T10:00:00.000Z');const core=createBridge(db,{now:()=>now});
- return{core,sqlite,time:()=>now.toISOString(),advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;}};
+ let now=new Date('2026-10-13T10:00:00.000Z'),clockStep=0;const core=createBridge(db,{now:()=>{const at=now;now=new Date(now.getTime()+clockStep);return at;}});
+ return{core,sqlite,time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;}};
 }
 const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
@@ -65,4 +65,50 @@ test('pagination, entire result persistence transaction, request validation and 
  await assert.rejects(f.core.nativeCommands.submit({...request(f,4),patch:{title:'x',zone:'longterm'}},'owner'),/字段/);
  await assert.rejects(f.core.nativeCommands.submit({...request(f,5),action:'delete',patch:{}},'owner'),/原始版本/);
  const clock=await f.core.registerDevice({id:'clock',label:'Clock',scopes:['clock.tick']});const c=await f.core.authenticateDevice(clock.token);await assert.rejects(f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create'],expiresAt:'2026-10-14T10:00:00.000Z'},c),/权限/);
+});
+test('journal read requires separate grant, queues without mutation confirmation and retains exact requested page',async()=>{
+ const f=fixture(),d=await setup(f),v={commandId:id(600),deviceId:d.id,query:{text:'fixture',limit:1}};
+ await assert.rejects(f.core.nativeCommands.readJournal(v,'owner'),/权限未启用/);
+ await f.core.nativeCommands.setGrant({revision:2,capabilities:['journal.read'],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+ const s=await f.core.nativeCommands.readJournal(v,'owner');assert.equal(s.state,'queued');assert.equal(s.approvedAt,null);assert.equal(s.operationEffect,'read_only');
+ f.advance(1000);const repeated=await f.core.nativeCommands.readJournal(v,'owner');assert.equal(repeated.requestHash,s.requestHash);assert.equal(repeated.acceptedAt,s.acceptedAt);
+ await assert.rejects(f.core.nativeCommands.readJournal({...v,query:{text:'different'}},'owner'),/不可改变/);
+ await assert.rejects(f.core.nativeCommands.readJournal(v,'other-owner'),/不存在/);
+ const claim={commandId:v.commandId,requestHash:s.requestHash,attemptId:id(601)};
+ await f.core.nativeCommands.claim(claim,d);
+ const page={authority:'swiftdata',readAt:f.time(),records:[{id:id(602),revision:'full-hash',values:{body:'isolated diary text'}}],hasMore:true,complete:false,nextCursor:'fixture-page-2',coverage:{photoBinaries:'not_requested_or_retrieved'}};
+ const r=await f.core.nativeCommands.receipt({...claim,outcome:'applied',receipt:page},d);assert.equal(r.deviceApplication,'device_reported_read');assert.deepEqual(r.result,page);
+ const evidence=await f.core.research.evidence({nativeCommandIds:[v.commandId]});assert.deepEqual(evidence.nativeCommands[0].result,page);
+ const denied={...s.request,commandId:id(603),action:'create',recordId:id(604),entryDate:f.time(),patch:{body:'must not write'}};delete denied.query;await assert.rejects(f.core.nativeCommands.submit(denied,'owner'),/权限未启用/);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM native_requests WHERE permission<>'journal.read' AND command_id=?").get(id(603)).n,0);
+});
+test('journal text create/update keep human confirmation and reject delete/photo/date widening',async()=>{
+ const f=fixture(),d=await setup(f);await f.core.nativeCommands.setGrant({revision:2,capabilities:['journal.create','journal.update'],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+ const v={...request(f,700),kind:'journal',action:'create',entryDate:f.time(),patch:{body:'fixture subjective text',mood:null,tags:['fixture']}};
+ const s=await approved(f,v);const claim={commandId:v.commandId,requestHash:s.value.requestHash,attemptId:id(701)};assert.equal((await f.core.nativeCommands.claim(claim,d)).state,'dispatching');
+ const update={...v,commandId:id(702),action:'update',expectedRevision:'actual revision'};delete update.entryDate;assert.equal((await f.core.nativeCommands.submit(update,'owner')).value.state,'awaiting_confirmation');
+ await assert.rejects(f.core.nativeCommands.submit({...v,commandId:id(703),action:'delete'},'owner'),/操作无效/);
+ await assert.rejects(f.core.nativeCommands.submit({...v,commandId:id(704),patch:{body:'x',photoRefs:[]}},'owner'),/字段/);
+ await assert.rejects(f.core.nativeCommands.submit({...update,commandId:id(705),entryDate:f.time()},'owner'),/原始版本/);
+ await assert.rejects(f.core.nativeCommands.submit({...v,commandId:id(706),patch:{body:'中'.repeat(6000)}},'owner'),/文字/);
+ await assert.rejects(f.core.nativeCommands.readJournal({commandId:id(707),deviceId:d.id},'owner'),/权限未启用/);
+});
+test('journal read range validation and revoked queued read cannot leak through later execution',async()=>{
+ const f=fixture(),d=await setup(f);await f.core.nativeCommands.setGrant({revision:2,capabilities:['journal.read'],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+ await assert.rejects(f.core.nativeCommands.readJournal({commandId:id(800),deviceId:d.id,query:{limit:0}},'owner'),/范围/);
+ await assert.rejects(f.core.nativeCommands.readJournal({commandId:id(800),deviceId:d.id,query:{start:f.time(),end:f.time()}},'owner'),/范围/);
+ const s=await f.core.nativeCommands.readJournal({commandId:id(801),deviceId:d.id,query:{start:'2026-10-12T10:00:00.000Z',end:f.time()}},'owner');
+ await f.core.nativeCommands.setGrant({revision:3,capabilities:[],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+ assert.equal((await f.core.nativeCommands.status({commandId:id(801)},'owner')).state,'revoked');
+ await assert.rejects(f.core.nativeCommands.claim({commandId:id(801),requestHash:s.requestHash,attemptId:id(802)},d),/权限未启用/);
+ assert.equal(f.sqlite.prepare('SELECT result FROM native_requests WHERE command_id=?').get(id(801)).result,null);
+});
+
+test('concurrent identical journal reads keep one original command despite independently generated timestamps',async()=>{
+ const f=fixture(),d=await setup(f);await f.core.nativeCommands.setGrant({revision:2,capabilities:['journal.read'],expiresAt:'2026-10-14T10:00:00.000Z'},d);f.stepEveryRead(1);
+ const v={commandId:id(900),deviceId:d.id,query:{limit:1}};
+ const [first,second]=await Promise.all([f.core.nativeCommands.readJournal(v,'owner'),f.core.nativeCommands.readJournal(v,'owner')]);
+ assert.equal(first.requestHash,second.requestHash);assert.equal(first.acceptedAt,second.acceptedAt);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests WHERE command_id=?').get(v.commandId).n,1);
+ await assert.rejects(f.core.nativeCommands.readJournal({...v,query:{limit:2}},'owner'),/不可改变/);
 });

@@ -24,8 +24,8 @@ function references(value) {
     snapshotEventId: value.snapshotEventId ?? null,
     noteIds: (value.notes ?? []).map(n=>n.id),
     sourceMetadata: (value.sources ?? []).map(s=>({sourceKey:s.sourceKey,eventId:s.eventId,assertion:s.assertion,observedAt:s.observedAt,receivedAt:s.receivedAt,expiresAt:s.expiresAt,freshness:s.freshness,availability:s.availability})),
-    coverage: value.coverage ?? null,
-    pagination: {hasMore:value.hasMore ?? null,nextCursor:value.nextCursor ?? null,throughId:value.throughId ?? null,valuesIncluded:value.valuesIncluded ?? null},
+    coverage: value.coverage ?? value.result?.coverage ?? null,
+    pagination: {hasMore:value.hasMore ?? value.result?.hasMore ?? null,nextCursor:value.nextCursor ?? value.result?.nextCursor ?? null,throughId:value.throughId ?? null,valuesIncluded:value.valuesIncluded ?? null},
     saved: value.saved ?? null,
     interpretation: 'References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store.',
   };

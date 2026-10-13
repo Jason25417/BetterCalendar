@@ -9,7 +9,7 @@ const labels={awaiting_confirmation:'等待你确认；尚未执行',queued:'已
 function metadata(m){return m?.approval??m?.mcp_tool_result?._meta?.approval??m?.call_tool_result?._meta?.approval??null;}
 function render(value,meta){if(!value?.nativeCommandId)return;output=value;approval=metadata(meta)??approval;
  status.textContent=labels[value.state]??'状态尚未核实';
- const r=value.request;details.textContent=JSON.stringify({指定设备:value.deviceId,操作:r.kind+'.'+r.action,用户请求:r.userRequest,事项身份:r.recordId,原始版本:r.expectedRevision,具体改动:r.patch,闹钟时间:r.fireAt?new Date(r.fireAt).toLocaleString():undefined,闹钟标题:r.title,取消闹钟:r.alarmId,确认期限:new Date(value.expiresAt).toLocaleString(),结果:value.result},null,2);
+ const r=value.request;details.textContent=JSON.stringify({指定设备:value.deviceId,操作:r.kind+'.'+r.action,用户请求:r.userRequest,事项身份:r.recordId,原始版本:r.expectedRevision,具体改动:r.patch,日记归属时刻:r.entryDate?new Date(r.entryDate).toLocaleString():undefined,读取范围:r.query,闹钟时间:r.fireAt?new Date(r.fireAt).toLocaleString():undefined,闹钟标题:r.title,取消闹钟:r.alarmId,确认期限:new Date(value.expiresAt).toLocaleString(),结果:value.result},null,2);
  button.disabled=!bridgeReady||value.state!=='awaiting_confirmation'||!approval?.token||approval.requestHash!==value.requestHash;refresh.disabled=!bridgeReady;
 }
 function request(method,params){if(window.openai?.callTool&&method==='tools/call')return window.openai.callTool(params.name,params.arguments);

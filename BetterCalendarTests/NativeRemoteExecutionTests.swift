@@ -99,6 +99,79 @@ import SwiftData
         #expect(store.file.requests.first?.phase == "reported" && service.receipts.count == 1)
         #expect(store.file.failures.count == 1)
     }
+    private func journalEnvelope(_ action: String, approved: Bool = false, revision: String? = nil, recordId: UUID = UUID()) throws -> BridgeJSON {
+        var e = try NativeRemoteJSON.object(envelope()), r = try NativeRemoteJSON.object(e["request"] ?? .null)
+        r["kind"] = .string("journal"); r["action"] = .string(action); r.removeValue(forKey: "patch"); r.removeValue(forKey: "recordId")
+        if action == "read" { r["query"] = .object(["text": .string("fixture"), "limit": .number(1)]) }
+        else {
+            r["recordId"] = .string(recordId.uuidString); r["patch"] = .object(["body": .string("ISOLATED JOURNAL FIXTURE")])
+            if action == "create" { r["entryDate"] = NativeRemoteJSON.timestamp(at) }
+            else if let revision { r["expectedRevision"] = .string(revision) }
+        }
+        e["permission"] = .string("journal." + action); e["approvedAt"] = approved ? NativeRemoteJSON.timestamp(at) : .null
+        e["request"] = .object(r); e["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r))))
+        return .object(e)
+    }
+    @Test func journalReadHasIndependentGrantNoWriteConfirmationAndFrozenReceiptRetry() async throws {
+        let (service, store, writer, c) = try fixture(journalEnvelope("read"))
+        store.file.grant?.capabilities = ["journal.read"]
+        let diary = JournalEntry(date: at, body: "original fixture", photoRefs: ["fixture-reference"])
+        c.mainContext.insert(diary); try c.mainContext.save()
+        let journal = SwiftDataNativeJournal(context: c.mainContext, journal: NativeActionMemoryJournal(), now: { self.at })
+        service.loseReceiptResponse = true
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), journal: journal, now: { self.at })
+        await executor.poll()
+        #expect(store.file.requests.first?.phase == "result" && store.file.requests.first?.outcome == "applied")
+        let original = try NativeRemoteJSON.object(store.file.requests[0].receipt ?? .null)
+        #expect(original["source"] == .string("bc.native.journal") && original["complete"] == .bool(true))
+        diary.body = "changed fixture after saved read"; try c.mainContext.save()
+        let restarted = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), journal: journal, now: { self.at })
+        await restarted.poll()
+        #expect(service.receipts.count == 2 && service.receipts[0] == service.receipts[1])
+        #expect(store.file.requests.first?.phase == "reported" && service.claims.count == 1)
+        #expect(diary.body == "changed fixture after saved read" && diary.photoRefs == ["fixture-reference"])
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<JournalEntry>()) == 1)
+    }
+    @Test func journalWritesStillNeedConfirmationAndSeparateWriteGrant() async throws {
+        let e = try journalEnvelope("create"), (service, store, writer, c) = try fixture(e)
+        let journal = SwiftDataNativeJournal(context: c.mainContext, journal: NativeActionMemoryJournal())
+        store.file.grant?.capabilities = ["journal.create", "journal.update"]
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), journal: journal, now: { self.at })
+        await executor.poll()
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<JournalEntry>()) == 0 && service.receipts.isEmpty)
+        var approved = try NativeRemoteJSON.object(service.envelope); approved["approvedAt"] = NativeRemoteJSON.timestamp(at); service.envelope = .object(approved)
+        store.file.grant?.capabilities = ["journal.read"]
+        await executor.poll()
+        #expect(try c.mainContext.fetchCount(FetchDescriptor<JournalEntry>()) == 0 && store.file.requests.first?.outcome == "failed")
+        let new = try journalEnvelope("create", approved: true), (validService, validStore, validWriter, validContainer) = try fixture(new)
+        validStore.file.grant?.capabilities = ["journal.create"]
+        let validJournal = SwiftDataNativeJournal(context: validContainer.mainContext, journal: NativeActionMemoryJournal())
+        let valid = NativeRemoteExecutor(service: validService, persistence: validStore, writer: validWriter, alarms: UnsupportedNativeAlarms(), journal: validJournal, now: { self.at })
+        await valid.poll(); await valid.poll()
+        #expect(try validContainer.mainContext.fetchCount(FetchDescriptor<JournalEntry>()) == 1 && validStore.file.requests.first?.phase == "reported")
+        #expect(validService.receipts.count == 1 && validService.claims.count == 1)
+    }
+    @Test func journalReadRevocationDuringClaimAndReadFailureNeverBecomeEmptySuccess() async throws {
+        let (service, store, writer, c) = try fixture(journalEnvelope("read"))
+        store.file.grant?.capabilities = ["journal.read"]
+        let journal = SwiftDataNativeJournal(context: c.mainContext, journal: NativeActionMemoryJournal())
+        service.beforeClaimReturn = { store.file.grant?.capabilities = [] }
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), journal: journal, now: { self.at })
+        await executor.poll()
+        #expect(store.file.requests.first?.outcome == "failed")
+        let (nextService, nextStore, nextWriter, nextContainer) = try fixture(journalEnvelope("read"))
+        nextStore.file.grant?.capabilities = ["journal.read"]
+        let diary = JournalEntry(date: at, body: "fixture unsaved editor")
+        nextContainer.mainContext.insert(diary)
+        let nextJournal = SwiftDataNativeJournal(context: nextContainer.mainContext, journal: NativeActionMemoryJournal())
+        let next = NativeRemoteExecutor(service: nextService, persistence: nextStore, writer: nextWriter, alarms: UnsupportedNativeAlarms(), journal: nextJournal, now: { self.at })
+        await next.poll()
+        #expect(nextStore.file.requests.first?.outcome == "failed")
+        let receipt = try NativeRemoteJSON.object(nextStore.file.requests[0].receipt ?? .null)
+        #expect(receipt["effect"] == .string("read_only_no_mutation") && receipt["records"] == nil)
+        #expect(diary.body == "fixture unsaved editor" && nextContainer.mainContext.hasChanges)
+    }
     @Test func JSAndSwiftCanonicalRequestHashMatch() throws {
         let data = Data(#"{"version":1,"commandId":"12345678-1234-4234-8234-123456789abc","deviceId":"fixture","kind":"item","action":"create","recordId":"12345678-1234-4234-8234-123456789abd","patch":{"title":"中文 / \"line\"\n"},"userRequest":"fixture","occurredAt":"2026-10-13T10:00:00.000Z","expiresAt":"2026-10-13T11:00:00.000Z"}"#.utf8)
         let body = try JSONDecoder().decode(BridgeJSON.self, from: data)
