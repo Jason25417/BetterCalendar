@@ -33,3 +33,13 @@ HTTP成功或saved=true仅是服务保存。缓存未保存、读取失败、版
 已核验：服务器55/55（隔离真实SQLite及MCP确认组件），Mac最终314/314（0失败/跳过），iOS Simulator BUILD SUCCEEDED，TS及服务构建通过。实际部署与TestFlight证据随后按真实结果追加。只有隔离fixture，没有真实用户任务、日记或闹钟。
 
 未验证：用户主动开启本机权限、Dots真实卡片/按钮、一个真正请求的完整设备执行、手机响铃/取消、两端当前计时/Live Activity实测延迟。外部连接器原始调用及provider完整费用仍有覆盖缺口，用户不反馈仍unknown。完整目标保持active，不能把测试、上传或工具可见性当作真机闭环已验收。
+
+## 实际部署与Dots只读样本（2026-10-13）
+
+源码a57e1ae已push并核对origin/main。现有私有服务v24部署succeeded（11:56:42.221687 UTC），source c6754f4c61464721b8da82c72c19996997dab2cc，deployment appgdep_6ace1c6efda08191bfe4200ac0ab6740；没有扩大访问对象、没有新资料服务。
+
+通过Edge扩展刷新现有插件后，Dots真实read_instructions与read_native_capabilities各1次，分别为research_94103f7e-b42c-4699-bf76-1341f666e192与research_22ecc000-beeb-43c2-91b2-11d158972a04。本地calls18965/18966及18968/18969保留开始/返回和原文定位；前者的返回hash与部署源码的完整instructions规范化hash相符，后者的devices[]页面返回重建hash与服务记录相符。不是原始HTTP抓包，也没有用一段总结补造原始调用。Dots已读到独立计时权限、指定设备、本人卡片确认、BC确认时刻及服务/设备分开报告规则。
+
+12:06:30.015 UTC实际设备权限列表为空；没有提交计时或其他写入，没有代启本机权限。工具可见/规则读到证明接入可读，不证明真实卡片或设备执行。证据详见[evidence/timer-readiness-169.json](evidence/timer-readiness-169.json)。
+
+双端0.65.12/169已archive+upload成功，归档bundle/version/build一致；Apple实际IOS fd5a5904-fa25-4d12-a559-1976a3ab26d6与MAC_OS cda7f50c-4d4b-4c5e-bad1-4565f8d7d718均VALID、IN_BETA_TESTING，中文说明已读回核对。可安装不代表已安装、主动授权或设备验收；完整目标仍active。[TestFlight证据](evidence/testflight-169.json)。

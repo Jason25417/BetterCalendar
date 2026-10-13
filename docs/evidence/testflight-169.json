@@ -1,0 +1,28 @@
+{
+  "appId": "6787325341",
+  "version": "0.65.12",
+  "build": 169,
+  "sourceCommit": "a57e1ae01affb0699e2ec8fcec44a18e7c8ebd1c",
+  "verifiedAt": "2026-10-13T12:12:34.045998+00:00",
+  "deviceInstalled": "not_verified",
+  "archiveVersionsVerified": true,
+  "uploads": "both_success",
+  "builds": [
+    {
+      "id": "fd5a5904-fa25-4d12-a559-1976a3ab26d6",
+      "platform": "IOS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    },
+    {
+      "id": "cda7f50c-4d4b-4c5e-bad1-4565f8d7d718",
+      "platform": "MAC_OS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "external": "READY_FOR_BETA_SUBMISSION",
+      "notesVerified": true
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "verifiedAt": "2026-10-13T12:09:09.636047+00:00",
+  "sourceCommit": "a57e1ae01affb0699e2ec8fcec44a18e7c8ebd1c",
+  "deployment": {
+    "existingPrivateSite": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "id": "appgdep_6ace1c6efda08191bfe4200ac0ab6740",
+    "sourceCommit": "c6754f4c61464721b8da82c72c19996997dab2cc",
+    "status": "succeeded",
+    "updatedAt": "2026-10-13T11:56:42.221687+00:00",
+    "audienceExpanded": false
+  },
+  "checks": {
+    "server": {
+      "passed": 55,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recorder": {
+      "passed": 12,
+      "failed": 0
+    },
+    "macOS": {
+      "passed": 314,
+      "failed": 0,
+      "skipped": 0
+    },
+    "iOSSimulator": "BUILD_SUCCEEDED",
+    "typescript": "passed",
+    "siteBuild": "passed"
+  },
+  "dots": {
+    "transport": "existing Edge extension, existing Dots conversation",
+    "readInstructions": {
+      "calls": 1,
+      "callId": "research_94103f7e-b42c-4699-bf76-1341f666e192",
+      "startedAt": "2026-10-13T12:06:23.214Z",
+      "returnedAt": "2026-10-13T12:06:23.331Z",
+      "responseHash": "a1d9c03f30d82a90173c3ac40e575759a1bdf240b5161f5c3b358f244ca050a4",
+      "localCallRows": [
+        18965,
+        18966
+      ],
+      "verification": "visible Dots rule summary; canonical hash of deployed source instructions independently matched to persisted server research return, not original HTTP response capture"
+    },
+    "readCapabilities": {
+      "calls": 1,
+      "callId": "research_22ecc000-beeb-43c2-91b2-11d158972a04",
+      "startedAt": "2026-10-13T12:06:29.856Z",
+      "returnedAt": "2026-10-13T12:06:30.015Z",
+      "payload": {
+        "readAt": "2026-10-13T12:06:30.015Z",
+        "devices": []
+      },
+      "responseHash": "1cc7632b1c87a4ad3d20d2761bc712b75729699ec65758f5981e300a5028d34b",
+      "localCallRows": [
+        18968,
+        18969
+      ],
+      "verification": "payload reconstructed from visible Dots response; canonical sorted-key SHA256 independently matched to persisted server research return, not original HTTP response capture"
+    },
+    "logPageSnapshot": "bf040bcda602abbaf96e00e04e8367950174f6b89221df84757c0c894c8699a8",
+    "permissionsEnabledByAgent": false,
+    "writeCallsRequested": 0,
+    "realTimerOperationsRequested": 0,
+    "screenshot": "local only /private/tmp/bc-dots-timer-readiness-169.jpg"
+  },
+  "authorizationGap": {
+    "legacyDirectMcpTimer": "fixed in source and existing private deployment",
+    "humanCardCallback": "not_verified",
+    "nativeDeviceExecution": "not_verified"
+  },
+  "unverified": [
+    "native 169 installed and explicit grants enabled",
+    "actual confirmation card callback",
+    "actual requested timer/item/journal/alarm execution",
+    "iPhone AlarmKit ring and cancel",
+    "real current-session dual-device and Live Activity delay",
+    "full external connector raw evidence and provider costs"
+  ],
+  "goal": "active; real-device closed loop not accepted"
+}
