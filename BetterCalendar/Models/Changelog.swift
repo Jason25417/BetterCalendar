@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.12", date: "2026-10", changes: [
+            "对话计时增加独立权限与具体卡片确认；开始、暂停、继续、结束仍与 BC 按钮共用同一记录",
+            "默认按你确认的时刻计时；明确补记的过去时间在卡片中展示，设备离线不会自动暂停",
+            "先核对服务保存，再核对本机保存版本；撤权、冲突和响应丢失不盲写，结束计时不自动完成事项"
+        ]),
         ChangelogEntry(version: "0.65.11", date: "2026-10", changes: [
             "新增 Dots 日记读取与文字操作：本机分别主动启用读取和修改权限，修改仍需对话内确认",
             "日记原文与照片引用保留；分页绑定内容版本，直接改动、断线和重试都会核对原请求",

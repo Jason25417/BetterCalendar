@@ -140,6 +140,35 @@ import Observation
             report("计时同步暂未完成；保留最后状态与 \(pendingCount) 条待同步操作，连接恢复后重试")
         }
     }
+    /// A confirmed remote command uses the same cloud session, then requires
+    /// the device's persisted complete snapshot to cover that returned version.
+    /// A newer version is reported as superseding it, never as the exact state.
+    func confirmSavedVersion(_ result: BridgeJSON) async throws -> BridgeJSON {
+        let fields = try NativeRemoteJSON.object(result)
+        let id = try NativeRemoteJSON.string(fields["id"]), revision = try NativeRemoteJSON.integer(fields["revision"])
+        let expectedStatus = try NativeRemoteJSON.string(fields["status"]), expectedCommand = try NativeRemoteJSON.string(fields["commandId"])
+        guard revision > 0, fields["saved"] == .bool(true) else { throw URLError(.cannotParseResponse) }
+        await refresh(allowCommands: false)
+        guard healthy, !hasMore, !isStale, let state = file.state, let snapshot = state.applicationSnapshot else {
+            throw DataArchiveError.invalid("服务已保存计时，但本机完整状态保存尚未核验")
+        }
+        let cached = state.sessions.first { $0.id == id }
+        let finished = snapshot.finishedVersions.first { $0.sessionId == id }
+        guard let savedRevision = cached?.revision ?? finished?.revision, savedRevision >= revision else {
+            throw DataArchiveError.invalid("服务已保存计时，本机尚未读取到该版本，不称设备完成")
+        }
+        if savedRevision == revision {
+            guard (cached?.status.rawValue ?? finished?.status.rawValue) == expectedStatus,
+                  (cached?.lastCommandId ?? finished?.commandId) == expectedCommand else {
+                throw DataArchiveError.invalid("本机版本号相同但状态或操作身份不同，未确认应用")
+            }
+        }
+        return .object(["serviceResult": result, "deviceEffect": .string("local_cache_persisted"),
+                        "snapshotId": .string(snapshot.id), "sessionId": .string(id),
+                        "requestedRevision": .number(Double(revision)), "savedRevision": .number(Double(savedRevision)),
+                        "superseded": .bool(savedRevision > revision), "readAt": NativeRemoteJSON.timestamp(state.readAt),
+                        "screenPresentation": .string("unknown"), "userSeen": .string("unknown")])
+    }
     private func report(_ text: String) {
         if lastError != text, !TestHost.isActive { DevLog.shared.warn("BC计时", text) }
         lastError = text; message = text

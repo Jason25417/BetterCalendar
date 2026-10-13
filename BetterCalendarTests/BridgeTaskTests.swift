@@ -166,6 +166,44 @@ import SwiftData
         #expect(service.requests.map(\.action) == [.start, .pause, .finish])
     }
 
+    @Test func confirmedVersionReportsNewerCacheAndFinishedVersionsWithoutChangingTasks() async throws {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        service.sessions = [.init(id: "fixture", title: "FIXTURE", status: .paused, startedAt: at, activeSince: nil, elapsedMs: 1000, updatedAt: at, revision: 3, provenance: "user")]
+        service.applicationSnapshot = .init(id: "task_snapshot_confirmed", finishedVersions: [], finishedComplete: true)
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        let receipt: BridgeJSON = .object(["saved": .bool(true), "id": .string("fixture"), "revision": .number(2), "status": .string("running"), "commandId": .string("fixture_start")])
+        let value = try NativeRemoteJSON.object(await model.confirmSavedVersion(receipt))
+        #expect(value["superseded"] == .bool(true) && value["savedRevision"] == .number(3))
+        service.sessions = []; service.applicationSnapshot = .init(id: "task_snapshot_finished", finishedVersions: [.init(sessionId: "fixture", revision: 4, status: .finished, commandId: "fixture_finish")], finishedComplete: true)
+        let finished = try NativeRemoteJSON.object(await model.confirmSavedVersion(.object(["saved": .bool(true), "id": .string("fixture"), "revision": .number(4), "status": .string("finished"), "commandId": .string("fixture_finish")])))
+        #expect(finished["savedRevision"] == .number(4) && finished["superseded"] == .bool(false))
+        #expect(service.requests.isEmpty && disk.file.state?.sessions.isEmpty == true)
+    }
+    @Test func confirmedTimerCannotTreatFailedCachePersistenceOrMissingVersionAsApplied() async throws {
+        final class Disk: BridgeTaskPersisting {
+            func load() throws -> BridgeTaskLocalFile { .init() }
+            func save(_ file: BridgeTaskLocalFile) throws { throw CocoaError(.fileWriteOutOfSpace) }
+        }
+        let service = Service(); service.applicationSnapshot = .init(id: "task_snapshot_disk_fixture", finishedVersions: [], finishedComplete: true)
+        let failed = BridgeTaskViewModel(service: service, persistence: Disk(), enabled: { true }, now: { service.clock })
+        let receipt: BridgeJSON = .object(["saved": .bool(true), "id": .string("missing"), "revision": .number(1), "status": .string("running"), "commandId": .string("fixture_missing")])
+        do { _ = try await failed.confirmSavedVersion(receipt); Issue.record("Cache disk failure was misreported as applied") } catch {}
+        let missing = BridgeTaskViewModel(service: service, persistence: BridgeTaskMemoryPersistence(), enabled: { true }, now: { service.clock })
+        do { _ = try await missing.confirmSavedVersion(receipt); Issue.record("Missing session version was misreported as applied") } catch {}
+        #expect(service.requests.isEmpty)
+    }
+    @Test func sameRevisionWithDifferentStatusOrCommandDoesNotProveTimerApplication() async throws {
+        let service = Service(), at = service.clock
+        service.sessions = [.init(id: "fixture", title: "FIXTURE", status: .paused, startedAt: at, activeSince: nil, elapsedMs: 1000, updatedAt: at, revision: 2, provenance: "user", lastCommandId: "other_command")]
+        service.applicationSnapshot = .init(id: "task_snapshot_mismatch", finishedVersions: [], finishedComplete: true)
+        let model = BridgeTaskViewModel(service: service, persistence: BridgeTaskMemoryPersistence(), enabled: { true }, now: { service.clock })
+        for status in ["running", "paused"] {
+            do { _ = try await model.confirmSavedVersion(.object(["saved": .bool(true), "id": .string("fixture"), "revision": .number(2), "status": .string(status), "commandId": .string("wanted_command")]))
+                Issue.record("Matching revision hid a different command or status")
+            } catch {}
+        }
+        #expect(service.requests.isEmpty)
+    }
     @Test func deviceClockOffsetIsCorrectedForCommandsAsWellAsDisplay() async {
         let service = Service()
         let localClock = service.clock.addingTimeInterval(3600)

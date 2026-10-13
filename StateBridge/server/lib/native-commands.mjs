@@ -1,12 +1,12 @@
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
 const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-const permissions=['item.create','item.update','item.delete','item.restore','alarm.schedule','alarm.cancel','journal.read','journal.create','journal.update'];
+const permissions=['item.create','item.update','item.delete','item.restore','alarm.schedule','alarm.cancel','journal.read','journal.create','journal.update','timer.start','timer.pause','timer.resume','timer.finish'];
 const changed=r=>Number(r?.meta?.changes ?? r?.changes ?? 0);
 function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)||v[k]===undefined))throw new BridgeError('请求包含不支持的字段');}
 function text(v,max){return typeof v==='string'&&v.trim().length>0&&v.length<=max;}
 // A transport identity is not user intent. Confirmation secrets go only to the
 // human widget's _meta, never model text, research logs or command bodies.
-export function createNativeCommands(db,time){
+export function createNativeCommands(db,time,executeTask){
  const q=(sql,...a)=>db.prepare(sql).bind(...a),one=(sql,...a)=>q(sql,...a).first();
  async function device(id){const d=await one('SELECT * FROM devices WHERE id=?',id);if(!d||d.revoked_at||!JSON.parse(d.scopes).includes('user.context'))throw new BridgeError('指定设备权限已撤回或不存在',403);return d;}
  async function grant(id,permission,revision=null){await device(id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',id);if(!g||g.expires_at<=time()||(revision!==null&&g.revision!==revision)||!JSON.parse(g.body).capabilities.includes(permission))throw new BridgeError('设备操作权限未启用、已到期或已变更',403);return g;}
@@ -23,12 +23,19 @@ export function createNativeCommands(db,time){
  }
  async function readGrant(d){await device(d.id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',d.id);return {deviceId:d.id,revision:g?.revision??0,capabilities:g?JSON.parse(g.body).capabilities:[],expiresAt:g?.expires_at??null,confirmation:'chat_button'};}
  function validate(v){
-  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query']);
+  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query','sessionId','relatedRecordId','effectiveAt']);
   if(v.version!==1||!uuid(v.commandId)||!text(v.deviceId,80)||!text(v.userRequest,2000))throw new BridgeError('需要固定请求/设备身份和用户请求原文（原文仅代理报告）');
   const at=time(),occurredAt=iso(v.occurredAt),expiresAt=iso(v.expiresAt);
   if(Date.parse(occurredAt)>Date.parse(at)+120000||expiresAt<=at||Date.parse(expiresAt)-Date.parse(at)>86400000)throw new BridgeError('请求时间无效或已过期');
   let permission;
-  if(v.kind==='item'){
+  if(v.kind!=='timer'&&['sessionId','relatedRecordId','effectiveAt'].some(k=>v[k]!==undefined))throw new BridgeError('非计时请求不能混入计时字段');
+  if(v.kind==='timer'){
+   if(!['start','pause','resume','finish'].includes(v.action)||['recordId','patch','fireAt','alarmId','entryDate','query'].some(k=>v[k]!==undefined))throw new BridgeError('计时请求无效');
+   if(v.action==='start'){if(!text(v.title,300)||v.sessionId!==undefined||v.expectedRevision!==undefined||v.relatedRecordId!==undefined&&!text(v.relatedRecordId,150))throw new BridgeError('开始计时需要标题，不能混入旧会话或版本');}
+   else if(!text(v.sessionId,80)||!Number.isSafeInteger(v.expectedRevision)||v.expectedRevision<1||v.title!==undefined||v.relatedRecordId!==undefined)throw new BridgeError('计时操作需要原会话与整数版本');
+   if(v.effectiveAt!==undefined&&(iso(v.effectiveAt)!==v.effectiveAt||v.effectiveAt>at))throw new BridgeError('明确补记的计时时刻需要标准UTC毫秒时间，不能在未来');
+   permission=`timer.${v.action}`;
+  }else if(v.kind==='item'){
    if(!['create','update','delete','restore'].includes(v.action)||!uuid(v.recordId))throw new BridgeError('事项操作或身份无效');
    if(v.action==='create'&&v.expectedRevision!=null||v.action!=='create'&&!text(v.expectedRevision,150))throw new BridgeError('事项操作需要正确的原始版本');
    const patch=v.patch??{};keys(patch,['title','note','status']);
@@ -124,6 +131,17 @@ export function createNativeCommands(db,time){
   ]);
   const fresh=await row(r.command_id);if(fresh.result_hash!==resultHash)throw new BridgeError('执行回执冲突，不能声称完成',409);return view(fresh);
  }
+ async function executeTimer(v,d){
+  keys(v,['commandId','requestHash','attemptId']);await device(d.id);const r=await row(v.commandId),request=JSON.parse(r.body);
+  if(r.device_id!==d.id||r.request_hash!==v.requestHash||r.attempt_id!==v.attemptId||r.state!=='dispatching'||!r.approved_at||request.kind!=='timer')throw new BridgeError('计时必须由已确认请求的指定设备接手',403);
+  await grant(d.id,r.permission,r.grant_revision);if(r.expires_at<=time())throw new BridgeError('计时请求过期，不再执行',409);
+  const command={commandId:r.command_id,action:request.action,occurredAt:request.effectiveAt??r.approved_at,provenance:'user'};
+  if(request.action==='start'){command.title=request.title;if(request.relatedRecordId!==undefined)command.relatedRecordId=request.relatedRecordId;}
+  else{command.sessionId=request.sessionId;command.expectedRevision=request.expectedRevision;}
+  // The mutation repeats these checks in the same SQLite transaction. A revoke
+  // between the awaited reads and the write cannot leave a changed session.
+  return executeTask(command,`confirmed-device:${d.id}`,{commandId:r.command_id,requestHash:r.request_hash,attemptId:r.attempt_id,deviceId:d.id,permission:r.permission,grantRevision:r.grant_revision});
+ }
  async function capabilities(){
   const rows=(await q('SELECT g.device_id,g.revision,g.body,g.expires_at,d.label FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE d.revoked_at IS NULL AND g.expires_at>? ORDER BY g.device_id',time()).all()).results;
   return {readAt:time(),devices:rows.map(r=>({deviceId:r.device_id,label:r.label,revision:r.revision,capabilities:JSON.parse(r.body).capabilities,expiresAt:r.expires_at,confirmation:'chat_button',availability:'execution_requires_device_online_not_heartbeat_proof'}))};
@@ -150,5 +168,5 @@ export function createNativeCommands(db,time){
    throw error;
   }
  }
- return {capabilities,setGrant,readGrant,submit,approve,status,pending,claim,receipt,readJournal};
+ return {capabilities,setGrant,readGrant,submit,approve,status,pending,claim,receipt,readJournal,executeTimer};
 }

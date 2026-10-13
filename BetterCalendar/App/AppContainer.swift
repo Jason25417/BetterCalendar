@@ -101,9 +101,12 @@ final class AppContainer {
         #else
         nativeAlarms = UnsupportedNativeAlarms()
         #endif
+        self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
+                                              persistence: TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence(),
+                                              enabled: { StateBridgeClient.shared.configured })
         let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
                                           persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
-                                          writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal)
+                                          writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks)
         self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote)
         remote.startPolling()
         if !TestHost.isActive {
@@ -129,9 +132,6 @@ final class AppContainer {
         #else
         self.liveActivity = NoLiveActivity()            // macOS：无 Live Activity → no-op
         #endif
-        self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
-                                              persistence: TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence(),
-                                              enabled: { StateBridgeClient.shared.configured })
         self.execution = ExecutionViewModel(calendarStore: calendarStore, reschedule: reschedule,
                                             planStore: planStore, reminderStore: reminderStore,
                                             liveActivity: liveActivity,

@@ -32,6 +32,7 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
           case "native/pending":return core.nativeCommands.pending(body,device);
           case "native/claim":return core.nativeCommands.claim(body,device);
           case "native/receipt":return core.nativeCommands.receipt(body,device);
+          case "native/timer":return core.nativeCommands.executeTimer(body,device);
           default:throw new BridgeError("未知原生设备接口",404);
         }
       };

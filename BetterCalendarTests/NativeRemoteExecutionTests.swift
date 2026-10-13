@@ -172,6 +172,51 @@ import SwiftData
         #expect(receipt["effect"] == .string("read_only_no_mutation") && receipt["records"] == nil)
         #expect(diary.body == "fixture unsaved editor" && nextContainer.mainContext.hasChanges)
     }
+    private func timerFixture() throws -> (RemoteService, RemotePersistence, SwiftDataNativeItemWriter, ModelContainer, ConfirmedTimerCacheService, BridgeTaskMemoryPersistence, BridgeTaskViewModel) {
+        var e = try NativeRemoteJSON.object(envelope()), r = try NativeRemoteJSON.object(e["request"]!)
+        r["recordId"] = nil; r["patch"] = nil; r["kind"] = .string("timer"); r["action"] = .string("start"); r["title"] = .string("ISOLATED TIMER FIXTURE")
+        e["request"] = .object(r); e["permission"] = .string("timer.start"); e["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(r))))
+        let (service, store, writer, container) = try fixture(.object(e)); store.file.grant?.capabilities = ["timer.start"]
+        let cache = ConfirmedTimerCacheService(at: at), disk = BridgeTaskMemoryPersistence()
+        let tasks = BridgeTaskViewModel(service: cache, persistence: disk, enabled: { true }, now: { self.at })
+        cache.state.sessions[0].lastCommandId = try NativeRemoteJSON.string(e["commandId"])
+        service.timerResult = .object(["commandId": e["commandId"]!, "saved": .bool(true), "id": .string("task_fixture"), "revision": .number(1), "status": .string("running")])
+        return (service, store, writer, container, cache, disk, tasks)
+    }
+    @Test func confirmedTimerCachesActualVersionAndLostReportDoesNotRepeatCommand() async throws {
+        let (service, store, writer, container, cache, disk, tasks) = try timerFixture()
+        service.loseReceiptResponse = true
+        let first = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), canonicalTasks: tasks, now: { self.at })
+        await first.poll()
+        #expect(service.timerRequests.count == 1 && cache.reads == 1)
+        #expect(store.file.requests.first?.outcome == "applied" && store.file.requests.first?.phase == "result")
+        #expect(disk.file.state?.sessions.first?.id == "task_fixture")
+        let result = try NativeRemoteJSON.object(store.file.requests[0].receipt!)
+        #expect(result["deviceEffect"] == .string("local_cache_persisted") && result["savedRevision"] == .number(1))
+        #expect(result["screenPresentation"] == .string("unknown") && result["userSeen"] == .string("unknown"))
+        let restarted = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), canonicalTasks: tasks, now: { self.at })
+        await restarted.poll(); await restarted.poll()
+        #expect(service.timerRequests.count == 1 && service.receipts.count == 2 && service.receipts[0] == service.receipts[1])
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<LongTask>()) == 0)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<ExecutionSession>()) == 0)
+    }
+    @Test func lostTimerAcceptanceReplyRemainsUnknownAndIsNotBlindlyReissued() async throws {
+        let (service, store, writer, _, cache, _, tasks) = try timerFixture(); service.loseTimerReply = true
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), canonicalTasks: tasks, now: { self.at })
+        await executor.poll(); await executor.poll()
+        #expect(service.timerRequests.count == 1 && cache.reads == 0)
+        #expect(store.file.requests.first?.outcome == "unknown" && store.file.requests.first?.phase == "reported")
+        #expect(store.file.requests.first?.envelope != nil && service.receipts.count == 1)
+    }
+    @Test func acceptedTimerWithoutSavedCacheKeepsRawReturnAndDoesNotClaimApplied() async throws {
+        let (service, store, writer, _, cache, _, tasks) = try timerFixture(); cache.failRead = true
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), canonicalTasks: tasks, now: { self.at })
+        await executor.poll(); await executor.poll()
+        let receipt = try NativeRemoteJSON.object(store.file.requests[0].receipt!)
+        #expect(receipt["serviceResult"] == service.timerResult)
+        #expect(receipt["effect"] == .string("service_saved_device_application_unknown"))
+        #expect(store.file.requests.first?.outcome == "unknown" && service.timerRequests.count == 1)
+    }
     @Test func JSAndSwiftCanonicalRequestHashMatch() throws {
         let data = Data(#"{"version":1,"commandId":"12345678-1234-4234-8234-123456789abc","deviceId":"fixture","kind":"item","action":"create","recordId":"12345678-1234-4234-8234-123456789abd","patch":{"title":"中文 / \"line\"\n"},"userRequest":"fixture","occurredAt":"2026-10-13T10:00:00.000Z","expiresAt":"2026-10-13T11:00:00.000Z"}"#.utf8)
         let body = try JSONDecoder().decode(BridgeJSON.self, from: data)
@@ -187,6 +232,7 @@ import SwiftData
     var nativeDeviceId: String? = "fixture-device"
     var envelope: BridgeJSON; var extra: BridgeJSON?
     var loseReceiptResponse = false; var loseClaimResponse = false
+    var timerResult: BridgeJSON?; var timerRequests: [BridgeJSON] = []; var loseTimerReply = false
     var claims: [BridgeJSON] = []; var receipts: [BridgeJSON] = []
     var beforeClaimReturn: (() -> Void)?
     init(_ envelope: BridgeJSON) { self.envelope = envelope }
@@ -199,6 +245,11 @@ import SwiftData
             if loseClaimResponse { loseClaimResponse = false; throw URLError(.networkConnectionLost) }
             beforeClaimReturn?(); return .object(e)
         }
+        if path == "native/timer" {
+            timerRequests.append(body)
+            if loseTimerReply { loseTimerReply = false; throw URLError(.networkConnectionLost) }
+            guard let result = timerResult else { throw URLError(.unsupportedURL) }; return result
+        }
         if path == "native/receipt" {
             receipts.append(body); e["state"] = input["outcome"]; e["result"] = input["receipt"]; envelope = .object(e)
             if loseReceiptResponse { loseReceiptResponse = false; throw URLError(.networkConnectionLost) }
@@ -206,4 +257,18 @@ import SwiftData
         }
         throw URLError(.unsupportedURL)
     }
+}
+
+@MainActor private final class ConfirmedTimerCacheService: BridgeTaskServing {
+    var state: BridgeTaskState
+    var reads = 0
+    var failRead = false
+    init(at: Date) {
+        state = .init(schemaVersion: 1, authority: "bettercalendar", readAt: at,
+                      sessions: [.init(id: "task_fixture", title: "ISOLATED TIMER FIXTURE", status: .running, startedAt: at, activeSince: at, elapsedMs: 0, updatedAt: at, revision: 1, provenance: "user")], hasMore: false,
+                      applicationSnapshot: .init(id: "task_snapshot_timer_fixture", finishedVersions: [], finishedComplete: true))
+    }
+    func readTasks() async throws -> BridgeTaskState { reads += 1; if failRead { throw URLError(.notConnectedToInternet) }; return state }
+    func submitTask(_ command: BridgeTaskCommand) async throws -> BridgeTaskReceipt { throw URLError(.unsupportedURL) }
+    func reportSavedTaskSnapshots(_ ids: [String]) async throws -> Set<String> { Set(ids) }
 }

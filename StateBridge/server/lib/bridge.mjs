@@ -51,7 +51,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   const research=createResearch(db,time);
   const taskApplication=createTaskApplication(db,time);
-  const nativeCommands=createNativeCommands(db,time);
+  const nativeCommands=createNativeCommands(db,time,taskCommand);
   async function registerDevice(v){
     const id=str(v.id,"设备 ID",80),label=str(v.label,"设备名",100);
     if(!Array.isArray(v.scopes)||!v.scopes.length||v.scopes.some(s=>typeof s!=="string"||!/^[a-z][a-z0-9_.-]{1,60}$/.test(s)))throw new BridgeError("来源范围无效");
@@ -125,19 +125,21 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
       interpretation:"sources 保留最后一次观察；stale 不是当前活动。coverage 的 not_received 表示此来源尚未上传，不证明用户没有该活动。lastSuccessfulReadAt 为本次可读快照时间，失败时为空，不代表历史从未成功。",
       sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes};
   }
-  async function taskCommand(v,origin="mcp"){
+  async function taskCommand(v,origin="mcp",authorization=null){
     const commandId=str(v.commandId,"commandId",150),requestHash=await sha(canonical(v));
     const replay=await one("SELECT * FROM commands WHERE id=?",commandId);
     if(replay){if(replay.request_hash!==requestHash)throw new BridgeError("commandId 不能复用于不同命令",409);return JSON.parse(replay.result);}
     if(!["start","pause","resume","finish"].includes(v.action)||v.provenance!=="user")throw new BridgeError("计时仅接受用户明确表达；推断请单独保存");
     const occurredAt=v.occurredAt==null?time():iso(v.occurredAt);
     if(Date.parse(occurredAt)>now().getTime()+120000)throw new BridgeError("计时动作不能在未来");
+    const guardSQL=authorization?`EXISTS(SELECT 1 FROM native_requests n JOIN native_grants g ON g.device_id=n.device_id JOIN devices d ON d.id=n.device_id WHERE n.command_id=? AND n.request_hash=? AND n.attempt_id=? AND n.device_id=? AND n.permission=? AND n.grant_revision=? AND n.state='dispatching' AND n.approved_at IS NOT NULL AND n.expires_at>? AND g.revision=n.grant_revision AND g.expires_at>? AND d.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=n.permission))`:'1';
+    const guardArgs=()=>authorization?[authorization.commandId,authorization.requestHash,authorization.attemptId,authorization.deviceId,authorization.permission,authorization.grantRevision,time(),time()]:[];
     let row,ops;
     if(v.action==="start"){
       const title=str(v.title,"任务名",300),id=`task_${(await sha(commandId)).slice(0,32)}`;
       const relatedRecordId=v.relatedRecordId==null?null:str(v.relatedRecordId,"关联记录 ID",150);
       row={id,title,status:"running",started_at:occurredAt,active_since:occurredAt,elapsed_ms:0,updated_at:occurredAt,revision:1,last_command_id:commandId,provenance:"user",related_record_id:relatedRecordId,origin};
-      ops=[q("INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance,related_record_id,origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user",relatedRecordId,origin)];
+      ops=[q(`INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance,related_record_id,origin) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guardSQL}`,id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user",relatedRecordId,origin,...guardArgs())];
     }else{
       const id=str(v.sessionId,"sessionId",80),old=await one("SELECT * FROM sessions WHERE id=?",id);
       if(!old)throw new BridgeError("找不到计时记录",404);
@@ -145,7 +147,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
       if(Date.parse(occurredAt)<Date.parse(old.updated_at))throw new BridgeError("动作早于上一状态；请明确修正历史");
       if(old.status==="finished"||(v.action==="pause"&&old.status!=="running")||(v.action==="resume"&&old.status!=="paused"))throw new BridgeError("当前状态不能执行此动作",409);
       row={...old,status:v.action==="resume"?"running":v.action==="pause"?"paused":"finished",active_since:v.action==="resume"?occurredAt:null,elapsed_ms:old.elapsed_ms+(old.active_since?Date.parse(occurredAt)-Date.parse(old.active_since):0),updated_at:occurredAt,revision:old.revision+1,last_command_id:commandId,origin};
-      ops=[q("UPDATE sessions SET status=?,active_since=?,elapsed_ms=?,updated_at=?,revision=?,last_command_id=?,origin=? WHERE id=? AND revision=?",row.status,row.active_since,row.elapsed_ms,row.updated_at,row.revision,commandId,origin,id,old.revision)];
+      ops=[q(`UPDATE sessions SET status=?,active_since=?,elapsed_ms=?,updated_at=?,revision=?,last_command_id=?,origin=? WHERE id=? AND revision=? AND ${guardSQL}`,row.status,row.active_since,row.elapsed_ms,row.updated_at,row.revision,commandId,origin,id,old.revision,...guardArgs())];
     }
     const result={...sessionView(row),elapsedMs:row.elapsed_ms,commandId,saved:true};
     ops.push(q(`INSERT OR IGNORE INTO commands(id,request_hash,session_id,result,created_at)
