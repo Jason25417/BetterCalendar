@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "checkedAt": "2026-10-13T05:05:27.046414+00:00",
+  "checkedAt": "2026-10-13T05:26:14.116370+00:00",
   "sourceCommit": "7fe98a8",
   "siteSourceCommit": "067198c0fda279cd587d75bf3729ef63b0f1d4dd",
   "siteVersion": 21,
@@ -17,8 +17,8 @@
     "status": 401,
     "interpretation": "device/platform credential is not MCP user identity; device API read succeeded"
   },
-  "currentConversationTools": "native tool descriptors not yet discovered",
-  "dotsReadonlyDiagnostic": "Dots replied 01:05 EDT: new instructions readable; four native tools not discovered; actual capability calls 0",
+  "currentConversationTools": "read_native_capabilities discovered after existing plugin Refresh tools",
+  "dotsReadonlyDiagnostic": "Dots called read_native_capabilities once after refresh, returned successfully; no submit/approve/write",
   "realOperationsPerformed": false,
   "widgetRenderedInDots": "not_verified",
   "nativeTests": {
@@ -27,5 +27,22 @@
     "serverPassed": 45,
     "recorderPassed": 12,
     "iosSimulatorBuild": "succeeded"
+  },
+  "dotsActualRead": {
+    "callId": "research_d3cdd924-7bba-42e7-80e9-65096d7ac3b5",
+    "response": {
+      "readAt": "2026-10-13T05:14:02.866Z",
+      "devices": []
+    },
+    "responseHash": "f62704fe6fd2b726bd732dc0667dd68709588ffad5a1bdca45433b21053eee15",
+    "localResearchRowIds": [
+      17821,
+      17822
+    ],
+    "startedAt": "2026-10-13T05:14:02.692Z",
+    "returnedAt": "2026-10-13T05:14:02.866Z",
+    "localLogPageSnapshot": "bf0ee517715c395680e3b2ae6b258def8ad79eeb3894c9dc4c58741f9f2f9f32",
+    "evidenceLevel": "visible Dots response reconstructed payload matches independently logged canonical SHA256; not an original HTTP screenshot",
+    "deviceGrantInterpretation": "no registered native grant, device online/application unknown"
   }
 }

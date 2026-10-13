@@ -44,6 +44,7 @@ final class AppContainer {
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
+    let nativeJournal: any NativeJournalAccessing // Local boundary; independent MCP journal permission is a later increment.
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
@@ -91,6 +92,7 @@ final class AppContainer {
                                                            learning: learning)
         self.longTasks = LongTaskStore()
         let actionJournal: any NativeActionJournaling = TestHost.isActive ? NativeActionMemoryJournal() : NativeActionFileJournal()
+        self.nativeJournal = SwiftDataNativeJournal(context: SharedModelContainer.shared.mainContext, journal: actionJournal)
         let nativeItems = SwiftDataNativeItemWriter(context: SharedModelContainer.shared.mainContext, journal: actionJournal,
                                                     didSave: { [weak longTasks] in longTasks?.reload() })
         let nativeAlarms: any NativeAlarmScheduling

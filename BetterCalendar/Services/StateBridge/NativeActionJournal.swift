@@ -40,7 +40,7 @@ nonisolated struct NativeActionEntry: Codable, Equatable {
     }
     private func validate(_ entries: [NativeActionEntry]) throws {
         guard entries.count <= 2000, Set(entries.map(\.commandId)).count == entries.count,
-              entries.allSatisfy({ ["item", "alarm", "cancel_alarm"].contains($0.kind) &&
+              entries.allSatisfy({ ["item", "alarm", "cancel_alarm", "journal"].contains($0.kind) &&
                   ["prepared", "applied"].contains($0.phase) && $0.requestHash.count == 64 &&
                   ($0.phase != "applied" || $0.receipt != nil) }) else {
             throw DataArchiveError.invalid("操作回执无效，保留原文件，不重放")

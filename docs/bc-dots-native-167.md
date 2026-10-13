@@ -2,7 +2,7 @@
 
 2026-10-13。完整目标仍在推进；本批不含 Aqara 修复、自动强提醒、应用屏蔽或通用多端写入平台。日记的读取与编辑范围已单独问 Jason；计时沿用已有统一 session/revision 入口，真实双端时延继续核验。
 
-Jason已拍板：每次具体改动在Dots对话里点确认，不再另开BC逐次批准。本机设置只需主动启用精确能力，29天有界授权；事项与闹钟独立。原生系统闹钟授权仍只能由用户主动取得。模型写“用户同意”、provenance=user、userConfirmed=true都不能替代按钮凭据。本批后端、原生队列和UI已实现，实际Dots承载能力未验证，不能称完整闭环已验收。
+Jason已拍板：每次具体改动在Dots对话里点确认，不再另开BC逐次批准。本机设置只需主动启用精确能力，29天有界授权；事项与闹钟独立。原生系统闹钟授权仍只能由用户主动取得。模型写“用户同意”、provenance=user、userConfirmed=true都不能替代按钮凭据。本批后端、原生队列和UI已实现，Dots已实际读取新能力工具；卡片与真实执行仍未验证，不能称完整闭环已验收。
 
 ## 用户可见的路径
 
@@ -32,9 +32,11 @@ Jason已拍板：每次具体改动在Dots对话里点确认，不再另开BC逐
 
 已验证：SQLite/MCP组件45/45；Recorder12/12；Mac全量294/294后，新增的离线撤权/效果保存但日志失败恢复与其余7项共9/9通过；iOS Simulator编译成功；TS与服务构建通过。测试均隔离fixture，不创建真实用户事项/闹钟，不伪造反馈。
 
+已验证新增：刷新既有插件后，Dots实际调用read_native_capabilities一次；返回readAt05:14:02.866Z、devices[]。本地研究行17821/17822对应真实开始/返回；页面报告的完整payload规范化哈希与服务记录一致。设备尚无新操作授权记录，不等于设备离线。
+
 未验证：Dots客户端实际卡片显示/按钮回调、167设备安装与主动权限启用、一次用户真正需要的事项/闹钟请求、真实响铃/取消/双端同步时延。真实操作样本不能由假任务代替。
 
-待开发：日记独立读取/写入授权及协议；按用户选择范围逐批接入。原生日志容量/保留配置和便捷导出；有界自动强提醒继续独立shadow；完整事项字段、全来源、旧史迁移不扩成本批平台。
+待开发：日记独立MCP读取/写入授权及远程接入；本地协议/实现和9项隔离验证已随后补齐（未包含在167已上传包，见bc-journal-increment.md）。不开放删除。原生日志容量/保留配置和便捷导出；有界自动强提醒继续独立shadow；完整事项字段、全来源、旧史迁移不扩成本批平台。
 
 产品哲学：无持续写日志义务；建议不变成义务；原文/事实不被推断覆盖；操作都可检查且权限可撤回；删除可恢复、长期区不删；开发期失败可见。没有静默修改既有约定。
 
@@ -42,4 +44,4 @@ Jason已拍板：每次具体改动在Dots对话里点确认，不再另开BC逐
 
 发布核验：7fe98a8已push；服务v21已部署，source067198c0fda279cd587d75bf3729ef63b0f1d4dd，部署appgdep_6acdbacdf2f881919a64e7cbb404d660为succeeded。0.65.10/167双端上传后ASC均VALID、IN_BETA_TESTING、中文说明读回一致，见[evidence/testflight-167.json](evidence/testflight-167.json)。设备安装与真实操作未验。
 
-线上只读证据：正式MCP读到新instructions；已认证Mac native/grant/read返回revision0、capabilities[]，没有开启权限或操作真任务。平台设备凭据读MCP metadata返回401，而native设备API正常，不能把两种身份混作权限失败。Edge Dots01:05 EDT报告四个新原生工具未发现，实际调用0；开发设置随后已点击“刷新工具”，等待Dots再验，不把点击刷新等同新工具已可调用。研究LaunchAgent25433实查running，保留原档案与游标，已加载新增native原文定位逻辑。[线上检查证据](evidence/native-readiness-167.json)。
+线上只读证据：正式MCP读到新instructions；已认证Mac native/grant/read返回revision0、capabilities[]，没有开启权限或操作真任务。平台设备凭据读MCP metadata返回401，而native设备API正常，不能把两种身份混作权限失败。Edge Dots01:05 EDT新工具未发现；开发设置刷新后01:14 EDT实际read_native_capabilities调用1次成功，callId research_d3cdd924-7bba-42e7-80e9-65096d7ac3b5，完整返回devices[]的哈希与本地研究记录独立核对一致。研究LaunchAgent25433实查running，保留原档案与游标，已加载新增native原文定位逻辑。[线上检查证据](evidence/native-readiness-167.json)。
