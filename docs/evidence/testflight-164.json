@@ -25,9 +25,9 @@
   "deviceInstalledVerified": false,
   "macInstalledVerified": true,
   "macNativeHeartbeat": {
-    "callId": "research_26d018ef-e51b-4c65-ad1d-4ab3380211e2",
-    "observedAt": "2026-10-12T23:59:12.000Z",
-    "receivedAt": "2026-10-12T23:59:17.541Z",
+    "callId": "research_62e15df9-0bd4-4218-b344-57ea9d669e71",
+    "observedAt": "2026-10-13T00:00:09.000Z",
+    "receivedAt": "2026-10-13T00:00:11.279Z",
     "collectorVersion": "0.65.7",
     "collectorBuild": "164",
     "freshness": "current"
