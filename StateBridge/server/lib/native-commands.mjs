@@ -1,5 +1,8 @@
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
-const uuid=v=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+// MCP advertises the same identity contract that the executor validates.
+export const nativeUUIDSchema=Object.freeze({type:'string',format:'uuid',pattern:'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'});
+const nativeUUIDPattern=new RegExp(nativeUUIDSchema.pattern);
+const uuid=v=>typeof v==='string'&&nativeUUIDPattern.test(v);
 const permissions=['item.create','item.update','item.delete','item.restore','alarm.schedule','alarm.cancel','journal.read','journal.create','journal.update','timer.start','timer.pause','timer.resume','timer.finish'];
 const changed=r=>Number(r?.meta?.changes ?? r?.changes ?? 0);
 function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)||v[k]===undefined))throw new BridgeError('请求包含不支持的字段');}
@@ -24,7 +27,10 @@ export function createNativeCommands(db,time,executeTask){
  async function readGrant(d){await device(d.id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',d.id);return {deviceId:d.id,revision:g?.revision??0,capabilities:g?JSON.parse(g.body).capabilities:[],expiresAt:g?.expires_at??null,confirmation:'chat_button'};}
  function validate(v){
   keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query','sessionId','relatedRecordId','effectiveAt']);
-  if(v.version!==1||!uuid(v.commandId)||!text(v.deviceId,80)||!text(v.userRequest,2000))throw new BridgeError('需要固定请求/设备身份和用户请求原文（原文仅代理报告）');
+  if(v.version!==1)throw new BridgeError('version必须为1');
+  if(!uuid(v.commandId))throw new BridgeError('commandId必须是UUID，不能使用任务名或日期拼接；尚未接收此请求。仅此格式拒绝可更正编号，已接收请求必须沿用原commandId');
+  if(!text(v.deviceId,80))throw new BridgeError('deviceId需要指定设备身份（最多80字符）');
+  if(!text(v.userRequest,2000))throw new BridgeError('userRequest需要用户请求原文（最多2000字符；原文仅代理报告，不能替代本人确认）');
   const at=time(),occurredAt=iso(v.occurredAt),expiresAt=iso(v.expiresAt);
   if(Date.parse(occurredAt)>Date.parse(at)+120000||expiresAt<=at||Date.parse(expiresAt)-Date.parse(at)>86400000)throw new BridgeError('请求时间无效或已过期');
   let permission;
@@ -151,7 +157,9 @@ export function createNativeCommands(db,time,executeTask){
   if(v.start!==undefined&&iso(v.start)!==v.start||v.end!==undefined&&iso(v.end)!==v.end||v.start!==undefined&&v.end!==undefined&&v.start>=v.end||v.text!==undefined&&(typeof v.text!=='string'||v.text.length>1000)||v.includeTrash!==undefined&&typeof v.includeTrash!=='boolean'||v.limit!==undefined&&(!Number.isSafeInteger(v.limit)||v.limit<1||v.limit>50)||v.cursor!==undefined&&(typeof v.cursor!=='string'||v.cursor.length>2000))throw new BridgeError('日记读取范围或分页无效');
  }
  async function readJournal(v,owner){
-  keys(v,['commandId','deviceId','query']);if(!text(owner,200))throw new BridgeError('需要账户身份',401);if(!uuid(v.commandId)||!text(v.deviceId,80))throw new BridgeError('读取需要固定请求和设备身份');journalQuery(v.query??{});
+  keys(v,['commandId','deviceId','query']);if(!text(owner,200))throw new BridgeError('需要账户身份',401);
+  if(!uuid(v.commandId))throw new BridgeError('commandId必须是UUID；读取尚未接收，更正格式后保持同一编号查询结果');
+  if(!text(v.deviceId,80))throw new BridgeError('deviceId需要指定设备身份（最多80字符）');journalQuery(v.query??{});
   const previous=await one('SELECT * FROM native_requests WHERE command_id=?',v.commandId);
   if(previous){const r=await row(v.commandId,owner),body=JSON.parse(r.body);if(r.permission!=='journal.read'||r.device_id!==v.deviceId||canonical(body.query)!==canonical(v.query??{}))throw new BridgeError('同一读取身份不可改变范围或设备',409);return view(r);}
   try {

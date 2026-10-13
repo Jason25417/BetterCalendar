@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {createBridge} from '../lib/bridge.mjs';
+import {nativeUUIDSchema} from '../lib/native-commands.mjs';
 function fixture(){
  const sqlite=new DatabaseSync(':memory:');
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
@@ -16,6 +17,32 @@ const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
 const request=(f,n=1)=>({version:1,commandId:id(n),deviceId:'iphone-test',kind:'item',action:'create',recordId:id(100+n),patch:{title:'ISOLATED FIXTURE'},occurredAt:f.time(),expiresAt:'2026-10-13T11:00:00.000Z',userRequest:'Isolated simulation, never a real user task'});
 async function approved(f,v){const s=await f.core.nativeCommands.submit(v,'owner');assert.equal(s.value.state,'awaiting_confirmation');await f.core.nativeCommands.approve(s.approval,'owner');return s;}
+test('agent-friendly names rejected before persistence; advertised UUID and distinct identity errors allow safe correction',async()=>{
+ const f=fixture(),d=await setup(f);
+ await f.core.nativeCommands.setGrant({revision:2,capabilities:['timer.start','journal.read'],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+ const timer={version:1,commandId:'dots-study-start-20261013',deviceId:d.id,kind:'timer',action:'start',title:'ISOLATED TIMER',userRequest:'Isolated explicit past-start fixture',occurredAt:f.time(),expiresAt:'2026-10-13T11:00:00.000Z',effectiveAt:'2026-10-13T09:00:00.000Z'};
+ assert.equal(nativeUUIDSchema.format,'uuid');
+ assert.equal(new RegExp(nativeUUIDSchema.pattern).test(timer.commandId),false);
+ await assert.rejects(f.core.nativeCommands.submit(timer,'owner'),/commandId必须是UUID/);
+ await assert.rejects(f.core.nativeCommands.readJournal({commandId:timer.commandId,deviceId:d.id},'owner'),/commandId必须是UUID/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM native_requests').get().n,0);
+ const corrected={...timer,commandId:id(910).toUpperCase()};
+ assert.equal(new RegExp(nativeUUIDSchema.pattern).test(corrected.commandId),true);
+ await assert.rejects(f.core.nativeCommands.submit({...corrected,version:2},'owner'),/version必须为1/);
+ await assert.rejects(f.core.nativeCommands.submit({...corrected,deviceId:''},'owner'),/deviceId需要/);
+ await assert.rejects(f.core.nativeCommands.submit({...corrected,userRequest:''},'owner'),/userRequest需要/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM native_requests').get().n,0);
+ const accepted=await f.core.nativeCommands.submit(corrected,'owner');
+ assert.equal(accepted.value.state,'awaiting_confirmation');
+ assert.equal(accepted.value.request.effectiveAt,timer.effectiveAt);
+ assert.equal(accepted.value.approvedAt,null);
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
+ const retry=await f.core.nativeCommands.submit(corrected,'owner');
+ assert.equal(retry.value.commandId,accepted.value.commandId);
+ assert.equal(retry.value.requestHash,accepted.value.requestHash);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM native_requests').get().n,1);
+ await assert.rejects(f.core.nativeCommands.submit({...corrected,effectiveAt:'2026-10-13T08:00:00.000Z'},'owner'),/不可改变/);
+});
 test('no model assertion can authorize; approval bound to owner and immutable payload',async()=>{
  const f=fixture(),d=await setup(f),v=request(f);await assert.rejects(f.core.nativeCommands.submit({...v,userConfirmed:true},'owner'),/字段/);
  const s=await f.core.nativeCommands.submit(v,'owner');assert.ok(s.approval.token);assert.equal(s.value.approvedAt,null);assert.equal(JSON.stringify(s.value).includes(s.approval.token),false);

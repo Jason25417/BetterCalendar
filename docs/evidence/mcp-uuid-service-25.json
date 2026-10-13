@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T14:04:47.129756+00:00",
+  "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+  "serviceVersion": 25,
+  "sourceCommit": "c0abd58c58db58f4e83a554f0baecbf68692f0ce",
+  "versionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_a5bada76bc18819190f1dd1c995f3bda",
+  "deploymentId": "appgdep_6ace39fb13a4819182408662b6c379bb",
+  "status": "succeeded",
+  "hasMcp": true,
+  "updatedAt": "2026-10-13T14:02:50.470156+00:00",
+  "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+  "access": "existing_owner_private_preserved",
+  "nativeBuildUnchanged": 171,
+  "tests": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0
+  },
+  "build": "passed",
+  "liveChecks": {
+    "invalidReadIdRejectedBeforeQueue": "commandId必须是UUID；读取尚未接收，更正格式后保持同一编号查询结果",
+    "instructionsCallId": "research_51a2a97b-d55a-46d2-977f-6a3f2e622e55",
+    "instructionsHash": "0b4aa42371b2deabe8deeb2858a7a9442772cf4e2b1dae9fb177aafaf8eb50ca",
+    "uuidInstructionPresent": true
+  },
+  "trigger": {
+    "tool": "submit_native_command",
+    "rejectedCommandId": "dots-5529-start-20261013-135511",
+    "localCallRows": [
+      19801,
+      19802,
+      19823,
+      19825
+    ],
+    "cause": "non_uuid_identity",
+    "genuineUserTimerExecuted": false
+  },
+  "gaps": [
+    "Dots regenerated card not yet verified",
+    "Human confirmation not yet verified",
+    "Actual timer write and multi-device display not yet verified"
+  ]
+}

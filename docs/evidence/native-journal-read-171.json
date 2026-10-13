@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T14:02:17.055214+00:00",
+  "kind": "actual_read_only_device_execution",
+  "sourceClass": "bc_native",
+  "executor": "Mac native BC",
+  "installedVersion": {
+    "version": "0.65.14",
+    "build": "171",
+    "evidence": "fresh device.status observedAt 2026-10-13T13:56:07.000Z"
+  },
+  "commandId": "a0b8d52c-e9d2-4ca1-8de8-8f540ab5d2b1",
+  "attemptId": "69a63b01-f626-4522-bd0d-abc4568592a7",
+  "requestHash": "8689441fac571b4653b43787093a0273adb01526b25abd50dea79153776581a3",
+  "grantRevision": 1,
+  "request": {
+    "action": "read",
+    "commandId": "a0b8d52c-e9d2-4ca1-8de8-8f540ab5d2b1",
+    "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+    "expiresAt": "2026-10-13T14:55:07.704Z",
+    "kind": "journal",
+    "occurredAt": "2026-10-13T13:55:07.704Z",
+    "query": {
+      "end": "2026-10-14T04:00:00.000Z",
+      "includeTrash": false,
+      "limit": 10,
+      "start": "2026-10-13T04:00:00.000Z"
+    },
+    "userRequest": "Read-only journal retrieval; permission is independent native journal.read grant",
+    "version": 1
+  },
+  "acceptedAt": "2026-10-13T13:55:08.000Z",
+  "claimedAt": "2026-10-13T13:55:28.331Z",
+  "resultAt": "2026-10-13T13:55:28.996Z",
+  "elapsedAcceptanceToResultSeconds": 20.996,
+  "receiptEnvelopeHash": "93d4371e7202554dfaddac4914b657a4bb0015ed3e9c3dc9c7126f53b2061185",
+  "result": {
+    "authority": "swiftdata",
+    "complete": true,
+    "coverage": {
+      "freshness": "local_persisted_store_at_readAt",
+      "journalText": "complete_per_returned_record",
+      "otherDevicesSync": "unknown",
+      "photoBinaries": "not_requested_or_retrieved",
+      "photoReferences": "included"
+    },
+    "dateUnit": "unix-milliseconds",
+    "dayBoundaryHour": 4,
+    "formatVersion": 1,
+    "hasMore": false,
+    "matchingCount": 0,
+    "nextCursor": null,
+    "readAt": 1791899728653.697,
+    "records": [],
+    "snapshotHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "source": "bc.native.journal",
+    "timeZone": "America/New_York",
+    "windowSemantics": "entry.date in [start,end); logicalDay is derived at retrieval"
+  },
+  "localNative": {
+    "path": "/Users/jasontu/Library/Containers/com.jason.BetterCalendar/Data/Library/Application Support/DotStateBridge/native-remote-v1.json",
+    "phase": "reported",
+    "outcome": "applied",
+    "attempts": 1,
+    "requestHashMatches": true,
+    "attemptIdMatches": true,
+    "resultMatches": true
+  },
+  "localResearch": {
+    "database": "/Users/jasontu/Library/Application Support/BetterCalendarResearch/research.sqlite",
+    "calls": [
+      {
+        "row": 19690,
+        "kind": "call_started",
+        "at": "2026-10-13T13:54:54.483Z",
+        "callId": "research_6c3688b9-1d88-46c7-b720-3c777ad2c95e",
+        "tool": "read_native_journal",
+        "responseHash": null
+      },
+      {
+        "row": 19691,
+        "kind": "call_failed",
+        "at": "2026-10-13T13:54:54.610Z",
+        "callId": "research_6c3688b9-1d88-46c7-b720-3c777ad2c95e",
+        "tool": "read_native_journal",
+        "responseHash": null
+      },
+      {
+        "row": 19704,
+        "kind": "call_started",
+        "at": "2026-10-13T13:55:07.532Z",
+        "callId": "research_d15a4130-f586-4fb9-9eb5-adcde5d3c00b",
+        "tool": "read_native_journal",
+        "responseHash": null
+      },
+      {
+        "row": 19706,
+        "kind": "call_returned",
+        "at": "2026-10-13T13:55:08.355Z",
+        "callId": "research_d15a4130-f586-4fb9-9eb5-adcde5d3c00b",
+        "tool": "read_native_journal",
+        "responseHash": "8407204ebf0d3fd53d2c077f03727a99136ae696601754c6f8a9505882642ad9"
+      },
+      {
+        "row": 19749,
+        "kind": "call_started",
+        "at": "2026-10-13T13:55:42.508Z",
+        "callId": "research_52300e7f-2819-4814-bd1c-33a846491192",
+        "tool": "read_native_command_status",
+        "responseHash": null
+      },
+      {
+        "row": 19750,
+        "kind": "call_returned",
+        "at": "2026-10-13T13:55:42.679Z",
+        "callId": "research_52300e7f-2819-4814-bd1c-33a846491192",
+        "tool": "read_native_command_status",
+        "responseHash": "c7b4854dd5d7f7990ab6625bda7857f02117155a52b0f39e767745336be0b6ca"
+      }
+    ],
+    "snapshot": "18629602646a9c2c6efb59f2ad8d19f5e7a70b5ed5da2032d62410d2ffb01efe",
+    "snapshotCapturedAt": "2026-10-13T13:56:45.484Z",
+    "snapshotHashVerified": true,
+    "fullNativeRequestAndResultPresent": true,
+    "retrievalPageComplete": true,
+    "missing": []
+  },
+  "initialFailure": {
+    "reason": "non-UUID commandId rejected before queueing",
+    "callRows": [
+      19690,
+      19691
+    ],
+    "retriedAfterValidationWithUUID": true,
+    "notReexecutionOfAcceptedCommand": true
+  },
+  "scope": {
+    "genuineUserMutation": false,
+    "humanConfirmationCardTested": false,
+    "notificationSent": false,
+    "timerChanged": false,
+    "journalChanged": false,
+    "journalBodyNonemptyTested": false,
+    "journalPaginationTested": false,
+    "otherDevicesSync": "unknown",
+    "photoBinariesRead": false,
+    "newService": false,
+    "userSeen": "unknown",
+    "iphoneGrantNotYetObserved": true
+  }
+}
