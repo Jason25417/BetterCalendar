@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "scope": "confirmation_32_published_human_form_unverified",
+  "source": {
+    "betterCalendarCommit": "65cffbadd149b9e1cf87877eb93f71790d218a1a",
+    "siteCommit": "60cc80a5c8e98a93c7ae51e69ba7e08aa45c98ca",
+    "comparedFiles": 152,
+    "blobMismatches": 0
+  },
+  "tests": {
+    "service": 90,
+    "failed": 0,
+    "skipped": 0,
+    "build": "passed",
+    "regressionBeforeFix": {
+      "expected": "expired",
+      "actual": "awaiting_confirmation"
+    }
+  },
+  "naturalV31Evidence": {
+    "fromExclusive": 39225,
+    "throughInclusive": 46226,
+    "localRows": 6999,
+    "started": 73,
+    "finished": 73,
+    "distinctDeliveryIds": 73,
+    "outcomes": {
+      "received": 73
+    },
+    "proposalEventIds": [],
+    "completedFlushes": 341,
+    "sameNonemptyBatchOverlapPairs": 9,
+    "overlapExamples": [
+      [
+        {
+          "id": 39617,
+          "start": "2026-10-13T19:44:03.880Z",
+          "end": "2026-10-13T19:44:10.101Z",
+          "batch": "minute_29865344",
+          "delivered": 1
+        },
+        {
+          "id": 39615,
+          "start": "2026-10-13T19:44:06.961Z",
+          "end": "2026-10-13T19:44:08.910Z",
+          "batch": "minute_29865344",
+          "delivered": 0
+        }
+      ],
+      [
+        {
+          "id": 39665,
+          "start": "2026-10-13T19:45:04.480Z",
+          "end": "2026-10-13T19:45:08.933Z",
+          "batch": "minute_29865345",
+          "delivered": 0
+        },
+        {
+          "id": 39667,
+          "start": "2026-10-13T19:45:06.710Z",
+          "end": "2026-10-13T19:45:09.697Z",
+          "batch": "minute_29865345",
+          "delivered": 1
+        }
+      ],
+      [
+        {
+          "id": 39774,
+          "start": "2026-10-13T19:47:01.839Z",
+          "end": "2026-10-13T19:47:05.143Z",
+          "batch": "minute_29865347",
+          "delivered": 1
+        },
+        {
+          "id": 39775,
+          "start": "2026-10-13T19:47:02.573Z",
+          "end": "2026-10-13T19:47:06.422Z",
+          "batch": "minute_29865347",
+          "delivered": 0
+        }
+      ]
+    ],
+    "firstStarted": {
+      "id": 39231,
+      "at": "2026-10-13T19:36:07.755Z",
+      "version": 1,
+      "deliveryId": "sub_bc14c0dce362662ebe7015f19924ef7e:minute_29865336",
+      "subscriptionId": "sub_bc14c0dce362662ebe7015f19924ef7e",
+      "attempt": 1,
+      "leaseUntil": "2026-10-13T19:37:07.661Z",
+      "channel": "state.minute_changed",
+      "receiverProcessing": "unknown"
+    },
+    "lastFinished": {
+      "id": 46176,
+      "at": "2026-10-13T21:48:06.711Z",
+      "version": 1,
+      "deliveryId": "sub_bc14c0dce362662ebe7015f19924ef7e:minute_29865468",
+      "subscriptionId": "sub_bc14c0dce362662ebe7015f19924ef7e",
+      "attempt": 1,
+      "receiverAccepted": true,
+      "httpStatus": 200,
+      "outcome": "received",
+      "receiverProcessing": "unknown"
+    },
+    "confirmedAbsentServerIds": [
+      39909,
+      40119
+    ],
+    "absentIdReads": [
+      {
+        "callId": "research_474bcd6f-8e66-4d59-8faf-4d80df8c63ae",
+        "responseHash": "f248450d46174b185b3346a4fe9453dc9dacb99db6425b7eec61b4d50d0d9297",
+        "recorded": true
+      },
+      {
+        "callId": "research_7c11c191-5f11-46ef-bf18-2a9e77e83bc9",
+        "responseHash": "8cbdb61fa5a1ace0718b5246fa6878298571876cd38920cc96cf051d1e8f70bb",
+        "recorded": true
+      }
+    ],
+    "formalTailResearch": {
+      "callId": "research_5ea2d761-98b3-4214-adaa-dfcd135b4755",
+      "responseHash": "3001b8bf2f897d48c47f9cde22997fab465776144935f0953628855a9d181db2",
+      "recorded": true
+    },
+    "formalTerminalResearch": {
+      "callId": "research_c7e6f0db-71b4-419f-82f9-aa93cab06da9",
+      "responseHash": "b61de5fe7bc1204e392f970b6e95b3db2f8d6a9497af29c1fed37a755ba249cc",
+      "recorded": true
+    },
+    "interpretation": "Bounded receiver HTTP acceptance; not host display or exactly-once processing"
+  },
+  "postV32LocalReadThrough": 46811,
+  "postV32ConfirmationEventsObserved": 0,
+  "host": {
+    "actualV32Form": "unverified",
+    "cancelCause": "unknown",
+    "layoutCause": "unknown",
+    "applicationAccessAttemptedThisTurn": false
+  },
+  "publication": {
+    "siteVersion": 32,
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "deploymentId": "appgdep_6acea917e0b081918e60382751028998",
+    "savedVersionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_ebe747a887f48191ba7519e56aeb7cbe",
+    "status": "succeeded",
+    "hasMcp": true,
+    "at": "2026-10-13T21:56:50.492704+00:00",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "audience": "owner_only_unchanged",
+    "storageContentHash": "sha256:aff231185b2a9e13af9befa6b544112c74b7e8ae8f795f0466bc1128ad61296e"
+  },
+  "health": {
+    "readAt": "2026-10-13T21:57:09.538Z",
+    "sourceCount": 25,
+    "activeSubscriptions": 1,
+    "research": {
+      "callId": "research_7d6516c1-c1ec-4833-bae7-47cfe990ec52",
+      "responseHash": "21a14df3f38837708fdefbd9c346fefbbda8f3e719e0d76f6da9c5b0c28e648e",
+      "recorded": true
+    },
+    "oldCommand": {
+      "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+      "state": "cancelled",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_f6ed6aaa-1a10-4b0a-bde0-d289c8ba8f8a",
+        "responseHash": "a8dc48ea5c27addad78e744569f272e4e017e1f7b7da4b32edf810b67566ae9c",
+        "recorded": true
+      }
+    },
+    "scope": "Read-only health; not actual host form or all sources fresh"
+  },
+  "workerErrors": {
+    "sinceMinutes": 15,
+    "limit": 40,
+    "errorsOnly": true,
+    "returnedEvents": 0,
+    "scope": "bounded query only"
+  },
+  "rollbackSource": "033acce531c2e9410747cb8b4aa4e17bc0398a90"
+}
