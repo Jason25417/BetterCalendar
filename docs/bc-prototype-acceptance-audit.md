@@ -1,5 +1,7 @@
 # 当前个人原型闭环验收对照
 
+2026-10-13 14:24 UTC 续接：已通过Edge直接向同一Dots消息流传达修复并核对重试。真实5529提案合法UUID已接受，刷新现有插件后原样重试保持同编号/哈希/08:55:11美东起点；Dots发送卡片工具报告“The widget is unavailable.”，页面未加载BC卡片。正式状态仍awaiting_confirmation，approvedAt/result=null。故障已推进到卡片注册/宿主发送交接，不能称计时已开始，暂时无需本人重复查找会话。详见[evidence/dots-native-card-25.json](evidence/dots-native-card-25.json)与[原生编号修复后续](bc-dots-mcp-uuid-fix.md)。
+
 2026-10-13 14:03 UTC 更新：本人保存权限后，Mac grant revision 1 已出现在正式接口，事项/计时/日记能力有效至11月11日；最新device.status实际报告0.65.14/171。只读日记请求已经由Mac真正接手并回传，commandId、requestHash、attemptId与本机reported记录、本地ResearchRecorder完整原文逐项一致。本次仅查美东今天的保存日记，实际为空、hasMore=false；不证明其他日期/另一端没有日记，也未验证非空正文、分页、编辑或照片。详见[evidence/native-journal-read-171.json](evidence/native-journal-read-171.json)。下表较早的“设备接手/日记读取未验”在这一只读范围内已补上证据，改动确认与执行仍未验。
 
 本人随后转来Dots真实“5529轻计时、补记一小时”失败：日志19801/19802、19823/19825显示commandId使用文字/日期拼接，服务在接收前拒绝。MCP原schema仅string、说明遗漏UUID，复合错误也未指出具体字段。本轮共享同一UUID校验与schema，明确说明和分项报错；不放宽权限、不自动开始计时。18项服务测试和构建通过，既有私有服务v25已成功部署；原生171与CloudKit结构不变。只有明确未接收的格式拒绝允许更正编号；已接收/unknown仍沿用原编号。真实Dots确认卡片与5529执行尚待继续，不能用只读成功代替。

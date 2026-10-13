@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-13T14:24:03.916Z",
+  "serviceVersion": 25,
+  "nativeBuild": 171,
+  "commandId": "becd0cca-1a55-4c12-99b1-fa0f0bfe512d",
+  "requestHash": "68ec5e3641807fdedae96f35bd14e8ed0812f875fd5778b50cd841857d777679",
+  "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+  "kind": "timer",
+  "action": "start",
+  "effectiveAt": "2026-10-13T12:55:11.000Z",
+  "occurredAt": "2026-10-13T14:07:11.000Z",
+  "expiresAt": "2026-10-13T14:39:00.000Z",
+  "acceptedAt": "2026-10-13T14:09:16.299Z",
+  "state": "awaiting_confirmation",
+  "approvedAt": null,
+  "result": null,
+  "research": {
+    "callId": "research_74d997ed-13ac-4d80-8fcb-b98d6cb8e1f5",
+    "responseHash": "2049efb4d4657632081e99ace3a519780edb0f2425d1f78d259fc847e6bc8b0c",
+    "recorded": true
+  },
+  "retry": {
+    "startedAt": "2026-10-13T14:19:49.332Z",
+    "finishedAt": "2026-10-13T14:19:51.135Z",
+    "researchCallId": "research_499cb512-3d6b-4b6b-8bba-cf688ca8b7b4",
+    "responseHash": "2049efb4d4657632081e99ace3a519780edb0f2425d1f78d259fc847e6bc8b0c",
+    "logRows": [
+      20828,
+      20830
+    ],
+    "sameRequest": true
+  },
+  "browser": {
+    "surface": "Edge extension",
+    "page": "https://chatgpt.com/dots/home",
+    "existingPluginToolsRefreshed": true,
+    "bcWidgetIframeObserved": false,
+    "otherIframes": "character preview and hidden host execution/security frames"
+  },
+  "agentReport": {
+    "source": "Dots visible message at 10:20 and 10:21 EDT",
+    "tool": "mcp__codex_apps__user_message_send_message",
+    "arguments": {
+      "channel": "chatgpt",
+      "metadata": {
+        "include_widget": true
+      }
+    },
+    "error": "The widget is unavailable.",
+    "widgetIdentitySupplied": false,
+    "evidenceLevel": "agent_report_observed_in_ui_not_independent_capture_of_internal_tool_error"
+  },
+  "gaps": [
+    "Human concrete confirmation not available in this sample",
+    "No approval or device timer effect",
+    "Root cause between MCP UI discovery and Dots widget transport remains unverified",
+    "Native MCP interactive tools lack advertised outputSchema; official reference identifies this as a contract gap, not proven root cause"
+  ],
+  "privacy": "Full private message and screenshots remain controlled locally; no hidden approval credentials recorded"
+}
