@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "release": "0.65.9",
+  "build": 166,
+  "sourceCommit": "60ae21a",
+  "verifiedAt": "2026-10-13T03:45:10.154897+00:00",
+  "appId": "6787325341",
+  "builds": [
+    {
+      "id": "a99700e3-5453-48cb-918a-9f694b2f910d",
+      "platform": "IOS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "notesVerified": true
+    },
+    {
+      "id": "c4657f33-0289-489b-9411-1e8c079cc3b6",
+      "platform": "MAC_OS",
+      "processing": "VALID",
+      "internal": "IN_BETA_TESTING",
+      "notesVerified": true
+    }
+  ],
+  "archiveUpload": "completed-both",
+  "minimumOS": "26.0",
+  "appAndWidgetVersionMatched": true,
+  "tests": {
+    "node": {
+      "passed": 50,
+      "failed": 0
+    },
+    "macAppUnit": {
+      "passed": 287,
+      "failed": 0,
+      "skipped": 0
+    },
+    "iosSimulatorBuild": "succeeded"
+  },
+  "cloudKitModelChanged": false,
+  "newCloudService": false,
+  "deviceInstall": "unverified",
+  "nativeAlarmAuthorizationRingingCancellation": "unverified",
+  "realCrossDeviceItemOperation": "unverified",
+  "mcpNativeWriteTransport": "not_implemented"
+}
