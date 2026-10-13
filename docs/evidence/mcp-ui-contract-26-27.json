@@ -112,5 +112,22 @@
       "responseHash": "3676a01341a60074c5ca0d2f74873372039002d298619565631ebc2ab816de8a",
       "recorded": true
     }
-  }
+  },
+  "v27Trial": {
+    "commandId": "becd0cca-1a55-4c12-99b1-fa0f0bfe512d",
+    "state": "expired",
+    "statusCallId": "research_26ae5e45-0485-4283-8c29-d08478218d43",
+    "submitCallId": "research_19506588-014f-4161-8afb-1521e44eeca8",
+    "logRows": [
+      21814,
+      21816
+    ],
+    "responseHash": "3676a01341a60074c5ca0d2f74873372039002d298619565631ebc2ab816de8a",
+    "result": "Dots reports user_message_send_message include_widget=true still returns The widget is unavailable",
+    "errorEvidence": "agent_report_observed_in_ui_not_independent_internal_tool_capture",
+    "buttonDisabled": "unverified_because_widget_not_displayed",
+    "approved": false,
+    "executed": false
+  },
+  "remaining": "Widget construction/transport still unavailable in actual Dots; original request expired; no automatic renewal"
 }

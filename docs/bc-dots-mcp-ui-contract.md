@@ -8,7 +8,7 @@
 
 进一步按[MCP 2026-07-28工具规范](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)核对，旧成功响应遗漏resultType=complete。v27补齐工具结果及JSON-RPC完成响应，保留现有正文、structuredContent及隐藏_meta。研究回执哈希仍针对正文，不因外层协议标记改变。19项测试和构建再次通过，服务发布成功；正式状态读取仍可用。
 
-原真实提案于14:39 UTC过期；14:41独立正式查询返回expired、approvedAt/attemptId/result=null。不会延长期限、新建编号或声称已计时。v27正在用原样过期请求验证组件能否显示；既有submit对已保存请求只核对同一哈希并返回历史状态，不生成批准凭据、不重新下发。缺少可见卡片和本人按钮确认时，真实执行仍未验。
+原真实提案于14:39 UTC过期；14:41独立正式查询返回expired、approvedAt/attemptId/result=null。不会延长期限、新建编号或声称已计时。v27用原样过期请求复测，Dots10:44美东再次明确报告widget unavailable；状态与原样submit实际callId分别research_26ae5e45-0485-4283-8c29-d08478218d43、research_19506588-014f-4161-8afb-1521e44eeca8，已停止循环。确认按钮是否禁用也未能核验，因为组件根本没有显示。既有submit对已保存请求只核对同一哈希并返回历史状态，不生成批准凭据、不重新下发。缺少可见卡片和本人按钮确认时，真实执行仍未验。
 
 证据见[evidence/mcp-ui-contract-26-27.json](evidence/mcp-ui-contract-26-27.json)。原始工具内容和截图保持在本地受控研究档案；Git仅留必要关联与回执元数据。现有private audience保持owner-only，未复制资料到新服务，无新增原生发行包。
 
