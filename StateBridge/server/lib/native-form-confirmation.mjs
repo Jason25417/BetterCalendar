@@ -21,6 +21,10 @@ export function nativeFormResult(value,approval) {
  const states={active:'进行中',done:'已完成',shelved:'先放下'};
  const edits=Object.entries(request.patch??{}).map(([key,text])=>`${labels[key]??key}：${key==='status'?(states[text]??text):Array.isArray(text)?text.join('、'):text===null?'清空':text}`);
  const details=[request.title?`标题：${request.title}`:null,...edits,request.recordId?`对应记录：${request.recordId}`:null,request.sessionId?`对应计时：${request.sessionId}`:null,request.alarmId?`对应闹钟：${request.alarmId}`:null,request.expectedRevision!==undefined?`核对的原版本：${request.expectedRevision}`:null,request.relatedRecordId?`关联事项：${request.relatedRecordId}`:null,request.effectiveAt?`补记起点（UTC）：${request.effectiveAt}`:request.kind==='timer'?`生效时间：本人确认时，按 BC 服务时间计时`:null,request.fireAt?`响铃时间（UTC）：${request.fireAt}`:null,request.entryDate?`日记日期（UTC）：${request.entryDate}`:null].filter(Boolean);
- const message=`请本人确认：${actions[request.action]??request.action}${kinds[request.kind]??request.kind}。\n${details.join('\n')}\n指定设备：${value.deviceId}\n你的原请求：${request.userRequest}\n有效期限（UTC）：${value.expiresAt}\n取消或不勾选都不会执行；服务接受后仍需核对设备回执。\n请求编号：${value.commandId}`;
- return {resultType:'input_required',inputRequests:{bc_native_confirmation:{method:'elicitation/create',params:{mode:'form',message,requestedSchema:{type:'object',properties:{confirm:{type:'boolean',title:'我确认执行上面的具体改动',default:false}},required:['confirm']}}}},requestState:approval.token};
+ // The host owns the form's layout. Keep its heading short and put the complete
+ // immutable operation in the standard field description, not a long heading.
+ // No truncation, HTML, new confirmation fields or automatic default approval.
+ const message=`请本人确认：${actions[request.action]??request.action}${kinds[request.kind]??request.kind}。`;
+ const description=`${details.join('\n')}\n指定设备：${value.deviceId}\n你的原请求：${request.userRequest}\n有效期限（UTC）：${value.expiresAt}\n关闭或不勾选都不会执行；服务接受后仍需核对设备回执。\n请求编号：${value.commandId}`;
+ return {resultType:'input_required',inputRequests:{bc_native_confirmation:{method:'elicitation/create',params:{mode:'form',message,requestedSchema:{type:'object',properties:{confirm:{type:'boolean',title:'确认执行',description,default:false}},required:['confirm']}}}},requestState:approval.token};
 }

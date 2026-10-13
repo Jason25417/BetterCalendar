@@ -19,7 +19,7 @@ body{font:15px system-ui;margin:0;padding:16px;color:CanvasText;background:Canva
 </style><h2>确认这次 BC 操作</h2><p id="status" role="status">正在读取具体改动…</p><pre id="details"></pre><button id="approve" disabled>确认并交给这台设备</button><button id="refresh" disabled>查看执行结果</button><script>
 const pending=new Map();let serial=0,output=null,approval=null,bridgeReady=false;
 const status=document.getElementById('status'),details=document.getElementById('details'),button=document.getElementById('approve'),refresh=document.getElementById('refresh');
-const labels={awaiting_confirmation:'等待你确认；尚未执行',queued:'已确认，等待指定设备上线执行',dispatching:'设备已接手；执行结果尚未回传',applied:'设备已报告完成；其他设备同步和你是否看到仍需核对',failed:'设备报告失败，请查看原因',unknown:'结果未知；请核对，勿重新创建同一操作',expired:'请求已过期，未执行',revoked:'权限已撤回或变更，未再执行',cancelled:'你已取消；尚未执行，不再弹出这次确认',declined:'你已拒绝；尚未执行，不再弹出这次确认'};
+const labels={awaiting_confirmation:'等待你确认；尚未执行',queued:'已确认，等待指定设备上线执行',dispatching:'设备已接手；执行结果尚未回传',applied:'设备已报告完成；其他设备同步和你是否看到仍需核对',failed:'设备报告失败，请查看原因',unknown:'结果未知；请核对，勿重新创建同一操作',expired:'请求已过期，未执行',revoked:'权限已撤回或变更，未再执行',cancelled:'确认已关闭；尚未执行。可能是关闭对话框或加载中断，原因未核实；这次请求不会重新执行',declined:'确认已被拒绝；尚未执行，不再弹出这次确认'};
 function metadata(m){return m?.approval??m?.mcp_tool_result?._meta?.approval??m?.call_tool_result?._meta?.approval??null;}
 function render(value,meta){if(!value?.nativeCommandId)return;output=value;approval=metadata(meta)??approval;
  status.textContent=labels[value.state]??'状态尚未核实';

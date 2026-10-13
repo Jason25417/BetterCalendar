@@ -93,6 +93,24 @@ test('route cancellation does not dispatch or silently renew the consumed confir
  assert.equal(new Ajv({allowUnionTypes:true}).compile(confirmation.nativeCommandOutputSchema)(refreshed.body.result.structuredContent),true);
  assert.ok((await f.call('submit_native_command',v,reply(state))).body.error);
 });
+test('host cancellation before expiry records unknown cause, never a confirmed user gesture',async t=>{
+ const f=await fixture(t),v=f.request(),first=await f.call('submit_native_command',v),state=first.body.result.requestState;
+ f.advance(40000);
+ const canceled=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ assert.equal(canceled.body.result.structuredContent.state,'cancelled');assert.equal(canceled.body.result.structuredContent.approvedAt,null);
+ const research=await f.core.research.read({limit:100}),call=research.entries.find(e=>e.kind==='call_started'&&e.body.arguments.confirmation);
+ assert.deepEqual(JSON.parse(JSON.stringify(call.body.arguments.confirmation)),{transport:'mcp_form',action:'cancel',confirmed:false,source:'host_response',userGesture:'unknown',cause:'unknown'});
+ assert.equal(JSON.stringify(research).includes(state),false);assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
+ f.restart();assert.equal((await f.call('submit_native_command',v)).body.result.structuredContent.state,'cancelled');
+});
+test('POST late cancel preserves expired status and does not publish another confirmation',async t=>{
+ const f=await fixture(t),v=f.request(),first=await f.call('submit_native_command',v),state=first.body.result.requestState;
+ f.advance(3600001);
+ const late=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ assert.equal(late.body.result.resultType,'complete');assert.equal(late.body.result.structuredContent.state,'expired');assert.equal('requestState' in late.body.result,false);
+ assert.equal(late.body.result.structuredContent.approvedAt,null);assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
+ const repeated=await f.call('submit_native_command',v);assert.equal(repeated.body.result.structuredContent.state,'expired');assert.equal('requestState' in repeated.body.result,false);
+});
 test('research result persistence failure returns error after approval; same command recovers without double execution',async t=>{
  const f=await fixture(t),v=f.request(),first=await f.call('submit_native_command',v),state=first.body.result.requestState;
  f.failResult();const lost=await f.call('submit_native_command',v,reply(state));assert.ok(lost.body.error);

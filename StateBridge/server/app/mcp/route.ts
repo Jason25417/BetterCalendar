@@ -71,7 +71,7 @@ export async function POST(request:Request){
         return core.nativeCommands.submit(input,owner,{formOrigin:form?p.name:null});
       };
       let approval:unknown=null;
-      const loggedArgs=response?{...a,confirmation:{transport:"mcp_form",action:response.action,confirmed:response.content?.confirm===true}}:a;
+      const loggedArgs=response?{...a,confirmation:{transport:"mcp_form",action:response.action,confirmed:response.content?.confirm===true,...(response.action==="cancel"?{source:"host_response",userGesture:"unknown",cause:"unknown"}:{})}}:a;
       const value=await core.research.invoke(p.name,loggedArgs,owner,async()=>{let value;
       switch(p.name){
         case "read_native_capabilities":value=await core.nativeCommands.capabilities();break;

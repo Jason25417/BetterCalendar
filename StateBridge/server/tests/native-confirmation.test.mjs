@@ -20,6 +20,11 @@ test('widget lacking hidden confirmation data cannot approve',()=>{
  vm.runInNewContext(nativeConfirmationHtml.match(/<script>([\s\S]*)<\/script>/)[1],{window,document:{getElementById(id){if(!elements.has(id))elements.set(id,{disabled:true});return elements.get(id);}},Date,Map,JSON,Error});
  assert.equal(elements.get('approve').disabled,true);
 });
+test('cancelled display does not attribute host dismissal or load failure to the user',()=>{
+ const elements=new Map();const window={openai:{toolOutput:{nativeCommandId:'id',requestHash:'hash',state:'cancelled',expiresAt:'2026-10-14T10:00:00Z',request:{}},toolResponseMetadata:{},callTool(){throw Error('cancelled request cannot execute');}},addEventListener(){}};
+ vm.runInNewContext(nativeConfirmationHtml.match(/<script>([\s\S]*)<\/script>/)[1],{window,document:{getElementById(id){if(!elements.has(id))elements.set(id,{disabled:true});return elements.get(id);}},Date,Map,JSON,Error});
+ assert.equal(elements.get('approve').disabled,true);assert.match(elements.get('status').textContent,/原因未核实/);assert.equal(elements.get('status').textContent.includes('你已取消'),false);
+});
 test('standard MCP Apps bridge receives hidden meta and waits for an actual click',async()=>{
  const elements=new Map(),listeners=[],messages=[];
  const parent={postMessage(message){messages.push(message);}};

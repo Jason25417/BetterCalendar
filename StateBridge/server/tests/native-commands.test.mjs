@@ -29,7 +29,9 @@ test('MRTR form is capability-gated, host-only and defaults to no operation',asy
  const result=nativeFormResult(s.value,s.approval);assert.equal(result.resultType,'input_required');
  assert.equal(result.requestState,s.approval.token);assert.equal('content' in result,false);assert.equal('structuredContent' in result,false);
  const form=result.inputRequests.bc_native_confirmation.params;assert.equal(form.requestedSchema.properties.confirm.default,false);
- assert.ok(form.message.includes(v.commandId)&&form.message.includes(v.deviceId)&&form.message.includes(v.userRequest));
+ const details=form.requestedSchema.properties.confirm.description;
+ assert.ok(details.includes(v.commandId)&&details.includes(v.deviceId)&&details.includes(v.userRequest));
+ assert.equal(form.message,'请本人确认：新增事项。');
  assert.equal(nativeFormResult({...s.value,state:'expired'},s.approval),null);
  assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).state,'awaiting_confirmation');
 });
@@ -76,6 +78,41 @@ test('form expiry revoked grant and rotated challenge reject stale human replies
   await assert.rejects(f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true}}},'owner'));
   assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).approvedAt,null);
  }
+});
+test('late host cancellation preserves expiry or revocation instead of relabeling it as a user cancel',async()=>{
+ for(const mode of ['expiry','revocation']){
+  const f=fixture(),d=await setup(f),v=request(f,810),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  if(mode==='expiry')f.advance(3600001);
+  else await f.core.nativeCommands.setGrant({revision:2,capabilities:[],expiresAt:'2026-10-14T10:00:00.000Z'},d);
+  const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'cancel'}};
+  const expected=mode==='expiry'?'expired':'revoked';
+  assert.equal((await f.core.nativeCommands.respondForm(proof,'owner')).state,expected);
+  assert.equal((await f.reopen().nativeCommands.respondForm(proof,'owner')).state,expected);
+  const saved=f.sqlite.prepare('SELECT state,approved_at,attempt_id,result FROM native_requests WHERE command_id=?').get(v.commandId);
+  assert.equal(saved.state,'awaiting_confirmation');assert.equal(saved.approved_at,null);assert.equal(saved.attempt_id,null);assert.equal(saved.result,null);
+  const retry=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});assert.equal(retry.value.state,expected);assert.equal(retry.approval,null);
+  assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
+ }
+});
+test('short form heading retains complete timer and edit evidence in standard description',()=>{
+ const token='isolated-hidden-state',base={state:'awaiting_confirmation',commandId:id(900),deviceId:'isolated-device',expiresAt:'2026-10-13T11:00:00.000Z'};
+ const requests=[{kind:'timer',action:'start',title:'Isolated long title '.repeat(9),userRequest:'Isolated long request '.repeat(90),effectiveAt:'2026-10-13T08:55:11.000Z',relatedRecordId:id(901)},
+  {kind:'journal',action:'update',recordId:id(902),expectedRevision:'revision-original',userRequest:'Isolated edit',patch:{body:'<script>plain text</script>\n'.repeat(100),mood:null,tags:['one','two']}}];
+ for(const request of requests){
+  const form=nativeFormResult({...base,request},{token}).inputRequests.bc_native_confirmation.params,field=form.requestedSchema.properties.confirm;
+  assert.ok(form.message.length<40);assert.equal(field.default,false);assert.equal(field.title,'确认执行');
+  const validate=new Ajv().compile(form.requestedSchema);assert.equal(validate({confirm:false}),true);assert.equal(validate({confirm:true}),true);
+  for(const text of [base.deviceId,base.commandId,base.expiresAt,request.userRequest,request.title,request.effectiveAt,request.relatedRecordId,request.recordId,request.expectedRevision,request.patch?.body].filter(Boolean))assert.ok(field.description.includes(text));
+  assert.equal(field.description.includes(token),false);
+ }
+});
+test('expiry crossing between response validation and SQL write cannot become cancelled',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,811),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ f.advance(3599000);f.stepEveryRead(500);
+ const result=await f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'cancel'}},'owner');
+ assert.equal(result.state,'expired');assert.equal(result.approvedAt,null);
+ assert.equal(f.sqlite.prepare('SELECT state FROM native_requests WHERE command_id=?').get(v.commandId).state,'awaiting_confirmation');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
 });
 test('advertised native output validates actual proposal and device receipt; approval secret is excluded',async()=>{
  const validate=new Ajv({allowUnionTypes:true}).compile(nativeCommandOutputSchema);

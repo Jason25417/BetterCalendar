@@ -121,15 +121,23 @@ export function createNativeCommands(db,time,executeTask){
     return approve({commandId:r.command_id,requestHash,token:requestState},owner);
    }
   }else if(response.content!==undefined)throw new BridgeError('取消确认不能混入确认内容');
-  // Persist the user's terminal choice. Retain the nonce hash to recognize a
-  // lost-response retry, but never renew a closed request or undo an execution.
+  // A host cancel is also used for load failures/dismissal; it is not proof of
+  // a user gesture. Still close the request without executing or renewing it.
+  // A late response must not rewrite already expired/revoked pending requests.
+  const current=await view(r);
+  if(['expired','revoked'].includes(current.state))return current;
+  // Retain the nonce hash to recognize a lost-response retry, but never renew
+  // a closed request or undo an execution.
   const state=response.action==='decline'?'declined':'cancelled';
   if(r.state===state)return view(r);
   if(r.state!=='awaiting_confirmation')throw new BridgeError('本请求已确认或关闭，不能把后来的取消当作撤销执行',409);
-  await q("UPDATE native_requests SET state=? WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash=?",state,r.command_id,r.approval_hash).run();
+  const at=time();
+  await q("UPDATE native_requests SET state=? WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants WHERE device_id=? AND revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM devices WHERE id=native_grants.device_id AND revoked_at IS NULL))",state,r.command_id,r.approval_hash,at,r.device_id,r.grant_revision,at).run();
   const fresh=await row(r.command_id,owner);
+  const effective=await view(fresh);
+  if(['expired','revoked'].includes(effective.state))return effective;
   if(fresh.state!==state)throw new BridgeError('确认状态已改变，请核对原请求结果',409);
-  return view(fresh);
+  return effective;
  }
  async function pending(v,d){
   keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??10;

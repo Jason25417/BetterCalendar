@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "scope": "local_only_confirmation_fix_not_deployed",
+  "sourceBaseline": "b4656cad50b83c054faa4b841af662f59d4b7915",
+  "observed": [
+    {
+      "commandId": "95f8ccdf-61d1-4b60-8a1e-f892bc7c6145",
+      "state": "cancelled",
+      "acceptedAt": "2026-10-13T18:05:24.945Z",
+      "expiresAt": "2026-10-13T18:35:10.000Z",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_3dd3db4a-ea08-4591-a81c-0e37e07edc5b",
+        "responseHash": "6d34d228c288af8a965554bc522d1d2c10143a06bcc182e480a9f055586b4dfc",
+        "recorded": true
+      },
+      "hostCancelReceivedAt": "2026-10-13T18:39:57.249Z",
+      "beforeExpiry": false,
+      "localCallRows": [
+        33251,
+        33252,
+        35333,
+        35334
+      ],
+      "hostResponse": {
+        "action": "cancel",
+        "confirmed": false
+      },
+      "userGesture": "unknown",
+      "cause": "unknown"
+    },
+    {
+      "commandId": "b4a701e9-3c68-4f96-86bd-72c5d6e9a043",
+      "state": "cancelled",
+      "acceptedAt": "2026-10-13T18:42:37.902Z",
+      "expiresAt": "2026-10-13T19:12:01.000Z",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_f2d72199-9743-40aa-9293-7a4603ba3dad",
+        "responseHash": "2b20f80074515a955a5258c351ae7478a112654ad5734d062438edfa714c1069",
+        "recorded": true
+      },
+      "hostCancelReceivedAt": "2026-10-13T18:50:59.806Z",
+      "beforeExpiry": true,
+      "localCallRows": [
+        35542,
+        35545,
+        36259,
+        36260
+      ],
+      "hostResponse": {
+        "action": "cancel",
+        "confirmed": false
+      },
+      "userGesture": "unknown",
+      "cause": "unknown"
+    },
+    {
+      "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+      "state": "cancelled",
+      "acceptedAt": "2026-10-13T18:51:36.602Z",
+      "expiresAt": "2026-10-13T19:21:15.000Z",
+      "approvedAt": null,
+      "attemptId": null,
+      "result": null,
+      "research": {
+        "callId": "research_a06b8634-fcf3-4cc5-bfee-f8713f819d08",
+        "responseHash": "a8dc48ea5c27addad78e744569f272e4e017e1f7b7da4b32edf810b67566ae9c",
+        "recorded": true
+      },
+      "hostCancelReceivedAt": "2026-10-13T18:52:15.839Z",
+      "beforeExpiry": true,
+      "localCallRows": [
+        36317,
+        36318,
+        36387,
+        36388
+      ],
+      "hostResponse": {
+        "action": "cancel",
+        "confirmed": false
+      },
+      "userGesture": "unknown",
+      "cause": "unknown"
+    }
+  ],
+  "concurrentActivity": {
+    "commandId": "cf94a2d8-63e1-4bc7-9f50-17c86a934b2e",
+    "batchId": "minute_29865280",
+    "completeBatchStartedAt": "2026-10-13T18:52:05.483Z",
+    "completeBatchReturnedAt": "2026-10-13T18:52:07.060Z",
+    "rows": [
+      36366,
+      36368,
+      36369
+    ],
+    "causality": "unproven"
+  },
+  "changes": [
+    "Preserve expired/revoked pending status when a delayed negative form response arrives",
+    "Short native form heading; complete immutable operation retained in standard boolean field description; default false unchanged",
+    "Host cancel trace records unknown gesture/cause; neutral closed-state text",
+    "Closed cancelled/declined commands remain closed and cannot renew or execute",
+    "Guard expiry and grant revision at the SQL state transition, including expiry crossing during response handling"
+  ],
+  "verification": {
+    "serviceTests": {
+      "passed": 78,
+      "failed": 0,
+      "skipped": 0
+    },
+    "recorderTests": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0
+    },
+    "build": "passed",
+    "actualHostRendering": "unverified",
+    "screenshotPixels": "unavailable_with_current_Library_tools",
+    "duplicateApprovalCardCallbackCause": "unverified",
+    "deployment": "not_performed",
+    "realTimerExecution": "not_requested_or_performed"
+  },
+  "references": [
+    "https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation",
+    "https://developers.openai.com/plugins/build/extensions"
+  ]
+}
