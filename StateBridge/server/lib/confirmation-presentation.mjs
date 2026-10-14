@@ -1,5 +1,11 @@
 import {BridgeError,canonical,sha} from './bridge.mjs';
 
+const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Swift UUID.uuidString is uppercase; MCP UUID inputs may be lowercase.
+// Compare UUID values, but never rewrite the persisted request/hash or fold
+// opaque device IDs, revisions, cursors, or non-UUID directory keys.
+const sameRecordId=(left,right)=>left===right||typeof left==='string'&&typeof right==='string'&&uuidPattern.test(left)&&uuidPattern.test(right)&&left.toLowerCase()===right.toLowerCase();
+
 // Read only. The displayed before-values come from the designated device's
 // pinned directory, never from an agent's claim about what used to be there.
 export async function confirmationPresentation(core,value) {
@@ -17,7 +23,9 @@ export async function confirmationPresentation(core,value) {
  const seen=new Set();
  while(true){
   if(!page.complete)throw new BridgeError('确认内容加载失败：指定设备的事项快照未齐全；未发布确认、未执行，请先核对设备上传',409);
-  const record=page.records.find(r=>r.id===request.recordId);
+  const matches=page.records.filter(r=>sameRecordId(r.id,request.recordId));
+  if(matches.length>1)throw new BridgeError('确认内容加载失败：事项UUID重复，无法唯一定位原事项；未发布确认、未执行',409);
+  const record=matches[0];
   if(record){
    if(record.revision!==request.expectedRevision)throw new BridgeError('确认内容加载失败：事项版本已变化；未发布确认、未执行，请重读原事项',409);
    display.recordTitle=record.values.title;

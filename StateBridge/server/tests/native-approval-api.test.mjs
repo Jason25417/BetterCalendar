@@ -62,3 +62,25 @@ test('missing or mismatching item snapshot blocks approve but allows a concrete 
  assert.equal((await f.post('native/approval/decide',body)).status,409);
  assert.equal((await f.post('native/approval/decide',{...body,decision:'decline'})).body.state,'declined');
 });
+test('native read and human decision resolve uppercase directory UUID with unchanged request hash and revision',async t=>{
+ const f=await fixture(t),recordId='abcdefab-cdef-4abc-8def-abcdefabcdef';
+ await f.core.nativeCommands.setGrant({revision:2,capabilities:['item.update'],expiresAt:'2026-10-15T12:00:00.000Z'},f.d);
+ const request={...f.request,commandId:'12345678-1234-4234-8234-000000004001',recordId,action:'update',expectedRevision:'a'.repeat(64)};
+ const s=await f.core.nativeCommands.submit(request,'fixture-owner',{formOrigin:'submit_native_command'});
+ let revision=request.expectedRevision;
+ f.core.readPoolRecords=async()=>({complete:true,records:[{id:recordId.toUpperCase(),revision,values:{title:'Isolated before title'}}],hasMore:false});
+ const read=await f.post('native/approval/read',{commandId:request.commandId});
+ assert.equal(read.status,200);assert.equal(read.body.displayError,null);
+ assert.equal(read.body.request.recordId,recordId);assert.equal(read.body.requestHash,s.value.requestHash);
+ assert.deepEqual(read.body.display.before,{title:'Isolated before title'});
+ const body={commandId:request.commandId,requestHash:s.value.requestHash,grantRevision:2,expectedRevision:request.expectedRevision,decision:'accept'};
+ revision='b'.repeat(64);
+ assert.equal((await f.post('native/approval/decide',body)).status,409);
+ assert.equal((await f.core.nativeCommands.status({commandId:request.commandId},'fixture-owner')).state,'awaiting_confirmation');
+ revision=request.expectedRevision;
+ assert.equal((await f.post('native/approval/decide',body)).body.state,'queued');
+ assert.equal((await f.post('native/approval/decide',body)).body.state,'queued');
+ const latest=await f.core.nativeCommands.status({commandId:request.commandId},'fixture-owner');
+ assert.equal(latest.requestHash,s.value.requestHash);assert.equal(latest.request.expectedRevision,request.expectedRevision);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
+});

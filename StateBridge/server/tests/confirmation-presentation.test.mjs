@@ -20,6 +20,27 @@ test('before-values are pinned across pagination rather than mixing later snapsh
  assert.equal((await confirmationPresentation(core,value)).before.note,'');
  assert.equal(calls[1].cursor,'server-pinned-cursor');assert.equal(calls[1].deviceId,value.deviceId);
 });
+test('UUID case variants resolve the same item without rewriting request identity or revision',async()=>{
+ const id='abcdefab-cdef-4abc-8def-abcdefabcdef';
+ for(const [requested,published] of [[id,id.toUpperCase()],[id.toUpperCase(),id]]){
+  const request={...value.request,recordId:requested};
+  const original=JSON.stringify(request);
+  const display=await confirmationPresentation(fixture(async()=>({...page,records:[{...record,id:published}]})),{...value,request});
+  assert.deepEqual(display.before,{note:''});assert.equal(JSON.stringify(request),original);
+  assert.equal(display.source.revision,request.expectedRevision);
+ }
+});
+test('UUID matching still rejects a different identity, mismatched revision or ambiguous case aliases',async()=>{
+ const id='abcdefab-cdef-4abc-8def-abcdefabcdef';
+ const command={...value,request:{...value.request,recordId:id}};
+ for(const records of [
+  [{...record,id:'abcdefab-cdef-4abc-8def-abcdefabcdee'}],
+  [{...record,id:id.toUpperCase(),revision:'b'.repeat(64)}],
+  [{...record,id},{...record,id:id.toUpperCase()}]
+ ])await assert.rejects(confirmationPresentation(fixture(async()=>({...page,records})),command),/确认内容加载失败/);
+ // Non-UUID directory keys remain case sensitive; this is not a global identity fold.
+ await assert.rejects(confirmationPresentation(fixture(async()=>({...page,records:[{...record,id:'FIXTURE-RECORD'}]})),value),/确认内容加载失败/);
+});
 test('missing data, mismatched revision, unread field and broken pagination fail before publishing',async()=>{
  for(const broken of [{...page,complete:false},{...page,records:[]},{...page,records:[{...record,revision:'b'.repeat(64)}]},{...page,records:[{...record,values:{title:'fixture'}}]},{...page,records:[],hasMore:true,nextCursor:null}])await assert.rejects(confirmationPresentation(fixture(async()=>broken),value),/确认内容加载失败/);
 });
