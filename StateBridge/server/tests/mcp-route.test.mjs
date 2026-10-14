@@ -57,6 +57,18 @@ test('read-only preview accepts all host outcomes without approving or reopening
  const list=await f.rpc('tools/list',{}),tool=list.body.result.tools.find(t=>t.name==='preview_native_confirmation');assert.equal(tool.annotations.readOnlyHint,true);
  for(const name of ['submit_native_command','task_command'])assert.equal(list.body.result.tools.find(t=>t.name===name)._meta,undefined);
 });
+test('cached record_context preview adapter never saves context or grants an operation',async t=>{
+ const f=await fixture(t),v=f.request(96),first=await f.call('submit_native_command',v);
+ await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ const a={id:'bc-preview:'+v.commandId,kind:'bc.confirmation.preview',body:{commandId:v.commandId},assertion:'user',confidence:'unknown',basis:[]};
+ const before=f.sqlite.prepare('SELECT * FROM native_requests').get();
+ const shown=await f.call('record_context',a);assert.equal(shown.body.result.resultType,'input_required');
+ const closed=await f.call('record_context',a,{requestState:shown.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ assert.equal(closed.body.result.structuredContent.executed,false);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ assert.deepEqual(f.sqlite.prepare('SELECT * FROM native_requests').get(),before);
+ for(const bad of [{...a,body:{commandId:v.commandId,patch:{note:'not allowed'}}},{...a,confidence:'high'},{...a,supersedes:'other'}])assert.ok((await f.call('record_context',bad)).body.error);
+});
 test('minute delivery and repeated status reads do not cancel, rotate or approve a pending native form',async t=>{
  const callbacks=[];
  const f=await fixture(t,{fetcher:async(url,options)=>{

@@ -63,10 +63,13 @@ export async function POST(request:Request){
     if(method==="events/unsubscribe")return result(await core.unsubscribe(p,owner));
     if(method==="tools/call"){
       const a=p.arguments??{};
-      if(p.name==="preview_native_confirmation"){
-        if(Object.keys(a).some(key=>key!=="commandId"))throw new BridgeError("只读显示测试只接受原commandId");
+      const cachedPreview=p.name==="record_context"&&a.kind==="bc.confirmation.preview";
+      if(p.name==="preview_native_confirmation"||cachedPreview){
+        const previewArgs=cachedPreview?a.body:a;
+        if(!previewArgs||Object.keys(previewArgs).some(key=>key!=="commandId"))throw new BridgeError("只读显示测试只接受原commandId");
+        if(cachedPreview&&(a.id!=="bc-preview:"+previewArgs.commandId||a.assertion!=="user"||a.confidence!=="unknown"||!Array.isArray(a.basis)||a.basis.length||Object.keys(a).some(key=>!["id","kind","body","assertion","confidence","basis"].includes(key))))throw new BridgeError("只读显示测试兼容参数无效；不会保存上下文");
         let inputRequired:unknown=null;
-        const value=await core.research.invoke(p.name,a,owner,async()=>{const preview=await previewNativeForm(core,a.commandId,owner,p);inputRequired=preview.inputRequired;return preview.value??{preview:true,operationEffect:"read_only",executed:false,originalCommandId:a.commandId,presentationPrepared:true,hostDisplayed:"unknown"};});
+        const value=await core.research.invoke(p.name,{...a,commandId:previewArgs.commandId},owner,async()=>{const preview=await previewNativeForm(core,previewArgs.commandId,owner,p);inputRequired=preview.inputRequired;return preview.value??{preview:true,operationEffect:"read_only",executed:false,originalCommandId:previewArgs.commandId,presentationPrepared:true,hostDisplayed:"unknown"};});
         return inputRequired?Response.json({jsonrpc:"2.0",id,result:inputRequired}):result(nativeToolResult(value));
       }
       const proposal=["submit_native_command","task_command"].includes(p.name);
