@@ -136,9 +136,21 @@
   "hostSupport": {
     "destination": "help.openai.com official chat",
     "reportSent": true,
-    "humanTicketOrEscalation": "not_confirmed",
-    "blocker": "login_required_existing_account_password_page",
+    "humanTicketOrEscalation": "official_UI_confirmed_escalated_to_support_specialist",
+    "blocker": null,
     "containsSecrets": false,
-    "containsUserConversationOrRawHAR": false
+    "containsUserConversationOrRawHAR": false,
+    "login": "completed_by_Jason",
+    "humanReplyReceived": false,
+    "caseId": null,
+    "evidenceRecordedAt": "2026-10-14T20:24:30Z",
+    "pending": "human_support_reply_and_host_fix",
+    "attachmentUpload": "not_confirmed_inline_fake_CSS_sent_instead",
+    "environmentUnknown": [
+      "exact_Edge_version",
+      "browser_menu_zoom",
+      "style_extension_inventory",
+      "Chrome_Safari_comparison"
+    ]
   }
 }

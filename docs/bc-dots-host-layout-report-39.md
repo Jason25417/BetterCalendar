@@ -1,6 +1,6 @@
 # Dots 原生确认表单桌面尺寸问题：最小宿主报告
 
-2026-10-14，服务v39，原生0.65.19/176。**电脑聊天布局仍未修好。** BC内确认与聊天必须同时保留，不能用一个入口通过替代另一个。已向官方Help客服发送下附脱敏报告；当前官方要求登录，尚无人工接单/工单编号/宿主修复回执。没有公开发布私人聊天、设备身份、令牌或HAR。
+2026-10-14，服务v39，原生0.65.19/176。**电脑聊天布局仍未修好。** BC内确认与聊天必须同时保留，不能用一个入口通过替代另一个。已向官方Help客服发送下附脱敏报告；Jason已完成登录；官方页面确认已升级给支持专家，尚无人工回复/工单编号/宿主修复回执。没有公开发布私人聊天、设备身份、令牌或HAR。
 
 ## 本轮真实证据
 
@@ -47,7 +47,7 @@ request-card具有container-type:inline-size。CSS标准草案说明inline-size 
 - [Dots权限社区讨论](https://community.openai.com/t/dots-explicit-approval-isn-t-carrying-through-delegated-tasks/1402896)：官方建议持续问题携时间/截图联系Support，不是本次布局修复。
 - [官方客服入口](https://help.openai.com/en/articles/6614161-how-can-i-contact-support)：本轮使用客服对话，不使用内容违法举报或文章thumbs-down冒充技术工单。
 
-截至本轮检索未发现与本次2px/pending→completed完全吻合的公开解决方案。未提交未脱敏HAR。以下为实际发入官方客服窗口的文本（身份验证尚未完成）：
+截至本轮检索未发现与本次2px/pending→completed完全吻合的公开解决方案。未提交未脱敏HAR。以下为最初实际发入官方客服窗口的文本（身份验证与后续升级现已完成，后续事实见末尾）：
 
 我们在联调一个私人 MCP 应用 BetterCalendar，想请你们帮忙排查 Dots 电脑端的原生确认表单布局。请将这份脱敏报告转给负责 Dots / form elicitation 的团队，而不是建议取消确认或改用另一个入口。
 
@@ -67,3 +67,9 @@ request-card具有container-type:inline-size。CSS标准草案说明inline-size 
 已核对官方 Extended forms 文档与 MCP 2026-07-28 form/MRTR；没有找到控制宿主原生确认卡宽高的服务端字段。客户端声明 form=declared_implicit、ui=not_declared，不能把 MCP Apps iframe 的尺寸API当成当前原生form的修复。
 
 请问：是否已有同类已知问题或正式服务端兼容方式？如果需要宿主修复，请提供工单编号并转交前端团队。我们可以继续提供只含假数据的HTML/CSS复现与计算样式；不上传令牌、完整聊天、用户事项或未脱敏HAR。浏览器具体版本、宿主前端构建号及原生Mac客户端DOM尚未采集，不把它们当作已知。
+
+## 官方支持升级回执（2026-10-14 16:24 EDT记录）
+
+Jason完成OpenAI Help登录。AI客服读到报告，认为更像宿主前端尺寸问题，但其判断不是工程根因确认。已补充脱敏请求编号、时间、原生form/非widget差异和未知环境项，并明确要求转人工。点击官方“升级处理”后，页面显示“已请求人工支持专员协助”及“已升级给支持专家”；说明未来几天可能通过当前对话/邮箱回复。**仅验证进入人工支持升级流程；没有case id、人工已阅证明或工程修复回执。**
+
+继续以内联代码补交假数据HTML/CSS最小复现。文件选择控件未给成功上传回执，所以不称已附截图/HTML文件；未发送令牌、真实事项、完整聊天或HAR。Edge内部版本页被浏览器策略禁止，未绕过限制；精确版本、菜单缩放、样式扩展清单和Chrome/Safari对照仍未核验，不阻碍本次已发生的人工升级。支持页保留在Edge tab143501646。截图仅本地/private/tmp/bc-support-escalated-20261014.png，不当宿主已修证据。
