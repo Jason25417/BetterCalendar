@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "asOf": "2026-10-14",
+  "nativeVersion": "0.65.17 / 174",
+  "sourceCommit": "a17c59079c6ce18946ae44ea0ab07160f26900aa",
+  "deployment": {
+    "id": "appgdep_6acf9e740ddc81919cef56d105ad871d",
+    "sourceCommit": "f21da9994872937b01769f452bd847001b18f5fc",
+    "status": "succeeded",
+    "hasMcp": true,
+    "updatedAt": "2026-10-14T15:23:42.625778Z",
+    "access": "unchanged_owner_private",
+    "sourceFilesIdenticalAtPublication": 156
+  },
+  "baselineCommand": {
+    "commandId": "518db08f-af21-4c4f-99be-56d70d7d73c2",
+    "state": "cancelled",
+    "approvedAt": null,
+    "attemptId": null,
+    "result": null,
+    "cancelCause": "unknown_not_expired_not_proven_user_cancel"
+  },
+  "choice": {
+    "preparedLogId": 89863,
+    "responseLogId": 89916,
+    "responseAt": "2026-10-14T15:29:58.305Z",
+    "presentationHash": "2a1433c1496f13c881719455ae5d9e5e35efcc3edf08cc89c26c7ab4a86ff36b",
+    "fields": [
+      "action",
+      "content",
+      "_meta"
+    ],
+    "metadataType": "object",
+    "confirmType": "string",
+    "acceptedReadOnly": true,
+    "executed": false
+  },
+  "review": {
+    "preparedLogId": 90034,
+    "responseLogId": 90046,
+    "responseAt": "2026-10-14T15:32:03.268Z",
+    "presentationHash": "cd6186c5c83e9e7fe31861243ace02d6d01839a0a8c914665b8599d3127ad643",
+    "fields": [
+      "action",
+      "content",
+      "_meta"
+    ],
+    "metadataType": "object",
+    "confirmType": "boolean",
+    "reviewType": "string",
+    "acceptedReadOnly": true,
+    "executed": false
+  },
+  "edgeMeasured": {
+    "viewportCss": [
+      1912,
+      931
+    ],
+    "dpr": 2,
+    "choicePendingCardCss": [
+      2,
+      849
+    ],
+    "reviewPendingCardCss": [
+      2,
+      849
+    ],
+    "pendingFormCss": [
+      0,
+      847
+    ],
+    "choiceCompletedCardCss": [
+      2,
+      849
+    ],
+    "layoutPassed": false
+  },
+  "humanReport": {
+    "iphoneDisplayedNormally": true,
+    "desktopPendingLongBlank": true,
+    "desktopContentVisibleAfterPhoneReply": true,
+    "desktopCompletedNarrowLong": true,
+    "desktopHostIdentity": "not_independently_verified"
+  },
+  "validation": {
+    "publishedIsolatedTestsPassed": 110,
+    "buildPassed": true,
+    "actualBusinessApprovalAndDeviceApplicationVerified": false,
+    "actualCancelResponseVerified": false,
+    "finalIsolatedTestsPassed": 111,
+    "hostRegressionTestsPassed": 31
+  },
+  "scope": {
+    "realOperationsExecutedByThisTest": false,
+    "newGrant": false,
+    "newService": false,
+    "nativeAppAccessBypassed": false,
+    "hostCssModified": false
+  },
+  "missingEvidence": [
+    "original_cancel_producer_and_message_render_timing",
+    "historical_400_extra_fields",
+    "native_desktop_pending_completed_layout_timing",
+    "business_boolean_confirmation_device_receipt"
+  ]
+}

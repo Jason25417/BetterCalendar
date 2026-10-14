@@ -77,6 +77,17 @@ test('human form accept retains one command across lost response and service rec
  assert.equal((await f.core.nativeCommands.respondForm(proof,'owner')).state,'applied');
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
 });
+test('observed host metadata is ignored while original confirmation binding and explicit choice remain required',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,1806),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ const proof={request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true},_meta:{hostFixture:'isolated',confirm:false}}};
+ await assert.rejects(f.core.nativeCommands.respondForm({...proof,requestState:proof.requestState+'invalid'},'owner'));
+ await assert.rejects(f.core.nativeCommands.respondForm({...proof,response:{action:'accept',_meta:{confirm:true}}},'owner'));
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).approvedAt,null);
+ assert.equal((await f.core.nativeCommands.respondForm(proof,'owner')).state,'queued');
+ assert.equal((await f.reopen().nativeCommands.respondForm(proof,'owner')).state,'queued');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,1);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+});
 test('form expiry revoked grant and rotated challenge reject stale human replies',async()=>{
  for(const mode of ['expiry','revocation','rotation']){
   const f=fixture(),d=await setup(f),v=request(f,808),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
