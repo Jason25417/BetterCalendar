@@ -66,17 +66,76 @@
   },
   "tests": {
     "service": {
-      "passed": 103,
+      "passed": 104,
       "failed": 0,
       "skipped": 0
     },
-    "log": "/private/tmp/bc-confirmation-35-tests-final.log",
+    "log": "/private/tmp/bc-confirmation-36-tests.log",
     "buildLog": "/private/tmp/bc-confirmation-35-build.log"
   },
   "deviceAcceptance": {
     "MacDotsNative": "not_verified",
     "iPhoneDotsNative": "not_verified",
-    "realExecution": "not_attempted"
+    "realExecution": "not_attempted",
+    "EdgeWeb": "failed_while_pending"
   },
-  "deployment": null
+  "deployment": {
+    "version": 36,
+    "id": "appgdep_6acef4c3de1481918d87db6ebb5205a3",
+    "versionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_36cebfac303c8191914323d8baff06a9",
+    "status": "succeeded",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "hasMcp": true,
+    "updatedAt": "2026-10-14T03:19:42.988344+00:00",
+    "siteSource": "77736c3c6d57e81224e1094af87108290de2b8b7",
+    "verifiedSourceFiles": 154,
+    "differentFiles": []
+  },
+  "cachedTools": {
+    "DotsObservedMissingPreviewTool": true,
+    "nativePreviewPublished": false,
+    "compatibleTool": "record_context",
+    "reservedKind": "bc.confirmation.preview",
+    "contextWrite": false,
+    "nativeWrite": false,
+    "compatiblePreviewPublished": true
+  },
+  "previewSample": {
+    "callId": "research_ecdf6fcb-e21f-4d35-ae1c-bb2ba16bae33",
+    "researchIds": [
+      57892,
+      57893,
+      57894
+    ],
+    "preparedAt": "2026-10-14T03:20:44.069Z",
+    "presentationHash": "195c86cadbf8035891384594d02122ffbb9162a75324a7fbeb4964e1f0e2d27b",
+    "originalState": "cancelled",
+    "operationEffect": "read_only",
+    "beforeSource": {
+      "snapshotEventId": "F51B71F3-FDB4-4C2D-8A44-D5290777BCCE",
+      "observedAt": "2026-10-14T03:20:36.000Z",
+      "receivedAt": "2026-10-14T03:20:41.420Z",
+      "revision": "7b71b18b110eaae3fd922630ab40597647390e460a65415841609e44a7c4370f",
+      "beforeHash": "c275a7593429639563e6599ebbac55412bdb7d6a76ca799cf4eada09fa80f18f"
+    },
+    "edgePendingDOM": {
+      "viewportCSS": {
+        "width": 1912,
+        "height": 888,
+        "DPR": 2
+      },
+      "messageRowWidth": 768,
+      "messageBubbleWidth": 2,
+      "cardHeight": 806,
+      "formWidth": 0,
+      "formHeight": 804,
+      "headerHeight": 2032,
+      "controlsPresent": true,
+      "controlsEnabled": true,
+      "visibleAndUsable": false
+    },
+    "screenshot": "/private/tmp/bc-confirmation-36-pending-form.jpg",
+    "result": "failed_host_layout",
+    "humanClick": "not_performed_by_codex"
+  }
 }
