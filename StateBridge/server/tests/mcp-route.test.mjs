@@ -321,6 +321,7 @@ test('host field diagnostics do not leak values and implicit expiry matches the 
   assert.equal(first.body.result.resultType,'complete');
   assert.equal(first.body.result.structuredContent.state,'awaiting_confirmation');
   assert.equal(first.body.result.structuredContent.approvalUI.channel,'target_device_button');
+  assert.equal(new Ajv({allowUnionTypes:true}).compile(confirmation.nativeCommandOutputSchema)(first.body.result.structuredContent),true);
   assert.equal(first.body.result._meta,undefined); assert.equal(first.body.result.requestState,undefined);
   const again=await f.call('submit_native_command',v);
   assert.equal(again.body.result.structuredContent.requestHash,first.body.result.structuredContent.requestHash);
@@ -337,4 +338,18 @@ test('host field diagnostics do not leak values and implicit expiry matches the 
   assert.equal(rows[1].stage,'response.envelope');assert.equal(rows[1].storedState,'awaiting_confirmation');
   assert.ok(rows[1].responseShape.envelopeFields.some(f=>f.name==='extraField'&&f.type==='string'));
   assert.equal(JSON.stringify(rows).includes('secret-value'),false);
+ });
+
+ test('one pending chat form is also actionable from target BC and late chat cancel cannot undo',async t=>{
+  const f=await fixture(t),v=f.request(400),first=await f.call('submit_native_command',v);
+  assert.equal(first.body.result.resultType,'input_required');
+  const page=await f.core.nativeCommands.approvalList({},f.d);
+  assert.equal(page.commands[0].commandId,v.commandId);
+  const pending=page.commands[0];
+  const accepted=await f.core.nativeCommands.decideFromDevice({commandId:v.commandId,requestHash:pending.requestHash,grantRevision:pending.grantRevision,expectedRevision:null,decision:'accept'},f.d);
+  assert.equal(accepted.state,'queued');
+  const late=await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+  assert.equal(late.body.error.data.current.state,'queued');
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
  });

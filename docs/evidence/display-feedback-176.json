@@ -10,7 +10,8 @@
     "failed": 0,
     "skipped": 0,
     "iOSSimulator": "BUILD SUCCEEDED",
-    "bundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_15-37-44--0400.xcresult"
+    "bundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_15-37-44--0400.xcresult",
+    "serverPassed": 126
   },
   "mac175HumanFeedback": {
     "source": "user_report",
@@ -39,5 +40,28 @@
   "iPhoneHumanUI": "not_verified",
   "realCommandE2E": "not_verified",
   "testFlight": "pending",
-  "dotsMessage": "not_sent"
+  "dotsMessage": "not_sent",
+  "dualEntry": {
+    "required": true,
+    "default": "chat_form",
+    "nativeListSameCommand": true,
+    "nativeIsNotChatFix": true,
+    "chatLayout": "not_fixed_diagnosis_in_progress"
+  },
+  "outputSchemaApprovalUI": "declared_and_regression_validated",
+  "realTestAuthorization": {
+    "titleMarker": "BC 联调测试",
+    "allowed": [
+      "create_test_todo",
+      "update_test_title_or_note"
+    ],
+    "everyStepHumanConfirmation": true,
+    "forbidden": [
+      "existing_real_items",
+      "timer",
+      "calendar",
+      "permissions"
+    ],
+    "activityClassification": "development_test_not_life_activity"
+  }
 }

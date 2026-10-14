@@ -10,7 +10,7 @@ function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.ke
 function text(v,max){return typeof v==='string'&&v.trim().length>0&&v.length<=max;}
 // A transport identity is not user intent. Confirmation secrets go only to the
 // human widget's _meta, never model text, research logs or command bodies.
-export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=86400,confirmationChannel="native"}={}){
+export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=86400,confirmationChannel="chat_form"}={}){
  if(!Number.isSafeInteger(approvalTTLSeconds)||approvalTTLSeconds<300||approvalTTLSeconds>86400)throw new BridgeError("审批默认期限配置必须为300–86400秒",503);
  if(!["native","chat_form"].includes(confirmationChannel))throw new BridgeError("审批渠道配置无效",503);
  const policy=()=>({defaultTTLSeconds:approvalTTLSeconds,maximumTTLSeconds:86400,hostCardLifetime:"unknown_independent_of_service_expiry",defaultConfirmationChannel:confirmationChannel,confirmationChannels:["chat_form","target_device_button"]});

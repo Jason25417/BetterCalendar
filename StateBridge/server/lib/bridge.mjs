@@ -50,7 +50,7 @@ export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch
   }
   if(!addresses)throw new BridgeError("回调没有公开地址");return u.toString();
 }
-export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots(),approvalTTLSeconds=86400,confirmationChannel="native"}={}){
+export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots(),approvalTTLSeconds=86400,confirmationChannel="chat_form"}={}){
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   const research=createResearch(db,time);

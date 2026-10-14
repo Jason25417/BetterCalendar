@@ -10,6 +10,7 @@ export const nativeCommandOutputSchema={
   serverAccepted:{type:'boolean',enum:[true]},deviceApplication:{type:'string',enum:['unknown','device_reported_read','device_reported_applied','device_reported_failed']},
   userSeen:{type:'string',enum:['unknown']},operationEffect:{type:'string',enum:['read_only','mutation']},
   userRequestEvidence:{type:'string',enum:['agent_report_confirmation_required','read_allowed_by_independent_device_grant']},
+  approvalUI:{type:'object',properties:{channel:{type:'string',enum:['target_device_button']},deviceLabel:textSchema,title:textSchema,expiresAt:textSchema,instructions:textSchema},required:['channel','deviceLabel','title','expiresAt','instructions'],additionalProperties:false},
   research:{type:'object',properties:{callId:textSchema,responseHash:textSchema,recorded:{type:'boolean'}},required:['callId','responseHash','recorded'],additionalProperties:false}},
  required:['version','nativeCommandId','commandId','deviceId','requestHash','request','permission','grantRevision','state','acceptedAt','expiresAt','approvedAt','attemptId','result','resultAt','serverAccepted','deviceApplication','userSeen','operationEffect','userRequestEvidence','research']
 };

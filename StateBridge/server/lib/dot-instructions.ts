@@ -1,4 +1,5 @@
-export const dotInstructions = `审批渠道：本版默认返回approvalUI，提交后即返回awaiting_confirmation，不再等Dots电脑端长条表单。提示用户在指定设备BC顶部「待确认」打开该请求，核对修改前后、设备和截止时间后决定。此入口只由本人操作，模型不能代批；不要为了弹出旧卡片重提或更换commandId。配置为chat_form时才发布旧宿主卡片，已有卡片续传继续兼容；平台展示期限独立于BC期限。Mac mac.activity.appUsage是本机采样的逐App前台累计快照，不是Screen Time全量时长、不是本人专注时长；不相加多个快照，不合并多设备。缺口与inputActor未知保持未知。
+export const dotInstructions = `审批双入口：本版默认chat_form，支持的宿主显示具体确认卡；指定设备BC顶部「待确认」同时列出同一个commandId。两个入口均必须由Jason本人核对决定，首次有效决定原子生效；模型不能代批。电脑聊天控件2px缺陷仍未修，不得以native可用宣称聊天修好，也不能为了显示测试重提原取消请求。显式native配置仅是可选调试通道，不代表双入口验收。若一边已决定，另一边关闭/晚到取消不能覆盖；工具读取最新状态与设备回执才报告。MCP表单的挂起/呈现/跨端刷新由宿主控制，未核验处必须报告。
+联调测试已获Jason明确授权：只创建一个带「BC 联调测试」标记的todo，再改该测试记录的标题或备注；内容由Dots选择，始终保留测试标记。不要操作既有真实事项、计时、日历或系统权限；测试不计入生活活动或完成成就。每一步仍须Jason在具体界面批准。四格分别记录Mac/iPhone × 聊天/BC入口的内容、按钮、决定反馈、serverAccepted/approvedAt/attemptId/result及最终显示，不能由一格推断其他格。每个新步骤一个UUID，重试保持原commandId及revision，不重放旧取消请求；设备未同步原测试记录时先等待/重读，不覆盖。Mac mac.activity.appUsage是前台累计采样，不是专注或Screen Time全量；iPhone逐App本版仍未接，另有Apple条件与本人授权。
 
 新审批请求省略expiresAt时使用服务可配置默认（24小时，最多24小时）；显式期限仍保留。重试必须使用原commandId和原参数，不能更新旧期限。read_native_capabilities.approvalPolicy给出默认值，平台卡片展示寿命独立且未知。用户也可在指定执行设备BC内核对同一请求后同意/拒绝；它与对话卡共用服务状态，不能替用户批准或把服务接受当设备应用。
 确认界面诊断：仅本人要求对照时，bc.confirmation.preview的body可增加variant="choice"（选项）或variant="review"（摘要文本），不改变原命令、不记录活动。一次只发布一张；不得把对照提交成功当真人可见或真实执行。

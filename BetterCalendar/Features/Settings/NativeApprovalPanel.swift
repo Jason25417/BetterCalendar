@@ -121,17 +121,47 @@ struct NativeApprovalDecisionBar: View {
     var body: some View {
         if let decision = model.displayTestDecision {
             NativeApprovalDisplayFeedback(decision: decision)
+        } else if let entry = model.selected, entry.state != "awaiting_confirmation" {
+            NativeApprovalResultFeedback(entry: entry, message: model.message)
         } else if let entry = model.selected {
-            HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
                 Button(model.isDisplayTest ? "确认显示测试" : "同意这项改动") { Task { await model.decide("accept") } }
                     .disabled(!model.canDecide(entry, accept: true)).accessibilityIdentifier("bc.approvals.accept")
                 Button(model.isDisplayTest ? "不执行／结束测试" : "拒绝") { Task { await model.decide("decline") } }
                     .disabled(!model.canDecide(entry, accept: false)).accessibilityIdentifier("bc.approvals.decline")
-            }.buttonStyle(.bordered).padding().frame(maxWidth: .infinity).background(.regularMaterial)
+                }.buttonStyle(.bordered)
+                if model.busy { ProgressView("正在回传你的选择…") }
+                if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+            }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.regularMaterial)
         }
     }
 }
 
+struct NativeApprovalResultFeedback: View {
+    let entry: NativeApproval
+    let message: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(entry.stateLabel, systemImage: entry.state == "applied" ? "checkmark.circle" : "info.circle").font(.headline)
+            Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            if let message, message != entry.stateLabel { Text(message).font(.caption).textSelection(.enabled) }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding().background(.regularMaterial)
+            .accessibilityElement(children: .combine).accessibilityIdentifier("bc.approvals.command-result")
+    }
+    private var detail: String {
+        switch entry.state {
+        case "queued": "服务已保存批准，尚无设备应用回执。"
+        case "dispatching": "设备已接手，结果尚未返回；不要重新提交。"
+        case "applied": "设备已回传结果；请核对最终内容，另一端显示仍需单独验证。"
+        case "failed": "请查看失败原因；没有把请求标成成功。"
+        case "unknown": "执行结果尚不确定；请核对原请求，不要换编号重做。"
+        case "declined", "cancelled": "这项请求已关闭，不会自动重新提交。"
+        case "expired": "本请求已到期，不会自动续期或重建。"
+        default: "权限已撤回或改变；不会按旧授权继续执行。"
+        }
+    }
+}
 
 struct NativeApprovalDisplayFeedback: View {
     let decision: NativeApprovalDisplayDecision
