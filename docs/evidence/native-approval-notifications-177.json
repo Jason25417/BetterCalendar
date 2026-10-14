@@ -16,7 +16,7 @@
     "bundle": "/private/tmp/bc177-dd/Logs/Test/Test-BetterCalendar-2026.10.14_17-00-50--0400.xcresult"
   },
   "iOSSimulator": "BUILD SUCCEEDED",
-  "release": "prepared_not_yet_uploaded",
+  "release": "uploaded_both_valid_internal_testing",
   "notificationDelivery": "local_poll_20s_while_app_runs",
   "remoteApprovalPush": false,
   "humanNotificationsAcceptance": {
@@ -48,5 +48,60 @@
       "presentInOldCompleteTodoPage": false,
       "currentSync": "unknown_stale_snapshot"
     }
+  },
+  "sourceCommit": "36e5d87c6aa46324015b2d1748c61bca2c6a7f3d",
+  "appStoreConnect": {
+    "appId": "6787325341",
+    "build": 177,
+    "builds": [
+      {
+        "id": "264188fb-3497-4baa-8fc6-a40b5f6515ce",
+        "platform": "IOS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "f9d7d98f-ddae-4648-a311-42b16fd220e7",
+        "platform": "MAC_OS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ]
+  },
+  "deviceVerification": {
+    "readAt": "2026-10-14T21:17:43.252Z",
+    "userReport": "both_updated_and_opened_prior_notification_authorization_granted",
+    "iPhone": {
+      "observedAt": "2026-10-14T21:16:02Z",
+      "receivedAt": "2026-10-14T21:16:28.073Z",
+      "build": "177",
+      "systemAuthorization": "authorized",
+      "approvalNotificationsEnabled": false
+    },
+    "Mac": {
+      "observedAt": "2026-10-14T21:14:19Z",
+      "build": "175",
+      "freshness": "stale",
+      "currentInstalledAndRunningBuild": "not_verified",
+      "knownApplicationsBundleReadOnly": {
+        "path": "/Applications/BetterCalendar.app",
+        "version": "0.65.19",
+        "build": "176",
+        "notProofOfCurrentRunningProcess": true
+      }
+    },
+    "nextHumanStep": "enable independent BC approval-notification toggle; verify Mac running 177 without repeating OS authorization"
+  },
+  "dotsHandoff": {
+    "sent": true,
+    "tabId": "143501672",
+    "url": "https://chatgpt.com/dots/home",
+    "proof": "/private/tmp/bc177-dots-message.png",
+    "scope": "own BC instruction only; await device readiness then one marked fixture edit at a time; human must approve",
+    "replyRead": false
   }
 }

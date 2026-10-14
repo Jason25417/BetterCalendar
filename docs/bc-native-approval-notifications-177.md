@@ -26,6 +26,12 @@ device.status新增只读approvalNotifications字段，区分本机开关、OS�
 
 真实只读核对：Mac21:01:01Z快照仍有唯一测试待办c5472af0…，revision077306fc…56，未改。iPhone21:01读取的仍是20:16:07Z快照，完整todo/active页未见该项；只能记旧快照缺失，当前同步未知，不新建副本。
 
+## 177发布与设备准备
+
+源码36e5d87双端上传完成，ASC两端均VALID / IN_BETA_TESTING，中文测试说明读回一致；只追加回执不再发包。已向Dots发送限定同一标记测试事项、逐步本人确认的增量验收说明，未读取其他会话正文，未提交或批准新真实命令。
+
+Jason报告两端已更新打开、此前已允许通知。21:17:43Z读回：iPhone为177，OS通知authorized，但本机审批提醒enabled=false；更新不需要重新申请已有系统授权，新功能仍需本人单独开启。Mac最后上传为21:14:19Z的175旧快照，不能据此否定本人更新报告。只读检查/Applications/BetterCalendar.app为176，也不等于当前运行来源；等待177上传确认，不自动替用户重启App或改授权。两端真实通知、决定反馈及同一测试项修改仍待验。
+
 ## 真人验收（攒一批，不能模型代点）
 
 1. 177两端可安装后，本人更新并各打开一次BC；读回build177及通知诊断，并等iPhone最新pool快照确认同一测试项及revision。
@@ -45,4 +51,4 @@ device.status新增只读approvalNotifications字段，区分本机开关、OS�
 
 ## 停止与回滚
 
-点“关闭审批通知”停止新提醒并清理本功能旧提醒；不自动批准/拒绝，不撤回既有具体决定。系统通知设置可另由本人关闭。177回滚176仅回退通知新能力/路由修复，无Model/CloudKit schema变更、无新APNs凭据。已批准/执行请求保持原ID结果，绝不重放。发布与ASC最终证据见evidence/native-approval-notifications-177.json，未上传阶段不称可安装。
+点“关闭审批通知”停止新提醒并清理本功能旧提醒；不自动批准/拒绝，不撤回既有具体决定。系统通知设置可另由本人关闭。177回滚176仅回退通知新能力/路由修复，无Model/CloudKit schema变更、无新APNs凭据。已批准/执行请求保持原ID结果，绝不重放。双端177已可内测安装；发布与ASC最终证据见evidence/native-approval-notifications-177.json。
