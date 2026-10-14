@@ -21,6 +21,10 @@ import CryptoKit
     #if os(macOS)
     private var workspaceObservers: [NSObjectProtocol] = []
     private var activityTimer: Timer?
+    private var workspaceSuspended = false
+    private var appUsage: MacAppUsage = {
+        guard let data = UserDefaults.standard.data(forKey: "dotStateBridge.macAppUsage.v1"), let v = try? JSONDecoder().decode(MacAppUsage.self, from: data) else { return MacAppUsage() }; return v
+    }()
     private var lastActivity: BridgeJSON?
     private var lastBrowserFailure: BridgeJSON?
     private let browserReader: any StateBridgeBrowserReading = AppleScriptBridgeBrowserReader()
@@ -31,6 +35,7 @@ import CryptoKit
         if enabled { start() } else { timer?.invalidate(); timer = nil
             networkMonitor?.cancel(); networkMonitor = nil
             #if os(macOS)
+            appUsage.stop(); workspaceSuspended = false
             activityTimer?.invalidate(); activityTimer = nil
             workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }; workspaceObservers.removeAll()
             #endif
@@ -56,14 +61,21 @@ import CryptoKit
         }
         #if os(macOS)
         if workspaceObservers.isEmpty {
-            for event in [NSWorkspace.didActivateApplicationNotification,NSWorkspace.didWakeNotification,NSWorkspace.willSleepNotification] {
+            for event in [NSWorkspace.didActivateApplicationNotification,NSWorkspace.didWakeNotification,NSWorkspace.willSleepNotification,NSWorkspace.screensDidSleepNotification,NSWorkspace.screensDidWakeNotification] {
                 workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:event,object:nil,queue:.main) { note in
                     Task { @MainActor in
                         guard StateBridgeCollector.shared.enabled else { return }
-                        if note.name == NSWorkspace.willSleepNotification {
+                        if note.name == NSWorkspace.willSleepNotification || note.name == NSWorkspace.screensDidSleepNotification {
+                            StateBridgeCollector.shared.sampleActivity(force:true)
+                            StateBridgeCollector.shared.appUsage.stop()
+                            StateBridgeCollector.shared.workspaceSuspended = true
                             StateBridgeClient.shared.emit("device.status",value:.object(["availability":.string("sleeping")]))
                             await StateBridgeClient.shared.uploadAndFlush()
-                        } else if note.name == NSWorkspace.didWakeNotification { await StateBridgeCollector.shared.recover() }
+                        } else if note.name == NSWorkspace.didWakeNotification || note.name == NSWorkspace.screensDidWakeNotification {
+                            StateBridgeCollector.shared.workspaceSuspended = false
+                            StateBridgeCollector.shared.appUsage.stop()
+                            await StateBridgeCollector.shared.recover()
+                        }
                         else { StateBridgeCollector.shared.sampleActivity(force:true) }
                     }
                 })
@@ -143,19 +155,25 @@ import CryptoKit
     }
     #if os(macOS)
     private func sampleActivity(force: Bool = false) {
-        guard enabled, !TestHost.isActive else { return }
-        let app = NSWorkspace.shared.frontmostApplication
+        guard enabled, !workspaceSuspended, !TestHost.isActive else { return }
+        let at = Date(), app = NSWorkspace.shared.frontmostApplication
+        appUsage.sample(at: at, uptime: ProcessInfo.processInfo.systemUptime, bundle: app?.bundleIdentifier, name: app?.localizedName)
         // .null measures null events, not keyboard/mouse input. The system's
         // any-input sentinel includes synthesized input: actor remains unknown.
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState,eventType:CGEventType(rawValue:UInt32.max)!)
         let previousBundle: BridgeJSON? = { if case let .object(fields) = lastActivity { return fields["bundleId"] }; return nil }()
-        let value = BridgeInputActivity.value(bundleID: app?.bundleIdentifier, app: app?.localizedName,
+        var value = BridgeInputActivity.value(bundleID: app?.bundleIdentifier, app: app?.localizedName,
             idleSeconds: idle, foregroundChanged: previousBundle != nil && previousBundle != .text(app?.bundleIdentifier))
         let semanticChanged: Bool = {
             guard case let .object(current) = value, case let .object(previous) = lastActivity else { return true }
             return ["bundleId", "idle", "activityActor"].contains { current[$0] != previous[$0] }
         }()
-        if force || semanticChanged { StateBridgeClient.shared.emit("mac.activity",value:value); lastActivity = value }
+        if case var .object(fields) = value { fields["appUsage"] = appUsage.snapshot(at: at); value = .object(fields) }
+        if force || semanticChanged {
+            do { UserDefaults.standard.set(try JSONEncoder().encode(appUsage), forKey: "dotStateBridge.macAppUsage.v1") }
+            catch { DevLog.shared.warn("StateBridge", "Mac App累计时长本机保存失败；重启后的覆盖可能缺失") }
+            StateBridgeClient.shared.emit("mac.activity",value:value,observedAt:at); lastActivity = value
+        }
     }
     func chooseHistoryFolder() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false

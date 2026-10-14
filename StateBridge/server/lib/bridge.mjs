@@ -50,12 +50,12 @@ export async function validateCallback(value,fetcher=(...args)=>globalThis.fetch
   }
   if(!addresses)throw new BridgeError("回调没有公开地址");return u.toString();
 }
-export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots(),approvalTTLSeconds=86400}={}){
+export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThis.fetch(...args),decisionPolicy=new ForwardAllToDots(),approvalTTLSeconds=86400,confirmationChannel="native"}={}){
   const time=()=>now().toISOString(),q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first(),all=async(sql,...args)=>(await q(sql,...args).all()).results;
   const research=createResearch(db,time);
   const taskApplication=createTaskApplication(db,time);
-  const nativeCommands=createNativeCommands(db,time,taskCommand,{approvalTTLSeconds});
+  const nativeCommands=createNativeCommands(db,time,taskCommand,{approvalTTLSeconds,confirmationChannel});
   async function registerDevice(v){
     const id=str(v.id,"设备 ID",80),label=str(v.label,"设备名",100);
     if(!Array.isArray(v.scopes)||!v.scopes.length||v.scopes.some(s=>typeof s!=="string"||!/^[a-z][a-z0-9_.-]{1,60}$/.test(s)))throw new BridgeError("来源范围无效");

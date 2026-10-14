@@ -96,10 +96,26 @@ import AppKit
         await inbox.refresh(); await inbox.refresh(); #expect(notifier.sent == [service.id])
         inbox.disableNotifications(); #expect(!inbox.notificationsEnabled)
     }
+    @Test func displayPreviewCannotReachRealExecutorOrRequestNotificationPermission() async throws {
+        let inbox = NativeApprovalPreview.make()
+        await inbox.refresh()
+        let entry = try #require(inbox.pending.first)
+        await inbox.open(entry.id)
+        let selected = try #require(inbox.selected)
+        #expect(inbox.isDisplayTest && inbox.canDecide(selected, accept: true))
+        await inbox.decide("accept")
+        let result = try NativeRemoteJSON.object(try #require(inbox.selected?.result))
+        #expect(result["executed"] == .bool(false) && result["operationEffect"] == .string("read_only_display"))
+        #expect(inbox.retryCommandIds.isEmpty && !inbox.notificationsEnabled)
+        let denied = NativeApprovalPreview.make(); await denied.refresh(); await denied.open(entry.id); await denied.decide("decline")
+        #expect(denied.selected?.state == "declined")
+    }
     #if os(macOS)
     @Test func approvalLayoutNarrowAndWidePreviewWithPinnedControls() async throws {
         let (service, disk, prefs) = try fixture(); service.showUpdate = true
         let inbox = model(service, disk, prefs); await inbox.refresh(); await inbox.open(service.id)
+        let entry = try #require(inbox.selected)
+        #expect(inbox.canDecide(entry, accept: true) && inbox.canDecide(entry, accept: false))
         for width in [390.0, 620.0] {
             // ImageRenderer cannot capture AppKit-backed scroll containers.
             // Use an offscreen test-only host; never order it in front.

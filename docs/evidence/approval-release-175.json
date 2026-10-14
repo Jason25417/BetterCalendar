@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "nativeVersion": "0.65.18",
+  "build": 175,
+  "serviceSourceCommit": "f6a193e0188b51b997804e2579657c2858f5d1e9",
+  "deploymentId": "appgdep_6acfd005ba048191b448d757d4614e4c",
+  "serviceStatus": "pending",
+  "userAuthorization": "current_turn_release_and_Dots_incremental_tests",
+  "tests": {
+    "serverPassed": 125,
+    "macPassed": 360,
+    "failed": 0,
+    "skipped": 0,
+    "iOSSimulator": "BUILD SUCCEEDED",
+    "resultBundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_14-54-08--0400.xcresult"
+  },
+  "defaultConfirmationChannel": "native",
+  "defaultTTLSeconds": 86400,
+  "DotsHostLayoutFixed": false,
+  "nativeRealMacAndPhoneAcceptance": "not_yet_verified",
+  "originalHistoricalMissingFields": "unknown_not_reconstructed",
+  "iPhonePerAppDuration": "not_integrated_additional_Apple_profile_entitlement_and_consent_required",
+  "MacPerAppDuration": "sampled_foreground_cumulative_snapshot_under_existing_mac.activity_scope",
+  "realTasksTimersOrRemindersModified": false,
+  "permissionsExpanded": false,
+  "notificationOptIn": "off_by_default_requires_separate_human_choice",
+  "displayPreview": "in_memory_only_no_production_credentials_no_executor",
+  "testFlight": "not_uploaded_yet",
+  "dotsMessage": "not_sent_yet"
+}

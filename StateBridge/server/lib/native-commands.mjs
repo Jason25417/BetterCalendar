@@ -10,9 +10,10 @@ function keys(v,allowed){if(!v||typeof v!=='object'||Array.isArray(v)||Object.ke
 function text(v,max){return typeof v==='string'&&v.trim().length>0&&v.length<=max;}
 // A transport identity is not user intent. Confirmation secrets go only to the
 // human widget's _meta, never model text, research logs or command bodies.
-export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=86400}={}){
+export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=86400,confirmationChannel="native"}={}){
  if(!Number.isSafeInteger(approvalTTLSeconds)||approvalTTLSeconds<300||approvalTTLSeconds>86400)throw new BridgeError("审批默认期限配置必须为300–86400秒",503);
- const policy=()=>({defaultTTLSeconds:approvalTTLSeconds,maximumTTLSeconds:86400,hostCardLifetime:"unknown_independent_of_service_expiry",confirmationChannels:["chat_form","target_device_button"]});
+ if(!["native","chat_form"].includes(confirmationChannel))throw new BridgeError("审批渠道配置无效",503);
+ const policy=()=>({defaultTTLSeconds:approvalTTLSeconds,maximumTTLSeconds:86400,hostCardLifetime:"unknown_independent_of_service_expiry",defaultConfirmationChannel:confirmationChannel,confirmationChannels:["chat_form","target_device_button"]});
  const resolved=(v,r=null)=>v.expiresAt===undefined?{...v,expiresAt:r?.expires_at??new Date(Date.parse(time())+approvalTTLSeconds*1000).toISOString()}:v;
  const q=(sql,...a)=>db.prepare(sql).bind(...a),one=(sql,...a)=>q(sql,...a).first();
  async function device(id){const d=await one('SELECT * FROM devices WHERE id=?',id);if(!d||d.revoked_at||!JSON.parse(d.scopes).includes('user.context'))throw new BridgeError('指定设备权限已撤回或不存在',403);return d;}
@@ -115,7 +116,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   return {value,approval};
  }
  function conflict(message,value){const error=new BridgeError(message,409);error.current=value;return error;}
- async function decide(r,decision,actor){
+ async function decide(r,decision,actor,resolution="explicit_button"){
   const current=await view(r);
   if(decision==='accept'&&r.approved_at)return current;
   const state=decision==='accept'?'queued':decision==='decline'?'declined':'cancelled';
@@ -132,7 +133,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   // approval; the first competing decision wins the conditional UPDATE.
   await db.batch([
    q("UPDATE native_requests SET state=?,approved_at=? WHERE command_id=? AND owner_id=? AND request_hash=? AND state='awaiting_confirmation' AND grant_revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE g.device_id=? AND g.revision=? AND g.expires_at>? AND d.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=?))",state,decision==='accept'?at:null,r.command_id,r.owner_id,r.request_hash,r.grant_revision,at,r.device_id,r.grant_revision,at,r.permission),
-   q("INSERT OR IGNORE INTO research_log(call_id,kind,actor,created_at,body) SELECT ?,?,?,?,? WHERE changes()>0",`native_decision_${r.command_id}`,'native_approval_decision',actor,at,canonical({version:1,commandId:r.command_id,requestHash:r.request_hash,grantRevision:r.grant_revision,decision,state,source:actor.startsWith('device:')?'native_button':'chat_confirmation',userGesture:'transport_report_not_independent_observation'}))
+   q("INSERT OR IGNORE INTO research_log(call_id,kind,actor,created_at,body) SELECT ?,?,?,?,? WHERE changes()>0",`native_decision_${r.command_id}`,'native_approval_decision',actor,at,canonical({version:1,commandId:r.command_id,requestHash:r.request_hash,grantRevision:r.grant_revision,decision,state,priorStoredState:r.state,priorEffectiveState:current.state,resolution,producer:'authenticated_transport',producerGesture:'not_observed',cancelCause:'unknown',source:actor.startsWith('device:')?'native_button':'chat_confirmation',userGesture:'transport_report_not_independent_observation'}))
   ]);
   const fresh=await row(r.command_id),value=await view(fresh);
   if(decision!=='accept'&&['expired','revoked'].includes(value.state))return value;
@@ -154,22 +155,23 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
  }
  async function confirmationIdentity(request,owner){
   const r=await one('SELECT * FROM native_requests WHERE command_id=? AND owner_id=?',request.commandId,owner);
-  return {requestHash:r?.request_hash??null,candidateRequestHash:await sha(canonical(resolved(request,r)))};
+  return {storedState:r?.state??null,effectiveState:r?(await view(r)).state:null,expiresAt:r?.expires_at??null,approvedAt:r?.approved_at??null,requestHash:r?.request_hash??null,candidateRequestHash:await sha(canonical(resolved(request,r)))};
  }
  async function respondForm({request,originTool,requestState,response},owner){
-  if(!['submit_native_command','task_command'].includes(originTool)||!text(requestState,200)||!requestState.startsWith(`bc-form-v1:${originTool}:`))throw new BridgeError('原生表单确认身份无效',403);
+  if(!['submit_native_command','task_command'].includes(originTool)||!text(requestState,200)||!requestState.startsWith(`bc-form-v1:${originTool}:`))throw Object.assign(new BridgeError('原生表单确认身份无效',403),{confirmationStage:'binding.origin_or_challenge_format'});
   const r=await row(request.commandId,owner),requestHash=await sha(canonical(resolved(request,r)));
-  if(r.request_hash!==requestHash||await sha(requestState)!==r.approval_hash)throw new BridgeError('确认原文、设备或凭据已改变',403);
+  if(r.request_hash!==requestHash)throw Object.assign(new BridgeError('确认原文或设备已改变',403),{confirmationStage:'binding.request_hash'});
+  if(await sha(requestState)!==r.approval_hash)throw Object.assign(new BridgeError('确认凭据已改变',403),{confirmationStage:'binding.challenge'});
   response=normalizeFormResponse(response);
   if(response.action==='accept'){
    if(typeof response.content.confirm!=='boolean')throw new BridgeError('原生确认需要本人明确选择');
    if(response.content.confirm===true){
-    return approve({commandId:r.command_id,requestHash,token:requestState},owner);
+    try{return await approve({commandId:r.command_id,requestHash,token:requestState},owner);}catch(e){e.confirmationStage??='authorization.grant_expiry_or_decision';throw e;}
    }
   }else if(response.content!==undefined)throw new BridgeError('取消确认不能混入确认内容');
   // Host cancellation is not proof of a user gesture and cannot undo another
   // channel's decision. Same decisions are idempotent; opposites return state.
-  return decide(r,response.action==='decline'?'decline':'cancel',`owner:${owner}`);
+  try{return await decide(r,response.action==='decline'?'decline':'cancel',`owner:${owner}`,response.action==='accept'?'host_accept_unchecked':response.action==='decline'?'host_decline':'host_cancel');}catch(e){e.confirmationStage??='decision.transition';throw e;}
  }
  async function approvalStatus(v,d){
   keys(v,['commandId']);await device(d.id);const r=await row(v.commandId);

@@ -10,22 +10,23 @@ import * as commands from '../lib/native-commands.mjs';
 import * as capabilities from '../lib/mcp-client-capabilities.mjs';
 import * as form from '../lib/native-form-confirmation.mjs';
 import * as research from '../lib/research.mjs';
+import * as presentation from '../lib/confirmation-presentation.mjs';
 import * as formResponse from '../lib/native-form-response.mjs';
 const ts=createRequire(import.meta.url)('typescript');
 const Ajv=createRequire(import.meta.url)('ajv');
 const routeSource=ts.transpileModule(readFileSync(new URL('../app/mcp/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const meta={'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{elicitation:{}}};
 const uuid=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
-async function fixture(t,{fetcher=()=>{throw Error('test forbids network');}}={}){
+async function fixture(t,{confirmationChannel='chat_form',fetcher=()=>{throw Error('test forbids network');}}={}){
  const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  let failReturned=false,beforeRecord=null,failKind=null,now=new Date('2026-10-13T10:00:00.000Z');
  const prepare=sql=>{let args=[];return {bind(...v){args=v;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return {results:sqlite.prepare(sql).all(...args)};},run(){if(sql.startsWith('INSERT INTO research_log')){if(beforeRecord&&args[1]===beforeRecord.kind){const hook=beforeRecord;beforeRecord=null;hook.fn();}if(args[1]===failKind){failKind=null;throw Error('isolated audit persistence failure');}if(failReturned&&args[1]==='call_returned'){failReturned=false;throw Error('isolated persistence failure');}}return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const out=ops.map(op=>op.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
- const reopen=()=>bridge.createBridge(db,{now:()=>now,fetcher});
+ const reopen=()=>bridge.createBridge(db,{now:()=>now,fetcher,confirmationChannel});
  let core=reopen();const logs=[];
- const modules={'@/lib/service':{service:()=>core},'@/lib/bridge.mjs':bridge,'@/lib/dot-instructions':{dotInstructions:'isolated route fixture'},'@/lib/native-confirmation.mjs':confirmation,'@/lib/native-commands.mjs':commands,'@/lib/mcp-client-capabilities.mjs':capabilities,'@/lib/native-form-confirmation.mjs':form,'@/lib/research.mjs':research,'@/lib/native-form-response.mjs':formResponse};
- const exports={};vm.runInNewContext(routeSource,{exports,require(name){assert.ok(modules[name],`unexpected import ${name}`);return modules[name];},Response,TextEncoder,console:{info(...args){logs.push(args);},warn(...args){logs.push(args);}}});
+ const modules={'@/lib/confirmation-presentation.mjs':presentation,'@/lib/service':{service:()=>core},'@/lib/bridge.mjs':bridge,'@/lib/dot-instructions':{dotInstructions:'isolated route fixture'},'@/lib/native-confirmation.mjs':confirmation,'@/lib/native-commands.mjs':commands,'@/lib/mcp-client-capabilities.mjs':capabilities,'@/lib/native-form-confirmation.mjs':form,'@/lib/research.mjs':research,'@/lib/native-form-response.mjs':formResponse};
+ const exports={};vm.runInNewContext(routeSource,{exports,require(name){assert.ok(modules[name],`unexpected import ${name}`);return modules[name];},Response,TextEncoder,crypto,console:{info(...args){logs.push(args);},warn(...args){logs.push(args);}}});
  let rpcId=0;
  const rpc=async(method,params,owner='fixture-owner')=>{
   const response=await exports.POST(new Request('https://fixture.invalid/mcp',{method:'POST',headers:{'Content-Type':'application/json',...(owner?{'oai-authenticated-user-id':owner}:{})},body:JSON.stringify({jsonrpc:'2.0',id:++rpcId,method,params})}));
@@ -313,3 +314,27 @@ test('host field diagnostics do not leak values and implicit expiry matches the 
  const accepted=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true},_meta:{credential:'isolated-secret-value'}}}});
  assert.equal(accepted.body.result.structuredContent.state,'queued');assert.equal(accepted.body.result.structuredContent.requestHash,entry.body.requestHash);
 });
+
+ test('default native entry completes without a host popup or secret and repeat cannot approve',async t=>{
+  const f=await fixture(t,{confirmationChannel:'native'}),v=f.request(399);
+  const first=await f.call('submit_native_command',v);
+  assert.equal(first.body.result.resultType,'complete');
+  assert.equal(first.body.result.structuredContent.state,'awaiting_confirmation');
+  assert.equal(first.body.result.structuredContent.approvalUI.channel,'target_device_button');
+  assert.equal(first.body.result._meta,undefined); assert.equal(first.body.result.requestState,undefined);
+  const again=await f.call('submit_native_command',v);
+  assert.equal(again.body.result.structuredContent.requestHash,first.body.result.structuredContent.requestHash);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+  assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ });
+ test('callback diagnostics correlate phases and identify rejected field without secret values',async t=>{
+  const f=await fixture(t),v=f.request(398),first=await f.call('submit_native_command',v);
+  const out=await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true},extraField:'secret-value'}}});
+  assert.ok(out.body.error);
+  const rows=f.sqlite.prepare("SELECT body FROM research_log WHERE kind LIKE 'native_confirmation_response_%' ORDER BY id").all().map(r=>JSON.parse(r.body));
+  assert.equal(rows.length,2);assert.equal(rows[0].callbackTraceId,rows[1].callbackTraceId);
+  assert.equal(rows[1].stage,'response.envelope');assert.equal(rows[1].storedState,'awaiting_confirmation');
+  assert.ok(rows[1].responseShape.envelopeFields.some(f=>f.name==='extraField'&&f.type==='string'));
+  assert.equal(JSON.stringify(rows).includes('secret-value'),false);
+ });

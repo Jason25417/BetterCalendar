@@ -11,6 +11,8 @@ struct NativeApprovalContent: View {
 struct NativeApprovalPanel: View {
     @Bindable var model: NativeApprovalInbox
     var pinnedActions = false
+    @State private var showPreview = false
+    @State private var previewModel: NativeApprovalInbox?
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -33,14 +35,31 @@ struct NativeApprovalPanel: View {
             }
             if let entry = model.selected { NativeApprovalDetail(model: model, entry: entry, pinnedActions: pinnedActions) }
             Divider()
-            if model.notificationsEnabled {
+            if !model.isDisplayTest {
+                Button("只测审批显示（不会执行）") { previewModel = NativeApprovalPreview.make(); showPreview = true }
+            }
+            if !model.isDisplayTest && model.notificationsEnabled {
                 Button("关闭审批通知") { model.disableNotifications() }
-            } else {
+            } else if !model.isDisplayTest {
                 Button("单独允许新审批通知") { Task { await model.enableNotifications() } }
             }
             Text("通知默认关闭，单独取得系统授权后才启用；点通知仅打开详情，不会批准或执行。后台到达时间取决于设备联网与系统调度。").font(.caption).foregroundStyle(.secondary)
             if let message = model.message { Text(message).font(.caption).textSelection(.enabled) }
-        }.buttonStyle(.bordered).task { await model.refresh() }
+        }.frame(maxWidth: .infinity, alignment: .leading).buttonStyle(.bordered).task { await model.refresh() }
+        .sheet(isPresented: $showPreview) {
+            if let previewModel {
+                NavigationStack {
+                    NativeApprovalContent(model: previewModel).navigationTitle("只读审批显示测试")
+                        .toolbar { Button("关闭") { showPreview = false } }
+                }
+                #if os(iOS)
+                .presentationDetents([.large])
+                #endif
+                #if os(macOS)
+                .frame(minWidth: 480, idealWidth: 620, minHeight: 420, idealHeight: 650)
+                #endif
+            }
+        }
     }
 }
 
@@ -53,7 +72,7 @@ private struct NativeApprovalDetail: View {
             Divider()
             Text(entry.title).font(.title3).textSelection(.enabled)
             Text("设备：" + entry.deviceLabel)
-            Text(entry.stateLabel).foregroundStyle(.secondary)
+            Text(model.isDisplayTest ? (entry.state == "awaiting_confirmation" ? "仅测试显示；所有选择均不执行操作" : "显示测试已返回；没有改事项或计时") : entry.stateLabel).foregroundStyle(.secondary)
             Text("确认截止：" + entry.expiresAt.formatted())
             Text("操作：" + actionLabel)
             ForEach(changes, id: \.0) { key, after in
@@ -102,10 +121,10 @@ struct NativeApprovalDecisionBar: View {
     var body: some View {
         if let entry = model.selected {
             HStack {
-                Button("同意这项改动") { Task { await model.decide("accept") } }
-                    .disabled(!model.canDecide(entry, accept: true))
-                Button("拒绝") { Task { await model.decide("decline") } }
-                    .disabled(!model.canDecide(entry, accept: false))
+                Button(model.isDisplayTest ? "确认显示测试" : "同意这项改动") { Task { await model.decide("accept") } }
+                    .disabled(!model.canDecide(entry, accept: true)).accessibilityIdentifier("bc.approvals.accept")
+                Button(model.isDisplayTest ? "不执行／结束测试" : "拒绝") { Task { await model.decide("decline") } }
+                    .disabled(!model.canDecide(entry, accept: false)).accessibilityIdentifier("bc.approvals.decline")
             }.buttonStyle(.bordered).padding().frame(maxWidth: .infinity).background(.regularMaterial)
         }
     }

@@ -6,6 +6,7 @@ import { nativeUUIDSchema } from "@/lib/native-commands.mjs";
 import { clientConfirmationCapabilities } from "@/lib/mcp-client-capabilities.mjs";
 import { supportsNativeForm, nativeFormResponse, nativeFormInputShape, finalizeNativeForm, previewNativeForm } from "@/lib/native-form-confirmation.mjs";
 import { safeArguments } from "@/lib/research.mjs";
+import {confirmationPresentation} from "@/lib/confirmation-presentation.mjs";
 import {formResponseShape} from "@/lib/native-form-response.mjs";
 export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
@@ -13,7 +14,7 @@ const string={type:"string"};
 const tools=[
   {name:"preview_native_confirmation",description:"仅在用户要求检查确认界面时，用已有commandId重现只读显示测试。确认/取消均不执行、不重建原操作，不修改事项、计时、权限或活动记录。原请求保持原状态。不是重新提交失败操作的入口；不得自动重复调用。",inputSchema:object({commandId:nativeUUIDSchema},["commandId"]),annotations:{readOnlyHint:true,destructiveHint:false}},
   {name:"read_native_capabilities",description:"查看用户在原生设置主动启用的指定设备、事项、独立共享计时、单次闹钟及独立日记读取/文字修改权限和期限。能力启用不证明设备在线或系统授权仍有效；每次改动仍需对话内确认。",inputSchema:object(),annotations:{readOnlyHint:true}},
-  {name:"submit_native_command",outputSchema:nativeCommandOutputSchema,description:"按用户明确请求提出BC事项、共享计时、日记文字或单次原生闹钟改动。固定UUID格式commandId和指定设备；用户需在对话中的具体改动卡片点确认，再交设备执行。模型写用户同意无效。服务接受不等于设备完成；用read_native_command_status核对。item创建仅todo；长期事项只放下不删。日记只create/update正文、心情和标签，entryDate只用于创建，修改前read_native_journal取得revision，照片/日期/格式不改，推断不能写成用户感受。timer支持start/pause/resume/finish，与BC按钮共用session；非start需要sessionId与整数expectedRevision，start可带relatedRecordId。默认计时按用户按钮确认的BC服务时刻生效，仅明确补记过去时间时传effectiveAt并在卡片显示让用户确认；设备离线不自动暂停；结束计时不完成事项。所有请求时间使用UTC毫秒ISO格式。",inputSchema:object({version:{type:"integer",enum:[1]},commandId:nativeUUIDSchema,deviceId:string,kind:{type:"string",enum:["item","alarm","journal","timer"]},action:{type:"string",enum:["create","update","delete","restore","schedule","cancel","start","pause","resume","finish"]},recordId:nativeUUIDSchema,sessionId:string,relatedRecordId:string,effectiveAt:string,expectedRevision:{type:["string","integer"]},patch:object({title:string,note:string,status:{type:"string",enum:["active","done","shelved"]},body:string,mood:{type:["string","null"]},tags:{type:"array",items:string,maxItems:30}}),entryDate:string,fireAt:string,title:string,alarmId:nativeUUIDSchema,occurredAt:string,expiresAt:string,userRequest:string},["version","commandId","deviceId","kind","action","occurredAt","userRequest"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
+  {name:"submit_native_command",outputSchema:nativeCommandOutputSchema,description:"按用户明确请求提出BC事项、共享计时、日记文字或单次原生闹钟改动。固定UUID格式commandId和指定设备；默认返回approvalUI，用户需在指定设备BC顶部待确认页核对并同意；配置为chat_form才用对话卡片，再交设备执行。模型写用户同意无效。服务接受不等于设备完成；用read_native_command_status核对。item创建仅todo；长期事项只放下不删。日记只create/update正文、心情和标签，entryDate只用于创建，修改前read_native_journal取得revision，照片/日期/格式不改，推断不能写成用户感受。timer支持start/pause/resume/finish，与BC按钮共用session；非start需要sessionId与整数expectedRevision，start可带relatedRecordId。默认计时按用户按钮确认的BC服务时刻生效，仅明确补记过去时间时传effectiveAt并在卡片显示让用户确认；设备离线不自动暂停；结束计时不完成事项。所有请求时间使用UTC毫秒ISO格式。",inputSchema:object({version:{type:"integer",enum:[1]},commandId:nativeUUIDSchema,deviceId:string,kind:{type:"string",enum:["item","alarm","journal","timer"]},action:{type:"string",enum:["create","update","delete","restore","schedule","cancel","start","pause","resume","finish"]},recordId:nativeUUIDSchema,sessionId:string,relatedRecordId:string,effectiveAt:string,expectedRevision:{type:["string","integer"]},patch:object({title:string,note:string,status:{type:"string",enum:["active","done","shelved"]},body:string,mood:{type:["string","null"]},tags:{type:"array",items:string,maxItems:30}}),entryDate:string,fireAt:string,title:string,alarmId:nativeUUIDSchema,occurredAt:string,expiresAt:string,userRequest:string},["version","commandId","deviceId","kind","action","occurredAt","userRequest"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"read_native_journal",outputSchema:nativeCommandOutputSchema,description:"从指定BC设备读取保存的日记文字及照片引用，需要独立journal.read权限。固定UUID格式commandId（不可用任务名或日期拼接）；首次返回queued等设备，之后read_native_command_status取实际页结果。读取不需写入确认，不改日记/计时/通知；query时间是entry.date的[start,end)。返回正文完整、hasMore时相同范围加nextCursor重新请求一页并用新的commandId；版本改变必须重读第一页。照片二进制未读取，不能称看过图片。设备离线或失败不是没有日记。",inputSchema:object({commandId:nativeUUIDSchema,deviceId:string,query:object({start:string,end:string,text:string,includeTrash:{type:"boolean"},limit:{type:"integer",minimum:1,maximum:50},cursor:string})},["commandId","deviceId"]),annotations:{readOnlyHint:true,idempotentHint:true}},
   {name:"read_native_command_status",outputSchema:nativeCommandOutputSchema,description:"核对单次BC原生操作真实进展和设备回执。未确认/等待设备/执行中/结果未知不等于成功。不重新执行，不换commandId。",inputSchema:object({commandId:nativeUUIDSchema},["commandId"]),annotations:{readOnlyHint:true},_meta:{ui:{visibility:["model","app"]},"openai/widgetAccessible":true}},
   {name:"approve_native_command",outputSchema:nativeCommandOutputSchema,description:"仅由对话确认卡片的用户按钮提交具体请求确认；需要widget-only凭据。模型不能批准。",inputSchema:object({commandId:nativeUUIDSchema,requestHash:string,token:string},["commandId","requestHash","token"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true},_meta:{ui:{visibility:["app"]},"openai/widgetAccessible":true,"openai/visibility":"private"}},
@@ -24,7 +25,7 @@ const tools=[
   {name:"read_changes",description:"按游标分页读取完整变化；按发生时间理解补传。响应大小有界，hasMore时继续nextCursor；可设throughId只读到事件的throughChangeId，避免追逐新变化而一直不能结束本批。",inputSchema:object({afterId:{type:"integer",minimum:0},limit:{type:"integer",minimum:1,maximum:100},throughId:{type:"integer",minimum:0}}),annotations:{readOnlyHint:true}},
   {name:"read_observation_history",description:"按 sourceKey 和发生时间查询一个来源的原始历史；保留未知版本和字段，区分发生与接收时间。每页最多100条，hasMore时以相同范围及nextCursor继续；补传后复核需重读完整时间窗。不能把历史当实时状态。",inputSchema:object({sourceKey:string,from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:string},["sourceKey"]),annotations:{readOnlyHint:true}},
   {name:"read_instructions",description:"读取用户已批准的个人状态助手行为约定。",inputSchema:object(),annotations:{readOnlyHint:true}},
-  {name:"task_command",outputSchema:nativeCommandOutputSchema,description:"共享计时的兼容提案入口，与submit_native_command(kind=timer)完全相同，不直接执行。需要主动timer权限、指定设备和Dots具体卡片确认；不能把provenance=user或模型宣称同意当授权。BC按确认时刻计时；保持同commandId并核对session/revision，结束计时不完成事项。建议使用统一submit_native_command入口。",inputSchema:object({commandId:nativeUUIDSchema,deviceId:string,action:{type:"string",enum:["start","pause","resume","finish"]},title:string,sessionId:string,expectedRevision:{type:"integer",minimum:1},occurredAt:string,expiresAt:string,userRequest:string,relatedRecordId:string,effectiveAt:string},["commandId","deviceId","action","occurredAt","userRequest"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
+  {name:"task_command",outputSchema:nativeCommandOutputSchema,description:"共享计时的兼容提案入口，与submit_native_command(kind=timer)完全相同，不直接执行。需要主动timer权限、指定设备和本人具体确认（默认BC待确认页面）；不能把provenance=user或模型宣称同意当授权。BC按确认时刻计时；保持同commandId并核对session/revision，结束计时不完成事项。建议使用统一submit_native_command入口。",inputSchema:object({commandId:nativeUUIDSchema,deviceId:string,action:{type:"string",enum:["start","pause","resume","finish"]},title:string,sessionId:string,expectedRevision:{type:"integer",minimum:1},occurredAt:string,expiresAt:string,userRequest:string,relatedRecordId:string,effectiveAt:string},["commandId","deviceId","action","occurredAt","userRequest"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
   {name:"read_task_history",description:"分页读计时历史。origin=shared（默认）读共享会话；origin=legacy并指定deviceId读新版BC发布的旧SwiftData会话副本，不迁移或创建共享会话。共享空页不代表没有旧记录，两种来源同窗分别查，不自动相加或合并两端；旧设备目录未支持会明确报告。hasMore时保持来源/设备/时间窗及nextCursor读完。",inputSchema:object({origin:{type:"string",enum:["shared","legacy"]},deviceId:string,from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string"}}),annotations:{readOnlyHint:true}},
   {name:"read_task_commands",description:"按服务端保存时间分页读取BC计时原始操作回执与独立deviceReceipts；可按sessionId筛选，读到hasMore=false。设备回执只报告本机计时缓存保存版本，不证明屏幕/灵动岛呈现或人看到。缺失仍unknown，不会重放操作或修改记录。",inputSchema:object({sessionId:{type:"string"},from:{type:"string",format:"date-time"},before:{type:"string",format:"date-time"},limit:{type:"integer",minimum:1,maximum:100},cursor:{type:"string"}}),annotations:{readOnlyHint:true}},
   {name:"acknowledge_batch",description:"仅在读取最新状态、补齐截断变化并完成本批理解后调用，记录 Dot 的实际处理时间；不能提前确认。",inputSchema:object({batchId:string},["batchId"]),annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true}},
@@ -76,16 +77,17 @@ export async function POST(request:Request){
       const proposal=["submit_native_command","task_command"].includes(p.name);
       const hasInput=p.inputResponses!==undefined||p.requestState!==undefined;
       if(hasInput&&!proposal)throw new BridgeError("此工具不接受确认续传");
-      const form=supportsNativeForm(p)&&proposal;
+      const form=core.nativeCommands.policy().defaultConfirmationChannel==="chat_form"&&supportsNativeForm(p)&&proposal;
+      const callbackTraceId=crypto.randomUUID();
       let response:any=null;
       if(hasInput)try{response=nativeFormResponse(p);}catch(error){
-        await core.research.append("native_confirmation_response_rejected",null,{originTool:p.name,stage:(error as any)?.confirmationStage??"response.capabilities",status:error instanceof BridgeError?error.status:500,responseShape:formResponseShape(p.inputResponses?.bc_native_confirmation),inputShape:nativeFormInputShape(p)},owner);
+        await core.research.append("native_confirmation_response_rejected",null,{callbackTraceId,originTool:p.name,stage:(error as any)?.confirmationStage??"response.capabilities",status:error instanceof BridgeError?error.status:500,responseShape:formResponseShape(p.inputResponses?.bc_native_confirmation),inputShape:nativeFormInputShape(p)},owner);
         throw error;
       }
       const submit=async(input:any)=>{
         if(response){
           const references=safeArguments(input);
-          const evidence={originTool:p.name,commandId:typeof input.commandId==="string"&&new RegExp(nativeUUIDSchema.pattern).test(input.commandId)?input.commandId:null,...await core.nativeCommands.confirmationIdentity(input,owner),expectedRevision:references.expectedRevision??null,sessionId:references.sessionId??null,responseShape:formResponseShape(response),source:"host_response",userGesture:"unknown",cause:"unknown"};
+          const evidence={callbackTraceId,originTool:p.name,commandId:typeof input.commandId==="string"&&new RegExp(nativeUUIDSchema.pattern).test(input.commandId)?input.commandId:null,...await core.nativeCommands.confirmationIdentity(input,owner),expectedRevision:references.expectedRevision??null,sessionId:references.sessionId??null,responseShape:formResponseShape(response),source:"host_response",userGesture:"unknown",cause:"unknown"};
           await core.research.append("native_confirmation_response_received",null,evidence,owner);
           let value;
           try {value=await core.nativeCommands.respondForm({request:input,originTool:p.name,requestState:p.requestState,response},owner);}
@@ -125,6 +127,17 @@ export async function POST(request:Request){
         const finalized=await finalizeNativeForm(core,value,approval,owner,p.name);
         value=finalized.value;approval=finalized.approval;
         if(finalized.inputRequired)return Response.json({jsonrpc:"2.0",id,result:finalized.inputRequired});
+      }
+      if(proposal&&!response&&core.nativeCommands.policy().defaultConfirmationChannel==="native"){
+        // Native approvals use existing target-device authentication. No secret
+        // or model-callable authorization is returned as a layout fallback.
+        approval=null;
+        if(value.state==='awaiting_confirmation'){
+          let display:any=null;
+          try {display=await confirmationPresentation(core,value);} catch { /* Target BC reads authoritative before values; errors remain visible there. */ }
+          value={...value,approvalUI:{channel:'target_device_button',deviceLabel:display?.deviceLabel??'指定设备',title:display?.recordTitle??value.request.title??value.request.patch?.title??'具体改动',expiresAt:value.expiresAt,instructions:'在指定设备 BC 顶部点「待确认」，打开这项请求并核对改动，然后本人同意或拒绝。尚未执行；Dots 不需要等待长条弹窗。'}};
+          await core.research.append('native_confirmation_entry_returned',null,{commandId:value.commandId,requestHash:value.requestHash,grantRevision:value.grantRevision,state:value.state,channel:'target_device_button',hostDisplayed:'unknown',deviceApplied:'unknown'},owner);
+        }
       }
       return result(nativeToolResult(value,approval));
     }

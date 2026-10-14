@@ -124,6 +124,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     private let mayApprove: (NativeApproval) -> Bool
     private var timer: Timer?
     private var lastFailure: String?
+    let isDisplayTest: Bool
     var entries: [NativeApproval] = []
     var selected: NativeApproval?
     var message: String?
@@ -136,10 +137,10 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         !busy && entry.deviceId == service.nativeDeviceId && entry.state == "awaiting_confirmation" && entry.expiresAt > now() && (!accept || entry.displayError == nil && mayApprove(entry))
     }
     init(service: any NativeRemoteServing, persistence: any NativeApprovalPersisting, notifier: (any NativeApprovalNotifying)? = nil,
-         preferences: UserDefaults = .standard, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }) {
+         preferences: UserDefaults = .standard, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }, isDisplayTest: Bool = false) {
         self.service = service; self.persistence = persistence; self.notifier = notifier; self.preferences = preferences
         self.writer = writer; self.journal = journal; self.now = now
-        self.mayApprove = mayApprove
+        self.mayApprove = mayApprove; self.isDisplayTest = isDisplayTest
     }
     func start() {
         guard !TestHost.isActive, timer == nil else { return }

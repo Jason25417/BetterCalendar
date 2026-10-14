@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.18", date: "2026-10", changes: [
+            "新增 BC 内待确认页面：核对设备、改动前后与截止时间，同意或拒绝均由你决定",
+            "新审批默认保留24小时；Dots提交即返回入口，避免等待电脑端异常长条卡片",
+            "补齐脱敏回传阶段与状态溯源；通知单独启用，点击通知只打开详情",
+            "Mac按前台App累计本机采样时长，标明缺口；不代表专注时长，iPhone逐App数据尚未接入"
+        ]),
         ChangelogEntry(version: "0.65.17", date: "2026-10", changes: [
             "旧计时会话可供 Dots 只读查询，区分共享与原设备历史，不迁移、不重复相加",
             "手机观察批量补传并使用短暂后台时间；保留原事件时间和队列，后台仍受系统限制",
