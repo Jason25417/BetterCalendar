@@ -3,14 +3,13 @@
   "nativeVersion": "0.65.19",
   "build": 176,
   "baseCommit": "9d97d6e253b31e87646a7b9350521c1ecc25aaf4",
-  "serviceUnchanged": "v38",
   "tests": {
     "scope": "NativeApprovalInboxTests_only",
     "passed": 13,
     "failed": 0,
     "skipped": 0,
     "iOSSimulator": "BUILD SUCCEEDED",
-    "bundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_15-37-44--0400.xcresult",
+    "bundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_15-43-47--0400.xcresult",
     "serverPassed": 126
   },
   "mac175HumanFeedback": {
@@ -33,20 +32,63 @@
     "display_empty_page_cursor",
     "refresh_errors_remain_visible"
   ],
-  "realOperationsModified": false,
+  "realOperationsModified": true,
   "permissionsChanged": false,
-  "stateBridgeDeployed": false,
-  "human176Acceptance": "not_verified",
+  "stateBridgeDeployed": true,
+  "human176Acceptance": "not_yet_verified",
   "iPhoneHumanUI": "not_verified",
-  "realCommandE2E": "not_verified",
-  "testFlight": "pending",
-  "dotsMessage": "not_sent",
+  "realCommandE2E": "iPhone_chat_to_Mac_store_verified_screen_and_other_device_unknown",
+  "testFlight": {
+    "appId": "6787325341",
+    "build": 176,
+    "builds": [
+      {
+        "id": "37fca2f1-72c6-4b23-8acc-7896b0ad28d5",
+        "platform": "IOS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "0fa7970d-acd0-440b-a7ad-383f90299458",
+        "platform": "MAC_OS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ],
+    "sourceCommit": "c0750b9eb8aa41f666f5240692588604f2ff481e",
+    "installableBoth": true
+  },
+  "dotsMessage": {
+    "sentVia": "Edge_extension",
+    "page": "https://chatgpt.com/dots/home",
+    "at": "2026-10-14T15:50:00-04:00",
+    "purpose": "prepare_only_first_marked_test_todo_and_measure_chat_pending",
+    "requiresJasonEveryStep": true,
+    "actualTestCommandId": "8f3e6be2-01c9-4c7a-a120-cc7d9debe418"
+  },
   "dualEntry": {
     "required": true,
     "default": "chat_form",
     "nativeListSameCommand": true,
     "nativeIsNotChatFix": true,
-    "chatLayout": "not_fixed_diagnosis_in_progress"
+    "chatLayout": "Mac_pending_failed_row768_card2_form0_host_patch_required",
+    "serviceVersion": 39,
+    "deploymentId": "appgdep_6acfdc9c9a188191acb5500bad0469ac",
+    "deploymentStatus": "succeeded",
+    "sourceCommit": "ea17d8bbbc17494ed2f1d9125a3fdf2e718a068a",
+    "livePolicyRead": {
+      "at": "2026-10-14T19:49:28.265Z",
+      "callId": "research_d63927ce-a841-4a91-8a16-de9bebc7e625",
+      "default": "chat_form",
+      "channels": [
+        "chat_form",
+        "target_device_button"
+      ]
+    }
   },
   "outputSchemaApprovalUI": "declared_and_regression_validated",
   "realTestAuthorization": {
@@ -63,5 +105,40 @@
       "permissions"
     ],
     "activityClassification": "development_test_not_life_activity"
+  },
+  "sourceCommit": "c0750b9eb8aa41f666f5240692588604f2ff481e",
+  "operationScope": "one_marked_test_todo_created_by_device_after_Jason_phone_chat_confirmation_no_existing_item_timer_calendar_or_permissions",
+  "dotsFollowup": {
+    "at": "2026-10-14T16:12:00-04:00",
+    "sentVia": "Edge_extension",
+    "scope": "report_verified_receipt_and_prepare_only_Mac_BC_test_item_note_change_requires_Jason"
+  },
+  "realFixture": {
+    "commandId": "8f3e6be2-01c9-4c7a-a120-cc7d9debe418",
+    "recordId": "c5472af0-89c2-466e-9704-7e260a984c1d",
+    "displayDevice": "iPhone",
+    "displayEvidence": "Jason_message_in_Dots_2026-10-14_15:56_EDT_normal_and_confirmed",
+    "targetDevice": "Mac",
+    "state": "applied",
+    "acceptedAt": "2026-10-14T19:52:17.933Z",
+    "expiresAt": "2026-10-15T19:52:17.822Z",
+    "approvedAt": "2026-10-14T19:56:03.191Z",
+    "attemptId": "c98fd996-ce0c-4e91-ae13-247fb7fe4543",
+    "resultAt": "2026-10-14T19:56:06.530Z",
+    "requestHash": "58462b8adc845a4dde4a144a3142d3dfa97230a34029622c740f6bcdd10cc236",
+    "deviceApplication": "local_store_saved",
+    "persistedRevision": "077306fcdc53a83ac915a13dc3a0658650e2237d322d16482c5920ed0be5ab56",
+    "readback": "Dots_reported_test_record_title_note_readback",
+    "screenVisible": "unknown",
+    "syncOtherDevices": "unknown",
+    "statusReadCallId": "research_a7740d09-f525-4fce-9bfb-a804daf0e537"
+  },
+  "hostSupport": {
+    "destination": "help.openai.com official chat",
+    "reportSent": true,
+    "humanTicketOrEscalation": "not_confirmed",
+    "blocker": "login_required_existing_account_password_page",
+    "containsSecrets": false,
+    "containsUserConversationOrRawHAR": false
   }
 }

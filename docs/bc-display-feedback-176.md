@@ -33,9 +33,17 @@
 |---|---|---|---|---|
 | Mac | BC App | 175真人反馈正常、批准可点 | 175未见；176代码已改，待验 | 真实联调待本人批准后核验 |
 | iPhone | BC App | 待真人验收 | 176同实现，待验 | 待验 |
-| Mac | Dots聊天 | 旧2px/正文0失败；新复现与宿主诊断中 | 待验 | 未通过，不以BC代替 |
-| iPhone | Dots聊天 | 旧只读对照本人曾报告正常；本轮真实联调待验 | 待验 | 未通过本轮真实联调 |
+| Mac | Dots聊天 | 新pending实测row768/card2/form0失败；需宿主修复 | 待验 | 未通过，不以BC代替 |
+| iPhone | Dots聊天 | 本人15:56 EDT报告正常并确认 | 确认后Dots已反馈，具体卡结束态未单独验 | 本轮已批准→Mac applied/保存及Dots读回；最终屏幕/另一端未知 |
 
 聊天布局用正式MCP form/MRTR协议，BC控制message/requestedSchema及其回传校验，不拥有宿主组件CSS与挂起到完成重布局。OpenAI官方extended forms可扩展oneOf/缩略图，未提供修改宿主卡宽/高的字段。不得注入宿主CSS或读取私有会话库来绕过；具体DOM/计算样式和宿主需要的修复另记诊断证据。来源 https://developers.openai.com/plugins/build/extensions#extended-forms 。
 
 iPhone逐App仍在需求范围：iOS26.4+提供approvedWithDataAccess与DeviceActivityData.activityData；需要app-and-website-usage capability、匹配Apple提供profile和本人数据授权，客户安装还受设备/账号EU限制。当前没有该新增entitlement，不能将现有屏蔽权限或Mac上传当iPhone时长权限；这次联调授权明确不改系统权限，所以不代开。以受保护屏幕报告显示不等于可导出；快捷指令开关App事件只能部分覆盖，不能当精确全量时长。未来接入需独立核查Apple签名路径与本人授权。
+
+## 本轮最终发布与真实样本
+
+176双端ASC均VALID/IN_BETA_TESTING、中文notesVerified=true，可安装；原生源c0750b9。v39成功私有部署并正式读回chat_form/24h/双通道，服务源ea17d8b。13审批专项测试（最终15:43:47 xcresult）/126服务测试、iOS Simulator编译通过。没有把旧全量测试重报为本轮结果。
+
+独立测试待办commandId 8f3e6be2-01c9-4c7a-a120-cc7d9debe418，recordId c5472af0-89c2-466e-9704-7e260a984c1d，Jason在iPhone Dots本人确认；Mac回执applied/local_store_saved，持久revision 077306fc…56，attempt c98fd996…4543。真实屏幕及另一端同步未知，未重建/重执行。后续只在同一测试记录上，由Dots准备Mac BC入口改备注，每步本人确认。
+
+[最小宿主报告](bc-dots-host-layout-report-39.md)含本轮2px测量、隔离尺寸对照、候选宿主修复和官方反馈状态。Mac聊天仍失败，iPhone BC及176真人结束反馈仍待验。停止测试可不批准后续提案；无自动批准/续建取消。回滚原生175仅回退结束反馈；回滚服务到v38会恢复native默认，违背本轮双入口目标，不能把该回滚当聊天修复；必要时停止新测试并另核现有请求状态。

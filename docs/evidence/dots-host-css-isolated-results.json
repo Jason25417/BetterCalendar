@@ -1,0 +1,29 @@
+[
+  {
+    "bubble": 2,
+    "buttonsClipped": true,
+    "card": 2,
+    "form": 0,
+    "height": 502,
+    "id": "before",
+    "row": 768
+  },
+  {
+    "bubble": 512,
+    "buttonsClipped": false,
+    "card": 512,
+    "form": 510,
+    "height": 269.578125,
+    "id": "after",
+    "row": 768
+  },
+  {
+    "bubble": 285,
+    "buttonsClipped": false,
+    "card": 285,
+    "form": 283,
+    "height": 324.078125,
+    "id": "narrow",
+    "row": 358
+  }
+]

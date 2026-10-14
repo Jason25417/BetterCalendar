@@ -1,0 +1,196 @@
+{
+  "forms": [
+    {
+      "ancestors": [
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "flex max-h-[calc(100dvh/var(--codex-window-zoom)-var(--height-toolbar)-2rem)] min-h-0 flex-col outline-none",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "0px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 720,
+          "maxWidth": "none",
+          "minWidth": "auto",
+          "overflow": "visible",
+          "position": "static",
+          "tag": "FORM",
+          "width": 0
+        },
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "flex flex-col overflow-hidden text-default focus:outline-none rounded-3xl border border-default bg-surface-elevated-secondary @container/request-card",
+          "contain": "none",
+          "containerType": "inline-size",
+          "cssWidth": "2px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "none",
+          "minWidth": "0px",
+          "overflow": "hidden",
+          "position": "static",
+          "tag": "DIV",
+          "width": 2
+        },
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "relative PortalBoundary-TFj9W2 contents",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "auto",
+          "display": "contents",
+          "flex": "0 1 auto",
+          "height": 0,
+          "maxWidth": "none",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "relative",
+          "tag": "DIV",
+          "width": 0
+        },
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "min-w-0",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "block",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "none",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "static",
+          "tag": "FIELDSET",
+          "width": 2
+        },
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "flex w-full min-w-0 flex-col gap-2",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "none",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "static",
+          "tag": "DIV",
+          "width": 2
+        },
+        {
+          "alignItems": "normal",
+          "alignSelf": "auto",
+          "classes": "message-content-presentation",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "block",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "100%",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "relative",
+          "tag": "DIV",
+          "width": 2
+        },
+        {
+          "alignItems": "flex-start",
+          "alignSelf": "auto",
+          "classes": "message-surface",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "100%",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "relative",
+          "tag": "DIV",
+          "width": 2
+        },
+        {
+          "alignItems": "flex-start",
+          "alignSelf": "auto",
+          "classes": "message-body",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "100%",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "relative",
+          "tag": "DIV",
+          "width": 2
+        },
+        {
+          "alignItems": "flex-start",
+          "alignSelf": "auto",
+          "classes": "message-content",
+          "contain": "none",
+          "containerType": "normal",
+          "cssWidth": "2px",
+          "display": "flex",
+          "flex": "0 1 auto",
+          "height": 722,
+          "maxWidth": "100%",
+          "minWidth": "0px",
+          "overflow": "visible",
+          "position": "relative",
+          "tag": "DIV",
+          "width": 2
+        }
+      ],
+      "box": {
+        "height": 720,
+        "width": 0
+      },
+      "controls": [
+        {
+          "height": 24,
+          "label": "取消",
+          "tag": "BUTTON",
+          "width": 24
+        },
+        {
+          "height": 92,
+          "label": "确认执行",
+          "tag": "LABEL",
+          "width": 16
+        },
+        {
+          "height": 1,
+          "label": "确认执行",
+          "tag": "INPUT",
+          "width": 1
+        },
+        {
+          "height": 36,
+          "label": "继续",
+          "tag": "BUTTON",
+          "width": 46
+        }
+      ]
+    }
+  ],
+  "viewport": {
+    "dpr": 2,
+    "height": 804,
+    "width": 1462
+  }
+}
