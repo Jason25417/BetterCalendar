@@ -38,6 +38,25 @@ async function fixture(t,{fetcher=()=>{throw Error('test forbids network');}}={}
  return {sqlite,logs,d,request,rpc,call,get core(){return core;},restart(){core=reopen();},failResult(){failReturned=true;},beforeRecord(kind,fn){beforeRecord={kind,fn};},failRecordKind(kind){failKind=kind;},advance(ms){now=new Date(now.getTime()+ms);}};
 }
 const reply=state=>({requestState:state,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true}}}});
+test('read-only preview accepts all host outcomes without approving or reopening the original command',async t=>{
+ const f=await fixture(t),v=f.request(95),submitted=await f.call('submit_native_command',v);
+ await f.call('submit_native_command',v,{requestState:submitted.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ const before=f.sqlite.prepare('SELECT * FROM native_requests').get();
+ for(const action of ['accept','cancel','decline']){
+  const initial=await f.call('preview_native_confirmation',{commandId:v.commandId});
+  assert.equal(initial.body.result.resultType,'input_required');assert.match(initial.body.result.inputRequests.bc_native_confirmation.params.message,/只读显示测试/);
+  const state=initial.body.result.requestState;
+  assert.ok((await f.call('submit_native_command',v,reply(state))).body.error);
+  const result=await f.call('preview_native_confirmation',{commandId:v.commandId},{requestState:state,inputResponses:{bc_native_confirmation:{action,...(action==='accept'?{content:{confirm:true}}:{})}}});
+  assert.equal(result.body.result.structuredContent.executed,false);assert.equal(result.body.result.structuredContent.originalState,'cancelled');
+  assert.deepEqual(f.sqlite.prepare('SELECT * FROM native_requests').get(),before);
+ }
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
+ assert.ok((await f.call('preview_native_confirmation',{commandId:v.commandId},{},'other-owner')).body.error);
+ const list=await f.rpc('tools/list',{}),tool=list.body.result.tools.find(t=>t.name==='preview_native_confirmation');assert.equal(tool.annotations.readOnlyHint,true);
+ for(const name of ['submit_native_command','task_command'])assert.equal(list.body.result.tools.find(t=>t.name===name)._meta,undefined);
+});
 test('minute delivery and repeated status reads do not cancel, rotate or approve a pending native form',async t=>{
  const callbacks=[];
  const f=await fixture(t,{fetcher:async(url,options)=>{
@@ -196,9 +215,12 @@ test('form finalization rejects stale pending snapshots after research persisten
  }
 });
 test('prepared audit failure prevents publishing a form and response audit failure cannot masquerade as applied confirmation',async t=>{
- const f=await fixture(t),v=f.request();f.failRecordKind('native_confirmation_prepared');
- assert.ok((await f.call('submit_native_command',v)).body.error);
+ const f=await fixture(t),unpublished=f.request();f.failRecordKind('native_confirmation_prepared');
+ assert.ok((await f.call('submit_native_command',unpublished)).body.error);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM research_log WHERE kind=?').get('native_confirmation_prepared').n,0);
+ const recovered=await f.call('submit_native_command',unpublished);
+ assert.equal(recovered.body.result.resultType,'complete');assert.equal('requestState' in recovered.body.result,false);
+ const v=f.request(92);
  const first=await f.call('submit_native_command',v),state=first.body.result.requestState;
  f.failRecordKind('native_confirmation_response_received');
  assert.ok((await f.call('submit_native_command',v,reply(state))).body.error);
@@ -211,24 +233,20 @@ test('prepared audit failure prevents publishing a form and response audit failu
  const retry=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
  assert.equal(retry.body.result.structuredContent.state,'cancelled');assert.equal(retry.body.result.structuredContent.approvedAt,null);
 });
-test('duplicate preparation and stale cancel are distinguishable without leaking a nonce or reopening the command',async t=>{
+test('pending retry does not rotate a nonce or publish another form after reconstruction',async t=>{
  const f=await fixture(t),v=f.request(),first=await f.call('submit_native_command',v);
+ const originalHash=f.sqlite.prepare('SELECT approval_hash FROM native_requests').get().approval_hash;
  f.restart();const second=await f.call('submit_native_command',v);
- assert.notEqual(first.body.result.requestState,second.body.result.requestState);
- const oldCancel=await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
- assert.ok(oldCancel.body.error);assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'fixture-owner')).state,'awaiting_confirmation');
- const closed=await f.call('submit_native_command',v,{requestState:second.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ assert.equal(second.body.result.resultType,'complete');assert.equal('requestState' in second.body.result,false);
+ assert.equal(f.sqlite.prepare('SELECT approval_hash FROM native_requests').get().approval_hash,originalHash);
+ const closed=await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
  assert.equal(closed.body.result.structuredContent.state,'cancelled');
- const before=f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_confirmation_prepared'").get().n;
  assert.equal((await f.call('submit_native_command',v)).body.result.structuredContent.state,'cancelled');
- assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_confirmation_prepared'").get().n,before);
  const entries=(await f.core.research.read({limit:100})).entries,prepared=entries.filter(e=>e.kind==='native_confirmation_prepared');
- assert.equal(prepared.length,2);assert.equal(prepared[0].body.presentationHash,prepared[1].body.presentationHash);
- for(const entry of prepared){assert.equal(entry.body.commandId,v.commandId);assert.equal(entry.body.hostDisplayed,'unknown');assert.equal(entry.body.grantRevision,1);}
- assert.equal(entries.filter(e=>e.kind==='native_confirmation_response_rejected').length,1);
+ assert.equal(prepared.length,1);assert.equal(prepared[0].body.commandId,v.commandId);assert.equal(prepared[0].body.hostDisplayed,'unknown');
  const cancel=entries.find(e=>e.kind==='native_confirmation_response_processed');assert.equal(cancel.body.state,'cancelled');assert.equal(cancel.body.source,'host_response');assert.equal(cancel.body.cause,'unknown');
  const safe=JSON.stringify({entries,logs:f.logs});
- for(const secret of [first.body.result.requestState,second.body.result.requestState,v.userRequest,v.patch.title])assert.equal(safe.includes(secret),false);
+ for(const secret of [first.body.result.requestState,v.userRequest,v.patch.title])assert.equal(safe.includes(secret),false);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
 });
 test('timer continuation cannot change command, session, expected revision or originating tool',async t=>{

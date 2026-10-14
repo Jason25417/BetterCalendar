@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "originalCommandId": "518db08f-af21-4c4f-99be-56d70d7d73c2",
+  "acceptedAt": "2026-10-14T02:51:19.353Z",
+  "expiresAt": "2026-10-14T03:03:25.000Z",
+  "preparedAt": "2026-10-14T02:51:20.677Z",
+  "hostCancelReceivedAt": "2026-10-14T02:51:56.832Z",
+  "closedAt": "2026-10-14T02:51:57.297Z",
+  "state": "cancelled",
+  "approvedAt": null,
+  "attemptId": null,
+  "result": null,
+  "cancelSource": "host_response",
+  "userGesture": "unknown",
+  "cancelCause": "unknown",
+  "presentationHash": "4d06ea6ccd9521192b69ca14e7f50ed32e82ebd126e1050478b57356ef442572",
+  "reconstructedHashMatches": true,
+  "messageCharacters": 11,
+  "descriptionCharacters": 358,
+  "preparedCount": 1,
+  "researchIds": [
+    55771,
+    55773,
+    55774,
+    55775,
+    55776,
+    55803,
+    55804,
+    55805,
+    55806,
+    55833,
+    55834
+  ],
+  "hostEvidence": {
+    "surface": "Edge extension / chatgpt.com/dots/home",
+    "state": "closed form, not original pending interval",
+    "domFormsForOriginalCommand": 1,
+    "viewportCSS": {
+      "width": 1912,
+      "height": 931,
+      "devicePixelRatio": 2
+    },
+    "messageRowCSS": {
+      "width": 768,
+      "height": 849
+    },
+    "messageBubbleCSS": {
+      "width": 2,
+      "height": 849
+    },
+    "formCSS": {
+      "width": 0,
+      "height": 847,
+      "maxHeight": 847
+    },
+    "headerContentCSS": {
+      "width": 36,
+      "height": 5836
+    },
+    "headingCSS": {
+      "width": 0,
+      "height": 220
+    },
+    "overflow": "request-card overflow:hidden; header shrink-0",
+    "consoleError": "React #418 at 2026-10-14T02:55:53.827Z; correlation to original pending failure unknown"
+  },
+  "tests": {
+    "service": {
+      "passed": 103,
+      "failed": 0,
+      "skipped": 0
+    },
+    "log": "/private/tmp/bc-confirmation-35-tests-final.log",
+    "buildLog": "/private/tmp/bc-confirmation-35-build.log"
+  },
+  "deviceAcceptance": {
+    "MacDotsNative": "not_verified",
+    "iPhoneDotsNative": "not_verified",
+    "realExecution": "not_attempted"
+  },
+  "deployment": null
+}

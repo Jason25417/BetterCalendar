@@ -89,13 +89,13 @@ export function createNativeCommands(db,time,executeTask){
   }
   const r=await row(v.commandId,owner);if(r.request_hash!==await sha(canonical(v)))throw new BridgeError('同一commandId不可改变请求',409);
   let value=await view(r);let approval=null;
-  if(value.state==='awaiting_confirmation'){
+  if(value.state==='awaiting_confirmation'&&!r.approval_hash){
    // Opaque MRTR state is a high-entropy nonce, not client-controlled serialized
    // authorization. Its complete value (including originating tool) is hashed
    // in the existing durable request row, which binds owner/body/expiry/grant.
    const token=(formOrigin?`bc-form-v1:${formOrigin}:`:'')+crypto.randomUUID()+crypto.randomUUID();
    const tokenHash=await sha(token),at=time();
-   const result=await q("UPDATE native_requests SET approval_hash=? WHERE command_id=? AND state='awaiting_confirmation' AND request_hash=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants WHERE device_id=? AND revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM devices WHERE id=native_grants.device_id AND revoked_at IS NULL))",tokenHash,r.command_id,r.request_hash,at,r.device_id,r.grant_revision,at).run();
+   const result=await q("UPDATE native_requests SET approval_hash=? WHERE command_id=? AND state='awaiting_confirmation' AND approval_hash IS NULL AND request_hash=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants WHERE device_id=? AND revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM devices WHERE id=native_grants.device_id AND revoked_at IS NULL))",tokenHash,r.command_id,r.request_hash,at,r.device_id,r.grant_revision,at).run();
    const fresh=await row(r.command_id,owner);value=await view(fresh);
    if(changed(result)&&value.state==='awaiting_confirmation'){
     if(fresh.approval_hash!==tokenHash)throw new BridgeError('确认凭据已更新，请核对原请求；不要重复发布确认',409);

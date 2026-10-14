@@ -30,10 +30,18 @@ test('MRTR form is capability-gated, host-only and defaults to no operation',asy
  assert.equal(result.requestState,s.approval.token);assert.equal('content' in result,false);assert.equal('structuredContent' in result,false);
  const form=result.inputRequests.bc_native_confirmation.params;assert.equal(form.requestedSchema.properties.confirm.default,false);
  const details=form.requestedSchema.properties.confirm.description;
- assert.ok(details.includes(v.commandId)&&details.includes(v.deviceId)&&details.includes(v.userRequest));
+ assert.ok(details.includes(v.patch.title));assert.equal(details.includes(v.commandId),false);
  assert.equal(form.message,'请本人确认：新增事项。');
  assert.equal(nativeFormResult({...s.value,state:'expired'},s.approval),null);
  assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).state,'awaiting_confirmation');
+});
+test('concurrent duplicate proposals and restart issue only one approval challenge',async()=>{
+ const f=fixture();await setup(f);const v=request(f,818);
+ const proposals=await Promise.all(Array.from({length:8},()=>f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'})));
+ const published=proposals.filter(p=>p.approval);assert.equal(published.length,1);
+ assert.equal((await f.reopen().nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'})).approval,null);
+ const state=await f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:published[0].approval.token,response:{action:'accept',content:{confirm:true}}},'owner');
+ assert.equal(state.state,'queued');assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
 });
 test('MRTR nonce binds tool, owner and exact original parameters; no model flag can approve',async()=>{
  const f=fixture();await setup(f);const v=request(f,802),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
@@ -74,7 +82,7 @@ test('form expiry revoked grant and rotated challenge reject stale human replies
   const f=fixture(),d=await setup(f),v=request(f,808),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
   if(mode==='expiry')f.advance(3600001);
   if(mode==='revocation')await f.core.nativeCommands.setGrant({revision:2,capabilities:[],expiresAt:'2026-10-14T10:00:00.000Z'},d);
-  if(mode==='rotation')await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  if(mode==='rotation')f.sqlite.prepare("UPDATE native_requests SET approval_hash='isolated-tampered-challenge' WHERE command_id=?").run(v.commandId);
   await assert.rejects(f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true}}},'owner'));
   assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).approvedAt,null);
  }
@@ -94,7 +102,7 @@ test('late host cancellation preserves expiry or revocation instead of relabelin
   assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
  }
 });
-test('short form heading retains complete timer and edit evidence in standard description',()=>{
+test('short form heading retains operation values without raw audit identifiers in the human field',()=>{
  const token='isolated-hidden-state',base={state:'awaiting_confirmation',commandId:id(900),deviceId:'isolated-device',expiresAt:'2026-10-13T11:00:00.000Z'};
  const requests=[{kind:'timer',action:'start',title:'Isolated long title '.repeat(9),userRequest:'Isolated long request '.repeat(90),effectiveAt:'2026-10-13T08:55:11.000Z',relatedRecordId:id(901)},
   {kind:'journal',action:'update',recordId:id(902),expectedRevision:'revision-original',userRequest:'Isolated edit',patch:{body:'<script>plain text</script>\n'.repeat(100),mood:null,tags:['one','two']}}];
@@ -102,7 +110,7 @@ test('short form heading retains complete timer and edit evidence in standard de
   const form=nativeFormResult({...base,request},{token}).inputRequests.bc_native_confirmation.params,field=form.requestedSchema.properties.confirm;
   assert.ok(form.message.length<40);assert.equal(field.default,false);assert.equal(field.title,'确认执行');
   const validate=new Ajv().compile(form.requestedSchema);assert.equal(validate({confirm:false}),true);assert.equal(validate({confirm:true}),true);
-  for(const text of [base.deviceId,base.commandId,base.expiresAt,request.userRequest,request.title,request.effectiveAt,request.relatedRecordId,request.recordId,request.expectedRevision,request.patch?.body].filter(Boolean))assert.ok(field.description.includes(text));
+  for(const text of [base.deviceId,base.expiresAt,request.title,request.effectiveAt,request.patch?.body].filter(Boolean))assert.ok(field.description.includes(text));
   assert.equal(field.description.includes(token),false);
  }
 });
