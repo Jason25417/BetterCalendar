@@ -2,8 +2,9 @@ import SwiftUI
 
 struct NativeApprovalContent: View {
     @Bindable var model: NativeApprovalInbox
+    var previewRequestId: UUID? = nil
     var body: some View {
-        ScrollView { NativeApprovalPanel(model: model, pinnedActions: true).padding() }
+        ScrollView { NativeApprovalPanel(model: model, pinnedActions: true, previewRequestId: previewRequestId).padding() }
             .safeAreaInset(edge: .bottom) { NativeApprovalDecisionBar(model: model) }
     }
 }
@@ -11,6 +12,7 @@ struct NativeApprovalContent: View {
 struct NativeApprovalPanel: View {
     @Bindable var model: NativeApprovalInbox
     var pinnedActions = false
+    var previewRequestId: UUID? = nil
     @State private var showPreview = false
     @State private var previewModel: NativeApprovalInbox?
     var body: some View {
@@ -39,13 +41,21 @@ struct NativeApprovalPanel: View {
                 Button("只测审批显示（不会执行）") { previewModel = NativeApprovalPreview.make(); showPreview = true }
             }
             if !model.isDisplayTest && model.notificationsEnabled {
-                Button("关闭审批通知") { model.disableNotifications() }
+                Button("关闭审批通知") { model.disableNotifications() }.disabled(model.busy)
+                Button("发送只读测试通知") { Task { await model.sendDisplayTestNotification() } }.disabled(model.busy)
             } else if !model.isDisplayTest {
-                Button("单独允许新审批通知") { Task { await model.enableNotifications() } }
+                Button("允许审批通知（含批准／拒绝）") { Task { await model.enableNotifications() } }.disabled(model.busy)
             }
-            Text("通知默认关闭，单独取得系统授权后才启用；点通知仅打开详情，不会批准或执行。后台到达时间取决于设备联网与系统调度。").font(.caption).foregroundStyle(.secondary)
+            if !model.isDisplayTest {
+                Text(model.notificationAuthorization.label).font(.caption).foregroundStyle(.secondary)
+                Text("短且完整的事项改动可展开系统通知，选择批准／拒绝；点通知正文打开详情。长内容必须到详情核对。系统预览可能显示事项和修改内容，可在系统设置隐藏锁屏预览。通知不会代你批准。").font(.caption).foregroundStyle(.secondary)
+                Text("当前 BC 运行时约每20秒检查；iPhone锁屏／后台可能延迟，尚未接通服务端远程审批推送。系统专注模式也可能隐藏横幅。").font(.caption).foregroundStyle(.secondary)
+            }
             if let message = model.message, message != model.displayTestDecision?.title { Text(message).font(.caption).textSelection(.enabled) }
         }.frame(maxWidth: .infinity, alignment: .leading).buttonStyle(.bordered).task { await model.refresh() }
+        .task(id: previewRequestId) {
+            if previewRequestId != nil { previewModel = NativeApprovalPreview.make(); showPreview = true }
+        }
         .sheet(isPresented: $showPreview) {
             if let previewModel {
                 NavigationStack {

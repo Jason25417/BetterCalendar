@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import SwiftUI
+import UserNotifications
 #if os(macOS)
 import AppKit
 #endif
@@ -22,6 +23,133 @@ import AppKit
         #expect(inbox.displayTestDecision == nil)
         #expect(inbox.pending.count == 1 && inbox.readComplete && inbox.selected?.state == "awaiting_confirmation")
         #expect(service.decisions.isEmpty && notifications.authorizations == 0 && notifications.sent.isEmpty && disk.values.isEmpty)
+    }
+    @Test func notificationActionsBindExactVisibleShortDiffAndNeverTreatDefaultTapAsApproval() async throws {
+        let (service, _, _) = try fixture(); service.showUpdate = true
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        let request = NativeApprovalNotification.request(approval: entry)
+        #expect(request.content.categoryIdentifier == NativeApprovalNotificationRoute.directCategory)
+        #expect(request.content.title == "批准修改事项？")
+        #expect(request.content.subtitle.contains("演示事项") && request.content.subtitle.contains("演示 Mac"))
+        #expect(request.content.body.contains("修改前的演示标题") && request.content.body.contains("ISOLATED approval fixture") && request.content.body.contains("截止"))
+        #expect(!request.content.body.contains(entry.id) && request.content.sound == nil)
+        let info = request.content.userInfo
+        let rawBinding = try #require(info["bcApprovalBinding"] as? String)
+        let binding = try #require(NativeApprovalNotificationBinding.decode(rawBinding))
+        #expect(binding.matches(entry))
+        #expect(NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: NativeApprovalNotificationRoute.approveAction) == .decision(binding, "accept"))
+        #expect(NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: NativeApprovalNotificationRoute.declineAction) == .decision(binding, "decline"))
+        let router = AppRouter(), delegate = NotificationDelegate(router: router)
+        #expect(delegate.routeApproval(userInfo: info, actionIdentifier: UNNotificationDefaultActionIdentifier))
+        #expect(router.nativeApprovalCommandId == entry.id && router.openNativeApprovals && service.decisions.isEmpty)
+        #expect(!delegate.routeApproval(userInfo: info, actionIdentifier: UNNotificationDismissActionIdentifier))
+        #expect(!delegate.routeApproval(userInfo: info, actionIdentifier: NativeApprovalNotificationRoute.approveAction))
+        #expect(NativeApprovalNotificationRoute.parse(userInfo: ["bcApprovalCommandId":entry.id], actionIdentifier: NativeApprovalNotificationRoute.approveAction) == nil)
+        #expect(NativeApprovalNotificationRoute.parse(userInfo: ["bcApprovalDisplayTest":true], actionIdentifier: NativeApprovalNotificationRoute.approveAction) == nil)
+    }
+    @Test func longIncompleteOrNonItemDiffHasNoNotificationApproveAuthority() async throws {
+        let (service, _, _) = try fixture(); service.showUpdate = true
+        var entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        entry.display["before"] = .object([:])
+        var request = NativeApprovalNotification.request(approval: entry)
+        #expect(request.content.categoryIdentifier == NativeApprovalNotificationRoute.category && request.content.userInfo["bcApprovalBinding"] == nil)
+        entry.display["before"] = .object(["title": .string(String(repeating: "长", count: 500))])
+        request = NativeApprovalNotification.request(approval: entry)
+        #expect(request.content.categoryIdentifier == NativeApprovalNotificationRoute.category && !request.content.body.contains("长"))
+        entry.request["kind"] = .string("timer")
+        #expect(!NativeApprovalNotificationSummary(entry).allowsDirectDecision)
+    }
+    @Test func actualNotificationChoiceUsesSameCommandAndDoesNotRepeatOrReverseIt() async throws {
+        let (service, disk, prefs) = try fixture(); prefs.set(true, forKey: "bc.nativeApprovalNotifications")
+        let notifier = ApprovalNotifier(), inbox = model(service, disk, prefs, notifier: notifier)
+        await inbox.open(service.id)
+        let binding = try NativeApprovalNotificationBinding(try #require(inbox.selected))
+        await inbox.decideFromNotification(binding, decision: "accept")
+        #expect(service.approvals == 1 && service.decisions.count == 1 && inbox.selected?.state == "queued" && disk.values.isEmpty)
+        #expect(notifier.feedbacks.last?.contains("等待设备") == true)
+        await inbox.decideFromNotification(binding, decision: "accept")
+        await inbox.decideFromNotification(binding, decision: "decline")
+        #expect(service.approvals == 1 && service.decisions.count == 1 && inbox.selected?.state == "queued")
+        let other = try fixture(), denied = model(other.0, other.1, other.2)
+        await denied.open(other.0.id)
+        await denied.decideFromNotification(try NativeApprovalNotificationBinding(try #require(denied.selected)), decision: "decline")
+        #expect(other.0.decisions.count == 1 && denied.selected?.state == "declined")
+    }
+    @Test func notificationCannotApproveChangedBindingExpiredRequestOrRevokedLocalPermission() async throws {
+        let (service, disk, prefs) = try fixture(); let inbox = model(service, disk, prefs)
+        await inbox.open(service.id); let original = try NativeApprovalNotificationBinding(try #require(inbox.selected))
+        var bad = original; bad.grantRevision += 1
+        await inbox.decideFromNotification(bad, decision: "accept")
+        bad = original; bad.requestHash = String(repeating: "a", count: 64)
+        await inbox.decideFromNotification(bad, decision: "accept")
+        bad = original; bad.expectedRevision = "changed"
+        await inbox.decideFromNotification(bad, decision: "accept")
+        service.showUpdate = true; await inbox.decideFromNotification(original, decision: "accept")
+        #expect(service.decisions.isEmpty && disk.values.isEmpty)
+        service.showUpdate = false; service.expired = true; await inbox.open(service.id)
+        await inbox.decideFromNotification(try NativeApprovalNotificationBinding(try #require(inbox.selected)), decision: "accept")
+        #expect(service.decisions.isEmpty)
+        service.expired = false
+        let revoked = NativeApprovalInbox(service: service, persistence: disk, preferences: prefs, now: { self.at }, mayApprove: { _ in false })
+        await revoked.open(service.id)
+        await revoked.decideFromNotification(try NativeApprovalNotificationBinding(try #require(revoked.selected)), decision: "accept")
+        #expect(service.decisions.isEmpty && revoked.message != nil)
+    }
+    @Test func notificationNavigationAndHumanChoiceWaitForRefreshRatherThanBeingLost() async throws {
+        let (service, disk, prefs) = try fixture(); let inbox = model(service, disk, prefs)
+        service.pauseNextList = true
+        let refreshing = Task { await inbox.refresh() }
+        for _ in 0..<200 where !service.listReadEntered { await Task.yield() }
+        #expect(service.listReadEntered && inbox.busy)
+        await inbox.requestOpen(service.id)
+        service.listBarrier?.resume(); service.listBarrier = nil
+        await refreshing.value
+        for _ in 0..<200 where inbox.selected == nil || inbox.busy { await Task.yield() }
+        let binding = try NativeApprovalNotificationBinding(try #require(inbox.selected))
+        service.listReadEntered = false; service.pauseNextList = true
+        let secondRefresh = Task { await inbox.refresh() }
+        for _ in 0..<200 where !service.listReadEntered { await Task.yield() }
+        let humanAction = Task { await inbox.decideFromNotification(binding, decision: "accept") }
+        await Task.yield(); service.listBarrier?.resume(); service.listBarrier = nil
+        await secondRefresh.value; await humanAction.value
+        #expect(inbox.selected?.state == "queued" && service.approvals == 1)
+    }
+    @Test func notificationOptOutCleansOnlyApprovalRemindersAndDisplayTestNeverExecutes() async throws {
+        let (service, disk, prefs) = try fixture(); let notifier = ApprovalNotifier(), inbox = model(service, disk, prefs, notifier: notifier)
+        await inbox.sendDisplayTestNotification(); #expect(notifier.displayTests == 0 && notifier.authorizations == 0)
+        await inbox.enableNotifications(); await inbox.sendDisplayTestNotification()
+        #expect(notifier.displayTests == 1 && service.decisions.isEmpty && disk.values.isEmpty)
+        await inbox.open(service.id); await inbox.decide("decline")
+        #expect(notifier.reconciled.last == [])
+        inbox.disableNotifications()
+        #expect(!inbox.notificationsEnabled)
+        let router = AppRouter(), delegate = NotificationDelegate(router: router)
+        #expect(delegate.routeApproval(userInfo: ["bcApprovalDisplayTest":true], actionIdentifier: UNNotificationDefaultActionIdentifier))
+        #expect(router.nativeApprovalPreviewRequest != nil && router.nativeApprovalCommandId == nil)
+        #expect(service.decisions.count == 1) // Only the explicit decline above.
+    }
+    @Test func decidedNotificationAfterRestartReportsLatestStateEvenWhenOldDisplayIsAbsent() async throws {
+        let (service, disk, prefs) = try fixture(); service.showUpdate = true
+        let original = try NativeApprovalNotificationBinding(NativeApproval(service.envelope(), deviceId: "fixture-device"))
+        service.state = "applied"
+        var changed = try NativeRemoteJSON.object(service.envelope())
+        changed["display"] = .null
+        let terminal = TerminalApprovalService(envelope: .object(changed))
+        prefs.set(true, forKey: "bc.nativeApprovalNotifications")
+        let notifier = ApprovalNotifier()
+        let restarted = NativeApprovalInbox(service: terminal, persistence: disk, notifier: notifier, preferences: prefs, now: { self.at }, mayApprove: { _ in true })
+        await restarted.decideFromNotification(original, decision: "accept")
+        #expect(terminal.writes == 0 && restarted.selected?.state == "applied")
+        #expect(notifier.feedbacks.last == "设备报告已应用")
+    }
+    @Test func sixHundredPendingNotificationsStayDeduplicatedAcrossCompletePagedRefreshes() async throws {
+        let service = NotificationBatchService(at: at), prefs = UserDefaults(suiteName: "bc-notification-batch-" + UUID().uuidString)!
+        prefs.set(true, forKey: "bc.nativeApprovalNotifications")
+        let notifier = ApprovalNotifier()
+        let inbox = NativeApprovalInbox(service: service, persistence: NativeApprovalMemoryPersistence(), notifier: notifier, preferences: prefs, now: { self.at }, mayApprove: { _ in true })
+        await inbox.refresh(); #expect(inbox.readComplete && inbox.pending.count == 600 && notifier.sent.count == 600)
+        #expect(prefs.stringArray(forKey: "bc.nativeApprovalNotified")?.count == 600)
+        await inbox.refresh(); #expect(inbox.readComplete && notifier.sent.count == 600)
     }
     @Test func lostApprovalReplyKeepsExactDecisionAcrossRestartAndNeverClaimsApplied() async throws {
         let (service, disk, prefs) = try fixture(); let inbox = model(service, disk, prefs)
@@ -130,7 +258,7 @@ import AppKit
             host.layoutSubtreeIfNeeded()
             let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: rect)); host.cacheDisplay(in: rect, to: bitmap)
             let data = try #require(bitmap.representation(using: .png, properties: [:]))
-            try data.write(to: URL(fileURLWithPath: "/private/tmp/bc176-display-result-\(Int(width)).png"), options: .atomic)
+            try data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("bc177-display-result-\(Int(width)).png"), options: .atomic)
             window.close()
         }
     }
@@ -155,7 +283,7 @@ import AppKit
             let data = try #require(bitmap.representation(using: .png, properties: [:]))
             let scale = window.backingScaleFactor
             #expect(bitmap.pixelsWide == Int(width * scale) && bitmap.pixelsHigh == Int(800 * scale))
-            try data.write(to: URL(fileURLWithPath: "/private/tmp/bc-approval-38-layout-\(Int(width)).png"), options: .atomic)
+            try data.write(to: FileManager.default.temporaryDirectory.appendingPathComponent("bc177-approval-layout-\(Int(width)).png"), options: .atomic)
             window.close()
         }
     }
@@ -168,6 +296,8 @@ import AppKit
     let id = "12345678-1234-4234-8234-000000001901"
     let at: Date
     var state = "awaiting_confirmation", decisions: [BridgeJSON] = []
+    var pauseNextList = false, listReadEntered = false
+    var listBarrier: CheckedContinuation<Void, Never>?
     var approvals = 0, loseResponse = false, wrongReceipt = false, expired = false, badPage = false, wrongHash = false, missingBefore = false, showUpdate = false, staleReceipt = false
     init(at: Date) throws { self.at = at }
     func envelope(wrongId: Bool = false) throws -> BridgeJSON {
@@ -188,6 +318,10 @@ import AppKit
         await Task.yield()
         switch path {
         case "native/approvals":
+            if pauseNextList {
+                pauseNextList = false; listReadEntered = true
+                await withCheckedContinuation { listBarrier = $0 }
+            }
             return .object(["commands": .array([try envelope()]), "through": .string(id), "nextCursor": .string(badPage ? "invalid" : id), "hasMore": .bool(badPage)])
         case "native/approval/read": return try envelope()
         case "native/approval/decide":
@@ -207,9 +341,51 @@ import AppKit
 @MainActor private final class ApprovalNotifier: NativeApprovalNotifying {
     var authorizations = 0, sent: [String] = [], allowed = true
     func authorize() async throws -> Bool { authorizations += 1; return allowed }
-    func send(commandId: String) async throws { sent.append(commandId) }
+    func send(_ approval: NativeApproval) async throws { sent.append(approval.id) }
+    func authorization() async -> NativeApprovalNotificationAuthorization { allowed ? .authorized : .denied }
+    var reconciled: [Set<String>] = [], displayTests = 0
+    func reconcile(pendingCommandIds: Set<String>) async { reconciled.append(pendingCommandIds) }
+    func sendDisplayTest() async throws { displayTests += 1 }
+    var feedbacks: [String] = []
+    func feedback(commandId: String, title: String, body: String) async throws { feedbacks.append(title) }
 }
 @MainActor private final class ApprovalFailingDisk: NativeApprovalPersisting {
     func load() throws -> [NativeApprovalIntent] { [] }
     func save(_ intents: [NativeApprovalIntent]) throws { throw DataArchiveError.invalid("isolated disk failure") }
+}
+
+@MainActor private final class TerminalApprovalService: NativeRemoteServing {
+    var nativeDeviceId: String? = "fixture-device"
+    var envelope: BridgeJSON
+    var writes = 0
+    init(envelope: BridgeJSON) { self.envelope = envelope }
+    func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        if path == "native/approval/read" { return envelope }
+        writes += 1; throw URLError(.unsupportedURL)
+    }
+}
+@MainActor private final class NotificationBatchService: NativeRemoteServing {
+    var nativeDeviceId: String? = "fixture-device"
+    let at: Date
+    init(at: Date) { self.at = at }
+    private var ids: [String] { (1901..<2501).map { String(format: "12345678-1234-4234-8234-%012d", $0) } }
+    private func envelope(_ id: String) throws -> BridgeJSON {
+        let base = try ApprovalService(at: at)
+        var value = try NativeRemoteJSON.object(base.envelope())
+        var request = try NativeRemoteJSON.object(value["request"]!)
+        request["commandId"] = .string(id)
+        value["request"] = .object(request); value["commandId"] = .string(id); value["nativeCommandId"] = .string(id)
+        value["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))))
+        return .object(value)
+    }
+    func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        let value = try NativeRemoteJSON.object(body)
+        if path == "native/approvals" {
+            let after = try NativeRemoteJSON.string(value["after"])
+            let remaining = ids.filter { $0 > after }, page = Array(remaining.prefix(20))
+            return .object(["commands": .array(try page.map(envelope)), "nextCursor": .string(page.last ?? after), "through": .string(ids.last!), "hasMore": .bool(remaining.count > page.count)])
+        }
+        if path == "native/approval/read" { return try envelope(NativeRemoteJSON.string(value["commandId"])) }
+        throw URLError(.unsupportedURL)
+    }
 }

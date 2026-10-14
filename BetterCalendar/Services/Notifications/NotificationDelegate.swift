@@ -11,6 +11,7 @@ import UserNotifications
 @MainActor
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let router: AppRouter
+    var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
 
     init(router: AppRouter) {
         self.router = router
@@ -20,11 +21,12 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     // id 对应 UNNotificationService 里的 morning/evening
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        if let id = response.notification.request.content.userInfo["bcApprovalCommandId"] as? String, UUID(uuidString: id) != nil {
-            router.nativeApprovalCommandId = id
-            router.openNativeApprovals = true
-            return // Opens detail only; never grants, approves or executes.
+        let info = response.notification.request.content.userInfo
+        if case let .decision(binding, decision) = NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            await handleApprovalDecision?(binding, decision)
+            return
         }
+        if routeApproval(userInfo: info, actionIdentifier: response.actionIdentifier) { return }
         switch response.notification.request.identifier {
         case "bc.reminder.morning":
             // 0.23 A：开始今天已退役——早通知改为打开执行界面、第一件「待开始」（不自动计时）
@@ -38,6 +40,25 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         default:
             break
         }
+    }
+
+    @discardableResult
+    func routeApproval(userInfo: [AnyHashable: Any], actionIdentifier: String) -> Bool {
+        guard let route = NativeApprovalNotificationRoute.parse(userInfo: userInfo, actionIdentifier: actionIdentifier) else { return false }
+        switch route {
+        case let .command(id):
+            router.nativeApprovalPreviewRequest = nil
+            router.nativeApprovalCommandId = id
+        case .decision: return false // Only the async human-action handler submits a decision.
+        case .displayTest:
+            router.nativeApprovalCommandId = nil
+            router.nativeApprovalPreviewRequest = UUID()
+        }
+        router.openNativeApprovals = true
+        #if os(macOS)
+        if !TestHost.isActive { AppLifecycle.shared?.showMainWindow() }
+        #endif
+        return true // Navigation only; never approves or executes.
     }
 
     // App 在前台时也把通知显出来（否则前台不弹）

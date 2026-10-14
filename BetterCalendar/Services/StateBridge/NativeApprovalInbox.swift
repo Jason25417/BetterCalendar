@@ -116,7 +116,11 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
 }
 @MainActor protocol NativeApprovalNotifying {
     func authorize() async throws -> Bool
-    func send(commandId: String) async throws
+    func send(_ approval: NativeApproval) async throws
+    func authorization() async -> NativeApprovalNotificationAuthorization
+    func sendDisplayTest() async throws
+    func reconcile(pendingCommandIds: Set<String>) async
+    func feedback(commandId: String, title: String, body: String) async throws
 }
 
 @MainActor @Observable final class NativeApprovalInbox {
@@ -130,6 +134,8 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     private let mayApprove: (NativeApproval) -> Bool
     private var timer: Timer?
     private var lastFailure: String?
+    private var requestedOpenId: String?
+    private var operationWaiters: [CheckedContinuation<Void, Never>] = []
     let isDisplayTest: Bool
     var entries: [NativeApproval] = []
     var selected: NativeApproval?
@@ -138,7 +144,8 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     var busy = false
     var readComplete = false
     var retryCommandIds: [String] = []
-    var notificationsEnabled: Bool { preferences.bool(forKey: "bc.nativeApprovalNotifications") }
+    private(set) var notificationsEnabled: Bool
+    private(set) var notificationAuthorization: NativeApprovalNotificationAuthorization = .unknown
     var pending: [NativeApproval] { entries.filter { $0.state == "awaiting_confirmation" && $0.expiresAt > now() } }
     func canDecide(_ entry: NativeApproval, accept: Bool) -> Bool {
         !busy && entry.deviceId == service.nativeDeviceId && entry.state == "awaiting_confirmation" && entry.expiresAt > now() && (!accept || entry.displayError == nil && mayApprove(entry))
@@ -148,6 +155,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         self.service = service; self.persistence = persistence; self.notifier = notifier; self.preferences = preferences
         self.writer = writer; self.journal = journal; self.now = now
         self.mayApprove = mayApprove; self.isDisplayTest = isDisplayTest
+        self.notificationsEnabled = preferences.bool(forKey: "bc.nativeApprovalNotifications")
     }
     func start() {
         guard !TestHost.isActive, timer == nil else { return }
@@ -157,7 +165,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     }
     func refresh() async {
         guard !busy, let deviceId = service.nativeDeviceId else { return }
-        busy = true; defer { busy = false }
+        busy = true; defer { finishOperation() }
         do {
             var after = "", through: String?, collected: [NativeApproval] = []
             readComplete = false
@@ -188,11 +196,21 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
                 }
                 self.selected = latest
             }
-            if notificationsEnabled, let notifier {
-                var notified = Set(preferences.stringArray(forKey: "bc.nativeApprovalNotified") ?? [])
+            if let notifier, !isDisplayTest {
+                notificationAuthorization = await notifier.authorization()
+                await notifier.reconcile(pendingCommandIds: Set(pending.map(\.id)))
+            }
+            if notificationsEnabled, let notifier, !isDisplayTest {
+                let pendingIds = Set(pending.map(\.id))
+                var notified = Set(preferences.stringArray(forKey: "bc.nativeApprovalNotified") ?? []).intersection(pendingIds)
+                // Retain all current pending IDs (bounded by the verified 100 x 20
+                // page window); random UUID sorting must not evict live IDs.
+                preferences.set(Array(notified).sorted(), forKey: "bc.nativeApprovalNotified")
                 for entry in pending where !notified.contains(entry.id) {
-                    try await notifier.send(commandId: entry.id); notified.insert(entry.id)
-                    preferences.set(Array(notified).sorted().suffix(500).map { $0 }, forKey: "bc.nativeApprovalNotified")
+                    let prepared = try await read(entry.id, deviceId: deviceId)
+                    guard prepared.state == "awaiting_confirmation", prepared.expiresAt > now() else { continue }
+                    try await notifier.send(prepared); notified.insert(entry.id)
+                    preferences.set(Array(notified).sorted(), forKey: "bc.nativeApprovalNotified")
                 }
             }
         } catch { fail(error) }
@@ -244,8 +262,25 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             if patch.keys.contains(where: { before[$0] == nil }) { value.displayError = "未读取完整修改前内容；不把未知当作空白" }
         }
     }
+    // Notification navigation may arrive while a refresh is suspended. Keep
+    // the latest requested destination instead of silently dropping it.
+    func requestOpen(_ id: String) async {
+        guard UUID(uuidString: id) != nil else { return }
+        requestedOpenId = id
+        await drainRequestedOpen()
+    }
+    private func drainRequestedOpen() async {
+        guard !busy, let id = requestedOpenId else { return }
+        requestedOpenId = nil
+        await open(id)
+    }
+    private func finishOperation() {
+        busy = false
+        let waiting = operationWaiters; operationWaiters.removeAll(); waiting.forEach { $0.resume() }
+        if requestedOpenId != nil { Task { await self.drainRequestedOpen() } }
+    }
     func open(_ id: String) async {
-        guard !busy, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { busy = false }
+        guard !busy, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { finishOperation() }
         selected = nil; displayTestDecision = nil
         do { selected = try await read(id, deviceId: deviceId); message = nil } catch { fail(error) }
     }
@@ -253,7 +288,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         guard !busy, let value = selected, let deviceId = service.nativeDeviceId,
               value.deviceId == deviceId, value.state == "awaiting_confirmation", value.expiresAt > now(),
               ["accept", "decline"].contains(decision), decision != "accept" || value.displayError == nil && mayApprove(value) else { return }
-        busy = true; defer { busy = false }
+        busy = true; defer { finishOperation() }
         do {
             var intents = try persistence.load()
             let intent = NativeApprovalIntent(deviceId: deviceId, commandId: value.id, body: value.decision(decision))
@@ -263,8 +298,45 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             try await transmit(intent)
         } catch { fail(error) }
     }
+    // Invoked only by a concrete OS notification action selected by the human.
+    // A default tap/dismissal, agent claim or incomplete preview cannot enter it.
+    func decideFromNotification(_ binding: NativeApprovalNotificationBinding, decision: String) async {
+        guard !isDisplayTest, ["accept", "decline"].contains(decision), service.nativeDeviceId == binding.deviceId else { return }
+        while busy {
+            await withCheckedContinuation { operationWaiters.append($0) }
+            if Task.isCancelled { return }
+        }
+        await open(binding.commandId)
+        guard let entry = selected, binding.matchesRequest(entry) else {
+            fail(DataArchiveError.invalid("通知对应的审批内容或版本已改变；未提交，请打开原请求核对"))
+            await notificationFeedback(binding.commandId, title: "通知审批未提交", body: "内容或版本无法核对；请打开原请求查看，不要重复创建。")
+            return
+        }
+        guard entry.state == "awaiting_confirmation", entry.expiresAt > now() else {
+            await notificationFeedback(entry.id, title: entry.expiresAt <= now() && entry.state == "awaiting_confirmation" ? "审批请求已过期" : entry.stateLabel, body: "原请求已结束或到期；没有重建或重复执行。")
+            return
+        }
+        guard binding.matches(entry) else {
+            fail(DataArchiveError.invalid("通知展示的修改前后内容已改变；未提交，请重新核对原请求"))
+            await notificationFeedback(entry.id, title: "通知审批未提交", body: "修改前后展示内容已改变；请打开原请求核对。")
+            return
+        }
+        guard decision != "accept" || NativeApprovalNotificationSummary(entry).allowsDirectDecision && canDecide(entry, accept: true) else {
+            fail(DataArchiveError.invalid("通知批准未提交：完整内容或本机操作授权未通过，请打开详情"))
+            await notificationFeedback(entry.id, title: "通知批准未提交", body: "需打开完整详情核对内容和本机权限。没有扩大授权。")
+            return
+        }
+        await decide(decision)
+        let latest = selected
+        await notificationFeedback(entry.id, title: latest?.state == "awaiting_confirmation" ? "审批回传尚未确认" : (latest?.stateLabel ?? "审批结果未知"),
+                                   body: latest?.state == "applied" ? "设备已回传应用结果；点此核对最终内容。" : "点此核对原请求与设备回执；服务接受不等于设备已应用。")
+    }
+    private func notificationFeedback(_ id: String, title: String, body: String) async {
+        guard notificationsEnabled, !isDisplayTest, let notifier else { return }
+        do { try await notifier.feedback(commandId: id, title: title, body: body) } catch { fail(error) }
+    }
     func retryOriginalDecision() async {
-        guard !busy, let selected, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { busy = false }
+        guard !busy, let selected, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { finishOperation() }
         do {
             guard let intent = try persistence.load().first(where: { $0.commandId == selected.id && $0.deviceId == deviceId }) else { return }
             try await transmit(intent)
@@ -283,6 +355,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             var intents = try persistence.load(); intents.removeAll { $0 == intent }; try persistence.save(intents)
             retryCommandIds = intents.filter { $0.deviceId == intent.deviceId }.map(\.commandId)
             entries.removeAll { $0.id == value.id }
+            if let notifier, !isDisplayTest { await notifier.reconcile(pendingCommandIds: Set(pending.map(\.id))) }
             // Feedback follows an identity-checked reply and completed local
             // persistence. Never describe a simulated queued state as execution.
             if isDisplayTest, case let .object(result) = value.result,
@@ -298,14 +371,37 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         }
     }
     func enableNotifications() async {
-        guard let notifier else { return }
+        guard !isDisplayTest, !busy, let notifier else { return }
+        // Establish a verified baseline before opt-in; no burst of old requests.
+        await refresh()
+        guard readComplete else { return }
+        busy = true; defer { finishOperation() }
         do {
             guard try await notifier.authorize() else { throw DataArchiveError.invalid("系统未允许通知；审批仍可在 BC 内完成") }
-            preferences.set(true, forKey: "bc.nativeApprovalNotifications")
+            notificationAuthorization = await notifier.authorization()
             preferences.set(pending.map(\.id), forKey: "bc.nativeApprovalNotified")
-            message = "只提醒后续新请求；点通知只打开详情"
+            preferences.set(true, forKey: "bc.nativeApprovalNotifications"); notificationsEnabled = true
+            message = "已开启：只提醒后续新请求；短改动可展开通知，由你选择批准／拒绝，长改动需打开详情。"
+        } catch {
+            notificationAuthorization = await notifier.authorization()
+            fail(error)
+        }
+    }
+    func sendDisplayTestNotification() async {
+        guard !isDisplayTest, !busy, let notifier else { return }
+        guard notificationsEnabled else { message = "请先单独允许审批通知，再发送只读测试。"; return }
+        busy = true; defer { finishOperation() }
+        do {
+            try await notifier.sendDisplayTest()
+            message = "只读测试通知已交给系统；这不代表横幅已显示。点它打开本机演示，所有选择都不会执行。"
         } catch { fail(error) }
     }
-    func disableNotifications() { preferences.set(false, forKey: "bc.nativeApprovalNotifications") }
+    func disableNotifications() {
+        preferences.set(false, forKey: "bc.nativeApprovalNotifications"); notificationsEnabled = false
+        // Remove this feature's delivered/pending reminders; never revoke an
+        // operation or touch unrelated calendar/other notification categories.
+        if let notifier, !isDisplayTest { Task { await notifier.reconcile(pendingCommandIds: []) } }
+        message = "审批通知已关闭；请求仍可在待确认中处理，不会自动同意或拒绝。"
+    }
     private func fail(_ error: Error) { message = error.localizedDescription; if lastFailure != message { DevLog.shared.warn("BC 审批", message ?? "审批失败"); lastFailure = message } }
 }

@@ -15,6 +15,7 @@ final class AppRouter {
     var selectedTab: Tab = .schedule
     var openNativeApprovals = false
     var nativeApprovalCommandId: String?
+    var nativeApprovalPreviewRequest: UUID?
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。
     var journalRequest: Date?
 

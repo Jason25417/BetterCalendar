@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "nativeVersion": "0.65.20",
+  "build": 177,
+  "serviceVersion": 39,
+  "serviceChanged": false,
+  "systemPermissionsChangedByAgent": false,
+  "realCommandsCreatedOrDecidedByAgent": false,
+  "nativeTests": {
+    "result": "Passed",
+    "passedTests": 21,
+    "failedTests": 0,
+    "skippedTests": 0,
+    "totalTestCount": 21,
+    "testFailures": [],
+    "bundle": "/private/tmp/bc177-dd/Logs/Test/Test-BetterCalendar-2026.10.14_17-00-50--0400.xcresult"
+  },
+  "iOSSimulator": "BUILD SUCCEEDED",
+  "release": "prepared_not_yet_uploaded",
+  "notificationDelivery": "local_poll_20s_while_app_runs",
+  "remoteApprovalPush": false,
+  "humanNotificationsAcceptance": {
+    "Mac": "not_verified",
+    "iPhone": "not_verified"
+  },
+  "humanAppAcceptance": {
+    "Mac": "175_layout_click_reported_177_result_not_verified",
+    "iPhone": "not_verified"
+  },
+  "chatLayout": {
+    "Mac": "unfixed_separate_support_escalation",
+    "iPhone": "prior_human_confirmed_marked_create_to_Mac_only"
+  },
+  "directDecisionScope": "short_complete_item_create_update_title_note_only",
+  "directBodyMaximumUTF16": 420,
+  "thresholdIsNotRealDeviceLayoutProof": true,
+  "fixture": {
+    "recordId": "c5472af0-89c2-466e-9704-7e260a984c1d",
+    "Mac": {
+      "snapshotAt": "2026-10-14T21:01:01Z",
+      "readAt": "2026-10-14T21:01:45.108Z",
+      "present": true,
+      "revision": "077306fcdc53a83ac915a13dc3a0658650e2237d322d16482c5920ed0be5ab56"
+    },
+    "iPhone": {
+      "snapshotAt": "2026-10-14T20:16:07Z",
+      "readAt": "2026-10-14T21:01:43.536Z",
+      "presentInOldCompleteTodoPage": false,
+      "currentSync": "unknown_stale_snapshot"
+    }
+  }
+}

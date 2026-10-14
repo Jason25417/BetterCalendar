@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.20", date: "2026-10", changes: [
+            "短且完整的事项标题／备注改动可展开系统通知，由本人直接批准或拒绝；长内容仍须打开详情核对",
+            "修复通知打开审批时被刷新丢弃的问题，清理已关闭请求的旧通知，并提供不执行的通知入口测试",
+            "通知默认关闭，需本机单独允许；当前只在App运行时检查，尚未接通iPhone后台远程审批推送"
+        ]),
         ChangelogEntry(version: "0.65.19", date: "2026-10", changes: [
             "只读审批显示测试结束后，固定底栏明确显示已收到确认或不执行，避免点击后像没有反馈",
             "测试结束后不再显示可提交按钮；演示不修改任何事项、计时、闹钟或权限"

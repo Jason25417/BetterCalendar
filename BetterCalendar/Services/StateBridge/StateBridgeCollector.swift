@@ -139,7 +139,9 @@ import CryptoKit
         await StateBridgePhone.shared.readHealth()
         #endif
         guard enabled else { return }
+        let approvalNotificationStatus = await NativeApprovalNotification().authorization()
         client.emit("device.status",value:.object(["availability":.string("online"),
+            "approvalNotifications":NativeApprovalNotificationBinding.diagnostics(enabled:UserDefaults.standard.bool(forKey:"bc.nativeApprovalNotifications"),authorization:approvalNotificationStatus),
             "platform":.string(ProcessInfo.processInfo.operatingSystemVersionString),
             "collector":.object(["name":.string("BetterCalendar"),"version":.string(AppInfo.version),
                                  "build":.string(BuildInfo.buildNumber),"schemaVersion":.number(2)])]))

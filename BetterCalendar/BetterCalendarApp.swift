@@ -69,15 +69,18 @@ struct BetterCalendarApp: App {
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
             .toolbar {
-                Button { container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
+                Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
             }
             .sheet(isPresented: Binding(get: { container.router.openNativeApprovals }, set: { container.router.openNativeApprovals = $0 })) {
                 NavigationStack {
-                    NativeApprovalContent(model: container.nativeApprovals)
+                    NativeApprovalContent(model: container.nativeApprovals, previewRequestId: container.router.nativeApprovalPreviewRequest)
                         .navigationTitle("BC 审批")
                         .toolbar { Button("关闭") { container.router.openNativeApprovals = false } }
-                        .task {
-                            if let id = container.router.nativeApprovalCommandId { await container.nativeApprovals.open(id); container.router.nativeApprovalCommandId = nil }
+                        .task(id: container.router.nativeApprovalCommandId) {
+                            if let id = container.router.nativeApprovalCommandId {
+                                await container.nativeApprovals.requestOpen(id)
+                                if container.router.nativeApprovalCommandId == id { container.router.nativeApprovalCommandId = nil }
+                            }
                         }
                 }
                 #if os(iOS)

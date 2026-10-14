@@ -110,6 +110,10 @@ final class AppContainer {
                                           writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks)
         self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), writer: nativeItems, journal: nativeJournal, mayApprove: { remote.permitsApproval($0) })
         self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote, approvals: nativeApprovals)
+        notificationDelegate.handleApprovalDecision = { [weak inbox = nativeApprovals] binding, decision in
+            await inbox?.decideFromNotification(binding, decision: decision)
+        }
+        if !TestHost.isActive { Task { await NativeApprovalNotification.registerCategories() } }
         nativeApprovals.start()
         remote.startPolling()
         if !TestHost.isActive {
