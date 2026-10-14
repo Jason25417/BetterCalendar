@@ -4,7 +4,7 @@
   "build": 175,
   "serviceSourceCommit": "f6a193e0188b51b997804e2579657c2858f5d1e9",
   "deploymentId": "appgdep_6acfd005ba048191b448d757d4614e4c",
-  "serviceStatus": "pending",
+  "serviceStatus": "succeeded",
   "userAuthorization": "current_turn_release_and_Dots_incremental_tests",
   "tests": {
     "serverPassed": 125,
@@ -25,6 +25,69 @@
   "permissionsExpanded": false,
   "notificationOptIn": "off_by_default_requires_separate_human_choice",
   "displayPreview": "in_memory_only_no_production_credentials_no_executor",
-  "testFlight": "not_uploaded_yet",
-  "dotsMessage": "not_sent_yet"
+  "testFlight": {
+    "appId": "6787325341",
+    "build": 175,
+    "builds": [
+      {
+        "id": "d25d6844-da85-4eb7-9f26-9e159abb1caa",
+        "platform": "IOS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "79c3b617-5ee3-4e3e-a407-eb3ee88593e6",
+        "platform": "MAC_OS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ],
+    "bothInstallable": true
+  },
+  "dotsMessage": {
+    "transport": "Edge_extension_visible_UI",
+    "page": "https://chatgpt.com/dots/home",
+    "sent": true,
+    "visibleReadReceipt": "15:10 EDT",
+    "purpose": "only_new_approval_policy_trace_and_Mac_duration",
+    "readOnly": true,
+    "directThreadAPI": "thread_not_found_not_sent",
+    "screenshotLocalOnly": "/private/tmp/bc175-dots-message.png",
+    "testCompletion": "pending"
+  },
+  "serviceVersion": 38,
+  "serviceLiveRead": {
+    "readAt": "2026-10-14T18:56:18.657Z",
+    "researchCallId": "research_8fd0381d-7cbb-4711-ac2e-be12ac0c9528",
+    "defaultConfirmationChannel": "native",
+    "defaultTTLSeconds": 86400
+  },
+  "nativeSourceCommit": "be9850df7cb3f05ba21b3bbd8ddfb2d9c82e8b8a",
+  "layoutVerification": {
+    "kind": "offscreen_Mac_NSHostingView",
+    "logicalWidths": [
+      390,
+      620
+    ],
+    "images": [
+      "approval-release-175-390.png",
+      "approval-release-175-620.png"
+    ],
+    "realPhone": false,
+    "buttonAvailabilityAsserted": true
+  },
+  "releaseStatus": {
+    "build": 175,
+    "version": "0.65.18",
+    "sourceCommit": "be9850df7cb3f05ba21b3bbd8ddfb2d9c82e8b8a",
+    "phase": "uploaded-both",
+    "developerDir": "/Applications/Xcode.app/Contents/Developer",
+    "updatedAt": 1792004553.455383,
+    "macUploaded": true,
+    "iosUploaded": true
+  }
 }
