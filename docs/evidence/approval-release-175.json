@@ -57,7 +57,22 @@
     "readOnly": true,
     "directThreadAPI": "thread_not_found_not_sent",
     "screenshotLocalOnly": "/private/tmp/bc175-dots-message.png",
-    "testCompletion": "pending"
+    "testCompletion": "partial_live_read_calls_observed_native_UI_and_upload_unverified",
+    "reply": "Accepted four read-only checks; will not publish cards or real operations",
+    "liveBCResearchCalls": [
+      {
+        "id": 101080,
+        "at": "2026-10-14T19:11:59.975Z",
+        "tool": "read_instructions",
+        "callId": "research_137e04aa-5d29-419b-b209-107bb135814d"
+      },
+      {
+        "id": 101086,
+        "at": "2026-10-14T19:12:01.528Z",
+        "tool": "read_native_capabilities",
+        "callId": "research_0112c37e-7c38-415d-adf1-8b0ee68072da"
+      }
+    ]
   },
   "serviceVersion": 38,
   "serviceLiveRead": {
