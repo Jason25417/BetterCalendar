@@ -2,6 +2,7 @@ import {BridgeError} from './bridge.mjs';
 import {clientConfirmationCapabilities} from './mcp-client-capabilities.mjs';
 import {canonical,sha} from './bridge.mjs';
 import {confirmationPresentation} from './confirmation-presentation.mjs';
+import {formResponseShape,normalizeFormResponse} from './native-form-response.mjs';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 export function supportsNativeForm(params) {
  const caps=clientConfirmationCapabilities(params);
@@ -12,7 +13,7 @@ export function nativeFormResponse(params) {
  if(!object(params.inputResponses)||Object.keys(params.inputResponses).length!==1||!object(params.inputResponses.bc_native_confirmation)||typeof params.requestState!=='string')throw new BridgeError('原生表单确认响应不完整');
  return params.inputResponses.bc_native_confirmation;
 }
-export function nativeFormParameters(value,display=null,{preview=false}={}) {
+export function nativeFormParameters(value,display=null,{preview=false,variant='boolean'}={}) {
  const request=value.request;
  // Operation values are complete plain text. Technical identities/revisions
  // remain bound in the original request and audit rather than in the checkbox.
@@ -35,7 +36,11 @@ export function nativeFormParameters(value,display=null,{preview=false}={}) {
  const message=`${preview?'只读显示测试':'请本人确认'}：${actions[request.action]??request.action}${kinds[request.kind]??request.kind}。`;
  // UUIDs, full revisions and agent-reported userRequest remain in the original
  // immutable request/audit. The human field shows the operation, not a raw dump.
- return {mode:'form',message,requestedSchema:{type:'object',properties:{confirm:{type:'boolean',title:preview?'确认显示测试（不会执行）':'确认执行',description:details.join('\n')+'\n关闭或不勾选都不会执行；服务接受不等于设备已应用。',default:false}},required:['confirm']}};
+ const description=details.join('\n')+'\n关闭或不勾选都不会执行；服务接受不等于设备已应用。';
+ const properties={confirm:{type:'boolean',title:preview?'确认显示测试（不会执行）':'确认执行',description,default:false}};
+ if(preview&&variant==='choice')properties.confirm={type:'string',title:'显示测试选择（不会执行）',description,enum:['不执行','确认显示测试'],default:'不执行'};
+ if(preview&&variant==='review')return {mode:'form',message,requestedSchema:{type:'object',properties:{review:{type:'string',title:'改动摘要（仅显示测试）',default:description,maxLength:20000},confirm:{...properties.confirm,description:'这次只检查显示和响应格式，不执行原操作。'}},required:['review','confirm']}};
+ return {mode:'form',message,requestedSchema:{type:'object',properties,required:['confirm']}};
 }
 export function nativeFormResult(value,approval,display=null) {
  if(!approval||value.state!=='awaiting_confirmation')return null;
@@ -44,17 +49,19 @@ export function nativeFormResult(value,approval,display=null) {
 
 // This separate read-only tool never calls submit/respondForm/approve/claim.
 // Even an accept response cannot reopen or execute the referenced command.
-export async function previewNativeForm(core,commandId,owner,params) {
+export async function previewNativeForm(core,commandId,owner,params,variant='boolean') {
+ if(!['boolean','choice','review'].includes(variant))throw new BridgeError('未知只读表单对照');
  const value=await core.nativeCommands.status({commandId},owner);
  if(!supportsNativeForm(params))throw new BridgeError('此宿主未声明表单能力；显示测试未发布，不会执行操作',403);
  if(params.inputResponses!==undefined||params.requestState!==undefined){
-  const response=nativeFormResponse(params);
-  if(!params.requestState.startsWith(`bc-preview-v1:${commandId}:`)||!['accept','cancel','decline'].includes(response.action))throw new BridgeError('只读显示测试续传无效');
-  if(Object.keys(response).some(key=>!['action','content'].includes(key))||response.action==='accept'&&(!object(response.content)||Object.keys(response.content).length!==1||typeof response.content.confirm!=='boolean')||response.action!=='accept'&&response.content!==undefined)throw new BridgeError('只读显示测试响应格式无效');
+  const raw=nativeFormResponse(params);
+  if(!params.requestState.startsWith(`bc-preview-v1:${commandId}:`))throw new BridgeError('只读显示测试续传无效');
+  await core.research.append('native_confirmation_preview_response',null,{commandId,state:value.state,variant,responseShape:formResponseShape(raw),operationEffect:'read_only'},owner);
+  const response=normalizeFormResponse(raw,variant);
   return {value:{preview:true,operationEffect:'read_only',originalCommandId:commandId,originalState:value.state,hostResponse:response.action,executed:false,interpretation:'只读显示测试已返回；没有确认、重建或执行原请求。宿主响应不证明真人看见或点击。'},inputRequired:null};
  }
  const display=await confirmationPresentation(core,value);
- const form=nativeFormParameters(value,display,{preview:true});
+ const form=nativeFormParameters(value,display,{preview:true,variant});
  await core.research.append('native_confirmation_preview_prepared',null,{commandId,requestHash:value.requestHash,expectedRevision:value.request.expectedRevision??null,state:value.state,presentationVersion:2,presentationHash:await sha(canonical(form)),beforeSource:display.source,operationEffect:'read_only',hostDisplayed:'unknown'},owner);
  return {value:null,inputRequired:{resultType:'input_required',inputRequests:{bc_native_confirmation:{method:'elicitation/create',params:form}},requestState:`bc-preview-v1:${commandId}:${crypto.randomUUID()}`}};
 }

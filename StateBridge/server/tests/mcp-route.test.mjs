@@ -10,6 +10,7 @@ import * as commands from '../lib/native-commands.mjs';
 import * as capabilities from '../lib/mcp-client-capabilities.mjs';
 import * as form from '../lib/native-form-confirmation.mjs';
 import * as research from '../lib/research.mjs';
+import * as formResponse from '../lib/native-form-response.mjs';
 const ts=createRequire(import.meta.url)('typescript');
 const Ajv=createRequire(import.meta.url)('ajv');
 const routeSource=ts.transpileModule(readFileSync(new URL('../app/mcp/route.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -23,7 +24,7 @@ async function fixture(t,{fetcher=()=>{throw Error('test forbids network');}}={}
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const out=ops.map(op=>op.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  const reopen=()=>bridge.createBridge(db,{now:()=>now,fetcher});
  let core=reopen();const logs=[];
- const modules={'@/lib/service':{service:()=>core},'@/lib/bridge.mjs':bridge,'@/lib/dot-instructions':{dotInstructions:'isolated route fixture'},'@/lib/native-confirmation.mjs':confirmation,'@/lib/native-commands.mjs':commands,'@/lib/mcp-client-capabilities.mjs':capabilities,'@/lib/native-form-confirmation.mjs':form,'@/lib/research.mjs':research};
+ const modules={'@/lib/service':{service:()=>core},'@/lib/bridge.mjs':bridge,'@/lib/dot-instructions':{dotInstructions:'isolated route fixture'},'@/lib/native-confirmation.mjs':confirmation,'@/lib/native-commands.mjs':commands,'@/lib/mcp-client-capabilities.mjs':capabilities,'@/lib/native-form-confirmation.mjs':form,'@/lib/research.mjs':research,'@/lib/native-form-response.mjs':formResponse};
  const exports={};vm.runInNewContext(routeSource,{exports,require(name){assert.ok(modules[name],`unexpected import ${name}`);return modules[name];},Response,TextEncoder,console:{info(...args){logs.push(args);},warn(...args){logs.push(args);}}});
  let rpcId=0;
  const rpc=async(method,params,owner='fixture-owner')=>{
@@ -68,6 +69,30 @@ test('cached record_context preview adapter never saves context or grants an ope
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
  assert.deepEqual(f.sqlite.prepare('SELECT * FROM native_requests').get(),before);
  for(const bad of [{...a,body:{commandId:v.commandId,patch:{note:'not allowed'}}},{...a,confidence:'high'},{...a,supersedes:'other'}])assert.ok((await f.call('record_context',bad)).body.error);
+});
+test('actual continuation tolerates recognized transport metadata without using it for authority',async t=>{
+ const f=await fixture(t),v=f.request(97),first=await f.call('submit_native_command',v);
+ const response={action:'accept',content:{confirm:true},resultType:'complete',_meta:{privateFixture:'not-recorded',userConfirmed:true,patch:{title:'must-not-apply'}}};
+ const accepted=await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:response}});
+ assert.equal(accepted.body.result.structuredContent.state,'queued');assert.deepEqual(accepted.body.result.structuredContent.request.patch,v.patch);
+ const event=(await f.core.research.read({limit:100})).entries.find(e=>e.kind==='native_confirmation_response_received');
+ assert.equal(event.body.responseShape.resultTypeType,'string');assert.equal(event.body.responseShape.metadataType,'object');
+ assert.equal(JSON.stringify(event).includes('not-recorded'),false);
+});
+test('choice and text-review previews accept typed responses and never write activities or commands',async t=>{
+ const f=await fixture(t),v=f.request(98),first=await f.call('submit_native_command',v);
+ await f.call('submit_native_command',v,{requestState:first.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
+ const before=f.sqlite.prepare('SELECT * FROM native_requests').get();
+ for(const variant of ['choice','review']){
+  const a={id:'bc-preview:'+v.commandId,kind:'bc.confirmation.preview',body:{commandId:v.commandId,variant},assertion:'user',confidence:'unknown',basis:[]};
+  const preview=await f.call('record_context',a),schema=preview.body.result.inputRequests.bc_native_confirmation.params.requestedSchema;
+  assert.equal(new Ajv().compile(schema)(variant==='choice'?{confirm:'不执行'}:{confirm:false,review:'display only'}),true);
+  const content=variant==='choice'?{confirm:'确认显示测试'}:{confirm:true,review:schema.properties.review.default};
+  const outcome=await f.call('record_context',a,{requestState:preview.body.result.requestState,inputResponses:{bc_native_confirmation:{action:'accept',content,resultType:'complete'}}});
+  assert.equal(outcome.body.result.structuredContent.executed,false);
+  assert.deepEqual(f.sqlite.prepare('SELECT * FROM native_requests').get(),before);
+ }
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM notes').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
 });
 test('minute delivery and repeated status reads do not cancel, rotate or approve a pending native form',async t=>{
  const callbacks=[];

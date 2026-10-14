@@ -6,6 +6,7 @@ import { nativeUUIDSchema } from "@/lib/native-commands.mjs";
 import { clientConfirmationCapabilities } from "@/lib/mcp-client-capabilities.mjs";
 import { supportsNativeForm, nativeFormResponse, finalizeNativeForm, previewNativeForm } from "@/lib/native-form-confirmation.mjs";
 import { safeArguments } from "@/lib/research.mjs";
+import {formResponseShape} from "@/lib/native-form-response.mjs";
 export const dynamic="force-dynamic";
 const object=(properties:Record<string,unknown>={},required:string[]=[])=>({type:"object",properties,required,additionalProperties:false});
 const string={type:"string"};
@@ -66,10 +67,10 @@ export async function POST(request:Request){
       const cachedPreview=p.name==="record_context"&&a.kind==="bc.confirmation.preview";
       if(p.name==="preview_native_confirmation"||cachedPreview){
         const previewArgs=cachedPreview?a.body:a;
-        if(!previewArgs||Object.keys(previewArgs).some(key=>key!=="commandId"))throw new BridgeError("只读显示测试只接受原commandId");
+        if(!previewArgs||Object.keys(previewArgs).some(key=>!["commandId","variant"].includes(key)))throw new BridgeError("只读显示测试只接受原commandId和对照类型");
         if(cachedPreview&&(a.id!=="bc-preview:"+previewArgs.commandId||a.assertion!=="user"||a.confidence!=="unknown"||!Array.isArray(a.basis)||a.basis.length||Object.keys(a).some(key=>!["id","kind","body","assertion","confidence","basis"].includes(key))))throw new BridgeError("只读显示测试兼容参数无效；不会保存上下文");
         let inputRequired:unknown=null;
-        const value=await core.research.invoke(p.name,{...a,commandId:previewArgs.commandId},owner,async()=>{const preview=await previewNativeForm(core,previewArgs.commandId,owner,p);inputRequired=preview.inputRequired;return preview.value??{preview:true,operationEffect:"read_only",executed:false,originalCommandId:previewArgs.commandId,presentationPrepared:true,hostDisplayed:"unknown"};});
+        const value=await core.research.invoke(p.name,{...a,commandId:previewArgs.commandId},owner,async()=>{const preview=await previewNativeForm(core,previewArgs.commandId,owner,p,previewArgs.variant??'boolean');inputRequired=preview.inputRequired;return preview.value??{preview:true,operationEffect:"read_only",executed:false,originalCommandId:previewArgs.commandId,presentationPrepared:true,hostDisplayed:"unknown"};});
         return inputRequired?Response.json({jsonrpc:"2.0",id,result:inputRequired}):result(nativeToolResult(value));
       }
       const proposal=["submit_native_command","task_command"].includes(p.name);
@@ -80,7 +81,7 @@ export async function POST(request:Request){
       const submit=async(input:any)=>{
         if(response){
           const references=safeArguments(input);
-          const evidence={originTool:p.name,commandId:typeof input.commandId==="string"&&new RegExp(nativeUUIDSchema.pattern).test(input.commandId)?input.commandId:null,requestHash:await sha(canonical(input)),expectedRevision:references.expectedRevision??null,sessionId:references.sessionId??null,action:response.action,confirmed:response.content?.confirm===true,source:"host_response",userGesture:"unknown",cause:"unknown"};
+          const evidence={originTool:p.name,commandId:typeof input.commandId==="string"&&new RegExp(nativeUUIDSchema.pattern).test(input.commandId)?input.commandId:null,requestHash:await sha(canonical(input)),expectedRevision:references.expectedRevision??null,sessionId:references.sessionId??null,action:response.action,confirmed:response.content?.confirm===true,responseShape:formResponseShape(response),source:"host_response",userGesture:"unknown",cause:"unknown"};
           await core.research.append("native_confirmation_response_received",null,evidence,owner);
           let value;
           try {value=await core.nativeCommands.respondForm({request:input,originTool:p.name,requestState:p.requestState,response},owner);}

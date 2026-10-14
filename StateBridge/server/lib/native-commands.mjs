@@ -1,4 +1,5 @@
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
+import {normalizeFormResponse} from './native-form-response.mjs';
 // MCP advertises the same identity contract that the executor validates.
 export const nativeUUIDSchema=Object.freeze({type:'string',format:'uuid',pattern:'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'});
 const nativeUUIDPattern=new RegExp(nativeUUIDSchema.pattern);
@@ -124,10 +125,9 @@ export function createNativeCommands(db,time,executeTask){
   if(!['submit_native_command','task_command'].includes(originTool)||!text(requestState,200)||!requestState.startsWith(`bc-form-v1:${originTool}:`))throw new BridgeError('原生表单确认身份无效',403);
   const r=await row(request.commandId,owner),requestHash=await sha(canonical(request));
   if(r.request_hash!==requestHash||await sha(requestState)!==r.approval_hash)throw new BridgeError('确认原文、设备或凭据已改变',403);
-  keys(response,['action','content']);
-  if(!['accept','decline','cancel'].includes(response.action))throw new BridgeError('原生确认结果无效');
+  response=normalizeFormResponse(response);
   if(response.action==='accept'){
-   keys(response.content,['confirm']);if(typeof response.content.confirm!=='boolean')throw new BridgeError('原生确认需要本人明确选择');
+   if(typeof response.content.confirm!=='boolean')throw new BridgeError('原生确认需要本人明确选择');
    if(response.content.confirm===true){
     if(['cancelled','declined'].includes(r.state))throw new BridgeError('本请求已取消或拒绝，不会重新确认或执行',409);
     return approve({commandId:r.command_id,requestHash,token:requestState},owner);
