@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.65.19", date: "2026-10", changes: [
+            "只读审批显示测试结束后，固定底栏明确显示已收到确认或不执行，避免点击后像没有反馈",
+            "测试结束后不再显示可提交按钮；演示不修改任何事项、计时、闹钟或权限"
+        ]),
         ChangelogEntry(version: "0.65.18", date: "2026-10", changes: [
             "新增 BC 内待确认页面：核对设备、改动前后与截止时间，同意或拒绝均由你决定",
             "新审批默认保留24小时；Dots提交即返回入口，避免等待电脑端异常长条卡片",

@@ -27,7 +27,7 @@ import Foundation
         }
         func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
             switch path {
-            case "native/approvals": return .object(["commands": .array(state == "awaiting_confirmation" ? [try envelope()] : []), "through": .string(id), "nextCursor": .string(id), "hasMore": .bool(false)])
+            case "native/approvals": return .object(["commands": .array(state == "awaiting_confirmation" ? [try envelope()] : []), "through": .string(id), "nextCursor": state == "awaiting_confirmation" ? .string(id) : (try NativeRemoteJSON.object(body)["after"] ?? .string("")), "hasMore": .bool(false)])
             case "native/approval/read": return try envelope()
             case "native/approval/decide":
                 let data = try NativeRemoteJSON.object(body), decision = try NativeRemoteJSON.string(data["decision"])

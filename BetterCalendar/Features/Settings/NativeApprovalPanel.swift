@@ -44,7 +44,7 @@ struct NativeApprovalPanel: View {
                 Button("单独允许新审批通知") { Task { await model.enableNotifications() } }
             }
             Text("通知默认关闭，单独取得系统授权后才启用；点通知仅打开详情，不会批准或执行。后台到达时间取决于设备联网与系统调度。").font(.caption).foregroundStyle(.secondary)
-            if let message = model.message { Text(message).font(.caption).textSelection(.enabled) }
+            if let message = model.message, message != model.displayTestDecision?.title { Text(message).font(.caption).textSelection(.enabled) }
         }.frame(maxWidth: .infinity, alignment: .leading).buttonStyle(.bordered).task { await model.refresh() }
         .sheet(isPresented: $showPreview) {
             if let previewModel {
@@ -72,7 +72,7 @@ private struct NativeApprovalDetail: View {
             Divider()
             Text(entry.title).font(.title3).textSelection(.enabled)
             Text("设备：" + entry.deviceLabel)
-            Text(model.isDisplayTest ? (entry.state == "awaiting_confirmation" ? "仅测试显示；所有选择均不执行操作" : "显示测试已返回；没有改事项或计时") : entry.stateLabel).foregroundStyle(.secondary)
+            Text(model.isDisplayTest ? (entry.state == "awaiting_confirmation" ? "仅测试显示；所有选择均不执行操作" : (model.displayTestDecision?.title ?? "显示测试已返回；没有改事项或计时")) : entry.stateLabel).foregroundStyle(.secondary)
             Text("确认截止：" + entry.expiresAt.formatted())
             Text("操作：" + actionLabel)
             ForEach(changes, id: \.0) { key, after in
@@ -92,8 +92,8 @@ private struct NativeApprovalDetail: View {
             if model.retryCommandIds.contains(entry.id) {
                 Button("核对原审批并重试原决定") { Task { await model.retryOriginalDecision() } }.disabled(model.busy)
             }
-            Text("同意表示交给指定设备；只有设备回执才能说明已应用。平台卡片可能提前结束显示，服务期限独立。").font(.caption).foregroundStyle(.secondary)
-            Text("同意还需本机原有操作授权有效且已同步；这里不会扩大授权。").font(.caption).foregroundStyle(.secondary)
+            Text(model.isDisplayTest ? "这是本机显示测试，不会提交给真实设备执行。" : "同意表示交给指定设备；只有设备回执才能说明已应用。平台卡片可能提前结束显示，服务期限独立。").font(.caption).foregroundStyle(.secondary)
+            Text(model.isDisplayTest ? "确认或不执行都不会改变你的事项、计时、闹钟或权限。" : "同意还需本机原有操作授权有效且已同步；这里不会扩大授权。").font(.caption).foregroundStyle(.secondary)
             DisclosureGroup("技术详情与回执") {
                 Text("请求：" + entry.id + "\n版本：" + value(entry.request["expectedRevision"]) + "\n请求哈希：" + entry.requestHash).font(.caption).textSelection(.enabled)
                 if let result = entry.result { Text(value(result)).font(.caption).textSelection(.enabled) }
@@ -119,7 +119,9 @@ private struct NativeApprovalDetail: View {
 struct NativeApprovalDecisionBar: View {
     @Bindable var model: NativeApprovalInbox
     var body: some View {
-        if let entry = model.selected {
+        if let decision = model.displayTestDecision {
+            NativeApprovalDisplayFeedback(decision: decision)
+        } else if let entry = model.selected {
             HStack {
                 Button(model.isDisplayTest ? "确认显示测试" : "同意这项改动") { Task { await model.decide("accept") } }
                     .disabled(!model.canDecide(entry, accept: true)).accessibilityIdentifier("bc.approvals.accept")
@@ -127,5 +129,17 @@ struct NativeApprovalDecisionBar: View {
                     .disabled(!model.canDecide(entry, accept: false)).accessibilityIdentifier("bc.approvals.decline")
             }.buttonStyle(.bordered).padding().frame(maxWidth: .infinity).background(.regularMaterial)
         }
+    }
+}
+
+
+struct NativeApprovalDisplayFeedback: View {
+    let decision: NativeApprovalDisplayDecision
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(decision.title, systemImage: "checkmark.circle.fill").font(.headline).foregroundStyle(.green)
+            Text(decision.detail).font(.subheadline).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding().background(.regularMaterial)
+            .accessibilityElement(children: .combine).accessibilityIdentifier("bc.approvals.display-result")
     }
 }

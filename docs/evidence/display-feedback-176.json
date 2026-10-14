@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "nativeVersion": "0.65.19",
+  "build": 176,
+  "baseCommit": "9d97d6e253b31e87646a7b9350521c1ecc25aaf4",
+  "serviceUnchanged": "v38",
+  "tests": {
+    "scope": "NativeApprovalInboxTests_only",
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0,
+    "iOSSimulator": "BUILD SUCCEEDED",
+    "bundle": "/private/tmp/bc39-dd/Logs/Test/Test-BetterCalendar-2026.10.14_15-37-44--0400.xcresult"
+  },
+  "mac175HumanFeedback": {
+    "source": "user_report",
+    "layout": "normal",
+    "approvalButton": "clickable",
+    "visibleCompletionFeedback": "not_seen",
+    "actualSimulatedReply": "unknown"
+  },
+  "mac175AppUsage": {
+    "source": "user_relayed_Dots_report",
+    "firstReportedAt": "2026-10-14T15:16:04-04:00",
+    "fieldAndUpload": "reported_verified",
+    "durationAccuracy": "not_verified",
+    "sleepRestartGapRealAcceptance": "not_verified"
+  },
+  "fix": [
+    "pinned_display_success_or_decline",
+    "remove_repeatable_actions_after_display_reply",
+    "display_empty_page_cursor",
+    "refresh_errors_remain_visible"
+  ],
+  "realOperationsModified": false,
+  "permissionsChanged": false,
+  "stateBridgeDeployed": false,
+  "human176Acceptance": "not_verified",
+  "iPhoneHumanUI": "not_verified",
+  "realCommandE2E": "not_verified",
+  "testFlight": "pending",
+  "dotsMessage": "not_sent"
+}

@@ -19,6 +19,7 @@ import AppKit
     @Test func openingAndRefreshingNeverApprovesAndDoesNotAskForNotificationPermission() async throws {
         let (service, disk, prefs) = try fixture(); let notifications = ApprovalNotifier(), inbox = model(service, disk, prefs, notifier: notifications)
         await inbox.refresh(); await inbox.open(service.id)
+        #expect(inbox.displayTestDecision == nil)
         #expect(inbox.pending.count == 1 && inbox.readComplete && inbox.selected?.state == "awaiting_confirmation")
         #expect(service.decisions.isEmpty && notifications.authorizations == 0 && notifications.sent.isEmpty && disk.values.isEmpty)
     }
@@ -107,10 +108,32 @@ import AppKit
         let result = try NativeRemoteJSON.object(try #require(inbox.selected?.result))
         #expect(result["executed"] == .bool(false) && result["operationEffect"] == .string("read_only_display"))
         #expect(inbox.retryCommandIds.isEmpty && !inbox.notificationsEnabled)
+        #expect(inbox.displayTestDecision == .accept && inbox.message == "显示测试完成：已收到确认")
+        await inbox.refresh(); #expect(inbox.displayTestDecision == .accept && inbox.readComplete && inbox.pending.isEmpty)
         let denied = NativeApprovalPreview.make(); await denied.refresh(); await denied.open(entry.id); await denied.decide("decline")
-        #expect(denied.selected?.state == "declined")
+        #expect(denied.selected?.state == "declined" && denied.displayTestDecision == .decline)
+        #expect(denied.message == "显示测试结束：已收到不执行")
     }
     #if os(macOS)
+    @Test func displayCompletionFeedbackIsVisibleInNarrowAndWidePinnedFooter() async throws {
+        let inbox = NativeApprovalPreview.make(); await inbox.refresh()
+        await inbox.open(try #require(inbox.pending.first).id); await inbox.decide("accept")
+        await inbox.refresh()
+        #expect(inbox.displayTestDecision == .accept && inbox.readComplete)
+        for width in [390.0, 620.0] {
+            let rect = NSRect(x: 0, y: 0, width: width, height: 650)
+            let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: NativeApprovalContent(model: inbox).frame(width: width, height: 650).environment(\.colorScheme, .light).background(Color.white))
+            host.frame = rect; host.appearance = NSAppearance(named: .aqua); window.contentView = host; host.layoutSubtreeIfNeeded()
+            for _ in 0..<20 { await Task.yield() }
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: rect)); host.cacheDisplay(in: rect, to: bitmap)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            try data.write(to: URL(fileURLWithPath: "/private/tmp/bc176-display-result-\(Int(width)).png"), options: .atomic)
+            window.close()
+        }
+    }
     @Test func approvalLayoutNarrowAndWidePreviewWithPinnedControls() async throws {
         let (service, disk, prefs) = try fixture(); service.showUpdate = true
         let inbox = model(service, disk, prefs); await inbox.refresh(); await inbox.open(service.id)

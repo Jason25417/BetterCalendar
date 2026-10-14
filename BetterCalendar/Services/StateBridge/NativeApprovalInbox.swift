@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+nonisolated enum NativeApprovalDisplayDecision: String {
+    case accept, decline
+    var title: String { self == .accept ? "显示测试完成：已收到确认" : "显示测试结束：已收到不执行" }
+    var detail: String { "未修改任何事项、计时、闹钟或权限。你可以关闭此页面。" }
+}
+
 nonisolated struct NativeApproval: Identifiable {
     var id: String
     var deviceId: String
@@ -127,6 +133,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     let isDisplayTest: Bool
     var entries: [NativeApproval] = []
     var selected: NativeApproval?
+    var displayTestDecision: NativeApprovalDisplayDecision?
     var message: String?
     var busy = false
     var readComplete = false
@@ -239,7 +246,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     }
     func open(_ id: String) async {
         guard !busy, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { busy = false }
-        selected = nil
+        selected = nil; displayTestDecision = nil
         do { selected = try await read(id, deviceId: deviceId); message = nil } catch { fail(error) }
     }
     func decide(_ decision: String) async {
@@ -275,7 +282,14 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             selected = value
             var intents = try persistence.load(); intents.removeAll { $0 == intent }; try persistence.save(intents)
             retryCommandIds = intents.filter { $0.deviceId == intent.deviceId }.map(\.commandId)
-            entries.removeAll { $0.id == value.id }; message = value.stateLabel
+            entries.removeAll { $0.id == value.id }
+            // Feedback follows an identity-checked reply and completed local
+            // persistence. Never describe a simulated queued state as execution.
+            if isDisplayTest, case let .object(result) = value.result,
+               result["executed"] == .bool(false), result["operationEffect"] == .string("read_only_display") {
+                displayTestDecision = NativeApprovalDisplayDecision(rawValue: decision)
+            }
+            message = displayTestDecision?.title ?? value.stateLabel
         } catch {
             // Keep the exact persisted request on lost responses; a read does
             // not approve, replace, or silently retry it after restart.
