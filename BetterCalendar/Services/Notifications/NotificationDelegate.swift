@@ -20,6 +20,11 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     // id 对应 UNNotificationService 里的 morning/evening
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
+        if let id = response.notification.request.content.userInfo["bcApprovalCommandId"] as? String, UUID(uuidString: id) != nil {
+            router.nativeApprovalCommandId = id
+            router.openNativeApprovals = true
+            return // Opens detail only; never grants, approves or executes.
+        }
         switch response.notification.request.identifier {
         case "bc.reminder.morning":
             // 0.23 A：开始今天已退役——早通知改为打开执行界面、第一件「待开始」（不自动计时）

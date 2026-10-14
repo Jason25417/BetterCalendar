@@ -142,7 +142,11 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         request.setValue("Bearer " + c.deviceToken,forHTTPHeaderField:"Authorization")
         let (data,response) = try await session.data(for:request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        guard (200..<300).contains(http.statusCode) else { throw NSError(domain:"StateBridge.HTTP",code:http.statusCode) }
+        guard (200..<300).contains(http.statusCode) else {
+            let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let message = payload?["error"] as? String ?? "服务请求失败；请核对原请求状态"
+            throw NSError(domain: "StateBridge.HTTP", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: message])
+        }
         return (try JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
     }
     var nativeDeviceId: String? { credentials?.deviceId }

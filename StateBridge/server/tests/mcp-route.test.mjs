@@ -139,7 +139,7 @@ test('actual POST route handles MRTR, one device receipt and lost-response retry
  const research=await f.core.research.read({limit:100});
  const trace=research.entries.filter(e=>e.kind==='call_started');
  const confirmationCall=trace.find(e=>e.body.arguments.confirmation);
- assert.equal(confirmationCall.body.arguments.confirmation.transport,'mcp_form');assert.equal(confirmationCall.body.arguments.confirmation.confirmed,true);
+ assert.equal(confirmationCall.body.arguments.confirmation.transport,'mcp_form');assert.equal(confirmationCall.body.arguments.confirmation.confirmed,undefined);
  const raw=await f.core.research.evidence({nativeCommandIds:[v.commandId]});
  assert.equal(raw.nativeCommands[0].body.userRequest,v.userRequest);
  assert.equal(JSON.stringify({research,raw,logs:f.logs}).includes(state),false);
@@ -182,7 +182,7 @@ test('host cancellation before expiry records unknown cause, never a confirmed u
  const canceled=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
  assert.equal(canceled.body.result.structuredContent.state,'cancelled');assert.equal(canceled.body.result.structuredContent.approvedAt,null);
  const research=await f.core.research.read({limit:100}),call=research.entries.find(e=>e.kind==='call_started'&&e.body.arguments.confirmation);
- assert.deepEqual(JSON.parse(JSON.stringify(call.body.arguments.confirmation)),{transport:'mcp_form',action:'cancel',confirmed:false,source:'host_response',userGesture:'unknown',cause:'unknown'});
+ assert.deepEqual(JSON.parse(JSON.stringify(call.body.arguments.confirmation)),{transport:'mcp_form',source:'host_response',userGesture:'unknown',cause:'unknown'});
  assert.equal(JSON.stringify(research).includes(state),false);assert.equal((await f.core.nativeCommands.pending({},f.d)).commands.length,0);
  f.restart();assert.equal((await f.call('submit_native_command',v)).body.result.structuredContent.state,'cancelled');
 });
@@ -288,6 +288,7 @@ test('pending retry does not rotate a nonce or publish another form after recons
 });
 test('timer continuation cannot change command, session, expected revision or originating tool',async t=>{
  const f=await fixture(t);await f.core.nativeCommands.setGrant({revision:2,capabilities:['timer.pause'],expiresAt:'2026-10-14T10:00:00.000Z'},f.d);
+ f.sqlite.prepare("INSERT INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance) VALUES(?,?,'running',?,?,0,?,7,?,'user')").run('isolated-existing-session','Isolated fixture','2026-10-13T10:00:00.000Z','2026-10-13T10:00:00.000Z','2026-10-13T10:00:00.000Z',uuid(170));
  const v={commandId:uuid(71),deviceId:f.d.id,action:'pause',sessionId:'isolated-existing-session',expectedRevision:7,occurredAt:'2026-10-13T10:00:00.000Z',expiresAt:'2026-10-13T11:00:00.000Z',userRequest:'Isolated pause request'};
  const first=await f.call('task_command',v),state=first.body.result.requestState;
  for(const change of [{commandId:uuid(72)},{sessionId:'other-session'},{expectedRevision:8}])assert.ok((await f.call('task_command',{...v,...change},reply(state))).body.error);
@@ -296,5 +297,19 @@ test('timer continuation cannot change command, session, expected revision or or
  const closed=await f.call('task_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'cancel'}}});
  assert.equal(closed.body.result.structuredContent.state,'cancelled');assert.equal(closed.body.result.structuredContent.request.expectedRevision,7);
  const trace=(await f.core.research.read({limit:100})).entries.find(e=>e.kind==='native_confirmation_prepared');assert.equal(trace.body.expectedRevision,7);assert.equal(trace.body.sessionId,v.sessionId);
- assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,1);
+ assert.equal(f.sqlite.prepare('SELECT revision FROM sessions').get().revision,7);
+});
+
+test('host field diagnostics do not leak values and implicit expiry matches the stored request hash',async t=>{
+ const f=await fixture(t),v=f.request(3900);delete v.expiresAt;
+ const first=await f.call('submit_native_command',v),state=first.body.result.requestState;
+ const rejected=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true,confirmed:'isolated-secret-value'},_meta:{credential:'isolated-secret-value'}}}});
+ assert.ok(rejected.body.error);
+ const log=await f.core.research.read({limit:100}),entry=log.entries.find(e=>e.kind==='native_confirmation_response_rejected');
+ assert.equal(entry.body.stage,'response.content');assert.equal(entry.body.requestHash,entry.body.candidateRequestHash);
+ assert.deepEqual(entry.body.responseShape.contentFields,[{name:'confirm',type:'boolean'},{name:'confirmed',type:'string'}]);
+ assert.equal(JSON.stringify(log).includes('isolated-secret-value'),false);assert.equal(JSON.stringify(log).includes(state),false);
+ const accepted=await f.call('submit_native_command',v,{requestState:state,inputResponses:{bc_native_confirmation:{action:'accept',content:{confirm:true},_meta:{credential:'isolated-secret-value'}}}});
+ assert.equal(accepted.body.result.structuredContent.state,'queued');assert.equal(accepted.body.result.structuredContent.requestHash,entry.body.requestHash);
 });

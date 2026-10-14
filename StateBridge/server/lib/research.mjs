@@ -10,8 +10,7 @@ export function safeArguments(args) {
   // Bodies are deliberately excluded. Remove recognizable credential strings
   // even if accidentally placed in a cursor/basis field.
   const redact=value=>typeof value==='string'?value.replace(/Bearer\s+\S+|whsec_[\w+/=-]+|sk-[\w-]{12,}/gi,'[redacted]'):Array.isArray(value)?value.map(redact):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,redact(v)])):value;
-  if(args.confirmation)clean.confirmation={transport:args.confirmation.transport,action:args.confirmation.action,confirmed:args.confirmation.confirmed,
-    ...(args.confirmation.action==='cancel'&&args.confirmation.source==='host_response'?{source:'host_response',userGesture:'unknown',cause:'unknown'}:{})};
+  if(args.confirmation)clean.confirmation={transport:'mcp_form',source:'host_response',userGesture:'unknown',cause:'unknown'};
   return redact(clean);
 }
 function references(value) {

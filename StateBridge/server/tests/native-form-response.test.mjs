@@ -14,7 +14,17 @@ test('metadata alone, truthy coercion, unsupported discriminants and extra conte
 });
 test('cancel can contain null content but never an affirmative content object',()=>{
  assert.deepEqual(normalizeFormResponse({action:'cancel',content:null,resultType:'complete'}),{action:'cancel'});
+ assert.deepEqual(normalizeFormResponse({action:'cancel',content:{},_meta:{fixture:'ignored'}}),{action:'cancel'});
  assert.throws(()=>normalizeFormResponse({action:'cancel',content:{confirm:true}}));
+});
+test('validation diagnostics name fields, types and missing fields without response or metadata values',()=>{
+ const v={action:'isolated-value-never-log',content:{confirmed:'isolated-value-never-log'},_meta:{token:'isolated-secret-never-log'},extraField:'isolated-extra-never-log'};
+ const d=formResponseShape(v);
+ assert.deepEqual(d.contentFields,[{name:'confirmed',type:'string'}]);assert.deepEqual(d.missingContentFields,['confirm']);
+ assert.ok(d.envelopeFields.some(f=>f.name==='extraField'&&f.type==='string'));
+ assert.equal(JSON.stringify(d).includes('never-log'),false);assert.equal(JSON.stringify(d).includes('token'),false);
+ assert.throws(()=>normalizeFormResponse(v),e=>e.confirmationStage==='response.envelope');
+ assert.throws(()=>normalizeFormResponse({action:'accept',content:{confirmed:true}}),e=>e.confirmationStage==='response.content');
 });
 test('diagnostic variants remain explicit and do not widen real command confirmation',()=>{
  assert.deepEqual(normalizeFormResponse({action:'accept',content:{confirm:'确认显示测试'}},'choice').content,{confirm:'确认显示测试'});

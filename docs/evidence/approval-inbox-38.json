@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "scope": "local_unreleased_code_and_isolated_tests",
+  "baselineCommit": "05f4a8145598217a36809c5f14572049932abf5a",
+  "deployedThisTurn": false,
+  "testFlightUploadedThisTurn": false,
+  "existingOnlineService": "v37",
+  "existingNativeRelease": "0.65.17 / 174",
+  "actualUserDataModified": false,
+  "systemAuthorizationRequested": false,
+  "schemaMigrationRequired": false,
+  "policy": {
+    "defaultTTLSeconds": 86400,
+    "minimumTTLSeconds": 300,
+    "maximumTTLSeconds": 86400,
+    "configuration": "BC_APPROVAL_TTL_SECONDS",
+    "oldDeadlinesUnchanged": true,
+    "hostCardLifetime": "unknown"
+  },
+  "validation": {
+    "serverTestsPassed": 123,
+    "serverTestsFailed": 0,
+    "macUnitTestsPassed": 355,
+    "macUnitTestsFailed": 0,
+    "macUnitTestsSkipped": 0,
+    "macUnitResult": "Passed",
+    "iosSimulatorBuild": "succeeded",
+    "serviceBuild": "succeeded",
+    "uiRunner": "stopped_after_no_connection_not_passed",
+    "macResultBundle": "/tmp/bc-approval-38-dd/Logs/Test/Test-BetterCalendar-2026.10.14_12-37-52--0400.xcresult"
+  },
+  "observedPreviously": {
+    "source": "v37_report_and_research_logs_89916_90046",
+    "hostEnvelopeFields": [
+      "action",
+      "content",
+      "_meta"
+    ],
+    "actualReadOnlyHostResponses": "accepted",
+    "historicalCc7RejectedField": "unknown_not_replayed"
+  },
+  "isolatedSample": {
+    "commandId": "12345678-1234-4234-8234-000000003800",
+    "states": [
+      "awaiting_confirmation",
+      "queued",
+      "dispatching",
+      "applied"
+    ],
+    "oppositeDecision": "409_current_queued",
+    "approvalReceiptCount": 1,
+    "deviceResultReceiptCount": 1,
+    "realDevice": false
+  },
+  "boundaries": {
+    "approvalRequiresExplicitPerRequestChoice": true,
+    "nativeApprovalTargetDeviceOnly": true,
+    "decisionAndAuditAtomic": true,
+    "callbackSecretsLogged": false,
+    "hostResponseValuesLoggedInDiagnostics": false,
+    "newNotificationDefault": "off",
+    "newApprovalToolExposedToModel": false,
+    "existingTargetDeviceCredentialIsTrustedClientBoundary": true,
+    "localUnsynchronizedOrRevokedGrantBlocksApproval": true,
+    "missingLocalGrantProviderDefault": "deny"
+  },
+  "notVerified": [
+    "new_code_actual_host_mutation_response",
+    "native_notification_delivery_and_click",
+    "real_mac_and_iphone_approval_ui",
+    "production_cross_channel_race",
+    "background_timeliness",
+    "original_host_cancel_cause"
+  ],
+  "layoutEvidence": {
+    "method": "offscreen_test_NSHostingView_fixed_fixture_clock",
+    "pointWidths": [
+      390,
+      620
+    ],
+    "iphonePhysicalDevice": false,
+    "dotsHostFixed": false,
+    "images": [
+      "approval-inbox-38-390.png",
+      "approval-inbox-38-620.png"
+    ]
+  }
+}

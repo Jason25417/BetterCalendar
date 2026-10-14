@@ -68,6 +68,22 @@ struct BetterCalendarApp: App {
             .tint(ThemeSettings.current.accent)
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
+            .toolbar {
+                Button { container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble") }
+            }
+            .sheet(isPresented: Binding(get: { container.router.openNativeApprovals }, set: { container.router.openNativeApprovals = $0 })) {
+                NavigationStack {
+                    NativeApprovalContent(model: container.nativeApprovals)
+                        .navigationTitle("BC 审批")
+                        .toolbar { Button("关闭") { container.router.openNativeApprovals = false } }
+                        .task {
+                            if let id = container.router.nativeApprovalCommandId { await container.nativeApprovals.open(id); container.router.nativeApprovalCommandId = nil }
+                        }
+                }
+                #if os(macOS)
+                .frame(minWidth: 480, idealWidth: 620, maxWidth: 760, minHeight: 420, idealHeight: 650)
+                #endif
+            }
             .task { StateBridgeCollector.shared.start(); await StateBridgeCollector.shared.sample() }
     }
 
@@ -124,6 +140,7 @@ struct BetterCalendarApp: App {
                     StateBridgeCollector.shared.start()
                     Task { await StateBridgeCollector.shared.recover() }
                     Task { await container.bridgeTasks.refresh() }
+                    Task { await container.nativeApprovals.refresh() }
                 }
                 FocusFollow.setForeground(phase == .active)
             }

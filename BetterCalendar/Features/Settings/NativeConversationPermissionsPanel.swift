@@ -38,7 +38,7 @@ struct NativeConversationPermissionsPanel: View {
             Text("已保存：" + enabledSummary).font(.caption).textSelection(.enabled)
             Text(model.message).font(.caption).textSelection(.enabled)
             if let expires = model.expiresAt { Text("授权到期：" + expires.formatted()).font(.caption) }
-            Text("授权29天；每次改动仍由你在 Dots 确认。没有自动开始计时、自动闹钟或应用屏蔽；读取日记不包含照片内容。iPhone需BC运行时接收请求，后台及时执行尚未保证。")
+            Text("授权29天；每次改动仍由你在 Dots 或指定设备的 BC 内确认。没有自动开始计时、自动闹钟或应用屏蔽；读取日记不包含照片内容。iPhone需BC运行时接收请求，后台及时执行尚未保证。")
                 .font(.caption).foregroundStyle(.secondary)
             DisclosureGroup("分别选择权限") {
                 Toggle("事项池新增、修改、删除与恢复", isOn: $items)

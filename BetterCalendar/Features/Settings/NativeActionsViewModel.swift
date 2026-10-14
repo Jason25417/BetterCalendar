@@ -5,6 +5,7 @@ import Observation
     let writer: any NativeItemWriting
     let alarms: any NativeAlarmScheduling
     let remote: NativeRemoteExecutor?
+    let approvals: NativeApprovalInbox?
     var records: [NativePoolRecord] = []
     var selected: UUID?
     var title = ""
@@ -20,8 +21,8 @@ import Observation
     var message: String?
     var working = false
     var conversationSetupNotice: String?
-    init(writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, remote: NativeRemoteExecutor? = nil) {
-        self.remote = remote
+    init(writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, remote: NativeRemoteExecutor? = nil, approvals: NativeApprovalInbox? = nil) {
+        self.remote = remote; self.approvals = approvals
         self.writer = writer; self.alarms = alarms; self.capability = alarms.inspect()
     }
     func refresh() {
@@ -97,7 +98,7 @@ import Observation
         if remote.allowItems && remote.allowTimer && remote.allowJournalRead && remote.allowJournalWrite && (!includeAlarms || remote.allowAlarms) {
             conversationSetupNotice = capability.supported && !includeAlarms
                 ? "事项、计时和日记权限已保存；系统尚未允许闹钟，闹钟权限未开启。可在系统设置允许后再点一键开启。"
-                : "本机支持的全部对话权限已保存。每次具体改动仍需你在 Dots 确认。"
+                : "本机支持的全部对话权限已保存。每次具体改动仍需你在 Dots 或指定设备的 BC 内确认。"
         } else {
             conversationSetupNotice = "对话权限尚未保存成功：" + remote.message + "。请修复原因后重试，开关选择不代表已经启用。"
         }

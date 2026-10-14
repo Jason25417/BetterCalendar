@@ -45,6 +45,7 @@ final class AppContainer {
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let nativeJournal: any NativeJournalAccessing // Independent read/text-write capability, sharing the native command boundary.
+    let nativeApprovals: NativeApprovalInbox
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
@@ -107,7 +108,9 @@ final class AppContainer {
         let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
                                           persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
                                           writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks)
-        self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote)
+        self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), writer: nativeItems, journal: nativeJournal, mayApprove: { remote.permitsApproval($0) })
+        self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote, approvals: nativeApprovals)
+        nativeApprovals.start()
         remote.startPolling()
         if !TestHost.isActive {
             StateBridgeCollector.shared.installPoolReader(SwiftDataBridgePoolReader(context: SharedModelContainer.shared.mainContext))

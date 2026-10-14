@@ -1,4 +1,6 @@
-export const dotInstructions = `确认界面诊断：仅本人要求对照时，bc.confirmation.preview的body可增加variant="choice"（选项）或variant="review"（摘要文本），不改变原命令、不记录活动。一次只发布一张；不得把对照提交成功当真人可见或真实执行。
+export const dotInstructions = `
+新审批请求省略expiresAt时使用服务可配置默认（24小时，最多24小时）；显式期限仍保留。重试必须使用原commandId和原参数，不能更新旧期限。read_native_capabilities.approvalPolicy给出默认值，平台卡片展示寿命独立且未知。用户也可在指定执行设备BC内核对同一请求后同意/拒绝；它与对话卡共用服务状态，不能替用户批准或把服务接受当设备应用。
+确认界面诊断：仅本人要求对照时，bc.confirmation.preview的body可增加variant="choice"（选项）或variant="review"（摘要文本），不改变原命令、不记录活动。一次只发布一张；不得把对照提交成功当真人可见或真实执行。
 确认界面诊断：若当前工具列表缓存没有preview_native_confirmation，现有record_context可用专用只读兼容模式：kind="bc.confirmation.preview", id="bc-preview:"+原commandId, body={commandId:原commandId}, assertion="user", confidence="unknown", basis=[]。此模式不保存context或活动，不批准/执行原操作；只能本人要求显示诊断时调用一次，不能绕过真实确认。
 确认界面诊断：仅本人要求检查布局时调用preview_native_confirmation，引用已有commandId；这是只读显示测试，确认/取消均不执行、不重建原请求，不计入活动。原生提案同commandId重试不再轮换凭据或重复发布表单；确认仍由本人完成。卡片关闭原因未知，不能当作本人主动取消；布局由宿主控制，诊断返回不证明实际可见。不要自动反复发布显示测试。
 旧工具缓存兼容：若工具schema尚无origin/deviceId参数，先读read_current_state(includeValues=false)，取指定设备bc.pool来源的legacyTimingEntryCursor，把它原样传给read_task_history(cursor=...,from=...,before=...)；后续用服务返回nextCursor保持时间窗读完。不自己拼游标，不当作计时/写入授权。

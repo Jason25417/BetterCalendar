@@ -8,14 +8,14 @@ import {nativeCommandOutputSchema} from '../lib/native-confirmation.mjs';
 import {nativeFormResult,nativeFormResponse,supportsNativeForm} from '../lib/native-form-confirmation.mjs';
 import {createRequire} from 'node:module';
 const Ajv=createRequire(import.meta.url)('ajv');
-function fixture(){
+function fixture(options={}){
  const sqlite=new DatabaseSync(':memory:');
  for(const file of readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
  let failRecord=false,beforeBatch=null,beforeApprovalWrite=null;
  const prepare=sql=>{let args=[];return{bind(...a){args=a;return this;},first(){return sqlite.prepare(sql).get(...args)??null;},all(){return{results:sqlite.prepare(sql).all(...args)};},run(){if(sql.startsWith('UPDATE native_requests SET approval_hash=')){const hook=beforeApprovalWrite;beforeApprovalWrite=null;hook?.();}if(failRecord&&sql.startsWith('INSERT OR IGNORE INTO research_log'))throw Error('disk full simulation');return sqlite.prepare(sql).run(...args);}};};
  const db={prepare,batch(ops){const hook=beforeBatch;beforeBatch=null;hook?.();sqlite.exec('BEGIN');try{const out=ops.map(o=>o.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
- let now=new Date('2026-10-13T10:00:00.000Z'),clockStep=0;const core=createBridge(db,{now:()=>{const at=now;now=new Date(now.getTime()+clockStep);return at;}});
- return{core,sqlite,reopen:()=>createBridge(db,{now:()=>new Date(now)}),time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;},beforeApprovalWrite(fn){beforeApprovalWrite=fn;}};
+ let now=new Date('2026-10-13T10:00:00.000Z'),clockStep=0;const core=createBridge(db,{...options,now:()=>{const at=now;now=new Date(now.getTime()+clockStep);return at;}});
+ return{core,sqlite,reopen:()=>createBridge(db,{...options,now:()=>new Date(now)}),time:()=>now.toISOString(),stepEveryRead(ms){clockStep=ms;},advance(ms){now=new Date(now.getTime()+ms);},failRecord(v){failRecord=v;},beforeBatch(fn){beforeBatch=fn;},beforeApprovalWrite(fn){beforeApprovalWrite=fn;}};
 }
 const id=n=>`12345678-1234-4234-8234-${String(n).padStart(12,'0')}`;
 async function setup(f){const token=await f.core.registerDevice({id:'iphone-test',label:'Fixture',scopes:['user.context']});const d=await f.core.authenticateDevice(token.token);await f.core.nativeCommands.setGrant({revision:1,capabilities:['item.create','item.update','alarm.schedule','alarm.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},d);return d;}
@@ -354,4 +354,71 @@ test('explicit past timer time is displayed and confirmed, not replaced by model
  await f.core.nativeCommands.approve(submitted.approval,'owner');const identity={commandId:v.commandId,requestHash:submitted.value.requestHash,attemptId:id(1501)};await f.core.nativeCommands.claim(identity,d);
  assert.equal((await f.core.nativeCommands.executeTimer(identity,d)).startedAt,past);
  await assert.rejects(f.core.nativeCommands.submit(timerRequest(f,1502,'start',{effectiveAt:'2026-10-13T10:01:00.000Z'}),'owner'),/未来/);
+});
+
+test('configurable default expiry freezes the first immutable request across retries and restart',async()=>{
+ for(const ttl of [86400,3600]){
+  const f=fixture({approvalTTLSeconds:ttl});await setup(f);const v=request(f,1900+ttl);delete v.expiresAt;
+  const first=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  assert.equal(Date.parse(first.value.expiresAt)-Date.parse(f.time()),ttl*1000);
+  f.advance(20000);const retry=await f.reopen().nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  assert.equal(retry.value.requestHash,first.value.requestHash);assert.equal(retry.value.expiresAt,first.value.expiresAt);assert.equal(retry.approval,null);
+  const accepted=await f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:first.approval.token,response:{action:'accept',content:{confirm:true},_meta:{fixture:true}}},'owner');
+  assert.equal(accepted.state,'queued');assert.equal(accepted.requestHash,first.value.requestHash);
+ }
+ assert.throws(()=>fixture({approvalTTLSeconds:86401}));
+});
+const nativeDecision=(v,s,decision='accept')=>({commandId:v.commandId,requestHash:s.value.requestHash,grantRevision:s.value.grantRevision,expectedRevision:v.expectedRevision??null,decision});
+test('concurrent first deliveries with implicit expiry converge to one deadline, hash and challenge',async()=>{
+ const f=fixture();await setup(f);const v=request(f,1910);delete v.expiresAt;f.stepEveryRead(1);
+ const replies=await Promise.all(Array.from({length:8},()=>f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'})));
+ assert.equal(new Set(replies.map(r=>r.value.requestHash)).size,1);assert.equal(new Set(replies.map(r=>r.value.expiresAt)).size,1);
+ assert.equal(replies.filter(r=>r.approval).length,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+});
+test('native and form acceptance share one decision receipt and one device queue across lost replies',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,1901),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ const accepted=await f.core.nativeCommands.decideFromDevice(nativeDecision(v,s),d);assert.equal(accepted.state,'queued');
+ assert.equal((await f.reopen().nativeCommands.decideFromDevice(nativeDecision(v,s),d)).state,'queued');
+ assert.equal((await f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'accept',content:{confirm:true},_meta:{fixture:true}}},'owner')).state,'queued');
+ await assert.rejects(f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:'cancel'}},'owner'),e=>e.status===409&&e.current.state==='queued');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,1);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
+});
+test('opposing native and chat decisions race atomically; only one result and receipt win',async()=>{
+ for(let n=0;n<8;n++){
+  const f=fixture(),d=await setup(f),v=request(f,2000+n),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+  const responses=await Promise.allSettled([f.core.nativeCommands.decideFromDevice(nativeDecision(v,s,n%2?'decline':'accept'),d),f.core.nativeCommands.respondForm({request:v,originTool:'submit_native_command',requestState:s.approval.token,response:{action:n%2?'accept':'decline',...(n%2?{content:{confirm:true}}:{})}},'owner')]);
+  assert.equal(responses.filter(r=>r.status==='fulfilled').length,1);assert.equal(responses.find(r=>r.status==='rejected').reason.status,409);
+  const stored=await f.core.nativeCommands.status({commandId:v.commandId},'owner');assert.ok(['queued','declined'].includes(stored.state));
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
+ }
+});
+test('native approval rejects wrong target, request hash, grant version, expected version and changed grant',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,2010),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'}),input=nativeDecision(v,s);
+ const other=await f.core.registerDevice({id:'other',label:'Other fixture',scopes:['user.context']});
+ await assert.rejects(f.core.nativeCommands.decideFromDevice(input,await f.core.authenticateDevice(other.token)));
+ for(const bad of [{...input,requestHash:'changed'},{...input,grantRevision:2},{...input,expectedRevision:'wrong'},{...input,decision:true},{...input,userConfirmed:true}])await assert.rejects(f.core.nativeCommands.decideFromDevice(bad,d));
+ f.beforeBatch(()=>f.sqlite.prepare('UPDATE native_grants SET revision=2').run());
+ await assert.rejects(f.core.nativeCommands.decideFromDevice(input,d),e=>e.current.state==='revoked');
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).approvedAt,null);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,0);
+});
+test('decision audit write failure rolls back approval and retry keeps the original identity',async()=>{
+ const f=fixture(),d=await setup(f),v=request(f,2011),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});
+ f.failRecord(true);await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(v,s),d));
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'owner')).state,'awaiting_confirmation');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
+ f.failRecord(false);assert.equal((await f.reopen().nativeCommands.decideFromDevice(nativeDecision(v,s),d)).state,'queued');
+});
+test('closed, expired and revoked native requests never reopen; effective state is paginated',async()=>{
+ const f=fixture(),d=await setup(f);const requests=[];
+ for(let n=0;n<23;n++){const v=request(f,2100+n),s=await f.core.nativeCommands.submit(v,'owner',{formOrigin:'submit_native_command'});requests.push([v,s]);}
+ const page=await f.core.nativeCommands.approvalList({limit:20},d);assert.equal(page.commands.length,20);assert.equal(page.hasMore,true);
+ assert.equal((await f.core.nativeCommands.approvalList({after:page.nextCursor,through:page.through,limit:20},d)).commands.length,3);
+ const [v,s]=requests[0];assert.equal((await f.core.nativeCommands.decideFromDevice(nativeDecision(v,s,'decline'),d)).state,'declined');
+ assert.equal((await f.reopen().nativeCommands.decideFromDevice(nativeDecision(v,s,'decline'),d)).state,'declined');
+ await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(v,s),d));
+ f.advance(3600001);const expired=await f.core.nativeCommands.approvalList({},d);assert.ok(expired.commands.every(c=>c.state==='expired'));
+ await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(...requests[1]),d),e=>e.current.state==='expired');
+ assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
 });

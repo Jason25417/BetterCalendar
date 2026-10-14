@@ -13,6 +13,8 @@ final class AppRouter {
     // today 仅 iOS（macOS 走 menu bar）；longterm=#40 周期态（2026-07-15 S1 修订四 tab 终局）
     enum Tab: String, Hashable { case schedule, today, longterm, journal }
     var selectedTab: Tab = .schedule
+    var openNativeApprovals = false
+    var nativeApprovalCommandId: String?
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。
     var journalRequest: Date?
 

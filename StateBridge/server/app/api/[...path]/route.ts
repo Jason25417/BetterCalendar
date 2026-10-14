@@ -1,5 +1,6 @@
 import { service } from "@/lib/service";
 import { BridgeError } from "@/lib/bridge.mjs";
+import { confirmationPresentation } from "@/lib/confirmation-presentation.mjs";
 import { env } from "cloudflare:workers";
 export const dynamic = "force-dynamic";
 const json = (v: unknown, status=200) => Response.json(v,{status,headers:{"Cache-Control":"no-store"}});
@@ -24,11 +25,26 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
     }
     if(path.startsWith("native/")){
       const device=await core.authenticateDevice(request.headers.get("Authorization")?.replace(/^Bearer /,""));
-      // Confirmation never accepts a device route or a model's userConfirmed flag.
-      const operation=()=>{
+      // Device approvals are target-device-only, concrete native button decisions.
+      // No MCP approval tool or model userConfirmed flag is introduced.
+      const operation=async()=>{
         switch(path){
           case "native/grant/read":return core.nativeCommands.readGrant(device);
           case "native/grant":return core.nativeCommands.setGrant(body,device);
+          case "native/approvals":return core.nativeCommands.approvalList(body,device);
+          case "native/approval/read":{
+            const value=await core.nativeCommands.approvalStatus(body,device);
+            let display=null,displayError=null;
+            if(value.state==='awaiting_confirmation')try{display=await confirmationPresentation(core,value);}catch(error){displayError=error instanceof BridgeError?error.message:'确认内容读取失败';}
+            return {...value,display,displayError};
+          }
+          case "native/approval/decide":{
+            if(body.decision==='accept'){
+              const value=await core.nativeCommands.approvalStatus({commandId:body.commandId},device);
+              if(value.state==='awaiting_confirmation')await confirmationPresentation(core,value);
+            }
+            return core.nativeCommands.decideFromDevice(body,device);
+          }
           case "native/pending":return core.nativeCommands.pending(body,device);
           case "native/claim":return core.nativeCommands.claim(body,device);
           case "native/receipt":return core.nativeCommands.receipt(body,device);
@@ -67,7 +83,7 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
     }
     if(path==="devices/revoke")return json(await core.revokeDevice(body.id));
     return json({error:"找不到接口"},404);
-  }catch(error){return json({error:error instanceof BridgeError?error.message:"服务暂不可用；请求没有被确认为已完成"},error instanceof BridgeError?error.status:500);}
+  }catch(error){return json({error:error instanceof BridgeError?error.message:"服务暂不可用；请求没有被确认为已完成",...(error instanceof BridgeError&&(error as any).current?{current:(error as any).current}:{})},error instanceof BridgeError?error.status:500);}
 }
 export async function GET(request:Request,context:{params:Promise<{path:string[]}>}) {
   try{

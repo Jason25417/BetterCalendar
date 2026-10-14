@@ -10,8 +10,16 @@ export function supportsNativeForm(params) {
 }
 export function nativeFormResponse(params) {
  if(!supportsNativeForm(params))throw new BridgeError('当前宿主没有声明原生表单确认能力',403);
- if(!object(params.inputResponses)||Object.keys(params.inputResponses).length!==1||!object(params.inputResponses.bc_native_confirmation)||typeof params.requestState!=='string')throw new BridgeError('原生表单确认响应不完整');
+ if(!object(params.inputResponses)||Object.keys(params.inputResponses).length!==1||!object(params.inputResponses.bc_native_confirmation)||typeof params.requestState!=='string'){
+  const error=new BridgeError('原生表单确认响应不完整');error.confirmationStage='response.container';throw error;
+ }
  return params.inputResponses.bc_native_confirmation;
+}
+export function nativeFormInputShape(params){
+ const responses=params.inputResponses;
+ return {requestStateType:typeof params.requestState,inputResponsesType:responses===null?'null':Array.isArray(responses)?'array':typeof responses,
+  responseNames:object(responses)?Object.keys(responses).slice(0,24).map(k=>/^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$/.test(k)?k:'[nonstandard-name]'):[],
+  missingFields:[...(typeof params.requestState!=='string'?['requestState']:[]),...(!object(responses)||!Object.hasOwn(responses,'bc_native_confirmation')?['bc_native_confirmation']:[])]};
 }
 export function nativeFormParameters(value,display=null,{preview=false,variant='boolean'}={}) {
  const request=value.request;

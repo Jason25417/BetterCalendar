@@ -54,6 +54,9 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            if let approvals = nativeActions?.approvals {
+                Section("BC 内审批（内测）") { NativeApprovalPanel(model: approvals) }
+            }
             if let nativeActions, let remote = nativeActions.remote {
                 Section("Dots 对话权限（内测）") { NativeConversationPermissionsPanel(actions: nativeActions, model: remote) }
             }

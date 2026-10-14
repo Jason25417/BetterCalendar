@@ -162,8 +162,18 @@ nonisolated enum NativeRemoteJSON {
             allowTimer = active && (grant?.capabilities.contains("timer.start") ?? false)
             allowJournalRead = active && (grant?.capabilities.contains("journal.read") ?? false)
             allowJournalWrite = active && (grant?.capabilities.contains("journal.update") ?? false)
-            message = active ? "每次改动都需在 Dots 对话里点确认；本机执行" : "对话操作未启用、未完成授权同步或已到期"
+            message = active ? "每次改动需在 Dots 或本机 BC 内逐条确认；指定设备执行" : "对话操作未启用、未完成授权同步或已到期"
         } catch { fail(error) }
+    }
+    func permitsApproval(_ approval: NativeApproval) -> Bool {
+        guard approval.deviceId == deviceId, approval.grantRevision == grantRevision, (expiresAt ?? .distantPast) > now() else { return false }
+        switch approval.kind {
+        case "item": return allowItems
+        case "timer": return allowTimer
+        case "alarm": return allowAlarms
+        case "journal": return allowJournalWrite
+        default: return false
+        }
     }
     // Called only by the human's native settings button, never a remote tool.
     func setCapabilities(items: Bool, alarm: Bool, journalRead: Bool = false, journalWrite: Bool = false, timer: Bool = false) async {
