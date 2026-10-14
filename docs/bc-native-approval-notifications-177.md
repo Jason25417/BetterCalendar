@@ -32,6 +32,8 @@ device.status新增只读approvalNotifications字段，区分本机开关、OS�
 
 Jason报告两端已更新打开、此前已允许通知。21:17:43Z读回：iPhone为177，OS通知authorized，但本机审批提醒enabled=false；更新不需要重新申请已有系统授权，新功能仍需本人单独开启。Mac最后上传为21:14:19Z的175旧快照，不能据此否定本人更新报告。只读检查/Applications/BetterCalendar.app为176，也不等于当前运行来源；等待177上传确认，不自动替用户重启App或改授权。两端真实通知、决定反馈及同一测试项修改仍待验。
 
+21:22:49Z追加：Mac21:21:55Z已上传177、OS authorized、审批通知enabled=true，Mac准备条件已核。iPhone仍21:20:41Z快照enabled=false，Jason回复已开启后尚无新快照，不能要求反复系统授权。已通知Dots仅先准备同一测试待办的Mac BC内备注改动；Dots17:22回复将核对原待办和已有请求，再由本人批准。新commandId/本人决定/设备执行暂未读回。连续多条后续对话读取被自动审批阻止，未绕过；只读取本次消息直接相邻的单条BC回复，不扫描无关私人内容。
+
 ## 真人验收（攒一批，不能模型代点）
 
 1. 177两端可安装后，本人更新并各打开一次BC；读回build177及通知诊断，并等iPhone最新pool快照确认同一测试项及revision。

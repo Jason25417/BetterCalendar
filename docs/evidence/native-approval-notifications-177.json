@@ -94,7 +94,27 @@
         "notProofOfCurrentRunningProcess": true
       }
     },
-    "nextHumanStep": "enable independent BC approval-notification toggle; verify Mac running 177 without repeating OS authorization"
+    "nextHumanStep": "Dots prepares one note edit on existing marked fixture for human Mac BC approval; do not repeat OS permission prompts; phone toggle needs newer snapshot",
+    "followup": {
+      "readAt": "2026-10-14T21:22:49.552Z",
+      "researchCallId": "research_ff6b2a0c-ac5a-4ea9-8e97-c4ebcd215555",
+      "userReport": "independent notification toggles enabled",
+      "Mac": {
+        "observedAt": "2026-10-14T21:21:55Z",
+        "receivedAt": "2026-10-14T21:21:58.061Z",
+        "build": "177",
+        "systemAuthorization": "authorized",
+        "approvalNotificationsEnabled": true
+      },
+      "iPhone": {
+        "observedAt": "2026-10-14T21:20:41Z",
+        "receivedAt": "2026-10-14T21:21:16.255Z",
+        "build": "177",
+        "systemAuthorization": "authorized",
+        "approvalNotificationsEnabledInLastSnapshot": false,
+        "currentOptInAfterUserAction": "not_verified_no_new_snapshot"
+      }
+    }
   },
   "dotsHandoff": {
     "sent": true,
@@ -102,6 +122,18 @@
     "url": "https://chatgpt.com/dots/home",
     "proof": "/private/tmp/bc177-dots-message.png",
     "scope": "own BC instruction only; await device readiness then one marked fixture edit at a time; human must approve",
-    "replyRead": false
+    "replyRead": false,
+    "followup": {
+      "sent": true,
+      "purpose": "Mac BC approval first, one fixture note edit only; do not duplicate existing pending request",
+      "messageId": "Sentinel_20f0a0e82a54819186ea975445f734f1",
+      "proof": "/private/tmp/bc177-ready-dots-message.png",
+      "singleReplyAt": "17:22 EDT",
+      "acknowledgedPreparation": true,
+      "newCommandId": "not_yet_verified",
+      "realDecisionByAgent": false,
+      "multiMessageReadRejected": true,
+      "privacyBoundary": "Only own message and directly adjacent single BC acknowledgment read; broader followup read rejected and not bypassed"
+    }
   }
 }
