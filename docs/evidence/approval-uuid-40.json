@@ -12,9 +12,51 @@
     "log": "/private/tmp/bc40-server-tests.log",
     "preFixNewRegressionFailures": 2
   },
-  "deployment": "not_yet_deployed",
+  "deployment": "succeeded",
   "humanApproval": "not_verified",
   "deviceApplied": "not_verified",
   "hostMac2px": "unfixed",
-  "realCommandsCreatedOrDecidedByAgent": false
+  "realCommandsCreatedOrDecidedByAgent": false,
+  "deploymentId": "appgdep_6acff59d57948191b459a24f8bc8e8f7",
+  "siteVersionId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_f8719382b2dc81918571f7e0c1252a79",
+  "siteSourceCommit": "bb53aa5a3583bba9a8062236485966b05fd50f02",
+  "appSourceCommit": "096580da76d8437603d688ceb13d5b32ce4d16ed",
+  "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+  "deploymentUpdatedAt": "2026-10-14T21:35:36.482419+00:00",
+  "hasMCP": true,
+  "audienceUnchanged": "owner_private",
+  "MacBCObservation": {
+    "build": "177",
+    "requestOpenedWithoutDecision": true,
+    "displayBeforeAndAfterLoaded": true,
+    "approveAndDeclineEnabled": true,
+    "initialViewportRequiresScrollingToReadDiff": true,
+    "nativeScrollActionVerified": true,
+    "pinnedButtonsRemainVisible": true,
+    "headerScreenshot": "/private/tmp/bc40-mac-original-approval.png",
+    "diffScreenshot": "/private/tmp/bc40-mac-original-approval-details.png",
+    "humanClickAndFeedback": "awaiting_user"
+  },
+  "latestCommandState": {
+    "state": "awaiting_confirmation",
+    "approvedAt": null,
+    "attemptId": null,
+    "result": null,
+    "researchCallId": "research_bd7e6341-2ca8-44c8-851c-7eee3151781e"
+  },
+  "iPhoneFixture": {
+    "readAt": "2026-10-14T21:36:50.567Z",
+    "observedAt": "2026-10-14T21:20:35Z",
+    "complete": true,
+    "hasMore": false,
+    "recordId": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+    "revision": "077306fcdc53a83ac915a13dc3a0658650e2237d322d16482c5920ed0be5ab56",
+    "meaning": "same test item had synced by this snapshot; later Mac edit not yet approved"
+  },
+  "dotsInformed": {
+    "sent": true,
+    "proof": "/private/tmp/bc40-dots-fix-message.png",
+    "instruction": "query original command only; no resubmit or model approval"
+  },
+  "userReadAuthorization": "2026-10-14 user explicitly authorized reading BC follow-up; no unrelated content retained in project evidence"
 }

@@ -9,3 +9,9 @@
 下一步：现有owner-private State Bridge同站点发布；确认部署成功后，只刷新Mac BC已有原请求详情。本人核对完整原/新备注再批准；读回同commandId的服务决定/设备回执和目录版本。不重新submit、不弹新卡、不改旧哈希，不模型代批。若取消/过期则停止，不复活。iPhone通知开关仍等新快照；后台APNs与Dots Mac聊天2px仍未接通/未修复。
 
 上线/回滚：只替换服务confirmation-presentation模块与回归测试，无schema/权限/新服务/原生变更；必要时回滚已保存39版，原请求与回执留存。部署、实机显示/本人决定/设备应用证据单独追加，不把129测试称端到端完成。
+
+## 发布及真实只读界面结果
+
+40已于21:35:36Z部署成功，MCP可用，仍原owner-private站点 https://jason-state-bridge.jason25417.chatgpt.site 。发布源bb53aa5a、App仓库修复096580d，无原生更新。Mac /Applications/BetterCalendar.app实际运行177；打开原请求成功，AX读到完整原/新备注、标题、设备、截止与可用同意/拒绝。实际初始窗口需要滚动才能读完整差异；原生Scroll Down已实测，前后文本可见且底部决定按钮固定。不能把AX包含正文说成初始视口全可见。截图分别保留初始/滚动后。
+
+只读核验iPhone21:20:35Z完整目录已含同一测试待办、同revision，说明此前缺失已在该快照同步；不表示未来修改或当前通知开启已核。已告知Dots只查原ID，禁止重新submit/补发卡。最新原请求仍awaiting_confirmation、未有approvedAt/attempt/result；本人已被请求在Mac详情核对后点击，agent没有代点。Mac/iPhone真人反馈、通知入口仍待验；Mac聊天2px独立未修，手机后台APNs仍待开发。
