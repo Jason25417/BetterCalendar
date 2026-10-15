@@ -130,6 +130,7 @@ nonisolated enum NativeRemoteJSON {
     private let persistence: any NativeRemotePersisting
     private let writer: any NativeItemWriting
     private let alarms: any NativeAlarmScheduling
+    private let reminders: NativeReminderScheduler?
     private let journal: (any NativeJournalAccessing)?
     private let canonicalTasks: BridgeTaskViewModel?
     private let now: () -> Date
@@ -140,6 +141,8 @@ nonisolated enum NativeRemoteJSON {
     var message = "对话操作尚未启用"
     var allowItems = false
     var allowAlarms = false
+    var allowReminderRead = false
+    var allowReminderWrite = false
     var allowTimer = false
     var allowJournalRead = false
     var allowJournalWrite = false
@@ -148,8 +151,8 @@ nonisolated enum NativeRemoteJSON {
     var deviceId: String? { service.nativeDeviceId }
     var alarmSupported: Bool { alarms.inspect().supported }
     init(service: any NativeRemoteServing, persistence: any NativeRemotePersisting,
-         writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, journal: (any NativeJournalAccessing)? = nil, canonicalTasks: BridgeTaskViewModel? = nil, now: @escaping () -> Date = Date.init) {
-        self.service = service; self.persistence = persistence; self.writer = writer; self.alarms = alarms; self.journal = journal; self.canonicalTasks = canonicalTasks; self.now = now
+         writer: any NativeItemWriting, alarms: any NativeAlarmScheduling, journal: (any NativeJournalAccessing)? = nil, canonicalTasks: BridgeTaskViewModel? = nil, reminders: NativeReminderScheduler? = nil, now: @escaping () -> Date = Date.init) {
+        self.service = service; self.persistence = persistence; self.writer = writer; self.alarms = alarms; self.journal = journal; self.canonicalTasks = canonicalTasks; self.reminders = reminders; self.now = now
         refreshLocal()
     }
     func refreshLocal() {
@@ -157,6 +160,8 @@ nonisolated enum NativeRemoteJSON {
             let grant = try persistence.load().grant
             grantRevision = grant?.revision ?? 0; expiresAt = grant?.expiresAt
             let active = grant?.synchronized == true && grant?.deviceId == deviceId && (grant?.expiresAt ?? .distantPast) > now()
+            allowReminderRead = active && (grant?.capabilities.contains("reminder.read") ?? false)
+            allowReminderWrite = active && (grant?.capabilities.contains("reminder.schedule") ?? false)
             allowItems = active && (grant?.capabilities.contains("item.create") ?? false)
             allowAlarms = active && (grant?.capabilities.contains("alarm.schedule") ?? false)
             allowTimer = active && (grant?.capabilities.contains("timer.start") ?? false)
@@ -168,6 +173,7 @@ nonisolated enum NativeRemoteJSON {
     func permitsApproval(_ approval: NativeApproval) -> Bool {
         guard approval.deviceId == deviceId, approval.grantRevision == grantRevision, (expiresAt ?? .distantPast) > now() else { return false }
         switch approval.kind {
+        case "reminder": return allowReminderWrite
         case "item": return allowItems
         case "timer": return allowTimer
         case "alarm": return allowAlarms
@@ -187,7 +193,7 @@ nonisolated enum NativeRemoteJSON {
         return true
     }
     // Called only by the human's native settings button, never a remote tool.
-    func setCapabilities(items: Bool, alarm: Bool, journalRead: Bool = false, journalWrite: Bool = false, timer: Bool = false) async {
+    func setCapabilities(items: Bool, alarm: Bool, journalRead: Bool = false, journalWrite: Bool = false, timer: Bool = false, reminderRead: Bool = false, reminderWrite: Bool = false) async {
         guard !granting, let deviceId else { message = "先配置个人状态连接"; return }
         granting = true; defer { granting = false }
         do {
@@ -198,11 +204,17 @@ nonisolated enum NativeRemoteJSON {
             if alarm { guard alarms.inspect().supported, alarms.inspect().authorization == "authorized" else { throw DataArchiveError.invalid("先在原生闹钟面板主动取得系统授权") } }
             if timer { guard canonicalTasks?.isEnabled == true else { throw DataArchiveError.invalid("本机共享计时尚未连接") } }
             if journalRead || journalWrite { guard journal != nil else { throw DataArchiveError.invalid("本机尚未提供日记入口") } }
+            if reminderRead || reminderWrite { guard reminders != nil else { throw DataArchiveError.invalid("本机普通提醒入口尚未接通") } }
             let server = try NativeRemoteJSON.object(await service.nativeRequest("native/grant/read", body: .object([:])))
             let revision = try NativeRemoteJSON.integer(server["revision"]) + 1
-            let caps = (items ? ["item.create", "item.update", "item.delete", "item.restore"] : []) + (alarm ? ["alarm.schedule", "alarm.cancel"] : []) +
-                (journalRead ? ["journal.read"] : []) + (journalWrite ? ["journal.create", "journal.update"] : []) +
-                (timer ? ["timer.start", "timer.pause", "timer.resume", "timer.finish"] : [])
+            var caps: [String] = []
+            if items { caps += ["item.create", "item.update", "item.delete", "item.restore"] }
+            if alarm { caps += ["alarm.schedule", "alarm.cancel"] }
+            if journalRead { caps.append("journal.read") }
+            if journalWrite { caps += ["journal.create", "journal.update"] }
+            if timer { caps += ["timer.start", "timer.pause", "timer.resume", "timer.finish"] }
+            if reminderRead { caps.append("reminder.read") }
+            if reminderWrite { caps += ["reminder.schedule", "reminder.update", "reminder.cancel"] }
             let grant = NativeRemoteGrant(deviceId: deviceId, revision: revision, capabilities: caps, expiresAt: now().addingTimeInterval(29 * 86400))
             var file = try persistence.load(); file.grant = grant; try persistence.save(file)
             let result = try NativeRemoteJSON.object(await service.nativeRequest("native/grant", body: .object([
@@ -320,7 +332,7 @@ nonisolated enum NativeRemoteJSON {
             guard UUID(uuidString: try NativeRemoteJSON.string(attempt)) != nil else { throw DataArchiveError.invalid("请求执行身份无效，未执行整页") }
         }
         let kind = try NativeRemoteJSON.string(r["kind"]), action = try NativeRemoteJSON.string(r["action"])
-        guard kind == "item" && ["create", "update", "delete", "restore"].contains(action) || kind == "alarm" && ["schedule", "cancel"].contains(action) || kind == "journal" && ["read", "create", "update"].contains(action) || kind == "timer" && ["start", "pause", "resume", "finish"].contains(action),
+        guard kind == "item" && ["create", "update", "delete", "restore"].contains(action) || kind == "alarm" && ["schedule", "cancel"].contains(action) || kind == "journal" && ["read", "create", "update"].contains(action) || kind == "timer" && ["start", "pause", "resume", "finish"].contains(action) || kind == "reminder" && ["read", "schedule", "update", "cancel"].contains(action),
               try NativeRemoteJSON.string(v["permission"]) == kind + "." + action else { throw URLError(.cannotParseResponse) }
         _ = try NativeRemoteJSON.date(r["occurredAt"]); _ = try NativeRemoteJSON.date(v["expiresAt"])
         try NativeRemoteRequestValidation.validate(r, expiresAt: v["expiresAt"])
@@ -359,7 +371,7 @@ nonisolated enum NativeRemoteJSON {
             guard let receipt = c["result"], receipt != .null else { throw URLError(.cannotParseResponse) }
             attempt.phase = "reported"; attempt.outcome = try NativeRemoteJSON.string(c["state"]); attempt.receipt = receipt; try update(attempt); return
         }
-        let readOnly = try NativeRemoteJSON.string(c["permission"]) == "journal.read"
+        let readOnly = ["journal.read", "reminder.read"].contains(try NativeRemoteJSON.string(c["permission"]))
         guard try NativeRemoteJSON.string(c["state"]) == "dispatching",
               try NativeRemoteJSON.string(c["attemptId"]) == attempt.attemptId,
               try NativeRemoteJSON.string(c["requestHash"]) == attempt.requestHash,
@@ -395,6 +407,30 @@ nonisolated enum NativeRemoteJSON {
                 // Acceptance alone is not evidence that the device saved state.
                 attempt.receipt = .object(["serviceResult": result]); try update(attempt)
                 attempt.receipt = try await canonicalTasks.confirmSavedVersion(result)
+            } else if try NativeRemoteJSON.string(r["kind"]) == "reminder" {
+                guard let reminders else { throw DataArchiveError.invalid("本机普通提醒尚未接通") }
+                let permission = try NativeRemoteJSON.string(c["permission"])
+                let currentGrant = { [self] in
+                    guard let grant = try? persistence.load().grant else { return false }
+                    return grant.synchronized && grant.deviceId == deviceId && service.nativeDeviceId == deviceId && grant.revision == local.revision && grant.expiresAt > now() && grant.capabilities.contains(permission)
+                }
+                if readOnly {
+                    let values = try NativeRemoteJSON.object(r["query"] ?? .object([:])); var query = NativeReminderQuery()
+                    if let id = values["reminderId"] { query.reminderId = UUID(uuidString: try NativeRemoteJSON.string(id)) }
+                    if case let .bool(flag) = values["includeCancelled"] { query.includeCancelled = flag }
+                    if let limit = values["limit"] { query.limit = try NativeRemoteJSON.integer(limit) }
+                    if let cursor = values["cursor"] { query.cursor = try NativeRemoteJSON.string(cursor) }
+                    attempt.receipt = try await reminders.read(query, readAllowed: currentGrant)
+                } else {
+                    guard let reminderId = UUID(uuidString: try NativeRemoteJSON.string(r["reminderId"])),
+                          let action = NativeReminderChange.Action(rawValue: try NativeRemoteJSON.string(r["action"])) else { throw URLError(.cannotParseResponse) }
+                    var change = NativeReminderChange(commandId: commandId, reminderId: reminderId, action: action)
+                    change.expectedRevision = r["expectedRevision"].flatMap { if case let .string(value) = $0 { value } else { nil } }
+                    change.title = try r["title"].map { try NativeRemoteJSON.string($0) }; change.body = try r["body"].map { try NativeRemoteJSON.string($0) }
+                    change.fireAt = try r["fireAt"].map { try NativeRemoteJSON.date($0) }
+                    if case let .bool(value) = r["sound"] { change.sound = value }; if case let .bool(value) = r["experiment"] { change.experiment = value }
+                    attempt.receipt = try await reminders.apply(change, userConfirmed: true, grantCurrent: currentGrant)
+                }
             } else if try NativeRemoteJSON.string(r["kind"]) == "journal" {
                 guard let journal else { throw DataArchiveError.invalid("本机尚未提供日记入口") }
                 if readOnly {
@@ -458,8 +494,8 @@ nonisolated enum NativeRemoteJSON {
             throw DataArchiveError.invalid("服务回执与本机保存的完整结果不一致，保留原身份重试，未标记已回传")
         }
         var saved = attempt; saved.phase = "reported"; saved.updatedAt = now(); try update(saved)
-        let isRead = (try? NativeRemoteJSON.object(attempt.envelope)["permission"]) == .string("journal.read")
-        message = outcome == "applied" ? (isRead ? "日记读取结果已回传；是否读完以分页信息为准" : "设备执行结果已回传；其他设备同步仍需核对") : "结果已回传：" + outcome + "；请查看原请求"
+        let isRead = [BridgeJSON.string("journal.read"), .string("reminder.read")].contains((try? NativeRemoteJSON.object(attempt.envelope)["permission"]) ?? .null)
+        message = outcome == "applied" ? (isRead ? "读取结果已回传；是否读完以分页信息为准" : "设备执行结果已回传；其他设备同步仍需核对") : "结果已回传：" + outcome + "；请查看原请求"
     }
     private func fail(_ error: Error) {
         message = error.localizedDescription

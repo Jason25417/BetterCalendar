@@ -21,6 +21,15 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
    return {deviceId:r.id,label:r.label,ready,notificationsEnabled:value?.approvalNotifications?.enabled===true,systemAuthorization:value?.approvalNotifications?.systemAuthorization??'unknown',reason:ready?'supported_recent_report':!r.body?'missing_status':value?.approvalNotifications?.routingProtocol!==1?'update_required':'stale_status'};
   });return {ready:devices.length>0&&devices.every(d=>d.ready),maxAgeSeconds,devices};
  }
+ async function runtimeCompatible(policy){
+  // Protocol support is a capability, not an activity heartbeat. An offline
+  // peer must not stop an online selected device from alerting. A newly
+  // reported legacy version still disables a second alert; never fail over.
+  const rows=(await q("SELECT d.id,s.body FROM devices d JOIN native_grants g ON g.device_id=d.id LEFT JOIN states s ON s.source_key=d.id||':device.status' WHERE d.revoked_at IS NULL AND g.expires_at>? AND json_array_length(g.body,'$.capabilities')>0",time()).all()).results;
+  return rows.every(r=>{let value;try{value=JSON.parse(r.body).value;}catch{}
+   return value?.approvalNotifications?value.approvalNotifications.routingProtocol===1:(policy.routingDevices??[]).includes(r.id);
+  });
+ }
  async function read(d){await device(d.id);const row=await rawPolicy(),policy=JSON.parse(row.body);return {version:1,revision:row.revision,primaryDeviceId:policy.primaryDeviceId,reviewOtherDevices:await canReview(d.id),notificationFallback:'none',policyAppliesTo:'requests_accepted_after_setting_change',delivery:'local_poll_while_app_runs',remotePush:false,routingReadiness:await readiness()};}
  async function configure(v,d){
   keys(v,['expectedRevision','reviewOtherDevices','primaryHere']);await device(d.id);
@@ -31,7 +40,7 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   if(v.reviewOtherDevices===true){const g=await grant(d.id);reviewers.push({deviceId:d.id,grantRevision:g.revision,expiresAt:g.expires_at});}
   else if(v.reviewOtherDevices===undefined)reviewers.push(...policy.reviewers.filter(r=>r.deviceId===d.id));
   policy.reviewers=reviewers;
-  if(v.primaryHere===true){if(!reviewers.some(r=>r.deviceId===d.id)||v.reviewOtherDevices!==true&&!await canReview(d.id))throw new BridgeError('请先明确允许本机跨设备核对审批，再选主要通知设备',403);const readinessReport=await readiness();if(!readinessReport.ready)throw new BridgeError('参与设备尚未全部报告新版审批协议，请更新并打开后重试',409);const self=readinessReport.devices.find(x=>x.deviceId===d.id);if(!self?.notificationsEnabled||!['authorized','provisional'].includes(self.systemAuthorization))throw new BridgeError('请先在这台设备明确开启审批通知并上传系统授权状态',409);policy.primaryDeviceId=d.id;}
+  if(v.primaryHere===true){if(!reviewers.some(r=>r.deviceId===d.id)||v.reviewOtherDevices!==true&&!await canReview(d.id))throw new BridgeError('请先明确允许本机跨设备核对审批，再选主要通知设备',403);const readinessReport=await readiness();if(!readinessReport.ready)throw new BridgeError('参与设备尚未全部报告新版审批协议，请更新并打开后重试',409);const self=readinessReport.devices.find(x=>x.deviceId===d.id);if(!self?.notificationsEnabled||!['authorized','provisional'].includes(self.systemAuthorization))throw new BridgeError('请先在这台设备明确开启审批通知并上传系统授权状态',409);policy.primaryDeviceId=d.id;policy.routingDevices=readinessReport.devices.map(x=>x.deviceId);}
   else if(v.primaryHere===false&&policy.primaryDeviceId===d.id||v.reviewOtherDevices===false&&policy.primaryDeviceId===d.id)policy.primaryDeviceId=null;
   const at=time(),revision=row.revision+1;
   const results=await db.batch([
@@ -55,9 +64,9 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   let saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
   if(!saved)return {version:1,commandId:r.command_id,requestHash:r.request_hash,maySubmit:false,reason:'no_longer_pending',state:(await requestView(await one('SELECT * FROM native_requests WHERE command_id=?',r.command_id))).state};
   if(saved.request_hash!==r.request_hash)throw new BridgeError('原通知身份冲突',409);
-  // A newly stale/legacy participant cannot cause a second alert on the primary.
+  // A newly reported legacy participant cannot cause a second alert on the primary.
   // Freeze as unknown rather than rerouting or retrying later after an upgrade.
-  if(policy.primaryDeviceId&&target===policy.primaryDeviceId&&!(await readiness()).ready)await q("UPDATE native_approval_notifications SET state='unknown',updated_at=? WHERE command_id=? AND state='routed'",time(),r.command_id).run();
+  if(policy.primaryDeviceId&&target===policy.primaryDeviceId&&!await runtimeCompatible(policy))await q("UPDATE native_approval_notifications SET state='unknown',updated_at=? WHERE command_id=? AND state='routed'",time(),r.command_id).run();
   saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
   const access=saved.device_id===d.id&&(r.device_id===d.id||await canReview(d.id));
   const begin=access?changed(await q("UPDATE native_approval_notifications SET state='reserved',updated_at=? WHERE command_id=? AND state='routed'",time(),r.command_id).run())>0:false;

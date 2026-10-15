@@ -11,6 +11,7 @@ import UserNotifications
 @MainActor
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let router: AppRouter
+    var handleReminderViewed: ((String) async -> Void)?
     var handleApprovalViewed: ((String) async -> Void)?
     var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
 
@@ -30,6 +31,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             await handleApprovalDecision?(binding, decision)
             _ = await viewed
             return
+        }
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier, let raw = info["bcExplicitReminder"] as? String {
+            await handleReminderViewed?(raw)
+            return // A reminder click never approves a command or starts timing.
         }
         if routeApproval(userInfo: info, actionIdentifier: response.actionIdentifier) {
             if let id = info["bcApprovalCommandId"] as? String { await handleApprovalViewed?(id) }

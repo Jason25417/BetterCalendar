@@ -94,7 +94,7 @@ import Observation
             return
         }
         let includeAlarms = capability.supported && capability.authorization == "authorized"
-        await remote.setCapabilities(items: true, alarm: includeAlarms, journalRead: true, journalWrite: true, timer: true)
+        await remote.setCapabilities(items: true, alarm: includeAlarms, journalRead: true, journalWrite: true, timer: true, reminderRead: remote.allowReminderRead, reminderWrite: remote.allowReminderWrite)
         if remote.allowItems && remote.allowTimer && remote.allowJournalRead && remote.allowJournalWrite && (!includeAlarms || remote.allowAlarms) {
             conversationSetupNotice = capability.supported && !includeAlarms
                 ? "事项、计时和日记权限已保存；系统尚未允许闹钟，闹钟权限未开启。可在系统设置允许后再点一键开启。"

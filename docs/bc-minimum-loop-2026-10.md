@@ -14,7 +14,7 @@
 |重复与冲突|已实现未全面验收|服务129隔离测试、通知21专项；尚缺真机竞争/断网/重复点击|
 |共享轻计时四动作/查询/补记|已实现未验收|shared session/revision、设备缓存及历史接口已有，不自动完成事项；真机多端未齐|
 |共享番茄MCP参数|尚未实现|本地番茄与CloudKit FocusFollow已有，BridgeTaskSession/MCP无mode字段，不能标MCP番茄闭环|
-|MCP普通定时提醒全生命周期|尚未实现|本机早晚UN提醒已有，独立MCP schedule/update/cancel/read与设备回执未接|
+|MCP普通定时提醒全生命周期|已实现未发布/未真机验收|已接独立reminder权限、MCP/原审批/指定设备/本地UN排程和读回；82原生/152服务测试通过，不代表真实到点|
 |iPhone单次原生闹钟|已实现未验收|AlarmKit schedule/cancel；Mac Unsupported；不能当普通跨平台提醒或保证唤醒|
 |新审批后台推送|尚未实现|2026-10-15实际device.status仍local_poll_20s_while_app_runs/remoteApprovalPush=false；无APNs|
 
@@ -69,3 +69,19 @@ NativeReminderScheduling.swift提供稳定reminderId/revision、schedule/update/
 10项新Mac隔离测试通过，全部使用假系统通知/内存或临时目录，另构造UNCalendarNotificationTrigger验证UTC绝对时刻、非重复、stable identifier、默认无声、不含审批category。没有调用真实UN通知中心，没有真实响铃。iOS Simulator构建通过（日志/private/tmp/bc-loop-reminder-core-ios.log）。本机内核不是MCP功能验收，E01–E04仍空；尚未注入AppContainer/NativeRemoteExecutor、没有新增授权按钮或线上工具。
 
 直接下一步：沿用native_requests审批/设备队列，增加kind=reminder及独立reminder.schedule/update/cancel/read权限（默认关闭），请求明确reminderId、expectedRevision、标题/正文/时间/声音/experiment。审批正文完整展示前后与目标设备，提醒不能复用普通item通知直接批准规则。指定设备调用本内核后回传同commandId/版本与系统排程/未知状态；查询优先复用已有按独立读取权限发给设备的只读请求模式，不另造任务数据库。完成MCP schema/执行/查询/权限面板与隔离测试后，再接共享计时mode/experiment并攒批更新。真实提醒对象/声音/时间仍需本人具体批准。
+
+## 第四批：普通提醒接入MCP、审批和指定设备（本地完成，尚未发布）
+
+MCP复用submit_native_command，kind=reminder，schedule/update完整给title/body/fireAt/sound/experiment/reminderId，update/cancel另需expectedRevision；read_native_reminders在独立reminder.read权限下读取设备，不自动授权/批准或排程。所有操作仍同commandId/requestHash/attempt/revision，不重复向每端写入。普通提醒与AlarmKit分开，无应用屏蔽/自动推断/保证叫醒。新read/write默认关闭，旧一键权限不自动包含；旧权限保存会保留已经明确启用的新范围，但不会代替本人开启。
+
+NativeRemoteExecutor接原生队列执行/回执；本机独立grant版本/到期/同步和系统通知状态复查，执行中撤回也停止后续系统修改。BC内/聊天显示完整正文、时刻、声音、实验标记、执行设备和修改前后；服务端before来自认证设备实际排程/读取回执，不信模型自行写的before。父revision关系与设备观察时间共同防迟到旧读回遮住新版本；本机执行前仍查expectedRevision。短完整变更可从系统通知批准/拒绝，长内容只提供详情，通知默认点击不批准。读请求不进入审批列表，避免把独立读取误说成本人刚批准或占满30天审批列表。
+
+查询按目录hash/过滤/游标固定内容，实际系统状态逐页读取并记录readAt；若读取期间目录/权限变化则整页失败，不合并不完整页；每页≤20条/40KiB，返回hasMore/nextCursor。用户点击记录绑定原revision，通知中心有entry仅是OS可观察证据，不是人已看到/听到；缺少pending/delivered时过去时间=elapsed_delivery_unknown，未来时间=system_plan_missing_unknown。撤回对话权限只阻止新读写，不自动取消已被本人安排的系统计划；要停止须先逐条取消。改期/取消尚未收到指定设备系统查回前，旧提醒仍可能触发，尤其设备离线时；服务接收/本人批准不能当作撤旧已完成。
+
+同时修正上批通知路由门槛：首次选择主要设备仍需所有参与端近期新协议，选择后仅另一端15分钟未上报/休眠不再阻挡在线主要设备。记录配置时的兼容设备，运行时明确上报旧协议则unknown保护，不切到别端、不事后重发同command。此前按所有端心跳新鲜度逐请求拦截会损害原型可用性，已以隔离sleep/legacy测试更正；不是把旧活动状态说成当前。
+
+本批验收：NativeApprovalInbox/NativeRemoteExecution/NativeReminderScheduling/NativeConversationPermissions共82/82（xcresult机器摘要、0失败/跳过），服务152/152，TS及production build、iOS Simulator构建通过；额外提醒布局附件单独导出。没有实际ChatGPT宿主回传、系统响铃、本人按钮或真实事项操作，线上仍177/40。E01–E04仅实现格转勾，仪表盘17/40；真人与后台矩阵格不动。
+
+接下来继续共享计时mode/experiment：MCP轻计时/番茄共用同session/revision，默认兼容旧light；番茄阶段从同一服务时间锚推算，不让跟随端建会话；合成计时从真实工时/成就/日历隔离。然后合并为有意义的双端TestFlight批次，先部署兼容服务、再发布App并验实际ASC状态。新提醒与跨端权限由本人在新界面开启；具体事项/计时/声音和时间仍逐次本人确认。APNs另案无凭据/无上线，仍只运行时20秒审批轮询；已交OS的定时提醒与新审批后台到达能力分开。
+
+布局核对：390/620pt Mac离屏图已实际查看，正文/提醒时间（本机时区）/声音/实验标记可读，底部批准/拒绝固定。发现材料底栏透出下层设置文字，已仅改为不透明系统背景，30项审批专项再过；不是iPhone真机或ChatGPT宿主验收。受控图片Agent/evidence/reminder-integration-local/narrow-390.png及wide-620.png。真实测试前不用点这些合成截图中的按钮。

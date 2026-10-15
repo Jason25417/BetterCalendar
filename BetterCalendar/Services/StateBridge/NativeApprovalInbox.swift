@@ -48,6 +48,12 @@ nonisolated struct NativeApproval: Identifiable {
         (try? NativeRemoteJSON.string(display["recordTitle"])) ?? (try? NativeRemoteJSON.string(request["title"])) ??
         (try? NativeRemoteJSON.string((try? NativeRemoteJSON.object(request["patch"] ?? .null))?["title"])) ?? "具体改动"
     }
+    var changeValues: [String: BridgeJSON] {
+        if kind == "reminder" {
+            return action == "cancel" ? [:] : request.filter { ["title", "body", "fireAt", "sound", "experiment"].contains($0.key) }
+        }
+        return (try? NativeRemoteJSON.object(request["patch"] ?? .null)) ?? [:]
+    }
     var deviceLabel: String { (try? NativeRemoteJSON.string(display["deviceLabel"])) ?? "本机" }
     var kind: String { (try? NativeRemoteJSON.string(request["kind"])) ?? "unknown" }
     var action: String { (try? NativeRemoteJSON.string(request["action"])) ?? "unknown" }
@@ -145,6 +151,7 @@ extension NativeApprovalNotifying {
     private let preferences: UserDefaults
     private let noticeDelivery: NativeApprovalNoticeDelivery?
     private let writer: (any NativeItemWriting)?
+    private let reminders: NativeReminderScheduler?
     private let journal: (any NativeJournalAccessing)?
     private let now: () -> Date
     private let mayReadOther: () -> Bool
@@ -173,11 +180,11 @@ extension NativeApprovalNotifying {
         !busy && mayReview(entry) && entry.state == "awaiting_confirmation" && entry.expiresAt > now() && (!accept || entry.displayError == nil && (entry.review != nil || mayApprove(entry)))
     }
     init(service: any NativeRemoteServing, persistence: any NativeApprovalPersisting, notifier: (any NativeApprovalNotifying)? = nil,
-         preferences: UserDefaults = .standard, notices: (any NativeApprovalNoticePersisting)? = nil, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }, mayReviewOther: @escaping (NativeApprovalReviewContext) -> Bool = { _ in false }, mayReadOther: @escaping () -> Bool = { false }, isDisplayTest: Bool = false) {
+         preferences: UserDefaults = .standard, notices: (any NativeApprovalNoticePersisting)? = nil, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, reminders: NativeReminderScheduler? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }, mayReviewOther: @escaping (NativeApprovalReviewContext) -> Bool = { _ in false }, mayReadOther: @escaping () -> Bool = { false }, isDisplayTest: Bool = false) {
         self.service = service; self.persistence = persistence; self.notifier = notifier; self.preferences = preferences
         self.noticeDelivery = notifier.map { NativeApprovalNoticeDelivery(service: service, notifier: $0, persistence: notices ?? NativeApprovalNoticeMemoryPersistence(), now: now) }
         self.crossReviewLocallyEnabled = preferences.bool(forKey: "bc.nativeApprovalCrossReview")
-        self.writer = writer; self.journal = journal; self.now = now
+        self.reminders = reminders; self.writer = writer; self.journal = journal; self.now = now
         self.mayReadOther = mayReadOther; self.mayReviewOther = mayReviewOther; self.mayApprove = mayApprove; self.isDisplayTest = isDisplayTest
         self.notificationsEnabled = preferences.bool(forKey: "bc.nativeApprovalNotifications")
     }
@@ -252,8 +259,8 @@ extension NativeApprovalNotifying {
         guard mayReview(value) else { throw DataArchiveError.invalid("本机尚未允许跨设备核对，或审核权限已变更") }
         if value.state == "awaiting_confirmation" {
             if value.deviceId == deviceId { do { try localBefore(&value) } catch { value.displayError = error.localizedDescription } }
-            else if value.action == "update" {
-                let patch = try NativeRemoteJSON.object(value.request["patch"] ?? .object([:]))
+            else if value.action == "update" || value.kind == "reminder" && value.action == "cancel" {
+                let patch = value.kind == "reminder" ? Dictionary(uniqueKeysWithValues: ["title", "body", "fireAt", "sound", "experiment"].map { ($0, BridgeJSON.null) }) : value.changeValues
                 let before = (try? NativeRemoteJSON.object(value.display["before"] ?? .null)) ?? [:]
                 if patch.keys.contains(where: { before[$0] == nil }) { value.displayError = "指定设备的修改前内容未读全；不能批准" }
             }
@@ -263,6 +270,16 @@ extension NativeApprovalNotifying {
     // User-opened native detail reads local truth; it does not export it or
     // enlarge the agent's independently granted journal.read permission.
     private func localBefore(_ value: inout NativeApproval) throws {
+        if value.kind == "reminder", ["update", "cancel"].contains(value.action) {
+            guard let reminders, let id = UUID(uuidString: try NativeRemoteJSON.string(value.request["reminderId"])),
+                  let record = try reminders.records().first(where: { $0.id == id }), !record.cancelled,
+                  value.request["expectedRevision"] == .string(record.revision) else { value.displayError = "本机原提醒或版本已改变，不能批准"; return }
+            var fields = try NativeRemoteJSON.object(record.record); fields.removeValue(forKey: "reminderId"); fields.removeValue(forKey: "revision"); fields.removeValue(forKey: "cancelled")
+            value.display["before"] = .object(fields); value.display["recordTitle"] = .string(record.title)
+            value.display["beforeSource"] = .string("本机已保存的普通提醒；执行前会再次核对版本")
+            value.displayError = nil
+            return
+        }
         let patch = try NativeRemoteJSON.object(value.request["patch"] ?? .object([:]))
         var values: [String: BridgeJSON]?
         if value.kind == "item", value.action != "create", let writer {

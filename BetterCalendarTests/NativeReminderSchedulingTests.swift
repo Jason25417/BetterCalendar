@@ -119,6 +119,50 @@ import UserNotifications
         let elapsed = try NativeRemoteJSON.object(try #require(await later.status().first))
         #expect(elapsed["state"] == .string("elapsed_delivery_unknown") && system.submitted.count == 1)
     }
+    @Test func readPagingPinsCatalogAndFiltersAndReadRevocationNeverReturnsMixedData() async throws {
+        let system = ReminderSystemFixture(), disk = NativeReminderMemoryPersistence()
+        let scheduler = NativeReminderScheduler(system: system, persistence: disk, now: { self.at })
+        for _ in 0..<3 { _ = try await scheduler.apply(change(), userConfirmed: true, grantCurrent: { true }) }
+        let first = try NativeRemoteJSON.object(await scheduler.read(.init(limit: 1), readAllowed: { true }))
+        let cursor = try NativeRemoteJSON.string(first["nextCursor"])
+        #expect(first["hasMore"] == .bool(true))
+        let next = try NativeRemoteJSON.object(await scheduler.read(.init(limit: 1, cursor: cursor), readAllowed: { true }))
+        #expect(next["records"] != first["records"] && next["catalogHash"] == first["catalogHash"])
+        await #expect(throws: (any Error).self) { try await scheduler.read(.init(includeCancelled: true, limit: 1, cursor: cursor), readAllowed: { true }) }
+        _ = try await scheduler.apply(change(), userConfirmed: true, grantCurrent: { true })
+        await #expect(throws: (any Error).self) { try await scheduler.read(.init(limit: 1, cursor: cursor), readAllowed: { true }) }
+        var allowed = true; system.beforePendingReturns = { allowed = false }
+        await #expect(throws: (any Error).self) { try await scheduler.read(.init(), readAllowed: { allowed }) }
+        #expect(system.submitted.count == 4)
+    }
+    @Test func clickProofIsBoundToOriginalPlanDeduplicatedAndNeverMarksNewRevisionSeen() async throws {
+        let system = ReminderSystemFixture(), disk = NativeReminderMemoryPersistence(), c = change()
+        let scheduler = NativeReminderScheduler(system: system, persistence: disk, now: { self.at })
+        _ = try await scheduler.apply(c, userConfirmed: true, grantCurrent: { true })
+        let plan = try #require(scheduler.records().first)
+        let raw = try #require(UNNativeReminderSystem.request(plan).content.userInfo["bcExplicitReminder"] as? String)
+        try scheduler.recordClick(raw); try scheduler.recordClick(raw)
+        #expect(disk.value.clicks?.count == 1 && system.submitted.count == 1)
+        let clicked = try NativeRemoteJSON.object(try #require(await scheduler.status().first))
+        #expect(clicked["clickedAt"] == NativeRemoteJSON.timestamp(at) && clicked["userSeen"] == .string("unknown"))
+        var update = c; update.commandId = UUID(); update.action = .update; update.expectedRevision = plan.revision; update.body = "new revision"
+        _ = try await scheduler.apply(update, userConfirmed: true, grantCurrent: { true })
+        let latest = try NativeRemoteJSON.object(try #require(await scheduler.status().first))
+        #expect(latest["clickedAt"] == .null && system.submitted.count == 2)
+        #expect(throws: (any Error).self) { try scheduler.recordClick("invalid") }
+    }
+    @Test func systemDeliveryEvidenceIsDistinctFromSavedScheduleAndHumanClick() async throws {
+        let system = ReminderSystemFixture(), disk = NativeReminderMemoryPersistence(), c = change()
+        let scheduler = NativeReminderScheduler(system: system, persistence: disk, now: { self.at })
+        _ = try await scheduler.apply(c, userConfirmed: true, grantCurrent: { true })
+        let plan = try #require(scheduler.records().first)
+        system.pendingValues.removeAll(); system.deliveredValues[plan.identifier] = plan
+        let observed = try NativeRemoteJSON.object(try #require(await scheduler.status().first))
+        #expect(observed["deliveryEvidence"] == .string("os_notification_center_entry") && observed["clickedAt"] == .null && observed["userSeen"] == .string("unknown"))
+        let cancel = NativeReminderChange(commandId: UUID(), reminderId: plan.id, action: .cancel, expectedRevision: plan.revision)
+        _ = try await scheduler.apply(cancel, userConfirmed: true, grantCurrent: { true })
+        #expect(system.deliveredValues.isEmpty)
+    }
     @Test func absoluteCalendarRequestHasStableIdentifierAndNoRepeatOrAlarmClaim() throws {
         let c = change(), plan = NativeReminderPlan(id: c.reminderId, revision: String(repeating: "a", count: 64), title: c.title!, body: c.body!, fireAt: c.fireAt!, sound: false, experiment: true)
         let request = try UNNativeReminderSystem.request(plan)
@@ -130,15 +174,18 @@ import UserNotifications
 }
 @MainActor private final class ReminderSystemFixture: NativeReminderSystem {
     var allowed = true, failSubmit = false
+    var deliveredValues: [String: NativeReminderPlan] = [:]
+    func delivered(_ identifier: String) async throws -> NativeReminderPlan? { deliveredValues[identifier] }
     var pendingValues: [String: NativeReminderPlan] = [:], submitted: [NativeReminderPlan] = [], removed: [String] = []
     var beforeAuthorizationReturns: (() -> Void)?
     func authorized() async -> Bool { beforeAuthorizationReturns?(); return allowed }
-    func pending(_ identifier: String) async throws -> NativeReminderPlan? { pendingValues[identifier] }
+    var beforePendingReturns: (() -> Void)?
+    func pending(_ identifier: String) async throws -> NativeReminderPlan? { beforePendingReturns?(); return pendingValues[identifier] }
     func submit(_ plan: NativeReminderPlan) async throws {
         if failSubmit { throw URLError(.networkConnectionLost) }
         submitted.append(plan); pendingValues[plan.identifier] = plan
     }
-    func remove(_ identifier: String) async { removed.append(identifier); pendingValues.removeValue(forKey: identifier) }
+    func remove(_ identifier: String) async { removed.append(identifier); pendingValues.removeValue(forKey: identifier); deliveredValues.removeValue(forKey: identifier) }
 }
 @MainActor private final class ReminderDiskFixture: NativeReminderPersisting {
     var value = NativeReminderLedger(), saves = 0, failSaveNumber = 0

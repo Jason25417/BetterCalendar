@@ -25,17 +25,17 @@ export function nativeFormParameters(value,display=null,{preview=false,variant='
  const request=value.request;
  // Operation values are complete plain text. Technical identities/revisions
  // remain bound in the original request and audit rather than in the checkbox.
- const kinds={item:'事项',timer:'计时',journal:'日记',alarm:'单次闹钟'};
+ const kinds={item:'事项',timer:'计时',journal:'日记',alarm:'单次闹钟',reminder:'普通提醒'};
  const actions={create:'新增',update:'修改',delete:'移入回收站',restore:'恢复',start:'开始',pause:'暂停',resume:'继续',finish:'结束',schedule:'设置',cancel:'取消'};
- const labels={title:'标题',note:'备注',body:'正文',mood:'心情',tags:'标签',status:'状态'};
+ const labels={title:'标题',note:'备注',body:'正文',mood:'心情',tags:'标签',status:'状态',fireAt:'提醒时刻（UTC）',sound:'声音',experiment:'合成测试（不计生活活动）'};
  const states={active:'进行中',done:'已完成',shelved:'先放下'};
- const format=(key,text)=>key==='status'?(states[text]??text):Array.isArray(text)?text.join('、'):text===null?'清空':text===''?'（空白）':text===undefined?'（未读取，不能当作空白）':String(text);
- const edits=Object.entries(request.patch??{}).map(([key,text])=>`${labels[key]??key}：${display?.before?format(key,display.before[key])+' → ':''}${format(key,text)}`);
+ const format=(key,text)=>['sound','experiment'].includes(key)?(text===true?'是':text===false?'否':'未知'):key==='status'?(states[text]??text):Array.isArray(text)?text.join('、'):text===null?'清空':text===''?'（空白）':text===undefined?'（未读取，不能当作空白）':String(text);
+ const edits=Object.entries(request.kind==='reminder'?(request.action==='cancel'?(display?.before??{}):Object.fromEntries(['title','body','fireAt','sound','experiment'].map(k=>[k,request[k]]))):request.patch??{}).map(([key,text])=>`${labels[key]??key}：${display?.before&&request.action!=='cancel'?format(key,display.before[key])+' → ':''}${format(key,text)}`);
  const title=display?.recordTitle??request.title??(request.kind==='item'&&request.action==='create'?request.patch?.title:null);
  const details=[title?`事项：${title}`:null,`设备：${display?.deviceLabel??value.deviceId}`,...edits,
   request.sessionId?`计时会话：${request.sessionId}`:null,request.alarmId?`闹钟：${request.alarmId}`:null,
   request.effectiveAt?`补记起点（UTC）：${request.effectiveAt}`:request.kind==='timer'?`生效时间：本人确认时，按 BC 服务时间计时`:null,
-  request.fireAt?`响铃时间（UTC）：${request.fireAt}`:null,request.entryDate?`日记日期（UTC）：${request.entryDate}`:null,
+  request.fireAt&&request.kind!=='reminder'?`响铃时间（UTC）：${request.fireAt}`:null,request.kind==='reminder'?(request.action==='cancel'?'取消后此设备不再排程该提醒；不会取消其他提醒':'普通系统通知；只在此设备排程，不保证叫醒，不自动扩大为闹钟或应用屏蔽'):null,request.entryDate?`日记日期（UTC）：${request.entryDate}`:null,
   display?.source?.freshness==='stale'?`修改前来自旧快照：${display.source.observedAt}；设备仍会核对原版本`:null,
   preview?'仅测试显示；原请求仍是 '+value.state+'，确认、取消均不执行任何操作':`确认期限（UTC）：${value.expiresAt}`].filter(Boolean);
  // The host owns the form's layout. Keep its heading short and put the complete

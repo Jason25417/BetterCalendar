@@ -353,3 +353,25 @@ test('host field diagnostics do not leak values and implicit expiry matches the 
   assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
   assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
  });
+
+test('MCP ordinary reminder schema, full human form and read-only query share durable native identities',async t=>{
+ const f=await fixture(t);
+ await f.core.nativeCommands.setGrant({revision:2,capabilities:['reminder.read','reminder.schedule','reminder.update','reminder.cancel'],expiresAt:'2026-10-14T10:00:00.000Z'},f.d);
+ const listed=(await f.rpc('tools/list',{})).body.result.tools;
+ const submit=listed.find(x=>x.name==='submit_native_command'),readTool=listed.find(x=>x.name==='read_native_reminders');
+ assert.ok(submit.inputSchema.properties.kind.enum.includes('reminder'));assert.equal(readTool.annotations.readOnlyHint,true);
+ const v={version:1,commandId:uuid(700),deviceId:f.d.id,kind:'reminder',action:'schedule',reminderId:uuid(701),title:'Isolated reminder',body:'Synthetic, not life activity',fireAt:'2026-10-13T11:30:00.000Z',sound:false,experiment:true,occurredAt:'2026-10-13T10:00:00.000Z',userRequest:'Isolated full reminder confirmation'};
+ const validate=new Ajv({allowUnionTypes:true,formats:{uuid:new RegExp(commands.nativeUUIDSchema.pattern)}}).compile(submit.inputSchema);assert.equal(validate(v),true,JSON.stringify(validate.errors));
+ const shown=await f.call('submit_native_command',v);assert.equal(shown.body.result.resultType,'input_required');
+ const desc=shown.body.result.inputRequests.bc_native_confirmation.params.requestedSchema.properties.confirm.description;
+ assert.ok(desc.includes(v.body)&&desc.includes(v.fireAt)&&desc.includes('声音')&&desc.includes('合成测试')&&desc.includes('普通系统通知'));
+ const repeated=await f.call('submit_native_command',v);assert.notEqual(repeated.body.result.resultType,'input_required');
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+ assert.equal((await f.core.nativeCommands.status({commandId:v.commandId},'fixture-owner')).state,'awaiting_confirmation');
+ const accepted=await f.call('submit_native_command',v,reply(shown.body.result.requestState));assert.equal(accepted.body.result.structuredContent.state,'queued');
+ const query=await f.call('read_native_reminders',{commandId:uuid(702),deviceId:f.d.id,query:{reminderId:v.reminderId,includeCancelled:true}});
+ assert.equal(query.body.result.structuredContent.operationEffect,'read_only');assert.equal(query.body.result.structuredContent.state,'queued');assert.equal(query.body.result.structuredContent.approvedAt,null);
+ const output=new Ajv({allowUnionTypes:true,formats:{uuid:new RegExp(commands.nativeUUIDSchema.pattern)}}).compile(readTool.outputSchema);assert.equal(output(query.body.result.structuredContent),true,JSON.stringify(output.errors));
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sessions').get().n,0);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM native_requests WHERE state='applied'").get().n,0); // No real device or OS was called.
+});

@@ -77,37 +77,44 @@ nonisolated struct NativeApprovalNotificationSummary {
     var body: String
     var allowsDirectDecision: Bool
     init(_ entry: NativeApproval) {
-        title = entry.kind == "item" ? (entry.action == "create" ? "批准新增事项？" : "批准修改事项？") : "BC 有一项改动等你确认"
+        let reminder = entry.kind == "reminder"
+        title = reminder ? (entry.action == "cancel" ? "批准取消普通提醒？" : "批准设置普通提醒？") : entry.kind == "item" ? (entry.action == "create" ? "批准新增事项？" : "批准修改事项？") : "BC 有一项改动等你确认"
         subtitle = entry.title + " · " + entry.deviceLabel
-        // Some OS layouts hide subtitles. Critical identity belongs in the
-        // complete body too; long bodies fall back to full-detail review.
-        var lines: [String] = ["事项：" + entry.title, "执行设备：" + entry.deviceLabel]
-        let patch = (try? NativeRemoteJSON.object(entry.request["patch"] ?? .null)) ?? [:]
+        var lines: [String] = [(reminder ? "提醒：" : "事项：") + entry.title, "执行设备：" + entry.deviceLabel]
+        let patch = entry.changeValues
         let before = (try? NativeRemoteJSON.object(entry.display["before"] ?? .null)) ?? [:]
-        var complete = entry.kind == "item" && ["create", "update"].contains(entry.action) && !patch.isEmpty &&
-            Set(patch.keys).isSubset(of: ["title", "note"]) && entry.displayError == nil &&
-            entry.title.utf16.count <= 80 && entry.deviceLabel.utf16.count <= 60
-        func text(_ value: BridgeJSON?) -> String? {
+        let labels = ["title":"标题", "note":"备注", "body":"正文", "fireAt":"时刻（UTC）", "sound":"播放声音", "experiment":"合成测试（不计生活活动）"]
+        let reminderKeys: Set<String> = ["title", "body", "fireAt", "sound", "experiment"]
+        var complete = entry.displayError == nil && entry.title.utf16.count <= 80 && entry.deviceLabel.utf16.count <= 60
+        if reminder {
+            complete = complete && ["schedule", "update", "cancel"].contains(entry.action) &&
+                (entry.action == "cancel" ? reminderKeys.isSubset(of: Set(before.keys)) : Set(patch.keys) == reminderKeys)
+        } else {
+            complete = complete && entry.kind == "item" && ["create", "update"].contains(entry.action) && !patch.isEmpty && Set(patch.keys).isSubset(of: ["title", "note"])
+        }
+        func text(_ key: String, _ value: BridgeJSON?) -> String? {
+            if ["sound", "experiment"].contains(key) { guard case let .bool(flag) = value else { return nil }; return flag ? "是" : "否" }
+            if key == "fireAt", (try? NativeRemoteJSON.date(value)) == nil { return nil }
             switch value {
-            case let .string(s): s.isEmpty ? "（空白）" : "「" + s + "」"
-            case .null: "清空"
-            default: nil
+            case let .string(s): return s.isEmpty ? "（空白）" : "「" + s + "」"
+            case .null: return "清空"
+            default: return nil
             }
         }
-        for key in patch.keys.sorted() {
-            guard let after = text(patch[key]) else { complete = false; continue }
-            let label = key == "title" ? "标题" : "备注"
+        let changes = reminder && entry.action == "cancel" ? before.filter { reminderKeys.contains($0.key) } : patch
+        for key in changes.keys.sorted() {
+            guard let after = text(key, changes[key]) else { complete = false; continue }
+            let label = labels[key] ?? key
             if entry.action == "update" {
-                guard let old = text(before[key]) else { complete = false; continue }
+                guard let old = text(key, before[key]) else { complete = false; continue }
                 lines.append(label + "\n原：" + old + "\n改为：" + after)
             } else { lines.append(label + "：" + after) }
         }
+        if reminder { lines.append(entry.action == "cancel" ? "取消后不再排程这条提醒。" : "普通系统通知，不保证叫醒。") }
         lines.append("截止：" + entry.expiresAt.formatted(date: .numeric, time: .shortened))
         let full = lines.joined(separator: "\n")
-        // Larger/richer changes must be reviewed in BC. Never truncate a change
-        // and leave an authoritative Approve button next to an incomplete diff.
         allowsDirectDecision = complete && full.utf16.count <= 420
-        body = allowsDirectDecision ? full : "请打开完整改动详情核对后再决定。" + "\n" + lines.last!
+        body = allowsDirectDecision ? full : "请打开完整改动详情核对后再决定。\n" + lines.last!
         if !allowsDirectDecision { title = "BC 有一项改动等你确认"; subtitle = "完整内容见审批详情" }
     }
 }

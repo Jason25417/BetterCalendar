@@ -113,16 +113,21 @@ test('expired, cancelled, wrong-hash or target-revoked requests never become a n
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notifications').get().n,0);
 });
 
-test('mixed-version or stale devices block primary selection; unknown route never becomes a later duplicate',async t=>{
+test('configuration requires fresh upgraded devices; sleeping peers do not stop the selected alert, legacy reports do',async t=>{
  const f=await fixture(t),[mac,phone]=f.devices;
  f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{enabled:true}}}),mac.id);
  assert.equal((await f.core.nativeCommands.routing.read(phone)).routingReadiness.ready,false);
  await assert.rejects(f.config(phone,{reviewOtherDevices:true,primaryHere:true}),e=>e.status===409);
- f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:true,systemAuthorization:'authorized'}}}),mac.id);
+ const supported=JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:true,systemAuthorization:'authorized'}}});
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(supported,mac.id);
  await f.config(phone,{reviewOtherDevices:true,primaryHere:true});
- f.advance(901000);const r=await f.submit(21);
- const c=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(c.state,'unknown');assert.equal(c.maySubmit,false);assert.equal(c.beginSubmission,false);
- f.sqlite.prepare("UPDATE states SET observed_at=?,received_at=?").run('2026-10-15T14:15:01.000Z','2026-10-15T14:15:01.000Z');
+ f.advance(901000);
+ assert.equal((await f.core.nativeCommands.routing.read(phone)).routingReadiness.ready,false);
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{availability:'sleeping'}}),mac.id);
+ const live=await f.core.nativeCommands.routing.claim(identity(await f.submit(21)),phone);assert.equal(live.beginSubmission,true);assert.equal(live.maySubmit,true);
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{enabled:true}}}),mac.id);
+ const r=await f.submit(23),c=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(c.state,'unknown');assert.equal(c.maySubmit,false);assert.equal(c.beginSubmission,false);
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(supported,mac.id);
  const later=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(later.state,'unknown');assert.equal(later.maySubmit,false);
  assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).maySubmit,false);
 });

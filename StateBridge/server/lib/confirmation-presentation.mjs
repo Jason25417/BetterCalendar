@@ -13,6 +13,7 @@ export async function confirmationPresentation(core,value) {
  const capabilities=await core.nativeCommands.capabilities();
  const device=capabilities.devices.find(d=>d.deviceId===value.deviceId);
  const display={version:1,deviceLabel:device?.label??value.deviceId,recordTitle:request.title??null,before:null,source:null};
+ if(request.kind==='reminder'&&['update','cancel'].includes(request.action))return {...display,...await core.nativeCommands.reminderSnapshot(value.deviceId,request.reminderId,request.expectedRevision)};
  if(request.kind==='timer'&&request.action!=='start'){
   const state=await core.taskState(),session=state.sessions.find(s=>s.id===request.sessionId);
   if(!session||session.revision!==request.expectedRevision)throw new BridgeError('确认内容加载失败：原计时会话或版本已改变',409);

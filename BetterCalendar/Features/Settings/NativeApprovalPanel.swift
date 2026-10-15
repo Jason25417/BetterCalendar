@@ -112,13 +112,23 @@ private struct NativeApprovalDetail: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(fieldLabel(key)).font(.headline)
                     if entry.action == "update" {
-                        ScrollView { Text("修改前：" + value(before[key])).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 160).foregroundStyle(.secondary)
+                        ScrollView { Text("修改前：" + fieldValue(key, before[key])).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 160).foregroundStyle(.secondary)
                     }
-                    ScrollView { Text("修改后：" + value(after)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 160)
+                    ScrollView { Text((entry.action == "schedule" || entry.action == "create" ? "新内容：" : "修改后：") + fieldValue(key, after)).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }.frame(maxHeight: 160)
                 }
             }
-            if let fire = entry.request["fireAt"] { Text("响铃时间：" + date(fire)) }
+            if entry.kind == "reminder" {
+                if entry.action == "cancel" {
+                    ForEach(before.sorted { $0.key < $1.key }, id: \.key) { key, content in Text("原" + fieldLabel(key) + "：" + fieldValue(key, content)).textSelection(.enabled) }
+                    Text("取消后只移除此设备的这条提醒，不影响其他提醒。")
+                }
+                Text("普通系统通知，不保证叫醒；只在指定设备排程。")
+            } else if let fire = entry.request["fireAt"] { Text("响铃时间：" + date(fire)) }
             if let start = entry.request["effectiveAt"] { Text("明确补记起点：" + date(start)) }
+            if case let .object(source) = entry.display["source"], case let .string(freshness) = source["freshness"], freshness != "current" {
+                Text("修改前数据时效：" + freshness + "；读取时刻：" + value(source["observedAt"]) + "。执行前仍会核对原版本。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let source = entry.display["beforeSource"] { Text(value(source)).font(.caption).foregroundStyle(.secondary) }
             if let error = entry.displayError { Text("确认内容加载失败：" + error).foregroundStyle(.orange).textSelection(.enabled) }
             if !pinnedActions { NativeApprovalDecisionBar(model: model) }
@@ -134,14 +144,21 @@ private struct NativeApprovalDetail: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private var before: [String: BridgeJSON] { (try? NativeRemoteJSON.object(entry.display["before"] ?? .null)) ?? [:] }
-    private var changes: [(String, BridgeJSON)] { ((try? NativeRemoteJSON.object(entry.request["patch"] ?? .null)) ?? [:]).sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
-    private var actionLabel: String { ["create":"新增", "update":"修改", "delete":"移入回收站（至少保留30天）", "restore":"恢复", "start":"开始计时", "pause":"暂停计时", "resume":"继续计时", "finish":"结束计时", "schedule":"设置单次闹钟", "cancel":"取消单次闹钟"][entry.action] ?? entry.action }
-    private func fieldLabel(_ key: String) -> String { ["title":"标题", "note":"备注", "status":"状态", "body":"正文", "mood":"心情", "tags":"标签"][key] ?? key }
+    private var changes: [(String, BridgeJSON)] { entry.changeValues.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
+    private var actionLabel: String { if entry.kind == "reminder" { return ["schedule":"设置单次普通提醒", "update":"修改普通提醒", "cancel":"取消普通提醒"][entry.action] ?? entry.action }; return ["create":"新增", "update":"修改", "delete":"移入回收站（至少保留30天）", "restore":"恢复", "start":"开始计时", "pause":"暂停计时", "resume":"继续计时", "finish":"结束计时", "schedule":"设置单次闹钟", "cancel":"取消单次闹钟"][entry.action] ?? entry.action }
+    private func fieldLabel(_ key: String) -> String { ["title":"标题", "note":"备注", "status":"状态", "body":"正文", "mood":"心情", "tags":"标签", "fireAt":"提醒时刻（本机时区）", "sound":"播放声音", "experiment":"合成测试（不计生活活动）"][key] ?? key }
+    private func fieldValue(_ key: String, _ v: BridgeJSON?) -> String {
+        if key == "fireAt", let date = try? NativeRemoteJSON.date(v) {
+            return date.formatted(date: .abbreviated, time: .standard) + " " + (TimeZone.current.abbreviation(for: date) ?? "本机时区")
+        }
+        return value(v)
+    }
     private func date(_ v: BridgeJSON) -> String { (try? NativeRemoteJSON.date(v).formatted()) ?? value(v) }
     private func value(_ v: BridgeJSON?) -> String {
         guard let v else { return "未读取，不能当作空白" }
         switch v {
         case let .string(s): return s.isEmpty ? "（空白）" : s
+        case .bool(let flag): return flag ? "是" : "否"
         case .null: return "清空"
         case let .array(a): return a.map { value($0) }.joined(separator: "、")
         default: return (try? String(data: BridgePoolCodec.encode(v), encoding: .utf8)) ?? "未知"
@@ -166,7 +183,7 @@ struct NativeApprovalDecisionBar: View {
                 }.buttonStyle(.bordered)
                 if model.busy { ProgressView("正在回传你的选择…") }
                 if let message = model.message { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-            }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.regularMaterial)
+            }.padding().frame(maxWidth: .infinity, alignment: .leading).background(.background)
         }
     }
 }

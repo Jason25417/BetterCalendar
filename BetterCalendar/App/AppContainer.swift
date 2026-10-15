@@ -105,11 +105,15 @@ final class AppContainer {
         self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
                                               persistence: TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence(),
                                               enabled: { StateBridgeClient.shared.configured })
+        let reminders: NativeReminderScheduler? = TestHost.isActive ? nil : NativeReminderScheduler(system: UNNativeReminderSystem(), persistence: NativeReminderFilePersistence())
         let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
                                           persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
-                                          writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks)
-        self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), notices: TestHost.isActive ? NativeApprovalNoticeMemoryPersistence() : NativeApprovalNoticeFilePersistence(), writer: nativeItems, journal: nativeJournal, mayApprove: { remote.permitsApproval($0) }, mayReviewOther: { remote.permitsCrossReview($0) }, mayReadOther: { remote.hasCurrentReviewGrant() })
+                                          writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks, reminders: reminders)
+        self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), notices: TestHost.isActive ? NativeApprovalNoticeMemoryPersistence() : NativeApprovalNoticeFilePersistence(), writer: nativeItems, journal: nativeJournal, reminders: reminders, mayApprove: { remote.permitsApproval($0) }, mayReviewOther: { remote.permitsCrossReview($0) }, mayReadOther: { remote.hasCurrentReviewGrant() })
         self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote, approvals: nativeApprovals)
+        notificationDelegate.handleReminderViewed = { [weak reminders] raw in
+            do { try reminders?.recordClick(raw) } catch { DevLog.shared.warn("普通提醒点击", error.localizedDescription) }
+        }
         notificationDelegate.handleApprovalViewed = { [weak inbox = nativeApprovals] id in await inbox?.recordNotificationClick(id) }
         notificationDelegate.handleApprovalDecision = { [weak inbox = nativeApprovals] binding, decision in
             await inbox?.decideFromNotification(binding, decision: decision)

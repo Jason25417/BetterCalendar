@@ -22,6 +22,77 @@ import SwiftData
         let service = RemoteService(envelope); let writer = SwiftDataNativeItemWriter(context: c.mainContext, journal: NativeActionMemoryJournal())
         return (service, store, writer, c)
     }
+    private func reminderEnvelope(action: String, reminderId: UUID, revision: String? = nil, title: String = "ISOLATED reminder") throws -> BridgeJSON {
+        var envelope = try NativeRemoteJSON.object(self.envelope())
+        var request = try NativeRemoteJSON.object(envelope["request"]!)
+        request.removeValue(forKey: "recordId"); request.removeValue(forKey: "patch")
+        request["kind"] = .string("reminder"); request["action"] = .string(action)
+        if action == "read" {
+            request["query"] = .object(["includeCancelled": .bool(true)]); envelope["approvedAt"] = .null
+        } else {
+            request["reminderId"] = .string(reminderId.uuidString.lowercased())
+            if let revision { request["expectedRevision"] = .string(revision) }
+            if action != "cancel" {
+                request["title"] = .string(title); request["body"] = .string("隔离测试，不计生活活动")
+                request["fireAt"] = NativeRemoteJSON.timestamp(at.addingTimeInterval(600))
+                request["sound"] = .bool(false); request["experiment"] = .bool(true)
+            }
+        }
+        envelope["request"] = .object(request); envelope["permission"] = .string("reminder." + action)
+        envelope["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))))
+        return .object(envelope)
+    }
+    @Test func confirmedReminderQueueReadsUpdatesCancelsAndLostReceiptNeverRepeatsSystemEffect() async throws {
+        let reminderId = UUID(), initial = try reminderEnvelope(action: "schedule", reminderId: reminderId)
+        let (service, store, writer, _) = try fixture(initial), system = RemoteReminderSystem(), remindersDisk = NativeReminderMemoryPersistence()
+        store.file.grant?.capabilities = ["reminder.read", "reminder.schedule", "reminder.update", "reminder.cancel"]
+        let reminders = NativeReminderScheduler(system: system, persistence: remindersDisk, now: { self.at })
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), reminders: reminders, now: { self.at })
+        service.loseReceiptResponse = true
+        await executor.poll()
+        #expect(system.added.count == 1 && store.file.requests.first?.phase == "result")
+        await executor.poll()
+        #expect(system.added.count == 1 && store.file.requests.first?.phase == "reported")
+        let first = try #require(reminders.records().first)
+        service.envelope = try reminderEnvelope(action: "read", reminderId: reminderId)
+        await executor.poll()
+        let read = try NativeRemoteJSON.object(try #require(store.file.requests.last?.receipt))
+        let records = try #require(read["records"])
+        #expect(read["operationEffect"] == .string("read_only") && records != .array([]) && system.added.count == 1)
+        service.envelope = try reminderEnvelope(action: "update", reminderId: reminderId, revision: first.revision, title: "Updated isolated reminder")
+        await executor.poll()
+        let updated = try #require(reminders.records().first)
+        #expect(updated.title == "Updated isolated reminder" && system.values[updated.identifier] == updated && system.added.count == 2)
+        service.envelope = try reminderEnvelope(action: "cancel", reminderId: reminderId, revision: updated.revision)
+        await executor.poll(); await executor.poll()
+        let cancelled = try #require(reminders.records().first)
+        #expect(cancelled.cancelled && system.values.isEmpty && system.added.count == 2)
+        #expect(store.file.requests.count == 4 && store.file.requests.allSatisfy { $0.phase == "reported" && $0.outcome == "applied" })
+        #expect(Set(try service.claims.map { try BridgePoolCodec.encode($0) }).count == 4) // Retransmission keeps the original attempt.
+    }
+    @Test func reminderPermissionCannotBeBorrowedFromItemsAndRevocationDuringSystemReadStopsScheduling() async throws {
+        let input = try reminderEnvelope(action: "schedule", reminderId: UUID())
+        let (service, store, writer, _) = try fixture(input), system = RemoteReminderSystem()
+        let reminders = NativeReminderScheduler(system: system, persistence: NativeReminderMemoryPersistence(), now: { self.at })
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), reminders: reminders, now: { self.at })
+        #expect(!executor.allowReminderRead && !executor.allowReminderWrite)
+        await executor.poll()
+        #expect(system.added.isEmpty && store.file.requests.first?.outcome == "failed")
+        service.envelope = try reminderEnvelope(action: "schedule", reminderId: UUID())
+        store.file.grant?.capabilities = ["reminder.schedule"]
+        system.onAuthorization = { store.file.grant?.synchronized = false }
+        await executor.poll()
+        #expect(system.added.isEmpty && store.file.requests.last?.outcome == "unknown")
+    }
+    @Test func shortReminderNotificationContainsFullImpactWhileLongBodyFallsBackToDetail() throws {
+        var value = try NativeRemoteJSON.object(reminderEnvelope(action: "schedule", reminderId: UUID(), title: "提醒"))
+        value["serverAccepted"] = .bool(true); value["display"] = .object(["deviceLabel": .string("测试Mac")])
+        let entry = try NativeApproval(.object(value), deviceId: "fixture-device")
+        let summary = NativeApprovalNotificationSummary(entry)
+        #expect(summary.allowsDirectDecision && summary.body.contains("播放声音：否") && summary.body.contains("合成测试") && summary.body.contains("不保证叫醒"))
+        var long = entry; long.request["body"] = .string(String(repeating: "长", count: 700))
+        #expect(!NativeApprovalNotificationSummary(long).allowsDirectDecision)
+    }
     @Test func crossReviewChecksDurableGrantRevisionExpiryAndOfflineRevocation() throws {
         let (service, store, writer, _) = try fixture(envelope())
         let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
@@ -562,4 +633,14 @@ import SwiftData
         }
         throw URLError(.unsupportedURL)
     }
+}
+
+@MainActor private final class RemoteReminderSystem: NativeReminderSystem {
+    var values: [String: NativeReminderPlan] = [:]
+    var added: [NativeReminderPlan] = []
+    var onAuthorization: (() -> Void)?
+    func authorized() async -> Bool { onAuthorization?(); return true }
+    func pending(_ identifier: String) async throws -> NativeReminderPlan? { values[identifier] }
+    func submit(_ plan: NativeReminderPlan) async throws { values[plan.identifier] = plan; added.append(plan) }
+    func remove(_ identifier: String) async { values.removeValue(forKey: identifier) }
 }

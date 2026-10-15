@@ -345,6 +345,33 @@ import AppKit
         #expect(try file.load() == [intent])
     }
     #if os(macOS)
+    @Test func reminderDetailRendersFullFieldsInNarrowAndWideViewsWithPinnedButtons() async throws {
+        let (base, _, prefs) = try fixture()
+        var envelope = try NativeRemoteJSON.object(base.envelope()), request = try NativeRemoteJSON.object(envelope["request"]!)
+        request.removeValue(forKey: "recordId"); request.removeValue(forKey: "patch"); request.removeValue(forKey: "expectedRevision")
+        request["kind"] = .string("reminder"); request["action"] = .string("schedule")
+        request["reminderId"] = .string(UUID().uuidString.lowercased()); request["title"] = .string("BC 联调测试提醒")
+        request["body"] = .string("这只是隔离显示测试，不会真实提醒。")
+        request["fireAt"] = NativeRemoteJSON.timestamp(at.addingTimeInterval(600)); request["sound"] = .bool(false); request["experiment"] = .bool(true)
+        envelope["request"] = .object(request); envelope["requestHash"] = .string(BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))))
+        envelope["display"] = .object(["deviceLabel": .string("测试 Mac")])
+        let service = ApprovalLayoutService(.object(envelope))
+        let inbox = NativeApprovalInbox(service: service, persistence: NativeApprovalMemoryPersistence(), preferences: prefs, now: { self.at }, mayApprove: { _ in true })
+        await inbox.refresh(); await inbox.open(base.id)
+        let entry = try #require(inbox.selected)
+        #expect(entry.changeValues.count == 5 && inbox.canDecide(entry, accept: true))
+        for width in [390.0, 620.0] {
+            let rect = NSRect(x: 0, y: 0, width: width, height: 800)
+            let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false); window.isReleasedWhenClosed = false
+            let host = NSHostingView(rootView: NativeApprovalContent(model: inbox).frame(width: width, height: 800).environment(\.colorScheme, .light).background(Color.white))
+            host.frame = rect; host.appearance = NSAppearance(named: .aqua); window.contentView = host; host.layoutSubtreeIfNeeded()
+            for _ in 0..<20 { await Task.yield() }; host.layoutSubtreeIfNeeded()
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: rect)); host.cacheDisplay(in: rect, to: bitmap)
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
+            Attachment.record(Array(data), named: "bc-reminder-approval-\(Int(width)).png")
+            window.close()
+        }
+    }
     @Test func displayCompletionFeedbackIsVisibleInNarrowAndWidePinnedFooter() async throws {
         let inbox = NativeApprovalPreview.make(); await inbox.refresh()
         await inbox.open(try #require(inbox.pending.first).id); await inbox.decide("accept")
@@ -542,4 +569,19 @@ import AppKit
 @MainActor private final class ApprovalFailingNoticeDisk: NativeApprovalNoticePersisting {
     func load() throws -> [NativeApprovalNoticeIntent] { [] }
     func save(_ values: [NativeApprovalNoticeIntent]) throws { throw DataArchiveError.invalid("isolated notification journal failure") }
+}
+
+@MainActor private final class ApprovalLayoutService: NativeRemoteServing {
+    var nativeDeviceId: String? = "fixture-device"
+    let envelope: BridgeJSON
+    init(_ envelope: BridgeJSON) { self.envelope = envelope }
+    func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        if path == "native/approval-policy/read" { return ApprovalRoutingFixture.policy() }
+        if path == "native/approval/read" { return envelope }
+        if path == "native/approvals" {
+            let id = try NativeRemoteJSON.object(envelope)["commandId"]!
+            return .object(["commands": .array([envelope]), "nextCursor": id, "through": id, "hasMore": .bool(false)])
+        }
+        throw URLError(.unsupportedURL) // This layout fixture cannot approve or execute.
+    }
 }

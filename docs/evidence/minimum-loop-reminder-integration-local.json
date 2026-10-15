@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "scope": "local MCP/native ordinary reminder integration only",
+  "native": {
+    "passed": 82,
+    "failed": 0,
+    "skipped": 0,
+    "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-08-57--0400.xcresult",
+    "log": "/private/tmp/bc-reminder-wiring-native-final.log",
+    "finalUILayout": {
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-17-57--0400.xcresult",
+      "suite": "NativeApprovalInboxTests",
+      "passed": 30,
+      "failed": 0,
+      "meaning": "targeted rerun after opaque pinned footer and local-time display; macOS offscreen sizes, not physical iPhone",
+      "attachmentsRetainedInXcresult": true
+    }
+  },
+  "server": {
+    "passed": 152,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-reminder-wiring-server-final.log"
+  },
+  "typescript": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-reminder-wiring-ts-final.log"
+  },
+  "productionBuild": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-reminder-wiring-build-final.log"
+  },
+  "iOSSimulatorBuild": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-reminder-wiring-ios-final.log"
+  },
+  "realOSNotifications": false,
+  "realUserConfirmation": false,
+  "newPermissionGranted": false,
+  "deployment": {
+    "changed": false,
+    "lastVerifiedAppBuild": 177,
+    "lastVerifiedServiceVersion": 40,
+    "liveVersionsNotRecheckedThisBatch": true
+  },
+  "dashboard": {
+    "checked": 17,
+    "total": 40
+  },
+  "pending": [
+    "MCP pomodoro/light shared mode",
+    "synthetic timer isolation",
+    "release/deployment",
+    "physical notification approval/delivery/readback",
+    "phone UI and multi-device screen acceptance",
+    "background/quit/offline real-state matrix",
+    "APNs provider requires separate authorized setup"
+  ],
+  "layoutImages": [
+    "/Users/jasontu/Developer/App Development/BetterCalendar_Agent/evidence/reminder-integration-local/narrow-390.png",
+    "/Users/jasontu/Developer/App Development/BetterCalendar_Agent/evidence/reminder-integration-local/wide-620.png"
+  ],
+  "mcpDescriptionFollowup": {
+    "passed": 22,
+    "failed": 0,
+    "log": "/private/tmp/bc-reminder-final-mcp-copy.log"
+  }
+}

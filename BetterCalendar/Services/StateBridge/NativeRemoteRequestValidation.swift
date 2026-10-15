@@ -25,6 +25,28 @@ nonisolated enum NativeRemoteRequestValidation {
                 try require(text(r["expectedRevision"], 150))
                 if action == "delete" || action == "restore" { try require(patch.isEmpty) }
             }
+        case "reminder":
+            try require(["read", "schedule", "update", "cancel"].contains(action))
+            if action == "read" {
+                fields = ["query"]
+                let query = try NativeRemoteJSON.object(r["query"] ?? .object([:]))
+                try require(Set(query.keys).isSubset(of: ["reminderId", "includeCancelled", "limit", "cursor"]))
+                if let id = query["reminderId"] { try require(uuid(id)) }
+                if let flag = query["includeCancelled"] { guard case .bool = flag else { throw invalid() } }
+                if let limit = query["limit"] { try require((1...20).contains(try NativeRemoteJSON.integer(limit))) }
+                if let cursor = query["cursor"] { try require(stringWithin(cursor, 2000)) }
+            } else {
+                fields = ["reminderId", "expectedRevision"]
+                try require(uuid(r["reminderId"]))
+                if action == "schedule" { try require(r["expectedRevision"] == nil) }
+                else { try require((try NativeRemoteJSON.string(r["expectedRevision"])).range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil) }
+                if action != "cancel" {
+                    fields.formUnion(["title", "body", "fireAt", "sound", "experiment"])
+                    try require(text(r["title"], 150) && stringWithin(r["body"] ?? .null, 2000))
+                    _ = try NativeRemoteJSON.date(r["fireAt"])
+                    guard case .bool = r["sound"], case .bool = r["experiment"] else { throw invalid() }
+                }
+            }
         case "alarm":
             if action == "schedule" {
                 fields = ["fireAt", "title"]
