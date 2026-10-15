@@ -16,6 +16,7 @@ async function fixture(t){
  const db={prepare,batch(ops){sqlite.exec('BEGIN');try{const out=ops.map(o=>o.run());sqlite.exec('COMMIT');return out;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
  const core=bridge.createBridge(db,{now:()=>new Date('2026-10-14T12:00:00.000Z'),fetcher:()=>{throw Error('network prohibited');}});
  const device=await core.registerDevice({id:'fixture-target',label:'Isolated API fixture',scopes:['user.context']});const d=await core.authenticateDevice(device.token);
+ sqlite.prepare("INSERT INTO states(source_key,device_id,seq,observed_at,received_at,value_hash,body) VALUES(?,?,1,?,?,?,?)").run(d.id+':device.status',d.id,'2026-10-14T12:00:00.000Z','2026-10-14T12:00:00.000Z','fixture',JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:true,systemAuthorization:'authorized'}}}));
  await core.nativeCommands.setGrant({revision:1,capabilities:['item.create'],expiresAt:'2026-10-15T12:00:00.000Z'},d);
  const request={version:1,commandId:id,deviceId:d.id,kind:'item',action:'create',recordId:'12345678-1234-4234-8234-000000003801',patch:{title:'Isolated API fixture'},occurredAt:'2026-10-14T12:00:00.000Z',userRequest:'Isolated test, no real task'};
  const proposal=await core.nativeCommands.submit(request,'fixture-owner',{formOrigin:'submit_native_command'});

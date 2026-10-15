@@ -22,7 +22,7 @@ struct NativeApprovalPanel: View {
                 Spacer()
                 Button("刷新") { Task { await model.refresh() } }.disabled(model.busy)
             }
-            Text("这里只处理指定给本机的请求。你可以在 Dots 卡片或这里决定；两处共用同一状态。").font(.caption).foregroundStyle(.secondary)
+            Text(model.crossReviewEnabled ? "可核对同一账户各设备的请求；改动仍只交给指定设备执行。Dots 与这里共用同一状态。" : "目前只核对指定给本机的请求。跨设备查看和确认需要你单独开启。").font(.caption).foregroundStyle(.secondary)
             if model.pending.isEmpty { Text(model.readComplete ? "目前没有需要你确认的请求" : "尚未读完，请刷新").foregroundStyle(.secondary) }
             ForEach(model.pending) { entry in
                 Button { Task { await model.open(entry.id) } } label: {
@@ -34,6 +34,15 @@ struct NativeApprovalPanel: View {
             }
             ForEach(model.retryCommandIds.filter { id in !model.pending.contains(where: { $0.id == id }) }, id: \.self) { id in
                 Button("核对上次审批的回传结果") { Task { await model.open(id) } }.disabled(model.busy)
+            }
+            if model.entries.contains(where: { $0.state != "awaiting_confirmation" }) {
+                DisclosureGroup("最近处理结果") {
+                    ForEach(model.entries.filter { $0.state != "awaiting_confirmation" }.suffix(10)) { entry in
+                        Button { Task { await model.open(entry.id) } } label: {
+                            VStack(alignment: .leading) { Text(entry.title); Text(entry.stateLabel).font(.caption) }
+                        }.disabled(model.busy)
+                    }
+                }
             }
             if let entry = model.selected { NativeApprovalDetail(model: model, entry: entry, pinnedActions: pinnedActions) }
             Divider()
@@ -47,6 +56,20 @@ struct NativeApprovalPanel: View {
                 Button("允许审批通知（含批准／拒绝）") { Task { await model.enableNotifications() } }.disabled(model.busy)
             }
             if !model.isDisplayTest {
+                Divider()
+                Text("跨设备审批与单端提醒").font(.headline)
+                Text("独立开启后，本机能查看并确认同一账户其他设备的具体请求，包括其已有授权的事项、计时或闹钟。仍由目标设备执行；不新增目标设备权限。关闭时本机立即停止跨设备确认，服务器撤回结果会明确显示。").font(.caption).foregroundStyle(.secondary)
+                if model.crossReviewEnabled {
+                    Button("关闭本机跨设备审批") { Task { await model.configurePolicy(review: false) } }.disabled(model.busy)
+                    Button("仅在这台设备提醒新的审批") { Task { await model.configurePolicy(primaryHere: true) } }.disabled(model.busy || !model.policy.routingReady || !model.notificationsEnabled || ![.authorized, .provisional].contains(model.notificationAuthorization))
+                    Text(model.policy.routingReadinessMessage).font(.caption).foregroundStyle(.secondary)
+                    if !model.notificationsEnabled { Text("先在这台设备开启审批通知，再选择主要通知设备。").font(.caption).foregroundStyle(.secondary) }
+                } else {
+                    Button("允许本机跨设备查看和确认") { Task { await model.configurePolicy(review: true) } }.disabled(model.busy)
+                }
+                Text(model.policy.primaryDeviceId == nil ? "尚未选择主要通知设备：沿用每个请求指定的执行设备提醒。" : model.primaryNotificationsHere ? "主要通知设备：这台设备。" : "主要通知设备：另一台设备。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("只影响设置之后新建的请求；旧请求保持原提醒设备，不自动故障转移。请先将参与设备全部更新并打开，再选择主要设备。系统通知设置由你决定。").font(.caption).foregroundStyle(.secondary)
                 Text(model.notificationAuthorization.label).font(.caption).foregroundStyle(.secondary)
                 Text("短且完整的事项改动可展开系统通知，选择批准／拒绝；点通知正文打开详情。长内容必须到详情核对。系统预览可能显示事项和修改内容，可在系统设置隐藏锁屏预览。通知不会代你批准。").font(.caption).foregroundStyle(.secondary)
                 Text("当前 BC 运行时约每20秒检查；iPhone锁屏／后台可能延迟，尚未接通服务端远程审批推送。系统专注模式也可能隐藏横幅。").font(.caption).foregroundStyle(.secondary)

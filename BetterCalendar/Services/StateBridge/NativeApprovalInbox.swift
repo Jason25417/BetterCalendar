@@ -19,6 +19,7 @@ nonisolated struct NativeApproval: Identifiable {
     var display: [String: BridgeJSON]
     var displayError: String?
     var result: BridgeJSON?
+    var review: NativeApprovalReviewContext?
     init(_ value: BridgeJSON, deviceId: String) throws {
         let v = try NativeRemoteJSON.object(value)
         id = try NativeRemoteJSON.string(v["commandId"])
@@ -32,9 +33,11 @@ nonisolated struct NativeApproval: Identifiable {
         display = (try? NativeRemoteJSON.object(v["display"] ?? .null)) ?? [:]
         displayError = try? NativeRemoteJSON.string(v["displayError"])
         result = v["result"] == .null ? nil : v["result"]
-        guard UUID(uuidString: id) != nil, self.deviceId == deviceId, grantRevision > 0,
+        review = try v["reviewContext"].flatMap { $0 == .null ? nil : try NativeApprovalReviewContext($0) }
+        guard UUID(uuidString: id) != nil, !self.deviceId.isEmpty, grantRevision > 0,
+              self.deviceId == deviceId ? review == nil : review?.reviewerDeviceId == deviceId && review?.executionDeviceId == self.deviceId,
               v["version"] == .number(1), request["version"] == .number(1), v["serverAccepted"] == .bool(true),
-              v["nativeCommandId"] == .string(id), request["commandId"] == .string(id), request["deviceId"] == .string(deviceId),
+              v["nativeCommandId"] == .string(id), request["commandId"] == .string(id), request["deviceId"] == .string(self.deviceId),
               ["awaiting_confirmation", "queued", "dispatching", "applied", "failed", "unknown", "expired", "revoked", "cancelled", "declined"].contains(state),
               BridgePoolCodec.hash(try BridgePoolCodec.encode(.object(request))) == requestHash else {
             throw DataArchiveError.invalid("审批身份、请求哈希或状态不一致；未批准")
@@ -63,8 +66,13 @@ nonisolated struct NativeApproval: Identifiable {
         }
     }
     func decision(_ decision: String) -> BridgeJSON {
-        .object(["commandId": .string(id), "requestHash": .string(requestHash), "grantRevision": .number(Double(grantRevision)),
-                 "expectedRevision": request["expectedRevision"] ?? .null, "decision": .string(decision)])
+        var body: [String: BridgeJSON] = ["commandId": .string(id), "requestHash": .string(requestHash), "grantRevision": .number(Double(grantRevision)),
+                 "expectedRevision": request["expectedRevision"] ?? .null, "decision": .string(decision)]
+        if let review {
+            body["reviewerGrantRevision"] = .number(Double(review.grantRevision))
+            body["reviewerPolicyRevision"] = .number(Double(review.policyRevision))
+        }
+        return .object(body)
     }
 }
 
@@ -103,7 +111,9 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             let body = try NativeRemoteJSON.object(v.body)
             guard UUID(uuidString: v.commandId) != nil, body["commandId"] == .string(v.commandId),
                   [BridgeJSON.string("accept"), .string("decline")].contains(body["decision"] ?? .null),
-                  Set(body.keys) == ["commandId", "requestHash", "grantRevision", "expectedRevision", "decision"] else {
+                  Set(body.keys).subtracting(["reviewerGrantRevision", "reviewerPolicyRevision"]) == ["commandId", "requestHash", "grantRevision", "expectedRevision", "decision"],
+                  (body["reviewerGrantRevision"] == nil && body["reviewerPolicyRevision"] == nil) ||
+                    ((try? NativeRemoteJSON.integer(body["reviewerGrantRevision"])) ?? 0 > 0 && (try? NativeRemoteJSON.integer(body["reviewerPolicyRevision"])) ?? 0 > 0) else {
                 throw DataArchiveError.invalid("审批重试身份损坏；未发送")
             }
         }
@@ -121,6 +131,11 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     func sendDisplayTest() async throws
     func reconcile(pendingCommandIds: Set<String>) async
     func feedback(commandId: String, title: String, body: String) async throws
+    func contains(commandId: String) async -> Bool
+}
+
+extension NativeApprovalNotifying {
+    func contains(commandId: String) async -> Bool { false }
 }
 
 @MainActor @Observable final class NativeApprovalInbox {
@@ -128,9 +143,12 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     private let persistence: any NativeApprovalPersisting
     private let notifier: (any NativeApprovalNotifying)?
     private let preferences: UserDefaults
+    private let noticeDelivery: NativeApprovalNoticeDelivery?
     private let writer: (any NativeItemWriting)?
     private let journal: (any NativeJournalAccessing)?
     private let now: () -> Date
+    private let mayReadOther: () -> Bool
+    private let mayReviewOther: (NativeApprovalReviewContext) -> Bool
     private let mayApprove: (NativeApproval) -> Bool
     private var timer: Timer?
     private var lastFailure: String?
@@ -144,17 +162,23 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     var busy = false
     var readComplete = false
     var retryCommandIds: [String] = []
+    private(set) var policy = NativeApprovalPolicy()
+    private(set) var crossReviewLocallyEnabled: Bool
+    var crossReviewEnabled: Bool { crossReviewLocallyEnabled && policy.reviewOtherDevices && mayReadOther() }
+    var primaryNotificationsHere: Bool { policy.primaryDeviceId != nil && policy.primaryDeviceId == service.nativeDeviceId }
     private(set) var notificationsEnabled: Bool
     private(set) var notificationAuthorization: NativeApprovalNotificationAuthorization = .unknown
     var pending: [NativeApproval] { entries.filter { $0.state == "awaiting_confirmation" && $0.expiresAt > now() } }
     func canDecide(_ entry: NativeApproval, accept: Bool) -> Bool {
-        !busy && entry.deviceId == service.nativeDeviceId && entry.state == "awaiting_confirmation" && entry.expiresAt > now() && (!accept || entry.displayError == nil && mayApprove(entry))
+        !busy && mayReview(entry) && entry.state == "awaiting_confirmation" && entry.expiresAt > now() && (!accept || entry.displayError == nil && (entry.review != nil || mayApprove(entry)))
     }
     init(service: any NativeRemoteServing, persistence: any NativeApprovalPersisting, notifier: (any NativeApprovalNotifying)? = nil,
-         preferences: UserDefaults = .standard, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }, isDisplayTest: Bool = false) {
+         preferences: UserDefaults = .standard, notices: (any NativeApprovalNoticePersisting)? = nil, writer: (any NativeItemWriting)? = nil, journal: (any NativeJournalAccessing)? = nil, now: @escaping () -> Date = Date.init, mayApprove: @escaping (NativeApproval) -> Bool = { _ in false }, mayReviewOther: @escaping (NativeApprovalReviewContext) -> Bool = { _ in false }, mayReadOther: @escaping () -> Bool = { false }, isDisplayTest: Bool = false) {
         self.service = service; self.persistence = persistence; self.notifier = notifier; self.preferences = preferences
+        self.noticeDelivery = notifier.map { NativeApprovalNoticeDelivery(service: service, notifier: $0, persistence: notices ?? NativeApprovalNoticeMemoryPersistence(), now: now) }
+        self.crossReviewLocallyEnabled = preferences.bool(forKey: "bc.nativeApprovalCrossReview")
         self.writer = writer; self.journal = journal; self.now = now
-        self.mayApprove = mayApprove; self.isDisplayTest = isDisplayTest
+        self.mayReadOther = mayReadOther; self.mayReviewOther = mayReviewOther; self.mayApprove = mayApprove; self.isDisplayTest = isDisplayTest
         self.notificationsEnabled = preferences.bool(forKey: "bc.nativeApprovalNotifications")
     }
     func start() {
@@ -167,17 +191,18 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         guard !busy, let deviceId = service.nativeDeviceId else { return }
         busy = true; defer { finishOperation() }
         do {
+            if !isDisplayTest { try await refreshPolicy(deviceId) }
             var after = "", through: String?, collected: [NativeApproval] = []
             readComplete = false
             for _ in 0..<100 {
-                var body: [String: BridgeJSON] = ["after": .string(after), "limit": .number(20)]
+                var body: [String: BridgeJSON] = ["after": .string(after), "limit": .number(20), "includeShared": .bool(crossReviewEnabled)]
                 if let through { body["through"] = .string(through) }
                 let page = try NativeRemoteJSON.object(await service.nativeRequest("native/approvals", body: .object(body)))
                 guard case let .array(values) = page["commands"], values.count <= 20, case let .bool(more) = page["hasMore"] else { throw URLError(.cannotParseResponse) }
                 let next = try NativeRemoteJSON.string(page["nextCursor"]), upper = try NativeRemoteJSON.string(page["through"])
                 let parsed = try values.map { try NativeApproval($0, deviceId: deviceId) }, ids = parsed.map(\.id)
                 guard service.nativeDeviceId == deviceId, through == nil || through == upper, ids == ids.sorted(),
-                      Set(ids).count == ids.count, ids.allSatisfy({ $0 > after && $0 <= upper }),
+                      Set(ids).count == ids.count, parsed.allSatisfy({ $0.deviceId == deviceId || crossReviewEnabled }), ids.allSatisfy({ $0 > after && $0 <= upper }),
                       next == (ids.last ?? after), !more || next > after else { throw DataArchiveError.invalid("审批分页或设备身份改变；不拼接不完整列表") }
                 collected += parsed
                 if !more { readComplete = true; break }; after = next; through = upper
@@ -200,7 +225,8 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
                 notificationAuthorization = await notifier.authorization()
                 await notifier.reconcile(pendingCommandIds: Set(pending.map(\.id)))
             }
-            if notificationsEnabled, let notifier, !isDisplayTest {
+            if !isDisplayTest { try await noticeDelivery?.flushEvidence() }
+            if notificationsEnabled, notifier != nil, !isDisplayTest {
                 let pendingIds = Set(pending.map(\.id))
                 var notified = Set(preferences.stringArray(forKey: "bc.nativeApprovalNotified") ?? []).intersection(pendingIds)
                 // Retain all current pending IDs (bounded by the verified 100 x 20
@@ -209,8 +235,10 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
                 for entry in pending where !notified.contains(entry.id) {
                     let prepared = try await read(entry.id, deviceId: deviceId)
                     guard prepared.state == "awaiting_confirmation", prepared.expiresAt > now() else { continue }
-                    try await notifier.send(prepared); notified.insert(entry.id)
-                    preferences.set(Array(notified).sorted(), forKey: "bc.nativeApprovalNotified")
+                    if let noticeDelivery, try await noticeDelivery.submit(prepared) {
+                        notified.insert(entry.id)
+                        preferences.set(Array(notified).sorted(), forKey: "bc.nativeApprovalNotified")
+                    } else if let warning = noticeDelivery?.warning { fail(DataArchiveError.invalid(warning)) }
                 }
             }
         } catch { fail(error) }
@@ -221,8 +249,14 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
         if value.state != "awaiting_confirmation", let previous = selected, previous.id == value.id, previous.requestHash == value.requestHash {
             value.display = previous.display
         }
+        guard mayReview(value) else { throw DataArchiveError.invalid("本机尚未允许跨设备核对，或审核权限已变更") }
         if value.state == "awaiting_confirmation" {
-            do { try localBefore(&value) } catch { value.displayError = error.localizedDescription }
+            if value.deviceId == deviceId { do { try localBefore(&value) } catch { value.displayError = error.localizedDescription } }
+            else if value.action == "update" {
+                let patch = try NativeRemoteJSON.object(value.request["patch"] ?? .object([:]))
+                let before = (try? NativeRemoteJSON.object(value.display["before"] ?? .null)) ?? [:]
+                if patch.keys.contains(where: { before[$0] == nil }) { value.displayError = "指定设备的修改前内容未读全；不能批准" }
+            }
         }
         return value
     }
@@ -262,6 +296,55 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             if patch.keys.contains(where: { before[$0] == nil }) { value.displayError = "未读取完整修改前内容；不把未知当作空白" }
         }
     }
+    private func mayReview(_ entry: NativeApproval) -> Bool {
+        guard let device = service.nativeDeviceId else { return false }
+        if entry.deviceId == device { return entry.review == nil }
+        guard crossReviewEnabled, let review = entry.review else { return false }
+        return review.reviewerDeviceId == device && review.executionDeviceId == entry.deviceId &&
+            review.policyRevision == policy.revision && review.expiresAt > now() && mayReviewOther(review)
+    }
+    private func refreshPolicy(_ device: String) async throws {
+        var latest = try NativeApprovalPolicy(await service.nativeRequest("native/approval-policy/read", body: .object([:])))
+        guard service.nativeDeviceId == device else { throw DataArchiveError.invalid("审批设置响应设备已改变") }
+        if preferences.bool(forKey: "bc.nativeApprovalPendingRevoke"), latest.reviewOtherDevices {
+            latest = try NativeApprovalPolicy(await service.nativeRequest("native/approval-policy/configure", body: .object([
+                "expectedRevision": .number(Double(latest.revision)), "reviewOtherDevices": .bool(false)])))
+            guard !latest.reviewOtherDevices else { throw DataArchiveError.invalid("服务器尚未确认关闭跨设备审批；本机已锁定") }
+            preferences.set(false, forKey: "bc.nativeApprovalPendingRevoke")
+        }
+        policy = latest
+    }
+    func configurePolicy(review: Bool? = nil, primaryHere: Bool? = nil) async {
+        guard !isDisplayTest, !busy, let device = service.nativeDeviceId else { return }
+        if review == false {
+            crossReviewLocallyEnabled = false; preferences.set(false, forKey: "bc.nativeApprovalCrossReview")
+            preferences.set(true, forKey: "bc.nativeApprovalPendingRevoke")
+            entries.removeAll { $0.deviceId != device }
+            if selected?.deviceId != device { selected = nil }
+        }
+        busy = true; defer { finishOperation() }
+        do {
+            if review == false { await notifier?.reconcile(pendingCommandIds: Set(pending.map(\.id))) }
+            let current = try NativeApprovalPolicy(await service.nativeRequest("native/approval-policy/read", body: .object([:])))
+            var body: [String: BridgeJSON] = ["expectedRevision": .number(Double(current.revision))]
+            if let review { body["reviewOtherDevices"] = .bool(review) }
+            if let primaryHere { body["primaryHere"] = .bool(primaryHere) }
+            let latest = try NativeApprovalPolicy(await service.nativeRequest("native/approval-policy/configure", body: .object(body)))
+            guard service.nativeDeviceId == device, latest.revision > current.revision,
+                  review == nil || latest.reviewOtherDevices == review,
+                  primaryHere != true || latest.primaryDeviceId == device else { throw DataArchiveError.invalid("审批设置回执未核实，没有扩大本机权限") }
+            policy = latest
+            if let review {
+                crossReviewLocallyEnabled = review
+                preferences.set(review, forKey: "bc.nativeApprovalCrossReview")
+                preferences.set(false, forKey: "bc.nativeApprovalPendingRevoke")
+            }
+            message = "审批设置已保存；只有本人具体确认才执行。主要设备仅影响之后新建的请求，不自动故障转移。"
+        } catch { fail(error) }
+    }
+    func recordNotificationClick(_ id: String) async {
+        do { try await noticeDelivery?.clicked(commandId: id) } catch { fail(error) }
+    }
     // Notification navigation may arrive while a refresh is suspended. Keep
     // the latest requested destination instead of silently dropping it.
     func requestOpen(_ id: String) async {
@@ -282,12 +365,15 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     func open(_ id: String) async {
         guard !busy, let deviceId = service.nativeDeviceId else { return }; busy = true; defer { finishOperation() }
         selected = nil; displayTestDecision = nil
-        do { selected = try await read(id, deviceId: deviceId); message = nil } catch { fail(error) }
+        do {
+            if !isDisplayTest { try await refreshPolicy(deviceId) }
+            selected = try await read(id, deviceId: deviceId); message = nil
+        } catch { fail(error) }
     }
     func decide(_ decision: String) async {
         guard !busy, let value = selected, let deviceId = service.nativeDeviceId,
-              value.deviceId == deviceId, value.state == "awaiting_confirmation", value.expiresAt > now(),
-              ["accept", "decline"].contains(decision), decision != "accept" || value.displayError == nil && mayApprove(value) else { return }
+              mayReview(value), value.state == "awaiting_confirmation", value.expiresAt > now(),
+              ["accept", "decline"].contains(decision), decision != "accept" || value.displayError == nil && (value.review != nil || mayApprove(value)) else { return }
         busy = true; defer { finishOperation() }
         do {
             var intents = try persistence.load()
@@ -301,7 +387,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     // Invoked only by a concrete OS notification action selected by the human.
     // A default tap/dismissal, agent claim or incomplete preview cannot enter it.
     func decideFromNotification(_ binding: NativeApprovalNotificationBinding, decision: String) async {
-        guard !isDisplayTest, ["accept", "decline"].contains(decision), service.nativeDeviceId == binding.deviceId else { return }
+        guard !isDisplayTest, ["accept", "decline"].contains(decision), service.nativeDeviceId == (binding.reviewerDeviceId ?? binding.deviceId) else { return }
         while busy {
             await withCheckedContinuation { operationWaiters.append($0) }
             if Task.isCancelled { return }
@@ -344,6 +430,12 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
     }
     private func transmit(_ intent: NativeApprovalIntent) async throws {
         guard service.nativeDeviceId == intent.deviceId else { throw DataArchiveError.invalid("设备配置已改变，未发送原审批") }
+        if case let .object(body) = intent.body, body["reviewerGrantRevision"] != nil {
+            guard let current = selected, current.id == intent.commandId, mayReview(current),
+                  current.decision(try NativeRemoteJSON.string(body["decision"])) == intent.body else {
+                throw DataArchiveError.invalid("跨设备审批权限或版本已变，未重发原决定")
+            }
+        }
         do {
             var value = try NativeApproval(await service.nativeRequest("native/approval/decide", body: intent.body), deviceId: intent.deviceId)
             guard value.id == intent.commandId, value.requestHash == (try NativeRemoteJSON.string(NativeRemoteJSON.object(intent.body)["requestHash"])) else { throw DataArchiveError.invalid("审批回执与原请求不一致；结果未知") }
@@ -354,7 +446,7 @@ nonisolated struct NativeApprovalIntent: Codable, Equatable {
             selected = value
             var intents = try persistence.load(); intents.removeAll { $0 == intent }; try persistence.save(intents)
             retryCommandIds = intents.filter { $0.deviceId == intent.deviceId }.map(\.commandId)
-            entries.removeAll { $0.id == value.id }
+            entries.removeAll { $0.id == value.id }; entries.append(value)
             if let notifier, !isDisplayTest { await notifier.reconcile(pendingCommandIds: Set(pending.map(\.id))) }
             // Feedback follows an identity-checked reply and completed local
             // persistence. Never describe a simulated queued state as execution.

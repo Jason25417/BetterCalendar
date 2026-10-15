@@ -22,6 +22,21 @@ import SwiftData
         let service = RemoteService(envelope); let writer = SwiftDataNativeItemWriter(context: c.mainContext, journal: NativeActionMemoryJournal())
         return (service, store, writer, c)
     }
+    @Test func crossReviewChecksDurableGrantRevisionExpiryAndOfflineRevocation() throws {
+        let (service, store, writer, _) = try fixture(envelope())
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        let context = try NativeApprovalReviewContext(.object([
+            "reviewerDeviceId": .string("fixture-device"), "executionDeviceId": .string("fixture-other-device"),
+            "grantRevision": .number(1), "policyRevision": .number(1), "expiresAt": NativeRemoteJSON.timestamp(at.addingTimeInterval(86400)), "authority": .string("explicit_cross_device_review")]))
+        #expect(executor.permitsCrossReview(context))
+        store.file.grant?.synchronized = false
+        #expect(!executor.permitsCrossReview(context))
+        store.file.grant?.synchronized = true; store.file.grant?.revision = 2
+        #expect(!executor.permitsCrossReview(context))
+        store.file.grant?.revision = 1; store.file.grant?.capabilities = []
+        #expect(!executor.permitsCrossReview(context))
+        #expect(service.claims.isEmpty && service.receipts.isEmpty)
+    }
     @Test func realStoreWriteAndLostResponseRetryAfterRestartNeverDuplicate() async throws {
         let (service, store, writer, c) = try fixture(envelope())
         service.loseReceiptResponse = true

@@ -242,6 +242,108 @@ import AppKit
         #expect(denied.selected?.state == "declined" && denied.displayTestDecision == .decline)
         #expect(denied.message == "显示测试结束：已收到不执行")
     }
+    @Test func crossDeviceReadRequiresIndependentOptInAndLocalGrantAndResultsConverge() async throws {
+        let (service, disk, prefs) = try fixture(); service.executionDeviceId = "fixture-other-device"
+        let inbox = NativeApprovalInbox(service: service, persistence: disk, preferences: prefs, now: { self.at }, mayReviewOther: { _ in true }, mayReadOther: { true })
+        await inbox.open(service.id)
+        #expect(inbox.selected == nil && service.decisions.isEmpty)
+        await inbox.configurePolicy(review: true)
+        await inbox.open(service.id)
+        let entry = try #require(inbox.selected)
+        #expect(entry.deviceId == "fixture-other-device" && inbox.canDecide(entry, accept: true))
+        await inbox.decide("accept")
+        let sent = try NativeRemoteJSON.object(try #require(service.decisions.first))
+        #expect(sent["reviewerGrantRevision"] == .number(1) && sent["reviewerPolicyRevision"] == .number(1))
+        #expect(inbox.selected?.state == "queued" && inbox.pending.isEmpty)
+        await inbox.refresh()
+        #expect(inbox.entries.first?.state == "queued" && service.approvals == 1)
+        let locked = NativeApprovalInbox(service: service, persistence: disk, preferences: prefs, now: { self.at })
+        service.state = "awaiting_confirmation"; await locked.open(service.id)
+        #expect(locked.selected == nil) // Server permission is insufficient after local revocation.
+    }
+    @Test func offlineCrossDeviceRevocationLocksImmediatelyAndRetriesOnlyRevocation() async throws {
+        let (service, disk, prefs) = try fixture(); service.executionDeviceId = "fixture-other-device"
+        let inbox = NativeApprovalInbox(service: service, persistence: disk, preferences: prefs, now: { self.at }, mayReviewOther: { _ in true }, mayReadOther: { true })
+        await inbox.configurePolicy(review: true); await inbox.open(service.id)
+        #expect(inbox.selected != nil)
+        service.routing.failConfigure = true; await inbox.configurePolicy(review: false)
+        #expect(!inbox.crossReviewEnabled && inbox.selected == nil && prefs.bool(forKey: "bc.nativeApprovalPendingRevoke"))
+        await inbox.decide("accept"); #expect(service.decisions.isEmpty)
+        service.routing.failConfigure = false; await inbox.refresh()
+        #expect(!service.routing.review && !inbox.crossReviewEnabled && !prefs.bool(forKey: "bc.nativeApprovalPendingRevoke"))
+    }
+    @Test func notificationSubmissionLostReceiptSurvivesRestartWithoutSecondOSSubmission() async throws {
+        let (service, _, _) = try fixture(), notifier = ApprovalNotifier(), disk = NativeApprovalNoticeMemoryPersistence()
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        service.routing.failReceipts = 1
+        let first = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: disk, now: { self.at })
+        await #expect(throws: (any Error).self) { try await first.submit(entry) }
+        #expect(notifier.sent == [entry.id] && disk.values.first?.phase == .submitted)
+        let restarted = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: disk, now: { self.at })
+        #expect(try await restarted.submit(entry))
+        #expect(notifier.sent.count == 1 && disk.values.first?.phase == .reported)
+        #expect(service.decisions.isEmpty && service.routing.receiptStates[entry.id] == "system_submitted")
+    }
+    @Test func lostInitialClaimOrPreparedCrashNeverBlindlyResubmitsNotification() async throws {
+        let (service, _, _) = try fixture(), notifier = ApprovalNotifier(), disk = NativeApprovalNoticeMemoryPersistence()
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        service.routing.claims.insert(entry.id) // Original selected-device claim reply was lost.
+        let restarted = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: disk, now: { self.at })
+        #expect(try await !restarted.submit(entry))
+        #expect(notifier.sent.isEmpty && disk.values.first?.phase == .unknown && restarted.warning != nil)
+        #expect(try await !restarted.submit(entry))
+        #expect(notifier.sent.isEmpty && service.decisions.isEmpty)
+        // Evidence already present in OS may be acknowledged without adding it again.
+        notifier.sent.append(entry.id)
+        #expect(try await restarted.submit(entry))
+        #expect(notifier.sent.count == 1 && disk.values.first?.phase == .reported)
+    }
+    @Test func notificationJournalFailureStopsBeforeOSAndOtherPrimaryNeverAlertsHere() async throws {
+        let (service, _, _) = try fixture(), notifier = ApprovalNotifier()
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        let failed = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: ApprovalFailingNoticeDisk(), now: { self.at })
+        await #expect(throws: (any Error).self) { try await failed.submit(entry) }
+        #expect(notifier.sent.isEmpty && service.decisions.isEmpty)
+        service.routing.primary = "fixture-other-device"
+        let other = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: NativeApprovalNoticeMemoryPersistence(), now: { self.at })
+        #expect(try await !other.submit(entry)); #expect(notifier.sent.isEmpty)
+    }
+    @Test func lateClickReceiptIsRetriedAfterCommandClosesAndWrongReplyIsNotAcknowledged() async throws {
+        let (service, _, _) = try fixture(), notifier = ApprovalNotifier(), disk = NativeApprovalNoticeMemoryPersistence()
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        let sender = NativeApprovalNoticeDelivery(service: service, notifier: notifier, persistence: disk, now: { self.at })
+        #expect(try await sender.submit(entry))
+        service.routing.failReceipts = 1
+        await #expect(throws: (any Error).self) { try await sender.clicked(commandId: entry.id) }
+        service.state = "queued"
+        #expect(disk.values.first?.clickedAt == at && disk.values.first?.clickReported != true)
+        service.routing.wrongReceipt = true
+        await #expect(throws: (any Error).self) { try await sender.flushEvidence() }
+        #expect(disk.values.first?.clickReported != true)
+        service.routing.wrongReceipt = false
+        try await sender.flushEvidence()
+        #expect(disk.values.first?.clickReported == true && notifier.sent.count == 1 && service.decisions.isEmpty)
+    }
+    @Test func notificationReviewBindingRejectsPartialAuthorityAndBodyIncludesObjectAndExecutor() throws {
+        let (service, _, _) = try fixture(); service.executionDeviceId = "fixture-other-device"; service.routing.revision = 1; service.showUpdate = true
+        let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        let summary = NativeApprovalNotificationSummary(entry)
+        #expect(summary.body.contains(entry.title) && summary.body.contains(entry.deviceLabel) && summary.allowsDirectDecision)
+        var binding = try NativeApprovalNotificationBinding(entry)
+        #expect(NativeApprovalNotificationBinding.decode(try #require(binding.encoded))?.matches(entry) == true)
+        binding.reviewerGrantRevision = nil
+        #expect(NativeApprovalNotificationBinding.decode(try #require(binding.encoded)) == nil)
+    }
+    @Test func notificationJournalRoundTripsAndRejectsDuplicateIdentitiesWithoutLosingFile() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = NativeApprovalNoticeFilePersistence(url: directory.appendingPathComponent("notices.json"))
+        let (service, _, _) = try fixture(), entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
+        let intent = NativeApprovalNoticeIntent(commandId: entry.id, requestHash: entry.requestHash, deviceId: entry.deviceId, claimId: UUID().uuidString, phase: .submitted)
+        try file.save([intent]); #expect(try file.load() == [intent])
+        #expect(throws: (any Error).self) { try file.save([intent, intent]) }
+        #expect(try file.load() == [intent])
+    }
     #if os(macOS)
     @Test func displayCompletionFeedbackIsVisibleInNarrowAndWidePinnedFooter() async throws {
         let inbox = NativeApprovalPreview.make(); await inbox.refresh()
@@ -293,6 +395,8 @@ import AppKit
 
 @MainActor private final class ApprovalService: NativeRemoteServing {
     var nativeDeviceId: String? = "fixture-device"
+    let routing = ApprovalRoutingFixture()
+    var executionDeviceId = "fixture-device"
     let id = "12345678-1234-4234-8234-000000001901"
     let at: Date
     var state = "awaiting_confirmation", decisions: [BridgeJSON] = []
@@ -302,20 +406,25 @@ import AppKit
     init(at: Date) throws { self.at = at }
     func envelope(wrongId: Bool = false) throws -> BridgeJSON {
         let commandId = wrongId ? "12345678-1234-4234-8234-000000001902" : id
-        let request: BridgeJSON = .object(["version": .number(1), "commandId": .string(commandId), "deviceId": .string("fixture-device"),
+        let request: BridgeJSON = .object(["version": .number(1), "commandId": .string(commandId), "deviceId": .string(executionDeviceId),
             "kind": .string("item"), "action": .string(missingBefore || showUpdate ? "update" : "create"), "recordId": .string("12345678-1234-4234-8234-000000001903"),
             "patch": .object(["title": .string("ISOLATED approval fixture")]),
             "expectedRevision": missingBefore || showUpdate ? .string("old-revision") : .null,
             "occurredAt": NativeRemoteJSON.timestamp(at), "expiresAt": NativeRemoteJSON.timestamp(at.addingTimeInterval(expired ? -1 : 86400)),
             "userRequest": .string("Isolated fixture; no real user task")])
-        return .object(["version": .number(1), "nativeCommandId": .string(commandId), "commandId": .string(commandId), "deviceId": .string("fixture-device"),
+        var response: [String: BridgeJSON] = ["version": .number(1), "nativeCommandId": .string(commandId), "commandId": .string(commandId), "deviceId": .string(executionDeviceId),
             "requestHash": .string(wrongHash ? "wrong" : BridgePoolCodec.hash(try BridgePoolCodec.encode(request))), "request": request,
             "grantRevision": .number(1), "state": .string(state), "expiresAt": NativeRemoteJSON.timestamp(at.addingTimeInterval(expired ? -1 : 86400)),
             "serverAccepted": .bool(true), "approvedAt": ["queued", "dispatching", "applied"].contains(state) ? NativeRemoteJSON.timestamp(at) : .null,
-            "display": showUpdate ? .object(["recordTitle": .string("演示事项（隔离数据）"), "deviceLabel": .string("演示 Mac"), "before": .object(["title": .string("修改前的演示标题")])]) : .null, "result": .null])
+            "display": showUpdate ? .object(["recordTitle": .string("演示事项（隔离数据）"), "deviceLabel": .string("演示 Mac"), "before": .object(["title": .string("修改前的演示标题")])]) : .null, "result": .null]
+        if nativeDeviceId != executionDeviceId {
+            response["reviewContext"] = .object(["reviewerDeviceId": .string(nativeDeviceId!), "executionDeviceId": .string(executionDeviceId), "grantRevision": .number(1), "policyRevision": .number(Double(routing.revision)), "expiresAt": NativeRemoteJSON.timestamp(at.addingTimeInterval(86400)), "authority": .string("explicit_cross_device_review")])
+        }
+        return .object(response)
     }
     func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
         await Task.yield()
+        if let response = try routing.response(path, body: body, device: nativeDeviceId!) { return response }
         switch path {
         case "native/approvals":
             if pauseNextList {
@@ -342,6 +451,7 @@ import AppKit
     var authorizations = 0, sent: [String] = [], allowed = true
     func authorize() async throws -> Bool { authorizations += 1; return allowed }
     func send(_ approval: NativeApproval) async throws { sent.append(approval.id) }
+    func contains(commandId: String) async -> Bool { sent.contains(commandId) }
     func authorization() async -> NativeApprovalNotificationAuthorization { allowed ? .authorized : .denied }
     var reconciled: [Set<String>] = [], displayTests = 0
     func reconcile(pendingCommandIds: Set<String>) async { reconciled.append(pendingCommandIds) }
@@ -360,6 +470,7 @@ import AppKit
     var writes = 0
     init(envelope: BridgeJSON) { self.envelope = envelope }
     func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        if path == "native/approval-policy/read" { return ApprovalRoutingFixture.policy() }
         if path == "native/approval/read" { return envelope }
         writes += 1; throw URLError(.unsupportedURL)
     }
@@ -367,6 +478,7 @@ import AppKit
 @MainActor private final class NotificationBatchService: NativeRemoteServing {
     var nativeDeviceId: String? = "fixture-device"
     let at: Date
+    let routing = ApprovalRoutingFixture()
     init(at: Date) { self.at = at }
     private var ids: [String] { (1901..<2501).map { String(format: "12345678-1234-4234-8234-%012d", $0) } }
     private func envelope(_ id: String) throws -> BridgeJSON {
@@ -379,6 +491,7 @@ import AppKit
         return .object(value)
     }
     func nativeRequest(_ path: String, body: BridgeJSON) async throws -> BridgeJSON {
+        if let response = try routing.response(path, body: body, device: nativeDeviceId!) { return response }
         let value = try NativeRemoteJSON.object(body)
         if path == "native/approvals" {
             let after = try NativeRemoteJSON.string(value["after"])
@@ -388,4 +501,45 @@ import AppKit
         if path == "native/approval/read" { return try envelope(NativeRemoteJSON.string(value["commandId"])) }
         throw URLError(.unsupportedURL)
     }
+}
+
+@MainActor private final class ApprovalRoutingFixture {
+    var revision = 0, review = false
+    var primary: String?
+    var claims: Set<String> = []
+    var receiptStates: [String: String] = [:]
+    var failReceipts = 0
+    var failConfigure = false
+    var wrongReceipt = false
+    static func policy(revision: Int = 0, review: Bool = false, primary: String? = nil) -> BridgeJSON {
+        .object(["version": .number(1), "revision": .number(Double(revision)), "reviewOtherDevices": .bool(review), "primaryDeviceId": primary.map(BridgeJSON.string) ?? .null, "routingReadiness": .object(["ready": .bool(true)])])
+    }
+    func response(_ path: String, body: BridgeJSON, device: String) throws -> BridgeJSON? {
+        if path == "native/approval-policy/read" { return Self.policy(revision: revision, review: review, primary: primary) }
+        let value = try NativeRemoteJSON.object(body)
+        if path == "native/approval-policy/configure" {
+            if failConfigure { throw URLError(.notConnectedToInternet) }
+            if case let .bool(v) = value["reviewOtherDevices"] { review = v }
+            if case let .bool(v) = value["primaryHere"] { primary = v ? device : nil }
+            revision += 1; return Self.policy(revision: revision, review: review, primary: primary)
+        }
+        if path == "native/notification/claim" {
+            let id = try NativeRemoteJSON.string(value["commandId"])
+            let first = !claims.contains(id); claims.insert(id)
+            let state = receiptStates[id] ?? "reserved"
+            return .object(["version": .number(1), "commandId": .string(id), "requestHash": value["requestHash"]!, "deviceId": .string(primary ?? device), "claimId": .string(id), "state": .string(state), "beginSubmission": .bool(first), "maySubmit": .bool(state == "reserved")])
+        }
+        if path == "native/notification/receipt" {
+            if failReceipts > 0 { failReceipts -= 1; throw URLError(.networkConnectionLost) }
+            let id = try NativeRemoteJSON.string(value["commandId"]), state = try NativeRemoteJSON.string(value["state"])
+            receiptStates[id] = state
+            return .object(["version": .number(1), "commandId": .string(wrongReceipt ? UUID().uuidString : id), "state": .string(state), "userSeen": .string("unknown")])
+        }
+        return nil
+    }
+}
+
+@MainActor private final class ApprovalFailingNoticeDisk: NativeApprovalNoticePersisting {
+    func load() throws -> [NativeApprovalNoticeIntent] { [] }
+    func save(_ values: [NativeApprovalNoticeIntent]) throws { throw DataArchiveError.invalid("isolated notification journal failure") }
 }

@@ -194,9 +194,10 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   return value;
  }
  async function approvalList(v,d){
-  keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??20;
+  keys(v,['after','through','limit','includeShared']);await device(d.id);const limit=v.limit??20;
+  if(v.includeShared!==undefined&&typeof v.includeShared!=='boolean')throw new BridgeError('跨设备审批读取选择无效');
   if(!Number.isSafeInteger(limit)||limit<1||limit>20||v.after!==undefined&&typeof v.after!=='string'||v.through!==undefined&&typeof v.through!=='string')throw new BridgeError('审批分页无效');
-  const shared=await routing.canReview(d.id),filter=shared?'1=1':'device_id=?',args=shared?[]:[d.id];
+  const shared=v.includeShared!==false&&await routing.canReview(d.id),filter=shared?'1=1':'device_id=?',args=shared?[]:[d.id];
   // Include retained results so an unselected card on another device can
   // converge too; effective states below still apply expiry/revocation.
   const retained="(state IN ('awaiting_confirmation','queued','dispatching') OR accepted_at>=?)",cutoff=new Date(Date.parse(time())-30*86400000).toISOString();

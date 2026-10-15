@@ -13,6 +13,7 @@ async function fixture(t){
  const reopen=()=>createBridge(db,{now:()=>new Date(now),fetcher:()=>{throw Error('network forbidden');}}),core=reopen(),devices=[];
  for(const deviceId of ['fixture-mac','fixture-phone']){
   const token=await core.registerDevice({id:deviceId,label:deviceId,scopes:['user.context']}),d=await core.authenticateDevice(token.token);
+  sqlite.prepare("INSERT INTO states(source_key,device_id,seq,observed_at,received_at,value_hash,body) VALUES(?,?,1,?,?,?,?)").run(deviceId+':device.status',deviceId,now.toISOString(),now.toISOString(),'fixture',JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:true,systemAuthorization:'authorized'}}}));
   await core.nativeCommands.setGrant({revision:1,capabilities:['item.create'],expiresAt:'2026-10-16T14:00:00.000Z'},d);devices.push(d);
  }
  const submit=async n=>(await core.nativeCommands.submit({version:1,commandId:id(n),deviceId:devices[0].id,kind:'item',action:'create',recordId:id(n+100),patch:{title:'ISOLATED ROUTING FIXTURE'},occurredAt:now.toISOString(),userRequest:'Isolated fixture, never real task'},'fixture-owner',{formOrigin:'submit_native_command'})).value;
@@ -37,7 +38,7 @@ test('explicit opt-in exposes one request to both devices; one primary receives 
  const listed=await f.core.nativeCommands.approvalList({},phone);assert.equal(listed.commands[0].commandId,r.commandId);assert.equal(listed.commands[0].reviewContext.reviewerDeviceId,phone.id);
  const [a,b]=await Promise.all([f.core.nativeCommands.routing.claim(identity(r),mac),f.core.nativeCommands.routing.claim(identity(r),phone)]);
  assert.equal(a.maySubmit,false);assert.equal(a.claimId,null);assert.equal(b.maySubmit,true);assert.equal(a.deviceId,phone.id);
- const restarted=await f.reopen().nativeCommands.routing.claim(identity(r),phone);assert.equal(restarted.claimId,b.claimId);assert.equal(restarted.policyRevision,b.policyRevision);
+ const restarted=await f.reopen().nativeCommands.routing.claim(identity(r),phone);assert.equal(restarted.claimId,b.claimId);assert.equal(restarted.policyRevision,b.policyRevision);assert.equal(b.beginSubmission,true);assert.equal(restarted.beginSubmission,false);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notifications').get().n,1);
 });
 test('switching the primary never reroutes a prior request or fails over when it is offline',async t=>{
@@ -110,4 +111,35 @@ test('expired, cancelled, wrong-hash or target-revoked requests never become a n
  assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).maySubmit,false);
  const e=await f.submit(11);f.advance(86400001);assert.equal((await f.core.nativeCommands.routing.claim(identity(e),mac)).maySubmit,false);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notifications').get().n,0);
+});
+
+test('mixed-version or stale devices block primary selection; unknown route never becomes a later duplicate',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{enabled:true}}}),mac.id);
+ assert.equal((await f.core.nativeCommands.routing.read(phone)).routingReadiness.ready,false);
+ await assert.rejects(f.config(phone,{reviewOtherDevices:true,primaryHere:true}),e=>e.status===409);
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:true,systemAuthorization:'authorized'}}}),mac.id);
+ await f.config(phone,{reviewOtherDevices:true,primaryHere:true});
+ f.advance(901000);const r=await f.submit(21);
+ const c=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(c.state,'unknown');assert.equal(c.maySubmit,false);assert.equal(c.beginSubmission,false);
+ f.sqlite.prepare("UPDATE states SET observed_at=?,received_at=?").run('2026-10-15T14:15:01.000Z','2026-10-15T14:15:01.000Z');
+ const later=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(later.state,'unknown');assert.equal(later.maySubmit,false);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).maySubmit,false);
+});
+test('old pending requests keep original alert destination and shared list can be locally disabled',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices,r=await f.submit(22);f.advance(1);
+ await f.config(phone,{reviewOtherDevices:true,primaryHere:true});
+ assert.equal((await f.core.nativeCommands.approvalList({includeShared:false},phone)).commands.length,0);
+ const other=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(other.deviceId,mac.id);assert.equal(other.beginSubmission,false);
+ const first=await f.core.nativeCommands.routing.claim(identity(r),mac);assert.equal(first.beginSubmission,true);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).beginSubmission,false);
+});
+
+test('primary selection does not silently enable notifications or assume system permission',async t=>{
+ const f=await fixture(t),[,phone]=f.devices;
+ f.sqlite.prepare("UPDATE states SET body=? WHERE device_id=?").run(JSON.stringify({value:{approvalNotifications:{routingProtocol:1,enabled:false,systemAuthorization:'denied'}}}),phone.id);
+ const status=await f.core.nativeCommands.routing.read(phone);assert.equal(status.routingReadiness.ready,true);
+ await assert.rejects(f.config(phone,{reviewOtherDevices:true,primaryHere:true}),e=>e.status===409);
+ assert.equal((await f.core.nativeCommands.routing.read(phone)).primaryDeviceId,null);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM native_approval_policy").get().n,0);
 });

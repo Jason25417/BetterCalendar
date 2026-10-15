@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "scope": "local isolated native approval integration; no deployment or real approval test",
+  "native": {
+    "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_12-30-25--0400.xcresult",
+    "result": "Passed",
+    "passed": 59,
+    "failed": 0,
+    "skipped": 0,
+    "suites": [
+      "NativeApprovalInboxTests (29)",
+      "NativeRemoteExecutionTests (30)"
+    ],
+    "evidenceSource": "xcresulttool test-results summary; log lines interleaved so not used as count"
+  },
+  "server": {
+    "passed": 143,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-loop-integration-server-final.log"
+  },
+  "typescript": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-loop-integration-ts-final.log"
+  },
+  "iOSSimulatorBuild": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-loop-integration-ios-final.log"
+  },
+  "dashboard": {
+    "url": "http://127.0.0.1:8765/#active-loop",
+    "category": "18.",
+    "checked": 13,
+    "total": 40,
+    "meaning": "code and existing human evidence separated; not overall real-device acceptance"
+  },
+  "deployment": {
+    "appBuild": 177,
+    "serviceVersion": 40,
+    "changed": false
+  },
+  "notVerified": [
+    "new cross-device human approval",
+    "primary notification device actual behavior",
+    "notification lock/background/quit/offline matrix",
+    "iPhone UI",
+    "new ordinary reminders",
+    "MCP pomodoro and experiment isolation"
+  ],
+  "newSystemPermissions": false,
+  "realBusinessOperations": false,
+  "productionBuild": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-loop-integration-build-final.log"
+  }
+}

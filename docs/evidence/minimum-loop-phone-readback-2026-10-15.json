@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "readAt": "2026-10-15T16:31:25.990Z",
+  "tool": "read_pool_records",
+  "sourceDeviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+  "observedAt": "2026-10-15T15:32:46.000Z",
+  "receivedAt": "2026-10-15T15:32:49.790Z",
+  "freshness": "stale",
+  "complete": true,
+  "matchedRecordCount": 12,
+  "hasMore": false,
+  "snapshotEventId": "DD8BFBA0-BED9-4052-8E25-ADB6320D699D",
+  "researchCallId": "research_5a295dc4-12f7-46d7-824b-03cb503c75cf",
+  "fixture": {
+    "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+    "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+    "title": "BC 联调测试｜双入口验收",
+    "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177"
+  },
+  "verified": "historical phone snapshot matches Mac applied note/revision",
+  "notVerified": [
+    "current state",
+    "phone UI",
+    "phone approval",
+    "notification action"
+  ]
+}

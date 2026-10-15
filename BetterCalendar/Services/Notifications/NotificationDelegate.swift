@@ -11,6 +11,7 @@ import UserNotifications
 @MainActor
 final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let router: AppRouter
+    var handleApprovalViewed: ((String) async -> Void)?
     var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
 
     init(router: AppRouter) {
@@ -23,10 +24,17 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         if case let .decision(binding, decision) = NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            // Persist/report the click alongside the decision, without waiting
+            // for receipt network latency before handling the human choice.
+            async let viewed: Void? = handleApprovalViewed?(binding.commandId)
             await handleApprovalDecision?(binding, decision)
+            _ = await viewed
             return
         }
-        if routeApproval(userInfo: info, actionIdentifier: response.actionIdentifier) { return }
+        if routeApproval(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            if let id = info["bcApprovalCommandId"] as? String { await handleApprovalViewed?(id) }
+            return
+        }
         switch response.notification.request.identifier {
         case "bc.reminder.morning":
             // 0.23 A：开始今天已退役——早通知改为打开执行界面、第一件「待开始」（不自动计时）

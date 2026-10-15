@@ -108,8 +108,9 @@ final class AppContainer {
         let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
                                           persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
                                           writer: nativeItems, alarms: nativeAlarms, journal: nativeJournal, canonicalTasks: bridgeTasks)
-        self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), writer: nativeItems, journal: nativeJournal, mayApprove: { remote.permitsApproval($0) })
+        self.nativeApprovals = NativeApprovalInbox(service: StateBridgeClient.shared, persistence: TestHost.isActive ? NativeApprovalMemoryPersistence() : NativeApprovalFilePersistence(), notifier: NativeApprovalNotification(), notices: TestHost.isActive ? NativeApprovalNoticeMemoryPersistence() : NativeApprovalNoticeFilePersistence(), writer: nativeItems, journal: nativeJournal, mayApprove: { remote.permitsApproval($0) }, mayReviewOther: { remote.permitsCrossReview($0) }, mayReadOther: { remote.hasCurrentReviewGrant() })
         self.nativeActions = NativeActionsViewModel(writer: nativeItems, alarms: nativeAlarms, remote: remote, approvals: nativeApprovals)
+        notificationDelegate.handleApprovalViewed = { [weak inbox = nativeApprovals] id in await inbox?.recordNotificationClick(id) }
         notificationDelegate.handleApprovalDecision = { [weak inbox = nativeApprovals] binding, decision in
             await inbox?.decideFromNotification(binding, decision: decision)
         }

@@ -24,11 +24,17 @@ nonisolated struct NativeApprovalNotificationBinding: Codable, Equatable {
     var expiresAt: Date
     var expectedRevision: String?
     var displayHash: String
+    var reviewerDeviceId: String?
+    var reviewerGrantRevision: Int?
+    var reviewerPolicyRevision: Int?
     init(_ entry: NativeApproval) throws {
         commandId = entry.id; deviceId = entry.deviceId; requestHash = entry.requestHash
         grantRevision = entry.grantRevision; expiresAt = entry.expiresAt
         expectedRevision = try? NativeRemoteJSON.string(entry.request["expectedRevision"])
         displayHash = try Self.hashDisplay(entry)
+        reviewerDeviceId = entry.review?.reviewerDeviceId
+        reviewerGrantRevision = entry.review?.grantRevision
+        reviewerPolicyRevision = entry.review?.policyRevision
     }
     private static func hashDisplay(_ entry: NativeApproval) throws -> String {
         BridgePoolCodec.hash(try BridgePoolCodec.encode(.object([
@@ -39,7 +45,8 @@ nonisolated struct NativeApprovalNotificationBinding: Codable, Equatable {
     func matchesRequest(_ entry: NativeApproval) -> Bool {
         guard version == 1, commandId == entry.id, deviceId == entry.deviceId,
               requestHash == entry.requestHash, grantRevision == entry.grantRevision,
-              expiresAt == entry.expiresAt,
+              expiresAt == entry.expiresAt, reviewerDeviceId == entry.review?.reviewerDeviceId,
+              reviewerGrantRevision == entry.review?.grantRevision, reviewerPolicyRevision == entry.review?.policyRevision,
               expectedRevision == (try? NativeRemoteJSON.string(entry.request["expectedRevision"])) else { return false }
         return true
     }
@@ -49,7 +56,7 @@ nonisolated struct NativeApprovalNotificationBinding: Codable, Equatable {
     static func diagnostics(enabled: Bool, authorization: NativeApprovalNotificationAuthorization) -> BridgeJSON {
         .object(["enabled": .bool(enabled), "systemAuthorization": .string(authorization.rawValue),
                  "delivery": .string("local_poll_20s_while_app_runs"), "remoteApprovalPush": .bool(false),
-                 "notificationDecision": .string("short_complete_item_title_note_only_requires_human_action")])
+                 "notificationDecision": .string("short_complete_item_title_note_only_requires_human_action"), "routingProtocol": .number(1)])
     }
     var encoded: String? { try? String(data: JSONEncoder().encode(self), encoding: .utf8) }
     static func decode(_ string: String) -> Self? {
@@ -57,6 +64,9 @@ nonisolated struct NativeApprovalNotificationBinding: Codable, Equatable {
               let value = try? JSONDecoder().decode(Self.self, from: data), value.version == 1,
               UUID(uuidString: value.commandId) != nil, !value.deviceId.isEmpty,
               value.grantRevision > 0, value.requestHash.count == 64, value.displayHash.count == 64 else { return nil }
+        let review = [value.reviewerDeviceId != nil, value.reviewerGrantRevision != nil, value.reviewerPolicyRevision != nil]
+        guard review.allSatisfy({ !$0 }) || review.allSatisfy({ $0 }) && value.reviewerDeviceId != value.deviceId &&
+              !(value.reviewerDeviceId?.isEmpty ?? true) && (value.reviewerGrantRevision ?? 0) > 0 && (value.reviewerPolicyRevision ?? 0) > 0 else { return nil }
         return value
     }
 }
@@ -69,7 +79,9 @@ nonisolated struct NativeApprovalNotificationSummary {
     init(_ entry: NativeApproval) {
         title = entry.kind == "item" ? (entry.action == "create" ? "批准新增事项？" : "批准修改事项？") : "BC 有一项改动等你确认"
         subtitle = entry.title + " · " + entry.deviceLabel
-        var lines: [String] = []
+        // Some OS layouts hide subtitles. Critical identity belongs in the
+        // complete body too; long bodies fall back to full-detail review.
+        var lines: [String] = ["事项：" + entry.title, "执行设备：" + entry.deviceLabel]
         let patch = (try? NativeRemoteJSON.object(entry.request["patch"] ?? .null)) ?? [:]
         let before = (try? NativeRemoteJSON.object(entry.display["before"] ?? .null)) ?? [:]
         var complete = entry.kind == "item" && ["create", "update"].contains(entry.action) && !patch.isEmpty &&
@@ -176,6 +188,12 @@ nonisolated struct NativeApprovalNotificationSummary {
     func send(_ approval: NativeApproval) async throws {
         try await checkAndRegister()
         try await center.add(Self.request(approval: approval))
+    }
+    func contains(commandId: String) async -> Bool {
+        let id = "bc.approval." + commandId
+        let pending = await center.pendingNotificationRequests()
+        if pending.contains(where: { $0.identifier == id }) { return true }
+        return await center.deliveredNotifications().contains(where: { $0.request.identifier == id })
     }
     func sendDisplayTest() async throws {
         try await checkAndRegister()

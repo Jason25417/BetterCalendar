@@ -175,6 +175,17 @@ nonisolated enum NativeRemoteJSON {
         default: return false
         }
     }
+    func hasCurrentReviewGrant() -> Bool {
+        guard let grant = try? persistence.load().grant else { return false }
+        return grant.synchronized && grant.deviceId == deviceId && grant.expiresAt > now() && !grant.capabilities.isEmpty
+    }
+    func permitsCrossReview(_ context: NativeApprovalReviewContext) -> Bool {
+        // Read durable local revocation, not a potentially stale UI flag.
+        guard let grant = try? persistence.load().grant, grant.synchronized,
+              grant.deviceId == deviceId, grant.revision == context.grantRevision,
+              grant.expiresAt > now(), context.expiresAt == grant.expiresAt, !grant.capabilities.isEmpty else { return false }
+        return true
+    }
     // Called only by the human's native settings button, never a remote tool.
     func setCapabilities(items: Bool, alarm: Bool, journalRead: Bool = false, journalWrite: Bool = false, timer: Bool = false) async {
         guard !granting, let deviceId else { message = "先配置个人状态连接"; return }

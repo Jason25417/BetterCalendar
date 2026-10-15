@@ -12,7 +12,16 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   await device(id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',id);
   return !!g&&g.revision===reviewer.grantRevision&&g.expires_at===reviewer.expiresAt&&g.expires_at>time();
  }
- async function read(d){await device(d.id);const row=await rawPolicy(),policy=JSON.parse(row.body);return {version:1,revision:row.revision,primaryDeviceId:policy.primaryDeviceId,reviewOtherDevices:await canReview(d.id),notificationFallback:'none',policyAppliesTo:'new_unrouted_requests',delivery:'local_poll_while_app_runs',remotePush:false};}
+ async function readiness(){
+  const rows=(await q("SELECT d.id,d.label,s.body,s.observed_at,s.received_at FROM devices d JOIN native_grants g ON g.device_id=d.id LEFT JOIN states s ON s.source_key=d.id||':device.status' WHERE d.revoked_at IS NULL AND g.expires_at>? AND json_array_length(g.body,'$.capabilities')>0",time()).all()).results;
+  const at=Date.parse(time()),maxAgeSeconds=900;
+  const devices=rows.map(r=>{let value;try{value=JSON.parse(r.body).value;}catch{}
+   const age=at-Date.parse(r.observed_at),receivedAge=at-Date.parse(r.received_at);
+   const ready=value?.approvalNotifications?.routingProtocol===1&&age>=-30000&&age<=maxAgeSeconds*1000&&receivedAge>=0&&receivedAge<=maxAgeSeconds*1000;
+   return {deviceId:r.id,label:r.label,ready,notificationsEnabled:value?.approvalNotifications?.enabled===true,systemAuthorization:value?.approvalNotifications?.systemAuthorization??'unknown',reason:ready?'supported_recent_report':!r.body?'missing_status':value?.approvalNotifications?.routingProtocol!==1?'update_required':'stale_status'};
+  });return {ready:devices.length>0&&devices.every(d=>d.ready),maxAgeSeconds,devices};
+ }
+ async function read(d){await device(d.id);const row=await rawPolicy(),policy=JSON.parse(row.body);return {version:1,revision:row.revision,primaryDeviceId:policy.primaryDeviceId,reviewOtherDevices:await canReview(d.id),notificationFallback:'none',policyAppliesTo:'requests_accepted_after_setting_change',delivery:'local_poll_while_app_runs',remotePush:false,routingReadiness:await readiness()};}
  async function configure(v,d){
   keys(v,['expectedRevision','reviewOtherDevices','primaryHere']);await device(d.id);
   if(!Number.isSafeInteger(v.expectedRevision)||v.expectedRevision<0||v.reviewOtherDevices===undefined&&v.primaryHere===undefined||['reviewOtherDevices','primaryHere'].some(k=>v[k]!==undefined&&typeof v[k]!=='boolean'))throw new BridgeError('审批设置版本或明确选择无效');
@@ -22,7 +31,7 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   if(v.reviewOtherDevices===true){const g=await grant(d.id);reviewers.push({deviceId:d.id,grantRevision:g.revision,expiresAt:g.expires_at});}
   else if(v.reviewOtherDevices===undefined)reviewers.push(...policy.reviewers.filter(r=>r.deviceId===d.id));
   policy.reviewers=reviewers;
-  if(v.primaryHere===true){if(!reviewers.some(r=>r.deviceId===d.id)||v.reviewOtherDevices!==true&&!await canReview(d.id))throw new BridgeError('请先明确允许本机跨设备核对审批，再选主要通知设备',403);policy.primaryDeviceId=d.id;}
+  if(v.primaryHere===true){if(!reviewers.some(r=>r.deviceId===d.id)||v.reviewOtherDevices!==true&&!await canReview(d.id))throw new BridgeError('请先明确允许本机跨设备核对审批，再选主要通知设备',403);const readinessReport=await readiness();if(!readinessReport.ready)throw new BridgeError('参与设备尚未全部报告新版审批协议，请更新并打开后重试',409);const self=readinessReport.devices.find(x=>x.deviceId===d.id);if(!self?.notificationsEnabled||!['authorized','provisional'].includes(self.systemAuthorization))throw new BridgeError('请先在这台设备明确开启审批通知并上传系统授权状态',409);policy.primaryDeviceId=d.id;}
   else if(v.primaryHere===false&&policy.primaryDeviceId===d.id||v.reviewOtherDevices===false&&policy.primaryDeviceId===d.id)policy.primaryDeviceId=null;
   const at=time(),revision=row.revision+1;
   const results=await db.batch([
@@ -39,15 +48,21 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   keys(v,['commandId','requestHash']);await device(d.id);if(typeof v.commandId!=='string'||!uuid.test(v.commandId)||typeof v.requestHash!=='string')throw new BridgeError('通知请求身份无效');
   const r=await one('SELECT * FROM native_requests WHERE command_id=?',v.commandId);await allowed(r,d);if(r.request_hash!==v.requestHash)throw new BridgeError('通知请求哈希不匹配',409);
   const value=await requestView(r);if(value.state!=='awaiting_confirmation')return {version:1,commandId:r.command_id,requestHash:r.request_hash,maySubmit:false,reason:'not_pending',state:value.state};
-  const p=await rawPolicy(),policy=JSON.parse(p.body),target=policy.primaryDeviceId??r.device_id;
+  const p=await rawPolicy(),policy=JSON.parse(p.body),target=policy.primaryDeviceId&&r.accepted_at>=p.updated_at?policy.primaryDeviceId:r.device_id;
   // Freeze one destination, even across policy edits/restarts. No failover or
   // lease stealing: another device cannot create a duplicate interruption.
-  await q("INSERT OR IGNORE INTO native_approval_notifications(command_id,request_hash,device_id,policy_revision,claim_id,state,updated_at) SELECT ?,?,?,?,?,'reserved',? WHERE EXISTS(SELECT 1 FROM native_requests n JOIN native_grants g ON g.device_id=n.device_id JOIN devices td ON td.id=n.device_id WHERE n.command_id=? AND n.request_hash=? AND n.state='awaiting_confirmation' AND n.expires_at>? AND g.revision=n.grant_revision AND g.expires_at>? AND td.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=n.permission))",r.command_id,r.request_hash,target,p.revision,crypto.randomUUID(),time(),r.command_id,r.request_hash,time(),time()).run();
-  const saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
+  await q("INSERT OR IGNORE INTO native_approval_notifications(command_id,request_hash,device_id,policy_revision,claim_id,state,updated_at) SELECT ?,?,?,?,?,'routed',? WHERE EXISTS(SELECT 1 FROM native_requests n JOIN native_grants g ON g.device_id=n.device_id JOIN devices td ON td.id=n.device_id WHERE n.command_id=? AND n.request_hash=? AND n.state='awaiting_confirmation' AND n.expires_at>? AND g.revision=n.grant_revision AND g.expires_at>? AND td.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=n.permission))",r.command_id,r.request_hash,target,p.revision,crypto.randomUUID(),time(),r.command_id,r.request_hash,time(),time()).run();
+  let saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
   if(!saved)return {version:1,commandId:r.command_id,requestHash:r.request_hash,maySubmit:false,reason:'no_longer_pending',state:(await requestView(await one('SELECT * FROM native_requests WHERE command_id=?',r.command_id))).state};
   if(saved.request_hash!==r.request_hash)throw new BridgeError('原通知身份冲突',409);
+  // A newly stale/legacy participant cannot cause a second alert on the primary.
+  // Freeze as unknown rather than rerouting or retrying later after an upgrade.
+  if(policy.primaryDeviceId&&target===policy.primaryDeviceId&&!(await readiness()).ready)await q("UPDATE native_approval_notifications SET state='unknown',updated_at=? WHERE command_id=? AND state='routed'",time(),r.command_id).run();
+  saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
   const access=saved.device_id===d.id&&(r.device_id===d.id||await canReview(d.id));
-  return {version:1,commandId:r.command_id,requestHash:r.request_hash,deviceId:saved.device_id,policyRevision:saved.policy_revision,claimId:access?saved.claim_id:null,state:saved.state,maySubmit:access&&saved.state==='reserved',reason:access?'selected_device':'other_device_only',systemSubmittedAt:saved.system_submitted_at??null,clickedAt:saved.clicked_at??null};
+  const begin=access?changed(await q("UPDATE native_approval_notifications SET state='reserved',updated_at=? WHERE command_id=? AND state='routed'",time(),r.command_id).run())>0:false;
+  if(begin)saved=await one('SELECT * FROM native_approval_notifications WHERE command_id=?',r.command_id);
+  return {version:1,commandId:r.command_id,requestHash:r.request_hash,deviceId:saved.device_id,policyRevision:saved.policy_revision,claimId:access?saved.claim_id:null,state:saved.state,maySubmit:access&&saved.state==='reserved',beginSubmission:begin,reason:access?'selected_device':'other_device_only',systemSubmittedAt:saved.system_submitted_at??null,clickedAt:saved.clicked_at??null};
  }
  async function receipt(v,d){
   keys(v,['commandId','requestHash','claimId','state']);await device(d.id);if(!['system_submitted','unknown','failed','clicked'].includes(v.state))throw new BridgeError('通知回执状态无效');
