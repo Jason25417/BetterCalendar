@@ -619,3 +619,15 @@ test('additive mode migration preserves existing session bytes and historical re
  assert.equal(after.mode,'light');assert.equal(after.focus_minutes,null);assert.equal(after.experiment,0);
  assert.equal(sqlite.prepare('SELECT result FROM commands').get().result,receipt);
 });
+
+test('two service instances racing pause and finish accept exactly one revision and retain the original winner receipt',async()=>{
+ const f=fixture();const start=await f.core.taskCommand({commandId:'race-start',action:'start',title:'ISOLATED RACE',provenance:'user',experiment:true});f.advance(1000);
+ const requests=['pause','finish'].map(action=>({commandId:'race-'+action,action,sessionId:start.id,expectedRevision:1,occurredAt:f.time(),provenance:'user'}));
+ const outcomes=await Promise.allSettled(requests.map((r,i)=>(i?f.reopen():f.core).taskCommand(r,'device:fixture-'+i)));
+ assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(outcomes.filter(r=>r.status==='rejected'&&r.reason.status===409).length,1);
+ const winner=outcomes.findIndex(r=>r.status==='fulfilled'),saved=outcomes[winner].value;
+ assert.equal(saved.revision,2);assert.equal(saved.elapsedMs,1000);assert.equal(saved.experiment,true);
+ assert.deepEqual(await f.reopen().taskCommand(requests[winner]),saved);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,2);
+ assert.equal(f.sqlite.prepare('SELECT revision FROM sessions').get().revision,2);
+});

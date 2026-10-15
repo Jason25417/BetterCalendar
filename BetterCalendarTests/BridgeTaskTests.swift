@@ -335,4 +335,21 @@ import SwiftData
         #expect(throws: Error.self) { try NativeRemoteRequestValidation.validate(bad, expiresAt: at) }
     }
 
+    @Test func lateActiveSnapshotCannotReviveAConfirmedFinishedSession() async {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        service.applicationSnapshot = .init(id: "task_snapshot_finished", finishedVersions: [
+            .init(sessionId: "finished", revision: 4, status: .finished, commandId: "finish")], finishedComplete: true)
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await model.refresh()
+        let receipts = service.applicationRequests.count
+        service.clock = at.addingTimeInterval(10)
+        service.applicationSnapshot = .init(id: "task_snapshot_stale_active", finishedVersions: [], finishedComplete: true)
+        service.sessions = [.init(id: "finished", title: "ISOLATED", status: .running, startedAt: at,
+                                 elapsedMs: 1000, updatedAt: at, revision: 3, provenance: "user")]
+        await model.refresh()
+        #expect(model.sessions.isEmpty && model.lastError != nil)
+        #expect(service.applicationRequests.count == receipts)
+        #expect(disk.file.state?.applicationSnapshot?.id == "task_snapshot_finished")
+    }
+
 }

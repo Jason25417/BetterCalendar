@@ -33,6 +33,34 @@ import SwiftData
         _ = try writer.execute(command(id, .restore, record.revision), userConfirmed: true)
         #expect(!task.isInTrash && task.id == id && stage.task?.id == id && stage.title == "original stage")
     }
+    @Test func everyItemMutationSurvivesLostReceiptRestartAndDuplicateWithoutRepeatingEffect() throws {
+        let c = try container(), journal = FaultJournal(), id = UUID()
+        let steps: [(NativeItemCommand.Action, [String: BridgeJSON])] = [
+            (.create, ["title": .string("BC ISOLATED LIFECYCLE"), "note": .string("fixture")]),
+            (.update, ["title": .string("BC ISOLATED RENAMED"), "note": .string("changed")]),
+            (.update, ["status": .string("done")]), (.update, ["status": .string("active")]),
+            (.delete, [:]), (.restore, [:])]
+        for (action, patch) in steps {
+            let writer = SwiftDataNativeItemWriter(context: ModelContext(c), journal: journal)
+            let previous = try writer.records().first
+            let request = command(id, action, action == .create ? nil : previous?.revision, patch: patch)
+            journal.failAt = journal.saves + 2 // Effect saved, applied receipt lost.
+            #expect(throws: Error.self) { try writer.execute(request, userConfirmed: true) }
+            #expect(journal.entries.last?.phase == "prepared")
+            let restarted = SwiftDataNativeItemWriter(context: ModelContext(c), journal: journal)
+            let recovered = try restarted.execute(request, userConfirmed: true)
+            let state = try #require(restarted.records().first)
+            #expect(try restarted.execute(request, userConfirmed: true) == recovered)
+            #expect(try restarted.records().first?.revision == state.revision)
+            #expect(try ModelContext(c).fetchCount(FetchDescriptor<LongTask>()) == 1)
+            #expect(journal.entries.last?.phase == "applied")
+        }
+        let final = try #require(ModelContext(c).fetch(FetchDescriptor<LongTask>()).first)
+        #expect(final.id == id && !final.isInTrash && final.status == .active)
+        #expect(final.title == "BC ISOLATED RENAMED" && final.note == "changed")
+        #expect(journal.entries.count == steps.count)
+    }
+
     @Test func editingCompletedTitleDoesNotRewriteTheOriginalAchievementTime() throws {
         let c = try container(), context = c.mainContext
         let completedAt = Date(timeIntervalSince1970: 50)

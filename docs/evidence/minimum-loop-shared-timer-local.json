@@ -20,6 +20,12 @@
       "failed": 0,
       "skipped": 0,
       "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-39-05--0400.xcresult"
+    },
+    "fullReleaseRegression": {
+      "tests": 400,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-47-27--0400.xcresult"
     }
   },
   "builds": {

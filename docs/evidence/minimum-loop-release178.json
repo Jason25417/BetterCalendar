@@ -1,0 +1,97 @@
+{
+  "version": "0.65.21",
+  "build": 178,
+  "status": "both_platforms_available",
+  "sourceCommit": "c64d6e2ccf84c77ecebb92f7ea798b842625ee63",
+  "service": {
+    "version": 41,
+    "status": "succeeded",
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "deploymentId": "appgdep_6ad14a7e39888191872085a3674a587d",
+    "sourceCommit": "34ea1c905488b1a248eb2a174bc5ff5b7b728950",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "access": "unchanged owner-only custom policy, 1 account",
+    "migrations": "0007 approval routing tables and 0008 additive timer columns",
+    "verified": [
+      "deployment succeeded and has_mcp",
+      "database overview contains both new approval tables",
+      "read_instructions actual MCP includes new timer semantics",
+      "read_native_capabilities actual MCP successful; old grants unchanged, new reminder scopes absent"
+    ]
+  },
+  "tests": {
+    "native": 400,
+    "server": 156,
+    "failed": 0,
+    "skipped": 0,
+    "iosSimulatorBuild": "passed",
+    "typescript": "passed",
+    "productionBuild": "passed"
+  },
+  "realDeviceAcceptance": "not yet attempted; no true timer, new notification/ring, item mutation or permission change",
+  "dotsMessage": {
+    "sentVia": "Edge extension / personal Dots page",
+    "sentAfterBothAppsAvailable": true,
+    "responseAt": "2026-10-15 17:57 EDT",
+    "readOnlyResponse": {
+      "newInstructionsVisible": true,
+      "newToolSchemasVisible": false,
+      "missingTimerFields": [
+        "mode",
+        "focusMinutes",
+        "experiment"
+      ],
+      "missingKinds": [
+        "reminder"
+      ],
+      "missingTools": [
+        "read_native_reminders"
+      ],
+      "MacDeviceReported": "0.65.20 /177 at17:56:46 EDT current then",
+      "iPhoneDeviceReported": "0.65.20 /177 at17:44:18 EDT stale then",
+      "reminderGrants": "absent on both, unchanged as intended"
+    },
+    "snapshotLocalOnly": "/private/tmp/bc178-dots-receipt.jpg",
+    "execution": "none; no new proposals/timers/reminder schedules/permission changes"
+  },
+  "appStoreConnect": {
+    "appId": "6787325341",
+    "build": 178,
+    "builds": [
+      {
+        "id": "af000a1c-17ea-4080-95fc-a0b0d63f083b",
+        "platform": "IOS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "1df36f9c-cae7-44a3-98b9-998fc87c2e8e",
+        "platform": "MAC_OS",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ]
+  },
+  "postArchiveTests": {
+    "nativeTargeted": 28,
+    "nativeFailed": 0,
+    "nativeSkipped": 0,
+    "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-54-21--0400.xcresult",
+    "serverTargeted": 55,
+    "serverFailed": 0,
+    "serverSkipped": 0,
+    "log": "/private/tmp/bc-loop178-timer-race.log",
+    "sourceChange": "tests and evidence only; no new runtime change or release needed"
+  },
+  "metadataRefresh": {
+    "officialGuide": "https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata",
+    "existingConnection": "asdk_app_sites_bb66cc6761408191a6c0734422864ee0",
+    "action": "clicked existing Refresh tools in ChatGPT plugin settings",
+    "result": "pending UI result, not yet counted as refreshed",
+    "permissionChanges": "none; did not alter platform All allow preference or BC native grants"
+  }
+}
