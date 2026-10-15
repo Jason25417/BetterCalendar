@@ -43,3 +43,6 @@
 发布后Dots只读回报（17:57EDT，代理报告，非本人验收）：新说明已可读，但其工具schema仍旧（缺mode/focusMinutes/experiment、reminder kind和read_native_reminders）；Mac上传177@17:56:46当时有效、iPhone177@17:44:18当时stale。新增提醒权限仍无。已通过Edge官方既有插件管理页点击刷新工具；未改全部允许偏好/BC grant/账户，后续已请Dots再次只读复核，结果尚未返回时不称缓存已修。官方元数据刷新流程：https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata 。
 
 后归档追加测试不改变App运行时代码：NativeItem逐个create/update/done/active/delete/restore在effect保存、回执失败后用新context恢复、再原命令重试，唯一对象及原revision保留；BridgeTask已finish快照后迟到active不复活。原生目标28/28；服务两实例竞争同revision仅一胜出、原回执幂等，目标55/55。源码tests和证据单独提交，不为此重发178。
+
+
+后续官方刷新已收到Dots明确回执：当前schema可见timer start mode/focusMinutes/experiment、reminder kind和read_native_reminders。仅工具定义检查，没有调用新提案或提醒查询。原始缓存缺口已解，仍等两端178实际安装打开和本人具体批准；不把新工具可见当作设备执行通过。截图仅保留/private/tmp/bc178-dots-refreshed.jpg，不向Git复制私人聊天。

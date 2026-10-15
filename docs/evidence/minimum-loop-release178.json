@@ -52,7 +52,8 @@
       "reminderGrants": "absent on both, unchanged as intended"
     },
     "snapshotLocalOnly": "/private/tmp/bc178-dots-receipt.jpg",
-    "execution": "none; no new proposals/timers/reminder schedules/permission changes"
+    "execution": "none; no new proposals/timers/reminder schedules/permission changes",
+    "latestResult": "refreshed metadata visible; awaiting physical 178 installation and explicit human approvals"
   },
   "appStoreConnect": {
     "appId": "6787325341",
@@ -91,7 +92,10 @@
     "officialGuide": "https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata",
     "existingConnection": "asdk_app_sites_bb66cc6761408191a6c0734422864ee0",
     "action": "clicked existing Refresh tools in ChatGPT plugin settings",
-    "result": "pending UI result, not yet counted as refreshed",
-    "permissionChanges": "none; did not alter platform All allow preference or BC native grants"
+    "result": "Dots explicitly reports refreshed schema visible: timer mode/focusMinutes/experiment, reminder kind and read_native_reminders",
+    "permissionChanges": "none; did not alter platform All allow preference or BC native grants",
+    "observedAt": "2026-10-15T22:04:36.675318+00:00",
+    "evidenceLevel": "Dots visible tool-definition report; no new operation/query executed",
+    "screenshotLocalOnly": "/private/tmp/bc178-dots-refreshed.jpg"
   }
 }
