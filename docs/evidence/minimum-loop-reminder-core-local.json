@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "scope": "isolated explicit ordinary-reminder native core only; not MCP or production",
+  "nativeTests": {
+    "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_12-41-15--0400.xcresult",
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-loop-reminder-core-final-tests.log"
+  },
+  "systemEffects": "fake NativeReminderSystem only; UN request construction does not submit",
+  "newPermissionGranted": false,
+  "newMCPTool": false,
+  "wiredToExecutor": false,
+  "released": false,
+  "specCheckmarksAdded": 0,
+  "pending": [
+    "MCP schema/normalization",
+    "independent grant UI (off by default)",
+    "native device queue/execution",
+    "remote readback",
+    "notification click receipts",
+    "real scheduled notification tests"
+  ],
+  "iOSSimulatorBuild": {
+    "exitCode": 0,
+    "log": "/private/tmp/bc-loop-reminder-core-ios.log"
+  }
+}

@@ -59,3 +59,13 @@
 2026-10-15T16:31:25.990Z正式只读MCP核验：iPhone完整todo页12条、无下一页，15:32:46Z快照已包含唯一c5472af0…测试项，备注新增Mac App审批验收177，revision23066b61…08332与Mac应用回执相同。快照当前stale，故仅证明该时点修改已同步；不证明当前状态、手机UI/本人审批或通知操作。限定单记录证据见evidence/minimum-loop-phone-readback-2026-10-15.json。
 
 待发布前置：普通提醒完整链和计时mode/experiment继续开发后合并有意义的设备测试批；本批不单独要求用户更新/反复点同意。APNs仍无，20秒运行中轮询不变。B03/B04/B05的勾仅实现与隔离验证，B06–B08/F03–F08的真人目标仍未通过。
+
+## 第三批在途：普通提醒本机内核（尚不可从MCP调用）
+
+NativeReminderScheduling.swift提供稳定reminderId/revision、schedule/update/cancel和实际OS pending查询；更新要求完整title/body/fireAt/sound/experiment、expectedRevision，取消不接受新内容，使用同一系统identifier替换/撤除旧计划。控制权检查为本人确认加可重读的本机grant闭包；查询OS权限后、执行前再次检查，权限读取过程中撤回不会继续提交。不会自动请求系统授权或授予持久权限。明确一端执行，后续MCP请求必须指定目标设备，其他端只是展示，不另排通知。
+
+本机先持久操作意图，OS接受后查回内容/排程再持久结果；回执丢失重试只查询同一计划，不自动重排未知通知；取消重复删除同identifier安全，但若原cancel后已经有新revision则阻断旧cancel，不能删掉新计划。已成功旧command只返回历史回执，不重新应用。到点后没有送达信号就elapsed_delivery_unknown，不能把本机saved记录冒充系统仍有计划。当前记录≤500/操作≤2000/文件≤8MiB，700目录/600文件，满容量明确失败；不静默删去去重证据，不写行为日志/计时/成就。experiment字段贯穿计划与回执。
+
+10项新Mac隔离测试通过，全部使用假系统通知/内存或临时目录，另构造UNCalendarNotificationTrigger验证UTC绝对时刻、非重复、stable identifier、默认无声、不含审批category。没有调用真实UN通知中心，没有真实响铃。iOS Simulator构建通过（日志/private/tmp/bc-loop-reminder-core-ios.log）。本机内核不是MCP功能验收，E01–E04仍空；尚未注入AppContainer/NativeRemoteExecutor、没有新增授权按钮或线上工具。
+
+直接下一步：沿用native_requests审批/设备队列，增加kind=reminder及独立reminder.schedule/update/cancel/read权限（默认关闭），请求明确reminderId、expectedRevision、标题/正文/时间/声音/experiment。审批正文完整展示前后与目标设备，提醒不能复用普通item通知直接批准规则。指定设备调用本内核后回传同commandId/版本与系统排程/未知状态；查询优先复用已有按独立读取权限发给设备的只读请求模式，不另造任务数据库。完成MCP schema/执行/查询/权限面板与隔离测试后，再接共享计时mode/experiment并攒批更新。真实提醒对象/声音/时间仍需本人具体批准。
