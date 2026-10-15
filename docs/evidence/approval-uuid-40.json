@@ -13,8 +13,8 @@
     "preFixNewRegressionFailures": 2
   },
   "deployment": "succeeded",
-  "humanApproval": "not_verified",
-  "deviceApplied": "not_verified",
+  "humanApproval": "user_reported_click_and_screenshot_of_applied_state",
+  "deviceApplied": "device_reported_applied_and_Mac_pool_readback_revision_matches",
   "hostMac2px": "unfixed",
   "realCommandsCreatedOrDecidedByAgent": false,
   "deploymentId": "appgdep_6acff59d57948191b459a24f8bc8e8f7",
@@ -35,14 +35,26 @@
     "pinnedButtonsRemainVisible": true,
     "headerScreenshot": "/private/tmp/bc40-mac-original-approval.png",
     "diffScreenshot": "/private/tmp/bc40-mac-original-approval-details.png",
-    "humanClickAndFeedback": "awaiting_user"
+    "humanClickAndFeedback": "user_screenshot_confirms_device_applied_feedback",
+    "finalItemReadback": "matching_note_and_persisted_revision",
+    "humanAppliedScreenshotLocalOnly": "/Users/jasontu/Developer/App Development/BetterCalendar_Agent/evidence/native-approval-40/mac-human-applied.png"
   },
   "latestCommandState": {
-    "state": "awaiting_confirmation",
-    "approvedAt": null,
-    "attemptId": null,
-    "result": null,
-    "researchCallId": "research_bd7e6341-2ca8-44c8-851c-7eee3151781e"
+    "state": "applied",
+    "approvedAt": "2026-10-15T00:28:01.938Z",
+    "attemptId": "bb3d465e-f2ad-4559-b816-284e7bb6958d",
+    "resultAt": "2026-10-15T00:28:18.784Z",
+    "result": {
+      "authority": "swiftdata",
+      "commandId": "D0FD563B-321C-4E12-A2B9-DB31229CEF4B",
+      "deviceApplication": "local_store_saved",
+      "persistedRevision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+      "recoverable": true,
+      "saved": true,
+      "screenVisible": "unknown",
+      "syncOtherDevices": "unknown"
+    },
+    "researchCallId": "research_94be81af-d43a-4b55-9821-6a57be0526fc"
   },
   "iPhoneFixture": {
     "readAt": "2026-10-14T21:36:50.567Z",
@@ -58,5 +70,8 @@
     "proof": "/private/tmp/bc40-dots-fix-message.png",
     "instruction": "query original command only; no resubmit or model approval"
   },
-  "userReadAuthorization": "2026-10-14 user explicitly authorized reading BC follow-up; no unrelated content retained in project evidence"
+  "userReadAuthorization": "2026-10-14 user explicitly authorized reading BC follow-up; no unrelated content retained in project evidence",
+  "humanReceiptFile": "approval-uuid-40-human-receipt.json",
+  "otherHumanClick": "user_said_both_but_entry_identity_pending_clarification",
+  "postEditIPhoneSync": "unverified_latest_pool_snapshot_precedes_approval"
 }

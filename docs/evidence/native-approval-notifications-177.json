@@ -24,7 +24,7 @@
     "iPhone": "not_verified"
   },
   "humanAppAcceptance": {
-    "Mac": "175_layout_click_reported_177_result_not_verified",
+    "Mac": "human_approved_real_update_and_screenshot_confirms_applied_feedback_Mac_pool_readback_matches",
     "iPhone": "not_verified"
   },
   "chatLayout": {
@@ -114,6 +114,23 @@
         "approvalNotificationsEnabledInLastSnapshot": false,
         "currentOptInAfterUserAction": "not_verified_no_new_snapshot"
       }
+    },
+    "finalNotificationRead": {
+      "readAt": "2026-10-15T00:32:22.427Z",
+      "Mac": {
+        "observedAt": "2026-10-15T00:31:55Z",
+        "build": "177",
+        "enabled": true,
+        "systemAuthorization": "authorized"
+      },
+      "iPhone": {
+        "observedAt": "2026-10-15T00:27:30Z",
+        "build": "177",
+        "enabled": true,
+        "systemAuthorization": "authorized",
+        "freshness": "stale",
+        "currentDelivery": "not_verified"
+      }
     }
   },
   "dotsHandoff": {
@@ -135,5 +152,6 @@
       "multiMessageReadRejected": true,
       "privacyBoundary": "Only own message and directly adjacent single BC acknowledgment read; broader followup read rejected and not bypassed"
     }
-  }
+  },
+  "realMacApprovalEvidence": "approval-uuid-40-human-receipt.json"
 }

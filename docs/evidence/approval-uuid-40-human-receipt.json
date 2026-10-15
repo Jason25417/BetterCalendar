@@ -1,0 +1,117 @@
+{
+  "recordedAt": "2026-10-15T00:32:22.649Z",
+  "commandId": "d0fd563b-321c-4e12-a2b9-db31229cef4b",
+  "requestHash": "627d6d34aa9938853acb7e2afbce9b1bf27449534c508e0ecef16a4cfcf045d3",
+  "expectedRevision": "077306fcdc53a83ac915a13dc3a0658650e2237d322d16482c5920ed0be5ab56",
+  "state": "applied",
+  "acceptedAt": "2026-10-14T21:25:25.648Z",
+  "approvedAt": "2026-10-15T00:28:01.938Z",
+  "attemptId": "bb3d465e-f2ad-4559-b816-284e7bb6958d",
+  "resultAt": "2026-10-15T00:28:18.784Z",
+  "result": {
+    "authority": "swiftdata",
+    "commandId": "D0FD563B-321C-4E12-A2B9-DB31229CEF4B",
+    "deviceApplication": "local_store_saved",
+    "persistedRevision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+    "recoverable": true,
+    "saved": true,
+    "screenVisible": "unknown",
+    "syncOtherDevices": "unknown"
+  },
+  "research": {
+    "callId": "research_94be81af-d43a-4b55-9821-6a57be0526fc",
+    "responseHash": "752d3551af82583fadff1f2a3881211b55bfd96c83ba8bb2b0af99b2f8a3baa8",
+    "recorded": true
+  },
+  "mac": {
+    "readAt": "2026-10-15T00:32:22.649Z",
+    "observedAt": "2026-10-15T00:31:55.000Z",
+    "complete": true,
+    "hasMore": false,
+    "fixture": {
+      "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+      "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+      "values": {
+        "cadenceMinutesPerWeek": null,
+        "checkpoints": [],
+        "createdAt": 1792007516159,
+        "deadline": null,
+        "deletedAt": null,
+        "deletionContext": null,
+        "deletionId": null,
+        "doneAt": null,
+        "family": null,
+        "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+        "isInTrash": false,
+        "modifiedAt": 1792013121119,
+        "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+        "restoredDeletionId": null,
+        "spilledFromDay": null,
+        "status": "active",
+        "title": "BC 联调测试｜双入口验收",
+        "totalMinutes": null,
+        "unitMinutes": null,
+        "zone": "todo"
+      }
+    }
+  },
+  "iphone": {
+    "readAt": "2026-10-15T00:32:22.522Z",
+    "observedAt": "2026-10-15T00:27:30.000Z",
+    "complete": true,
+    "hasMore": false,
+    "fixture": {
+      "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+      "revision": "077306fcdc53a83ac915a13dc3a0658650e2237d322d16482c5920ed0be5ab56",
+      "values": {
+        "cadenceMinutesPerWeek": null,
+        "checkpoints": [],
+        "createdAt": 1792007516159,
+        "deadline": null,
+        "deletedAt": null,
+        "deletionContext": null,
+        "deletionId": null,
+        "doneAt": null,
+        "family": null,
+        "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+        "isInTrash": false,
+        "modifiedAt": 1792007516159,
+        "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。",
+        "restoredDeletionId": null,
+        "spilledFromDay": null,
+        "status": "active",
+        "title": "BC 联调测试｜双入口验收",
+        "totalMinutes": null,
+        "unitMinutes": null,
+        "zone": "todo"
+      }
+    },
+    "interpretation": "snapshot precedes approval; post-edit sync not yet verified"
+  },
+  "notifications": [
+    {
+      "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "observedAt": "2026-10-15T00:27:30.000Z",
+      "freshness": "stale",
+      "approvalNotifications": {
+        "systemAuthorization": "authorized",
+        "remoteApprovalPush": false,
+        "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+        "enabled": true,
+        "delivery": "local_poll_20s_while_app_runs"
+      }
+    },
+    {
+      "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "observedAt": "2026-10-15T00:31:55.000Z",
+      "freshness": "current",
+      "approvalNotifications": {
+        "delivery": "local_poll_20s_while_app_runs",
+        "remoteApprovalPush": false,
+        "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+        "enabled": true,
+        "systemAuthorization": "authorized"
+      }
+    }
+  ]
+}
