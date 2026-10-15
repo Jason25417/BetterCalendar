@@ -72,6 +72,9 @@
   },
   "userReadAuthorization": "2026-10-14 user explicitly authorized reading BC follow-up; no unrelated content retained in project evidence",
   "humanReceiptFile": "approval-uuid-40-human-receipt.json",
-  "otherHumanClick": "user_said_both_but_entry_identity_pending_clarification",
-  "postEditIPhoneSync": "unverified_latest_pool_snapshot_precedes_approval"
+  "otherHumanClick": "user_final_correction_only_clicked_in_Mac_BC",
+  "postEditIPhoneSync": "unverified_latest_pool_snapshot_precedes_approval",
+  "humanApprovalEntry": "Mac_BC_App_only",
+  "iPhoneHumanApproval": "not_tested",
+  "humanReportCorrection": "User corrected earlier both/devices description: only clicked in Mac."
 }

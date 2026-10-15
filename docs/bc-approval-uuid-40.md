@@ -18,6 +18,6 @@
 
 ## 2026-10-14 20:32 EDT 真人反馈与实际保存
 
-Jason报告“两个都同意了”，并提供Mac真实审批结束截图，底部明确“设备报告已应用”；Mac BC本人批准及完成反馈可记通过，第二次点击具体入口仍待本人澄清，不扩算手机/通知入口。原d0fd…请求approvedAt=2026-10-15T00:28:01.938Z，resultAt=00:28:18.784Z，attemptId=bb3d465e-f2ad-4559-b816-284e7bb6958d，state=applied / local_store_saved。00:31:55Z的Mac完整目录读回备注仅新增Mac App审批验收177，新revision23066b61…08332与设备回执一致。未创建新提案，未启动计时。
+Jason报告“两个都同意了”，并提供Mac真实审批结束截图，底部明确“设备报告已应用”；Mac BC本人批准及完成反馈可记通过，本人随后最终更正为“我只在mac里点了”：只认Mac BC入口；iPhone BC和两端通知操作均未验收。原d0fd…请求approvedAt=2026-10-15T00:28:01.938Z，resultAt=00:28:18.784Z，attemptId=bb3d465e-f2ad-4559-b816-284e7bb6958d，state=applied / local_store_saved。00:31:55Z的Mac完整目录读回备注仅新增Mac App审批验收177，新revision23066b61…08332与设备回执一致。未创建新提案，未启动计时。
 
 手机已读到177、通知开关true与系统authorized，但最新pool00:27:30Z早于批准仍旧revision077306fc…56，因此本次修改后同步未知，不认定失败。Mac系统通知/iPhone BC与通知未由该截图验收；Mac聊天2px仍未修。原截图受控保存在Agent本地evidence/native-approval-40/mac-human-applied.png，未上传图片到新服务。完整限定测试项回执见evidence/approval-uuid-40-human-receipt.json。
