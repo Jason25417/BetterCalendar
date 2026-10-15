@@ -84,3 +84,19 @@ test('native read and human decision resolve uppercase directory UUID with uncha
  assert.equal(latest.requestHash,s.value.requestHash);assert.equal(latest.request.expectedRevision,request.expectedRevision);
  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
 });
+
+test('HTTP routing settings require device auth and explicit opt-in; notice receipt is not a business approval',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.post('native/approval-policy/read',{},null)).status,401);
+ assert.equal((await f.post('native/approval-policy/read')).body.revision,0);
+ assert.equal((await f.post('native/approval-policy/configure',{expectedRevision:0,primaryHere:true})).status,403);
+ const configured=await f.post('native/approval-policy/configure',{expectedRevision:0,reviewOtherDevices:true,primaryHere:true});
+ assert.equal(configured.status,200);assert.equal(configured.body.primaryDeviceId,f.d.id);
+ const binding={commandId:id,requestHash:f.proposal.value.requestHash};
+ const claim=await f.post('native/notification/claim',binding);assert.equal(claim.body.maySubmit,true);
+ const receipt=await f.post('native/notification/receipt',{...binding,claimId:claim.body.claimId,state:'system_submitted'});
+ assert.equal(receipt.status,200);assert.equal(receipt.body.state,'system_submitted');assert.equal(receipt.body.userSeen,'unknown');
+ assert.equal((await f.post('native/notification/claim',binding)).body.maySubmit,false);
+ assert.equal((await f.core.nativeCommands.status({commandId:id},'fixture-owner')).state,'awaiting_confirmation');
+ assert.equal((await f.post('native/approval-policy/configure',{expectedRevision:1,userConfirmed:true})).status,400);
+});

@@ -32,6 +32,10 @@ export async function POST(request:Request,context:{params:Promise<{path:string[
           case "native/grant/read":return core.nativeCommands.readGrant(device);
           case "native/grant":return core.nativeCommands.setGrant(body,device);
           case "native/approvals":return core.nativeCommands.approvalList(body,device);
+          case "native/approval-policy/read":return core.nativeCommands.routing.read(device);
+          case "native/approval-policy/configure":return core.nativeCommands.routing.configure(body,device);
+          case "native/notification/claim":return core.nativeCommands.routing.claim(body,device);
+          case "native/notification/receipt":return core.nativeCommands.routing.receipt(body,device);
           case "native/approval/read":{
             const value=await core.nativeCommands.approvalStatus(body,device);
             let display=null,displayError=null;

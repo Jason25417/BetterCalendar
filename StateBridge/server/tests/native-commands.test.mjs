@@ -418,7 +418,7 @@ test('closed, expired and revoked native requests never reopen; effective state 
  const [v,s]=requests[0];assert.equal((await f.core.nativeCommands.decideFromDevice(nativeDecision(v,s,'decline'),d)).state,'declined');
  assert.equal((await f.reopen().nativeCommands.decideFromDevice(nativeDecision(v,s,'decline'),d)).state,'declined');
  await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(v,s),d));
- f.advance(3600001);const expired=await f.core.nativeCommands.approvalList({},d);assert.ok(expired.commands.every(c=>c.state==='expired'));
+ f.advance(3600001);const expired=await f.core.nativeCommands.approvalList({},d);assert.ok(expired.commands.every(c=>['expired','declined'].includes(c.state)));assert.equal(expired.commands.find(c=>c.commandId===v.commandId).state,'declined');
  await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(...requests[1]),d),e=>e.current.state==='expired');
  assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
 });

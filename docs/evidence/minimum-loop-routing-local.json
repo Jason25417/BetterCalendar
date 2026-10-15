@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-15",
+  "goalStatus": "active",
+  "phase": "routing_backend_local_only",
+  "sourceBaseline": "d88dbac",
+  "liveNativeBuild": 177,
+  "liveServiceVersion": 40,
+  "deployed": false,
+  "permissionChanges": false,
+  "realBusinessOperations": false,
+  "serverTests": {
+    "pass": 140,
+    "fail": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-closure-routing-tests.log"
+  },
+  "typecheck": "passed",
+  "productionBuild": "passed",
+  "buildLog": "/private/tmp/bc-closure-server-build.log",
+  "dashboard": {
+    "url": "http://127.0.0.1:8765/#active-loop",
+    "loopbackOnly": true,
+    "refreshSeconds": 2,
+    "checked": 10,
+    "items": 40,
+    "screenshot": "/private/tmp/bc-minimum-loop-dashboard.png",
+    "browser": "Edge extension",
+    "tabId": "143502120",
+    "processSession": 69913
+  },
+  "notVerified": [
+    "native_client_integration",
+    "cross_device_human_approval",
+    "system_notification_actions",
+    "native_notification_outbox",
+    "primary_policy_mixed_client_compatibility",
+    "two_timer_modes",
+    "scheduled_reminder_lifecycle",
+    "actual_background_matrix",
+    "actual_delays"
+  ],
+  "next": "Native opt-in/UI and bound notification durable delivery; no real test effects without explicit concrete human approval"
+}

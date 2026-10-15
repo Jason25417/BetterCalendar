@@ -23,3 +23,13 @@ export const nativeRequests = sqliteTable("native_requests", {
   approvalHash:text("approval_hash"), approvedAt:text("approved_at"), attemptId:text("attempt_id"),
   claimedAt:text("claimed_at"), resultHash:text("result_hash"), result:text("result"), resultAt:text("result_at")
 }, t=>[index("idx_native_target_state").on(t.deviceId,t.state,t.acceptedAt,t.commandId)]);
+
+export const nativeApprovalPolicy = sqliteTable("native_approval_policy", {
+  id:text("id").primaryKey(), revision:integer("revision").notNull(), body:text("body").notNull(),
+  lastRequestHash:text("last_request_hash"), updatedAt:text("updated_at").notNull()
+});
+export const nativeApprovalNotifications = sqliteTable("native_approval_notifications", {
+  commandId:text("command_id").primaryKey(), requestHash:text("request_hash").notNull(), deviceId:text("device_id").notNull(),
+  policyRevision:integer("policy_revision").notNull(), claimId:text("claim_id").notNull(), state:text("state").notNull(),
+  systemSubmittedAt:text("system_submitted_at"), clickedAt:text("clicked_at"), updatedAt:text("updated_at").notNull()
+});

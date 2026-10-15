@@ -1,5 +1,6 @@
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
 import {normalizeFormResponse} from './native-form-response.mjs';
+import {createApprovalRouting} from './approval-routing.mjs';
 // MCP advertises the same identity contract that the executor validates.
 export const nativeUUIDSchema=Object.freeze({type:'string',format:'uuid',pattern:'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'});
 const nativeUUIDPattern=new RegExp(nativeUUIDSchema.pattern);
@@ -16,6 +17,10 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
  const policy=()=>({defaultTTLSeconds:approvalTTLSeconds,maximumTTLSeconds:86400,hostCardLifetime:"unknown_independent_of_service_expiry",defaultConfirmationChannel:confirmationChannel,confirmationChannels:["chat_form","target_device_button"]});
  const resolved=(v,r=null)=>v.expiresAt===undefined?{...v,expiresAt:r?.expires_at??new Date(Date.parse(time())+approvalTTLSeconds*1000).toISOString()}:v;
  const q=(sql,...a)=>db.prepare(sql).bind(...a),one=(sql,...a)=>q(sql,...a).first();
+ const routing=createApprovalRouting(db,time,{device,requestView:view,grant:async id=>{
+  await device(id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',id);
+  if(!g||g.expires_at<=time())throw new BridgeError('跨设备审批需要本机有效授权',403);return g;
+ }});
  async function device(id){const d=await one('SELECT * FROM devices WHERE id=?',id);if(!d||d.revoked_at||!JSON.parse(d.scopes).includes('user.context'))throw new BridgeError('指定设备权限已撤回或不存在',403);return d;}
  async function grant(id,permission,revision=null){await device(id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',id);if(!g||g.expires_at<=time()||(revision!==null&&g.revision!==revision)||!JSON.parse(g.body).capabilities.includes(permission))throw new BridgeError('设备操作权限未启用、已到期或已变更',403);return g;}
  async function setGrant(v,d){
@@ -80,6 +85,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   if(['awaiting_confirmation','queued'].includes(state)){if(r.expires_at<=time())state='expired';else try{await grant(r.device_id,r.permission,r.grant_revision);}catch{state='revoked';}}
   return {version:1,nativeCommandId:r.command_id,commandId:r.command_id,deviceId:r.device_id,requestHash:r.request_hash,request:JSON.parse(r.body),permission:r.permission,grantRevision:r.grant_revision,state,acceptedAt:r.accepted_at,expiresAt:r.expires_at,approvedAt:r.approved_at,attemptId:r.attempt_id,result:r.result?JSON.parse(r.result):null,resultAt:r.result_at,serverAccepted:true,deviceApplication:r.state==='applied'?(r.permission==='journal.read'?'device_reported_read':'device_reported_applied'):r.state==='failed'?'device_reported_failed':'unknown',userSeen:'unknown',operationEffect:r.permission==='journal.read'?'read_only':'mutation',userRequestEvidence:r.permission==='journal.read'?'read_allowed_by_independent_device_grant':'agent_report_confirmation_required'};
  }
+ /** @param {any} v @param {string} owner @param {{formOrigin?: 'submit_native_command'|'task_command'|null}} [options] */
  async function submit(v,owner,{formOrigin=null}={}){
   if(formOrigin!==null&&!['submit_native_command','task_command'].includes(formOrigin))throw new BridgeError('未知确认通道');
   if(!text(owner,200))throw new BridgeError('需要账户身份',401);
@@ -116,7 +122,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   return {value,approval};
  }
  function conflict(message,value){const error=new BridgeError(message,409);error.current=value;return error;}
- async function decide(r,decision,actor,resolution="explicit_button"){
+ async function decide(r,decision,actor,resolution="explicit_button",reviewGuard=null){
   const current=await view(r);
   if(decision==='accept'&&r.approved_at)return current;
   const state=decision==='accept'?'queued':decision==='decline'?'declined':'cancelled';
@@ -132,7 +138,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   // Decision and receipt commit together. A failed durable receipt rolls back
   // approval; the first competing decision wins the conditional UPDATE.
   await db.batch([
-   q("UPDATE native_requests SET state=?,approved_at=? WHERE command_id=? AND owner_id=? AND request_hash=? AND state='awaiting_confirmation' AND grant_revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE g.device_id=? AND g.revision=? AND g.expires_at>? AND d.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=?))",state,decision==='accept'?at:null,r.command_id,r.owner_id,r.request_hash,r.grant_revision,at,r.device_id,r.grant_revision,at,r.permission),
+   q("UPDATE native_requests SET state=?,approved_at=? WHERE command_id=? AND owner_id=? AND request_hash=? AND state='awaiting_confirmation' AND grant_revision=? AND expires_at>? AND EXISTS(SELECT 1 FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE g.device_id=? AND g.revision=? AND g.expires_at>? AND d.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=?))"+(reviewGuard?' AND '+reviewGuard.sql:''),state,decision==='accept'?at:null,r.command_id,r.owner_id,r.request_hash,r.grant_revision,at,r.device_id,r.grant_revision,at,r.permission,...(reviewGuard?.args??[])),
    q("INSERT OR IGNORE INTO research_log(call_id,kind,actor,created_at,body) SELECT ?,?,?,?,? WHERE changes()>0",`native_decision_${r.command_id}`,'native_approval_decision',actor,at,canonical({version:1,commandId:r.command_id,requestHash:r.request_hash,grantRevision:r.grant_revision,decision,state,priorStoredState:r.state,priorEffectiveState:current.state,resolution,producer:'authenticated_transport',producerGesture:'not_observed',cancelCause:'unknown',source:actor.startsWith('device:')?'native_button':'chat_confirmation',userGesture:'transport_report_not_independent_observation'}))
   ]);
   const fresh=await row(r.command_id),value=await view(fresh);
@@ -175,23 +181,43 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
  }
  async function approvalStatus(v,d){
   keys(v,['commandId']);await device(d.id);const r=await row(v.commandId);
-  if(r.device_id!==d.id)throw new BridgeError('只能在指定执行设备核对和审批',403);
-  return view(r);
+  await routing.allowed(r,d);
+  return approvalView(r,d);
+ }
+ async function approvalView(r,d){
+  const value=await view(r);
+  if(r.device_id!==d.id){
+   const g=await one('SELECT * FROM native_grants WHERE device_id=?',d.id);
+   const p=await routing.read(d);
+   value.reviewContext={reviewerDeviceId:d.id,grantRevision:g.revision,policyRevision:p.revision,expiresAt:g.expires_at,executionDeviceId:r.device_id,authority:'explicit_cross_device_review'};
+  }
+  return value;
  }
  async function approvalList(v,d){
   keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??20;
   if(!Number.isSafeInteger(limit)||limit<1||limit>20||v.after!==undefined&&typeof v.after!=='string'||v.through!==undefined&&typeof v.through!=='string')throw new BridgeError('审批分页无效');
-  const through=v.through??(await one("SELECT MAX(command_id) upper FROM native_requests WHERE device_id=? AND state='awaiting_confirmation'",d.id)).upper??'';
-  const rows=(await q("SELECT * FROM native_requests WHERE device_id=? AND command_id>? AND command_id<=? AND state='awaiting_confirmation' ORDER BY command_id LIMIT ?",d.id,v.after??'',through,limit+1).all()).results;
-  const commands=[];for(const r of rows.slice(0,limit))commands.push(await view(r));
+  const shared=await routing.canReview(d.id),filter=shared?'1=1':'device_id=?',args=shared?[]:[d.id];
+  // Include retained results so an unselected card on another device can
+  // converge too; effective states below still apply expiry/revocation.
+  const retained="(state IN ('awaiting_confirmation','queued','dispatching') OR accepted_at>=?)",cutoff=new Date(Date.parse(time())-30*86400000).toISOString();
+  const through=v.through??(await one(`SELECT MAX(command_id) upper FROM native_requests WHERE ${filter} AND ${retained}`,...args,cutoff)).upper??'';
+  const rows=(await q(`SELECT * FROM native_requests WHERE ${filter} AND ${retained} AND command_id>? AND command_id<=? ORDER BY command_id LIMIT ?`,...args,cutoff,v.after??'',through,limit+1).all()).results;
+  const commands=[];for(const r of rows.slice(0,limit))commands.push(await approvalView(r,d));
   return {commands,nextCursor:commands.at(-1)?.commandId??v.after??'',through,hasMore:rows.length>limit,approvalPolicy:policy()};
  }
  async function decideFromDevice(v,d){
-  keys(v,['commandId','requestHash','grantRevision','expectedRevision','decision']);await device(d.id);const r=await row(v.commandId);
-  if(r.device_id!==d.id||v.requestHash!==r.request_hash||v.grantRevision!==r.grant_revision||!['accept','decline'].includes(v.decision))throw new BridgeError('本机审批身份、版本或选择无效',403);
+  keys(v,['commandId','requestHash','grantRevision','expectedRevision','decision','reviewerGrantRevision','reviewerPolicyRevision']);await device(d.id);const r=await row(v.commandId);
+  await routing.allowed(r,d);
+  if(v.requestHash!==r.request_hash||v.grantRevision!==r.grant_revision||!['accept','decline'].includes(v.decision))throw new BridgeError('本机审批身份、版本或选择无效',403);
   const request=JSON.parse(r.body);
   if(canonical(v.expectedRevision??null)!==canonical(request.expectedRevision??null))throw new BridgeError('审批所读版本与原请求不一致',409);
-  return decide(r,v.decision,`device:${d.id}`);
+  let guardValue=null;
+  if(r.device_id!==d.id){
+   if(!Number.isSafeInteger(v.reviewerGrantRevision)||!Number.isSafeInteger(v.reviewerPolicyRevision))throw new BridgeError('跨设备审批需要本机审核权限版本',403);
+   guardValue=routing.decisionGuard(d.id,v.reviewerGrantRevision,v.reviewerPolicyRevision);
+  }else if(v.reviewerGrantRevision!==undefined||v.reviewerPolicyRevision!==undefined)throw new BridgeError('本机请求不能混入其他审核权限',400);
+  await decide(r,v.decision,`device:${d.id}`,'explicit_button',guardValue);
+  return approvalStatus({commandId:r.command_id},d);
  }
  async function pending(v,d){
   keys(v,['after','through','limit']);await device(d.id);const limit=v.limit??10;
@@ -265,5 +291,5 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
    throw error;
   }
  }
- return {policy,capabilities,setGrant,readGrant,submit,approve,status,confirmationSnapshot,confirmationIdentity,respondForm,approvalList,approvalStatus,decideFromDevice,pending,claim,receipt,readJournal,executeTimer};
+ return {policy,capabilities,setGrant,readGrant,submit,approve,status,confirmationSnapshot,confirmationIdentity,respondForm,approvalList,approvalStatus,decideFromDevice,pending,claim,receipt,readJournal,executeTimer,routing};
 }

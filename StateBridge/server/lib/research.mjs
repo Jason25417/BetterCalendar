@@ -35,6 +35,7 @@ function references(value) {
 export function createResearch(db,time) {
   const q=(sql,...args)=>db.prepare(sql).bind(...args);
   const one=(sql,...args)=>q(sql,...args).first();
+  /** @param {string} kind @param {string|null} batchId @param {any} body @param {string|null} [actor] */
   async function append(kind,batchId,body,actor=null) {
     const callId=`research_${crypto.randomUUID()}`;
     await q('INSERT INTO research_log(call_id,kind,batch_id,actor,created_at,body) VALUES(?,?,?,?,?,?)',callId,kind,batchId,actor,time(),JSON.stringify({version:1,...body})).run();
