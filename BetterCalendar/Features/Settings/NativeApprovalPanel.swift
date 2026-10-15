@@ -124,6 +124,7 @@ private struct NativeApprovalDetail: View {
                 }
                 Text("普通系统通知，不保证叫醒；只在指定设备排程。")
             } else if let fire = entry.request["fireAt"] { Text("响铃时间：" + date(fire)) }
+            if entry.kind == "timer", entry.request["mode"] == .string("pomodoro") { Text("番茄到时静默转为正计时，保留已工作时长；不自动结束、休息或响铃。") }
             if let start = entry.request["effectiveAt"] { Text("明确补记起点：" + date(start)) }
             if case let .object(source) = entry.display["source"], case let .string(freshness) = source["freshness"], freshness != "current" {
                 Text("修改前数据时效：" + freshness + "；读取时刻：" + value(source["observedAt"]) + "。执行前仍会核对原版本。")
@@ -146,8 +147,9 @@ private struct NativeApprovalDetail: View {
     private var before: [String: BridgeJSON] { (try? NativeRemoteJSON.object(entry.display["before"] ?? .null)) ?? [:] }
     private var changes: [(String, BridgeJSON)] { entry.changeValues.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } }
     private var actionLabel: String { if entry.kind == "reminder" { return ["schedule":"设置单次普通提醒", "update":"修改普通提醒", "cancel":"取消普通提醒"][entry.action] ?? entry.action }; return ["create":"新增", "update":"修改", "delete":"移入回收站（至少保留30天）", "restore":"恢复", "start":"开始计时", "pause":"暂停计时", "resume":"继续计时", "finish":"结束计时", "schedule":"设置单次闹钟", "cancel":"取消单次闹钟"][entry.action] ?? entry.action }
-    private func fieldLabel(_ key: String) -> String { ["title":"标题", "note":"备注", "status":"状态", "body":"正文", "mood":"心情", "tags":"标签", "fireAt":"提醒时刻（本机时区）", "sound":"播放声音", "experiment":"合成测试（不计生活活动）"][key] ?? key }
+    private func fieldLabel(_ key: String) -> String { ["mode":"计时方式", "focusMinutes":"番茄分钟数", "title":"标题", "note":"备注", "status":"状态", "body":"正文", "mood":"心情", "tags":"标签", "fireAt":"提醒时刻（本机时区）", "sound":"播放声音", "experiment":"合成测试（不计生活活动）"][key] ?? key }
     private func fieldValue(_ key: String, _ v: BridgeJSON?) -> String {
+        if key == "mode", case let .string(mode) = v { return mode == "pomodoro" ? "番茄钟" : "轻计时" }
         if key == "fireAt", let date = try? NativeRemoteJSON.date(v) {
             return date.formatted(date: .abbreviated, time: .standard) + " " + (TimeZone.current.abbreviation(for: date) ?? "本机时区")
         }

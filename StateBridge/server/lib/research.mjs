@@ -2,7 +2,7 @@ import { BridgeError, canonical, sha } from './bridge.mjs';
 
 // No tool bodies, credentials, callback URLs or private model reasoning here.
 // The local recorder resolves references to the existing authoritative records.
-const argumentKeys = ['origin','recordType','afterId','limit','throughId','batchId','includeValues','sourceKeys','sourceKey','from','before','cursor','deviceId','zone','status','includeTrash','commandId','action','sessionId','expectedRevision','occurredAt','attemptId','requestHash','outcome','grantRevision','provenance','relatedRecordId','id','kind','assertion','confidence','basis','expiresAt','supersedes'];
+const argumentKeys = ['mode','focusMinutes','experiment','includeExperiments','origin','recordType','afterId','limit','throughId','batchId','includeValues','sourceKeys','sourceKey','from','before','cursor','deviceId','zone','status','includeTrash','commandId','action','sessionId','expectedRevision','occurredAt','attemptId','requestHash','outcome','grantRevision','provenance','relatedRecordId','id','kind','assertion','confidence','basis','expiresAt','supersedes'];
 export function safeArguments(args) {
   const clean=Object.fromEntries(argumentKeys.filter(k => args[k] !== undefined).map(k => [k,args[k]]));
   if(Array.isArray(args.observations))clean.observations=args.observations.map(o=>({eventId:o.eventId,source:o.source,sequence:o.sequence,observedAt:o.observedAt}));

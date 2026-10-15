@@ -6,7 +6,7 @@ export function createTaskApplication(db,time) {
   const q=(sql,...args)=>db.prepare(sql).bind(...args);
   async function offer(state,device,finishedRows) {
     const finished=finishedRows.slice(0,100);
-    const versions=[...state.sessions,...finished].map(s=>({sessionId:s.id,revision:s.revision,status:s.status,commandId:s.commandId ?? s.lastCommandId}));
+    const versions=[...state.sessions,...finished].map(s=>({sessionId:s.id,revision:s.revision,status:s.status,commandId:s.commandId ?? s.lastCommandId,mode:s.mode??"light",focusMinutes:s.focusMinutes??null,experiment:s.experiment===true}));
     const snapshotId=`task_snapshot_${crypto.randomUUID()}`,createdAt=time();
     const body={version:1,readAt:state.readAt,responseHash:await sha(canonical(state)),versions,
       activeComplete:!state.hasMore,finishedComplete:finishedRows.length<=100,
@@ -41,7 +41,7 @@ export function createTaskApplication(db,time) {
     const deviceRows=(await q(`SELECT body,created_at FROM research_log WHERE kind='task_snapshot_applied'
       AND EXISTS(SELECT 1 FROM json_each(body,'$.versions') j WHERE json_extract(j.value,'$.commandId') IN (${ids.map(()=>'?').join(',')}))`,...ids).all()).results;
     for(const row of deviceRows){const body=JSON.parse(row.body);for(const v of body.versions)if(ids.includes(v.commandId)){
-      const prior=result.get(v.commandId) ?? [],entry={deviceId:body.deviceId,snapshotId:body.snapshotId,revision:v.revision,status:v.status,reportedAt:row.created_at,stage:body.stage};
+      const prior=result.get(v.commandId) ?? [],entry={deviceId:body.deviceId,snapshotId:body.snapshotId,revision:v.revision,status:v.status,mode:v.mode??"light",focusMinutes:v.focusMinutes??null,experiment:v.experiment===true,reportedAt:row.created_at,stage:body.stage};
       const i=prior.findIndex(p=>p.deviceId===body.deviceId);if(i<0)prior.push(entry);else if(prior[i].reportedAt<row.created_at)prior[i]=entry;result.set(v.commandId,prior);
     }}
     return result;

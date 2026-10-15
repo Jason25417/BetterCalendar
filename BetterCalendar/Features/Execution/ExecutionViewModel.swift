@@ -316,7 +316,8 @@ final class ExecutionViewModel {
             presentingCanonicalActivity = false; canonicalActivityID = nil; return
         }
         let now = Date(), elapsed = tasks.elapsed(session, at: now)
-        let snapshot = LiveActivitySnapshot(title: tasks.isStale ? "待同步 · " + session.title : session.title,
+        let displayTitle = (session.isExperiment ? "测试 · " : "") + (session.resolvedMode == .pomodoro ? "番茄\(session.focusMinutes ?? 25)分钟 · " : "") + session.title
+        let snapshot = LiveActivitySnapshot(title: tasks.isStale ? "待同步 · " + displayTitle : displayTitle,
                                             timerStart: now.addingTimeInterval(-elapsed),
                                             pausedAt: session.status == .paused ? now : nil,
                                             mode: .light, phaseEndsAt: nil, phaseIsRest: false, isRemote: true,
@@ -327,13 +328,14 @@ final class ExecutionViewModel {
         #if os(macOS)
         // One Mac projects committed BC state into the existing CloudKit wake
         // channel. iPhone receivers do not republish the projection.
-        guard FocusFollowSettings.enabled, !tasks.isStale, let receivedAt = tasks.lastReadReceivedAt,
+        guard !session.isExperiment, FocusFollowSettings.enabled, !tasks.isStale, let receivedAt = tasks.lastReadReceivedAt,
               receivedAt != canonicalProjectedReadAt else { return }
         let signature = "\(session.id):\(session.revision)"
-        let a = FocusStateExporter.State.Active(title: session.title, timingStyle: TimingStyle.light.rawValue,
+        let phase = session.presentation(elapsed: elapsed)
+        let a = FocusStateExporter.State.Active(title: session.title, timingStyle: phase.countingDown ? TimingStyle.pomodoro.rawValue : TimingStyle.light.rawValue,
                                                startedAt: now.addingTimeInterval(-elapsed), elapsedSec: Int(elapsed),
-                                               pausedSec: 0, plannedSec: nil, endsAt: nil, inRest: nil,
-                                               segmentsRemaining: nil, workSec: nil, restSec: nil)
+                                               pausedSec: 0, plannedSec: nil, endsAt: phase.countingDown ? now.addingTimeInterval(phase.remaining) : nil, inRest: false,
+                                               segmentsRemaining: 0, workSec: session.focusMinutes.map { $0 * 60 }, restSec: 0)
         FocusFollow.publish(kind: canonicalProjectionHasPublished && canonicalProjectionSignature == signature ? "tick" : "canonical-state",
                             active: a, isPaused: session.status == .paused, elapsed: elapsed, sampledAt: tasks.estimatedServerDate(at: now))
         canonicalProjectionSignature = signature
@@ -863,7 +865,7 @@ final class ExecutionViewModel {
     /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
     func startBlock(_ item: PlannedItem) async {
         if usesCanonicalTiming, let tasks = canonicalTasks {
-            await tasks.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString)
+            await tasks.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString, mode: item.timingStyle == .pomodoro ? .pomodoro : .light, focusMinutes: item.timingStyle == .pomodoro ? Int(PomodoroTimer.work / 60) : nil)
             selected = nil
             return
         }

@@ -103,7 +103,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if model.usesCanonicalTiming, let tasks = model.canonicalTasks {
             if let session = tasks.primary {
                 symbol(tasks.isStale ? "exclamationmark.clock" : session.status == .paused ? "pause.fill" : "play.fill", "BC 统一计时")
-                button.title = " " + ExecutionPanel.hms(tasks.elapsed(session))
+                let phase = session.presentation(elapsed: tasks.elapsed(session))
+                button.title = (session.isExperiment ? " 测试 " : " ") + (phase.countingDown ? "番茄 " : "") + ExecutionPanel.hms(phase.displaySeconds)
             } else { symbol("calendar.badge.clock", "BetterCalendar"); button.title = "" }
         } else if model.isOnBreak {
             symbol("cup.and.saucer.fill", "休息中")

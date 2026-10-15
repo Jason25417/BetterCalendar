@@ -14,7 +14,7 @@ nonisolated struct BridgeTaskLocalFile: Codable {
     func validate() throws {
         guard schemaVersion == 1, pending.count <= 100,
               Set(pending.map { $0.command.commandId }).count == pending.count,
-              pending.allSatisfy({ !$0.command.commandId.isEmpty && $0.command.provenance == "user" }) else { throw URLError(.cannotParseResponse) }
+              pending.allSatisfy({ !$0.command.commandId.isEmpty && $0.command.provenance == "user" && $0.command.validMode }) else { throw URLError(.cannotParseResponse) }
         try state?.validate()
         if let ids = pendingApplicationSnapshots {
             guard ids.count <= 100, Set(ids).count == ids.count,

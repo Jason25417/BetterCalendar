@@ -1,3 +1,4 @@
+import {validateTaskMode,taskModeFields} from './task-mode.mjs';
 import { BridgeError, canonical, sha, iso } from './bridge.mjs';
 import {normalizeFormResponse} from './native-form-response.mjs';
 import {reminderFields,reminderPermissions,validateReminder,reminderQuery,createReminderSnapshots} from './native-reminders.mjs';
@@ -38,7 +39,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
  }
  async function readGrant(d){await device(d.id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',d.id);return {deviceId:d.id,revision:g?.revision??0,capabilities:g?JSON.parse(g.body).capabilities:[],expiresAt:g?.expires_at??null,confirmation:'chat_button'};}
  function validate(v){
-  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query','sessionId','relatedRecordId','effectiveAt',...reminderFields]);
+  keys(v,['version','commandId','deviceId','kind','action','recordId','expectedRevision','patch','fireAt','title','alarmId','occurredAt','expiresAt','userRequest','entryDate','query','sessionId','relatedRecordId','effectiveAt',...taskModeFields,...reminderFields]);
   if(v.version!==1)throw new BridgeError('version必须为1');
   if(!uuid(v.commandId))throw new BridgeError('commandId必须是UUID，不能使用任务名或日期拼接；尚未接收此请求。仅此格式拒绝可更正编号，已接收请求必须沿用原commandId');
   if(!text(v.deviceId,80))throw new BridgeError('deviceId需要指定设备身份（最多80字符）');
@@ -46,10 +47,12 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   const at=time(),occurredAt=iso(v.occurredAt),expiresAt=iso(v.expiresAt);
   if(Date.parse(occurredAt)>Date.parse(at)+120000||expiresAt<=at||Date.parse(expiresAt)-Date.parse(at)>86400000)throw new BridgeError('请求时间无效或已过期');
   let permission;
-  if(v.kind!=='timer'&&['sessionId','relatedRecordId','effectiveAt'].some(k=>v[k]!==undefined))throw new BridgeError('非计时请求不能混入计时字段');
-  if(v.kind!=='reminder'&&reminderFields.some(k=>v[k]!==undefined))throw new BridgeError('非提醒请求不可混入提醒字段');
+  if(v.kind!=='timer'&&['sessionId','relatedRecordId','effectiveAt','mode','focusMinutes'].some(k=>v[k]!==undefined))throw new BridgeError('非计时请求不能混入计时字段');
+  if(!['timer','reminder'].includes(v.kind)&&v.experiment!==undefined)throw new BridgeError('此请求不能指定实验标记');
+  if(v.kind!=='reminder'&&reminderFields.filter(k=>k!=='experiment').some(k=>v[k]!==undefined))throw new BridgeError('非提醒请求不可混入提醒字段');
   if(v.kind==='reminder'){permission=validateReminder(v,at);
   }else if(v.kind==='timer'){
+   validateTaskMode(v);
    if(!['start','pause','resume','finish'].includes(v.action)||['recordId','patch','fireAt','alarmId','entryDate','query'].some(k=>v[k]!==undefined))throw new BridgeError('计时请求无效');
    if(v.action==='start'){if(!text(v.title,300)||v.sessionId!==undefined||v.expectedRevision!==undefined||v.relatedRecordId!==undefined&&!text(v.relatedRecordId,150))throw new BridgeError('开始计时需要标题，不能混入旧会话或版本');}
    else if(!text(v.sessionId,80)||!Number.isSafeInteger(v.expectedRevision)||v.expectedRevision<1||v.title!==undefined||v.relatedRecordId!==undefined)throw new BridgeError('计时操作需要原会话与整数版本');
@@ -262,7 +265,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
   if(r.device_id!==d.id||r.request_hash!==v.requestHash||r.attempt_id!==v.attemptId||r.state!=='dispatching'||!r.approved_at||request.kind!=='timer')throw new BridgeError('计时必须由已确认请求的指定设备接手',403);
   await grant(d.id,r.permission,r.grant_revision);if(r.expires_at<=time())throw new BridgeError('计时请求过期，不再执行',409);
   const command={commandId:r.command_id,action:request.action,occurredAt:request.effectiveAt??r.approved_at,provenance:'user'};
-  if(request.action==='start'){command.title=request.title;if(request.relatedRecordId!==undefined)command.relatedRecordId=request.relatedRecordId;}
+  if(request.action==='start'){command.title=request.title;for(const k of taskModeFields)if(request[k]!==undefined)command[k]=request[k];if(request.relatedRecordId!==undefined)command.relatedRecordId=request.relatedRecordId;}
   else{command.sessionId=request.sessionId;command.expectedRevision=request.expectedRevision;}
   // The mutation repeats these checks in the same SQLite transaction. A revoke
   // between the awaited reads and the write cannot leave a changed session.

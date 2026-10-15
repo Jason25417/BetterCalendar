@@ -85,3 +85,18 @@ NativeRemoteExecutor接原生队列执行/回执；本机独立grant版本/到�
 接下来继续共享计时mode/experiment：MCP轻计时/番茄共用同session/revision，默认兼容旧light；番茄阶段从同一服务时间锚推算，不让跟随端建会话；合成计时从真实工时/成就/日历隔离。然后合并为有意义的双端TestFlight批次，先部署兼容服务、再发布App并验实际ASC状态。新提醒与跨端权限由本人在新界面开启；具体事项/计时/声音和时间仍逐次本人确认。APNs另案无凭据/无上线，仍只运行时20秒审批轮询；已交OS的定时提醒与新审批后台到达能力分开。
 
 布局核对：390/620pt Mac离屏图已实际查看，正文/提醒时间（本机时区）/声音/实验标记可读，底部批准/拒绝固定。发现材料底栏透出下层设置文字，已仅改为不透明系统背景，30项审批专项再过；不是iPhone真机或ChatGPT宿主验收。受控图片Agent/evidence/reminder-integration-local/narrow-390.png及wide-620.png。真实测试前不用点这些合成截图中的按钮。
+
+
+## 2026-10-15 共享番茄与合成隔离（仅本地实现）
+
+Jason明确拍板：番茄到时静默转正计时，从已经工作的时长继续。25分钟到点显示25:00，继续到26:00；不归零、不结束、不自动休息或响铃，不完成关联事项。数据库保留原mode=pomodoro作为来源事实；阶段仅按净投入投影，不写额外命令/revision/session。暂停的净投入不增长，恢复沿用同会话。
+
+- sessions增量0008：mode(light默认)、focus_minutes(番茄1–240整数)、experiment(false默认)；旧会话原值、旧command/result原文不重写。MCP submit_native_command与task_command在start接受mode/focusMinutes/experiment，后续动作不可改变。原生预检、具体确认页/聊天完整展示；执行仍须本人按钮和原grant/hash/command/revision。
+- 原生cache缺新字段按旧light解析；App和Mac菜单显示倒计时，到点显示累计。新状态拒绝旧readAt、revision回退、同版本状态/命令变更、原会话模式/实验标记变更、已结束会话复活；失败保留旧cache、不发应用确认。精确执行回读也核对模式/分钟/experiment。
+- 锁屏/灵动岛本批使用系统累计用时并在标题显示番茄目标；App挂起也不会出现倒计时归零后等待App唤醒的假结束。未实现/未宣称后台动态切换倒计时样式。时效仍由staleAt提示，显示不代表当前服务已同步。
+- 合成start experiment=true永久随会话/动作留存，UI有测试标记，真实会话优先展示，合成不发布FocusFollow活动，不写SwiftData会话、实际日历、成就。默认read_current_state/read_task_history/read_task_commands排除，显式includeExperiments=true可读完整原始命令；分页绑定筛选，不能混页。原始研究变化保留实验标记，Dots指令明确不可算生活工时。
+- 本地服务156/156、0失败/跳过；原生三专项80/80后追加隔离/预检测试，最终BridgeTask19/19；类型检查、生产build及iOSSimulator编译通过。机器摘要和日志位置见evidence/minimum-loop-shared-timer-local.json。无真实计时、通知排程、用户权限修改。
+
+发布顺序：先检查/备份现有D1，再以现有发布工具应用0007/0008增量及兼容服务；完整支持需要双端新版App，不能把旧177显示light当番茄验收。旧native请求body/hash/状态不改写。撤回代码时保留增量列和已存数据，勿删表/恢复旧快照覆盖新记录；旧App会忽略模式，暂停试用共享番茄并回到新版后再核验。不重放旧取消/过期命令。
+
+当前仍无新部署/TestFlight；上次实查177/服务40不能代表本批可用。SPEC仅A05/D02实现格更新，所有新真机与延迟/后台矩阵保持未勾，goal active。接下来准备一批值得测试的双端更新，之后逐项本人批准合成对象；APNs凭据、系统权限不随发布自动启用。

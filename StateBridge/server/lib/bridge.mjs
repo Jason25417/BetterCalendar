@@ -1,3 +1,4 @@
+import { validateTaskMode } from "./task-mode.mjs";
 import { timingSafeEqual } from "node:crypto";
 import { ForwardAllToDots } from "./event-decision.mjs";
 import { sourceView, coverageView, stateWarnings, observationSignalValue } from "./state-view.mjs";
@@ -102,7 +103,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return ingestAuthorized(v,d,["bc.pool","bc.pool.chunk"]);
   }
   const readPoolRecords=createPoolRecords(db,time);
-  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,lastCommandId:r.last_command_id,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null});
+  const sessionView=r=>({id:r.id,title:r.title,status:r.status,startedAt:r.started_at,activeSince:r.active_since,elapsedMs:r.elapsed_ms+(r.status==="running"&&r.active_since?Math.max(0,now().getTime()-Date.parse(r.active_since)):0),updatedAt:r.updated_at,revision:r.revision,lastCommandId:r.last_command_id,provenance:r.provenance,relatedRecordId:r.related_record_id??null,origin:r.origin??null,mode:r.mode??"light",focusMinutes:r.focus_minutes??null,experiment:!!r.experiment});
   async function taskState(device=null){
     // One SQLite read snapshot: a concurrent finish cannot appear as both active
     // and finished in a device application receipt.
@@ -114,6 +115,7 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     return device?taskApplication.offer(state,device,rows.filter(r=>r.status==='finished').map(sessionView)):state;
   }
   async function readState(options={}){
+    if(options.includeExperiments!==undefined&&typeof options.includeExperiments!=="boolean")throw new BridgeError("includeExperiments 需要布尔值");
     if(options.includeValues!=null&&typeof options.includeValues!=="boolean")throw new BridgeError("includeValues 需要布尔值");
     if(options.sourceKeys!=null&&(!Array.isArray(options.sourceKeys)||options.sourceKeys.length>40||options.sourceKeys.some(k=>typeof k!=="string"||!k.length||k.length>150)))throw new BridgeError("来源筛选需要至多40个sourceKey");
     const readAt=time();
@@ -127,13 +129,14 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     const notes=(await all("SELECT * FROM notes n WHERE (n.expires_at IS NULL OR n.expires_at>?) AND NOT EXISTS(SELECT 1 FROM notes replacement WHERE replacement.supersedes=n.id) ORDER BY created_at DESC LIMIT 30",readAt)).map(n=>options.includeValues===false?{id:n.id,kind:n.kind,assertion:n.assertion,confidence:n.confidence,createdAt:n.created_at,expiresAt:n.expires_at,supersedes:n.supersedes,contentIncluded:false}:{...n,body:JSON.parse(n.body),basis:JSON.parse(n.basis)});
     return {schemaVersion:1,readAt,sources:selected,sourceCount:sources.length,valuesIncluded:options.includeValues!==false,missingSourceKeys:(options.sourceKeys??[]).filter(k=>!sources.some(s=>s.sourceKey===k)),coverage:coverageView(devices,sources),warnings:stateWarnings(sources),
       interpretation:"sources 保留最后一次观察；stale 不是当前活动。coverage 的 not_received 表示此来源尚未上传，不证明用户没有该活动。lastSuccessfulReadAt 为本次可读快照时间，失败时为空，不代表历史从未成功。",
-      sessions:(await all("SELECT * FROM sessions WHERE status!='finished' ORDER BY started_at")).map(sessionView),notes};
+      sessions:(await all("SELECT * FROM sessions WHERE status!='finished' AND (? OR experiment=0) ORDER BY started_at",options.includeExperiments===true?1:0)).map(sessionView),timerCoverage:{experimentsIncluded:options.includeExperiments===true},notes};
   }
   async function taskCommand(v,origin="mcp",authorization=null){
     const commandId=str(v.commandId,"commandId",150),requestHash=await sha(canonical(v));
     const replay=await one("SELECT * FROM commands WHERE id=?",commandId);
     if(replay){if(replay.request_hash!==requestHash)throw new BridgeError("commandId 不能复用于不同命令",409);return JSON.parse(replay.result);}
     if(!["start","pause","resume","finish"].includes(v.action)||v.provenance!=="user")throw new BridgeError("计时仅接受用户明确表达；推断请单独保存");
+    validateTaskMode(v);
     const occurredAt=v.occurredAt==null?time():iso(v.occurredAt);
     if(Date.parse(occurredAt)>now().getTime()+120000)throw new BridgeError("计时动作不能在未来");
     const guardSQL=authorization?`EXISTS(SELECT 1 FROM native_requests n JOIN native_grants g ON g.device_id=n.device_id JOIN devices d ON d.id=n.device_id WHERE n.command_id=? AND n.request_hash=? AND n.attempt_id=? AND n.device_id=? AND n.permission=? AND n.grant_revision=? AND n.state='dispatching' AND n.approved_at IS NOT NULL AND n.expires_at>? AND g.revision=n.grant_revision AND g.expires_at>? AND d.revoked_at IS NULL AND EXISTS(SELECT 1 FROM json_each(g.body,'$.capabilities') WHERE value=n.permission))`:'1';
@@ -142,8 +145,8 @@ export function createBridge(db,{now=()=>new Date(),fetcher=(...args)=>globalThi
     if(v.action==="start"){
       const title=str(v.title,"任务名",300),id=`task_${(await sha(commandId)).slice(0,32)}`;
       const relatedRecordId=v.relatedRecordId==null?null:str(v.relatedRecordId,"关联记录 ID",150);
-      row={id,title,status:"running",started_at:occurredAt,active_since:occurredAt,elapsed_ms:0,updated_at:occurredAt,revision:1,last_command_id:commandId,provenance:"user",related_record_id:relatedRecordId,origin};
-      ops=[q(`INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance,related_record_id,origin) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guardSQL}`,id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user",relatedRecordId,origin,...guardArgs())];
+      row={id,title,status:"running",started_at:occurredAt,active_since:occurredAt,elapsed_ms:0,updated_at:occurredAt,revision:1,last_command_id:commandId,provenance:"user",related_record_id:relatedRecordId,origin,mode:v.mode??"light",focus_minutes:v.focusMinutes??null,experiment:v.experiment?1:0};
+      ops=[q(`INSERT OR IGNORE INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance,related_record_id,origin,mode,focus_minutes,experiment) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guardSQL}`,id,title,"running",occurredAt,occurredAt,0,occurredAt,1,commandId,"user",relatedRecordId,origin,row.mode,row.focus_minutes,row.experiment,...guardArgs())];
     }else{
       const id=str(v.sessionId,"sessionId",80),old=await one("SELECT * FROM sessions WHERE id=?",id);
       if(!old)throw new BridgeError("找不到计时记录",404);

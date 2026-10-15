@@ -25,7 +25,7 @@ import Observation
     }
     var isEnabled: Bool { enabled() }
     var sessions: [BridgeTaskSession] { file.state?.sessions ?? [] }
-    var primary: BridgeTaskSession? { sessions.first(where: { $0.status == .running }) ?? sessions.first }
+    var primary: BridgeTaskSession? { sessions.first(where: { !$0.isExperiment && $0.status == .running }) ?? sessions.first(where: { !$0.isExperiment }) ?? sessions.first }
     var pendingCount: Int { file.pending.filter { !$0.needsReview }.count }
     var reviewCount: Int { file.pending.filter(\.needsReview).count }
     var canSubmit: Bool { isEnabled && healthy && file.state != nil && !busy && pendingCount == 0 && file.pending.count < 100 }
@@ -61,15 +61,15 @@ import Observation
         Task { await refresh() }
     }
 
-    func start(title: String, relatedRecordId: String? = nil) async {
-        guard queueStart(title: title, relatedRecordId: relatedRecordId) else { return }
+    func start(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false) async {
+        guard queueStart(title: title, relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment) else { return }
         await refresh()
     }
-    @discardableResult func queueStart(title: String, relatedRecordId: String? = nil) -> Bool {
+    @discardableResult func queueStart(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false) -> Bool {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return false }
         return enqueue(BridgeTaskCommand(commandId: UUID().uuidString, action: .start, title: title,
-                                         occurredAt: estimatedServerDate(), relatedRecordId: relatedRecordId))
+                                         occurredAt: estimatedServerDate(), relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment))
     }
     func act(_ action: BridgeTaskCommand.Action, on session: BridgeTaskSession) async {
         guard action != .start else { return }
@@ -78,7 +78,7 @@ import Observation
         await refresh()
     }
     @discardableResult private func enqueue(_ command: BridgeTaskCommand) -> Bool {
-        guard canSubmit else { return false }
+        guard canSubmit, command.validMode else { return false }
         var next = file; next.pending.append(.init(command: command))
         do { try persistence.save(next); file = next }
         catch { report("操作未能保存到本机，没有开始或改变计时"); return false }
@@ -114,6 +114,18 @@ import Observation
             }
             let sentAt = now(), state = try await service.readTasks(), receivedAt = now()
             try state.validate()
+            if let previous = file.state {
+                guard state.readAt >= previous.readAt else { throw URLError(.cannotParseResponse) }
+                for incoming in state.sessions {
+                    if let old = previous.sessions.first(where: { $0.id == incoming.id }) {
+                        guard incoming.revision >= old.revision,
+                              incoming.resolvedMode == old.resolvedMode, incoming.focusMinutes == old.focusMinutes,
+                              incoming.isExperiment == old.isExperiment,
+                              incoming.revision != old.revision || (incoming.status == old.status && incoming.lastCommandId == old.lastCommandId) else { throw URLError(.cannotParseResponse) }
+                    }
+                    guard previous.applicationSnapshot?.finishedVersions.contains(where: { $0.sessionId == incoming.id }) != true else { throw URLError(.cannotParseResponse) }
+                }
+            }
             var next = file; next.state = state; next.receivedAt = receivedAt
             next.localMidpoint = sentAt.addingTimeInterval(max(0, receivedAt.timeIntervalSince(sentAt)) / 2)
             if healthy, !state.hasMore, let snapshot = state.applicationSnapshot {
@@ -165,6 +177,16 @@ import Observation
             throw DataArchiveError.invalid("服务已保存计时，本机尚未读取到该版本，不称设备完成")
         }
         if savedRevision == revision {
+            if let expectedMode = fields["mode"] {
+                let mode = cached?.resolvedMode ?? finished?.mode ?? .light
+                let minutes = cached?.focusMinutes ?? finished?.focusMinutes
+                let experiment = cached?.isExperiment ?? finished?.experiment ?? false
+                guard expectedMode == .string(mode.rawValue),
+                      (fields["focusMinutes"] ?? .null) == (minutes.map { .number(Double($0)) } ?? .null),
+                      (fields["experiment"] ?? .bool(false)) == .bool(experiment) else {
+                    throw DataArchiveError.invalid("本机计时模式、时长或实验标记未匹配服务结果，未确认应用")
+                }
+            }
             guard (cached?.status.rawValue ?? finished?.status.rawValue) == expectedStatus,
                   (cached?.lastCommandId ?? finished?.commandId) == expectedCommand else {
                 throw DataArchiveError.invalid("本机版本号相同但状态或操作身份不同，未确认应用")

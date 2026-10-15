@@ -33,6 +33,7 @@ export function nativeFormParameters(value,display=null,{preview=false,variant='
  const edits=Object.entries(request.kind==='reminder'?(request.action==='cancel'?(display?.before??{}):Object.fromEntries(['title','body','fireAt','sound','experiment'].map(k=>[k,request[k]]))):request.patch??{}).map(([key,text])=>`${labels[key]??key}：${display?.before&&request.action!=='cancel'?format(key,display.before[key])+' → ':''}${format(key,text)}`);
  const title=display?.recordTitle??request.title??(request.kind==='item'&&request.action==='create'?request.patch?.title:null);
  const details=[title?`事项：${title}`:null,`设备：${display?.deviceLabel??value.deviceId}`,...edits,
+  request.kind==='timer'&&request.action==='start'?`模式：${request.mode==='pomodoro'?'番茄 '+request.focusMinutes+' 分钟，到时静默转正计时，保留已工作时长；不自动结束、休息或响铃':'轻计时'}；合成测试：${request.experiment===true?'是（不计生活活动）':'否'}`:null,
   request.sessionId?`计时会话：${request.sessionId}`:null,request.alarmId?`闹钟：${request.alarmId}`:null,
   request.effectiveAt?`补记起点（UTC）：${request.effectiveAt}`:request.kind==='timer'?`生效时间：本人确认时，按 BC 服务时间计时`:null,
   request.fireAt&&request.kind!=='reminder'?`响铃时间（UTC）：${request.fireAt}`:null,request.kind==='reminder'?(request.action==='cancel'?'取消后此设备不再排程该提醒；不会取消其他提醒':'普通系统通知；只在此设备排程，不保证叫醒，不自动扩大为闹钟或应用屏蔽'):null,request.entryDate?`日记日期（UTC）：${request.entryDate}`:null,

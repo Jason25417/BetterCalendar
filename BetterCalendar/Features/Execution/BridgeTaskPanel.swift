@@ -4,6 +4,8 @@ struct BridgeTaskPanel: View {
     @Bindable var model: BridgeTaskViewModel
     var planned: [ExecutionViewModel.PlannedItem] = []
     @State private var title = ""
+    @State private var mode = BridgeTaskSession.Mode.light
+    @State private var focusMinutes = 25
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,9 +19,10 @@ struct BridgeTaskPanel: View {
             if model.sessions.isEmpty { Text(model.isStale ? "等待读取计时状态" : "目前没有正在计时的事项").foregroundStyle(.secondary) }
             ForEach(model.sessions) { session in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(session.title).font(.body.weight(.medium))
+                    Text((session.isExperiment ? "测试 · " : "") + session.title).font(.body.weight(.medium))
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                        Text("\(session.status == .paused ? "已暂停" : "已用") · \(ExecutionPanel.hms(model.elapsed(session, at: timeline.date)))")
+                        let phase = session.presentation(elapsed: model.elapsed(session, at: timeline.date))
+                        Text("\(session.status == .paused ? "已暂停 · " : "")\(phase.label) · \(ExecutionPanel.hms(phase.displaySeconds))")
                             .font(.callout.monospacedDigit())
                     }
                     HStack {
@@ -35,6 +38,15 @@ struct BridgeTaskPanel: View {
             if model.hasMore { Text("这里只展示前 100 项；其余计时记录仍保留。")
                     .font(.caption).foregroundStyle(.secondary) }
             Divider()
+            Picker("计时方式", selection: $mode) {
+                Text("轻计时").tag(BridgeTaskSession.Mode.light)
+                Text("番茄钟").tag(BridgeTaskSession.Mode.pomodoro)
+            }.pickerStyle(.segmented)
+            if mode == .pomodoro {
+                Stepper("专注 \(focusMinutes) 分钟", value: $focusMinutes, in: 1...240)
+                Text("到时静默转为正计时，保留已工作时长；不自动结束或休息。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             TextField("开始什么事项", text: $title)
                 .onSubmit { startNew() }
             HStack {
@@ -44,7 +56,7 @@ struct BridgeTaskPanel: View {
                     Menu("从今天安排里选") {
                         ForEach(planned) { item in
                             Button(item.title) {
-                                Task { await model.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString) }
+                                Task { await model.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString, mode: item.timingStyle == .pomodoro ? .pomodoro : .light, focusMinutes: item.timingStyle == .pomodoro ? Int(PomodoroTimer.work / 60) : nil) }
                             }
                         }
                     }.disabled(!model.canSubmit)
@@ -59,7 +71,7 @@ struct BridgeTaskPanel: View {
     private func startNew() {
         let submitted = title
         guard model.canSubmit else { return }
-        guard model.queueStart(title: submitted) else { return }
+        guard model.queueStart(title: submitted, mode: mode, focusMinutes: mode == .pomodoro ? focusMinutes : nil) else { return }
         title = ""
         Task { await model.refresh() }
     }

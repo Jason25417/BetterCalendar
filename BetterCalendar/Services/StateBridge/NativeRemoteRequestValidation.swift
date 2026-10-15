@@ -87,7 +87,12 @@ nonisolated enum NativeRemoteRequestValidation {
             }
         case "timer":
             if action == "start" {
-                fields = ["title", "relatedRecordId", "effectiveAt"]
+                fields = ["title", "relatedRecordId", "effectiveAt", "mode", "focusMinutes", "experiment"]
+                let mode = try r["mode"].map { try NativeRemoteJSON.string($0) } ?? "light"
+                try require(["light", "pomodoro"].contains(mode))
+                if mode == "pomodoro" { try require((1...240).contains(try NativeRemoteJSON.integer(r["focusMinutes"]))) }
+                else { try require(r["focusMinutes"] == nil) }
+                if let flag = r["experiment"] { guard case .bool = flag else { throw invalid() } }
                 try require(text(r["title"], 300))
                 if let related = r["relatedRecordId"] { try require(text(related, 150)) }
             } else {

@@ -49,6 +49,12 @@ nonisolated struct NativeApproval: Identifiable {
         (try? NativeRemoteJSON.string((try? NativeRemoteJSON.object(request["patch"] ?? .null))?["title"])) ?? "具体改动"
     }
     var changeValues: [String: BridgeJSON] {
+        if kind == "timer", action == "start" {
+            var values = request.filter { ["title", "mode", "focusMinutes", "experiment"].contains($0.key) }
+            if values["mode"] == nil { values["mode"] = .string("light") }
+            if values["experiment"] == nil { values["experiment"] = .bool(false) }
+            return values
+        }
         if kind == "reminder" {
             return action == "cancel" ? [:] : request.filter { ["title", "body", "fireAt", "sound", "experiment"].contains($0.key) }
         }

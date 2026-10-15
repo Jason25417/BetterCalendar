@@ -574,3 +574,48 @@ test('legacy entry supports existing Unicode device identifiers without breaking
  const entry=(await f.core.readState({includeValues:false})).sources.find(s=>s.source==='bc.pool').legacyTimingEntryCursor;
  const result=await f.core.taskHistory({cursor:entry});assert.equal(result.origin,'legacy');assert.equal(result.sourceDeviceId,d.id);assert.equal(result.availability,'not_supported_by_device_snapshot');
 });
+
+test('shared pomodoro duration is immutable and expiry never creates another command or ends work',async()=>{
+ const f=fixture(),start={commandId:'pomo-fixture',action:'start',title:'ISOLATED POMO',mode:'pomodoro',focusMinutes:25,experiment:true,provenance:'user'};
+ const s=await f.core.taskCommand(start);f.advance(20*60000);
+ await f.core.taskCommand({commandId:'pomo-pause',action:'pause',sessionId:s.id,expectedRevision:1,provenance:'user'});
+ f.advance(30*60000);assert.equal((await f.core.taskState()).sessions[0].elapsedMs,20*60000);
+ await f.core.taskCommand({commandId:'pomo-resume',action:'resume',sessionId:s.id,expectedRevision:2,provenance:'user'});
+ f.advance(6*60000);
+ const current=(await f.reopen().taskState()).sessions[0];
+ assert.equal(current.id,s.id);assert.equal(current.revision,3);assert.equal(current.status,'running');assert.equal(current.elapsedMs,26*60000);
+ assert.equal(current.mode,'pomodoro');assert.equal(current.focusMinutes,25);assert.equal(current.experiment,true);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,3);
+ assert.equal((await f.core.readState()).sessions.length,0);assert.equal((await f.core.readState({includeExperiments:true})).sessions.length,1);
+ assert.equal((await f.core.taskHistory()).sessions.length,0);assert.equal((await f.core.readTaskCommands()).commands.length,0);
+ const page=await f.core.readTaskCommands({includeExperiments:true,limit:1});assert.equal(page.hasMore,true);
+ await assert.rejects(f.core.readTaskCommands({cursor:page.nextCursor,includeExperiments:false}),/游标/);
+ const next=await f.core.readTaskCommands({cursor:page.nextCursor,includeExperiments:true,limit:1});assert.notEqual(next.commands[0].commandId,page.commands[0].commandId);
+ const done=await f.core.taskCommand({commandId:'pomo-end',action:'finish',sessionId:s.id,expectedRevision:3,provenance:'user'});
+ assert.equal(done.elapsedMs,26*60000);assert.equal(done.experiment,true);
+ assert.equal((await f.core.taskHistory({includeExperiments:true})).sessions[0].id,s.id);
+});
+test('legacy sessions become light without rewriting old command receipts, invalid mode fields fail before saving',async()=>{
+ const f=fixture();
+ for(const fields of [{mode:'other'},{mode:'pomodoro'},{mode:'pomodoro',focusMinutes:1.5},{mode:'pomodoro',focusMinutes:241},{mode:'light',focusMinutes:25},{experiment:'true'}])await assert.rejects(f.core.taskCommand({commandId:'invalid',action:'start',title:'isolated',provenance:'user',...fields}));
+ const s=await f.core.taskCommand({commandId:'old-style',action:'start',title:'isolated',provenance:'user'});
+ assert.equal(s.mode,'light');assert.equal(s.focusMinutes,null);assert.equal(s.experiment,false);
+ await assert.rejects(f.core.taskCommand({commandId:'mutate-mode',action:'pause',sessionId:s.id,expectedRevision:1,mode:'pomodoro',focusMinutes:25,provenance:'user'}),/仅在开始/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM commands').get().n,1);
+ const oldReceipt=JSON.stringify({id:s.id,saved:true,revision:1});f.sqlite.prepare('UPDATE commands SET result=? WHERE id=?').run(oldReceipt,'old-style');
+ assert.deepEqual((await f.core.readTaskCommands()).commands[0].result,JSON.parse(oldReceipt));
+});
+
+test('additive mode migration preserves existing session bytes and historical receipts',()=>{
+ const sqlite=new DatabaseSync(':memory:');const files=readdirSync(new URL('../drizzle/',import.meta.url)).filter(f=>f.endsWith('.sql')).sort();
+ for(const file of files.filter(f=>!f.startsWith('0008_')))sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
+ sqlite.prepare('INSERT INTO sessions(id,title,status,started_at,active_since,elapsed_ms,updated_at,revision,last_command_id,provenance) VALUES(?,?,?,?,?,?,?,?,?,?)').run('legacy','ISOLATED','paused','2026-10-05T10:00:00.000Z',null,90123,'2026-10-05T10:01:30.123Z',7,'legacy-command','user');
+ const receipt='{"saved":true,"id":"legacy","unknownOldField":"preserved"}';
+ sqlite.prepare('INSERT INTO commands(id,request_hash,session_id,result,created_at) VALUES(?,?,?,?,?)').run('legacy-command','hash','legacy',receipt,'2026-10-05T10:01:30.123Z');
+ const before=sqlite.prepare('SELECT * FROM sessions').get();
+ for(const file of files.filter(f=>f.startsWith('0008_')))sqlite.exec(readFileSync(new URL('../drizzle/'+file,import.meta.url),'utf8'));
+ const after=sqlite.prepare('SELECT * FROM sessions').get();
+ for(const [key,value] of Object.entries(before))assert.equal(after[key],value);
+ assert.equal(after.mode,'light');assert.equal(after.focus_minutes,null);assert.equal(after.experiment,0);
+ assert.equal(sqlite.prepare('SELECT result FROM commands').get().result,receipt);
+});

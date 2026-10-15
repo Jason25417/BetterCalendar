@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-15",
+  "scope": "local_isolated_only_not_deployed",
+  "decision": "pomodoro silently projects to count-up at target, preserving all worked time; same session and revision; no auto-pause/finish/rest/ring/item completion",
+  "server": {
+    "tests": 156,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-shared-mode-server-final.log"
+  },
+  "native": {
+    "combinedBeforeLastTwoTests": {
+      "tests": 80,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-37-45--0400.xcresult"
+    },
+    "finalBridgeTaskSuite": {
+      "tests": 19,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.15_17-39-05--0400.xcresult"
+    }
+  },
+  "builds": {
+    "typescript": "passed",
+    "production": "passed",
+    "iOSSimulator": "passed"
+  },
+  "migration": "0008 additive columns only; pre-mode session values and historical receipt bytes preserved in SQLite test",
+  "limitations": [
+    "no service deployment or TestFlight upload in this batch",
+    "no physical timer, approval, sound or permission action",
+    "shared Live Activity shows total elapsed and pomodoro target; not a tested background countdown-to-countup switch",
+    "cache-persisted device report never proves screen visible or human seen",
+    "old apps do not present new mode semantics; update both before acceptance",
+    "no APNs added"
+  ]
+}

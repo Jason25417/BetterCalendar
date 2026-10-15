@@ -30,7 +30,7 @@ import SwiftData
                     sessions.append(BridgeTaskSession(id: "session", title: command.title!, status: .running,
                                                       startedAt: command.occurredAt, activeSince: command.occurredAt,
                                                       elapsedMs: 0, updatedAt: command.occurredAt, revision: 1,
-                                                      provenance: "user", relatedRecordId: command.relatedRecordId))
+                                                      provenance: "user", relatedRecordId: command.relatedRecordId, mode: command.mode, focusMinutes: command.focusMinutes, experiment: command.experiment))
                 } else {
                     guard let i = sessions.firstIndex(where: { $0.id == command.sessionId }),
                           sessions[i].revision == command.expectedRevision else { throw NSError(domain: "StateBridge.HTTP", code: 409) }
@@ -247,4 +247,92 @@ import SwiftData
         #expect(service.requests[0].occurredAt == service.clock)
         #expect(tasks.elapsed(tasks.sessions[0], at: localClock.addingTimeInterval(10)) == 10)
     }
+    @Test func pomodoroSilentlyCountsUpFromWorkedTimeWithNoCommandsAtExpiry() async throws {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await model.refresh()
+        await model.start(title: "ISOLATED POMO", mode: .pomodoro, focusMinutes: 25, experiment: true)
+        let session = try #require(model.sessions.first)
+        #expect(session.resolvedMode == .pomodoro && session.focusMinutes == 25 && session.isExperiment)
+        #expect(session.presentation(elapsed: 24 * 60).displaySeconds == 60)
+        let atEnd = session.presentation(elapsed: 25 * 60)
+        #expect(!atEnd.countingDown && atEnd.displaySeconds == 25 * 60)
+        #expect(session.presentation(elapsed: 26 * 60).displaySeconds == 26 * 60)
+        #expect(session.elapsed(at: at.addingTimeInterval(26 * 60), localMidpoint: at) == 26 * 60)
+        var paused = session; paused.status = .paused; paused.elapsedMs = 24 * 60 * 1000
+        let frozen = paused.elapsed(at: at.addingTimeInterval(10000), localMidpoint: at)
+        #expect(paused.presentation(elapsed: frozen).remaining == 60)
+        service.clock = at.addingTimeInterval(26 * 60)
+        let restarted = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        #expect(restarted.sessions.first?.id == session.id)
+        #expect(restarted.elapsed(session) == 26 * 60)
+        #expect(service.requests.count == 1 && service.requests[0].action == .start)
+        #expect(disk.file.pending.isEmpty && model.sessions[0].revision == 1)
+    }
+
+    @Test func oldModeCacheDecodesAsLightWithoutResetAndInvalidModeBlocksQueue() throws {
+        let at = Date(timeIntervalSince1970: 1_790_000_000)
+        let original = BridgeTaskSession(id: "old", title: "old", status: .running, startedAt: at,
+                                        elapsedMs: 12345, updatedAt: at, revision: 9, provenance: "user")
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(BridgeTaskSession.self, from: data)
+        #expect(decoded.resolvedMode == .light && !decoded.isExperiment && decoded.elapsedMs == 12345 && decoded.revision == 9)
+        #expect(!BridgeTaskCommand(commandId: "bad", action: .start, occurredAt: at, mode: .pomodoro).validMode)
+        #expect(!BridgeTaskCommand(commandId: "bad", action: .pause, occurredAt: at, experiment: true).validMode)
+    }
+
+    @Test func olderSnapshotAndSameVersionMetadataChangeCannotReplaceCacheOrReceiveAck() async {
+        let service = Service(), disk = BridgeTaskMemoryPersistence(), at = service.clock
+        service.sessions = [.init(id: "pomo", title: "ISOLATED", status: .running, startedAt: at,
+                                 elapsedMs: 0, updatedAt: at, revision: 3, provenance: "user", mode: .pomodoro, focusMinutes: 25, experiment: true)]
+        let model = BridgeTaskViewModel(service: service, persistence: disk, enabled: { true }, now: { service.clock })
+        await model.refresh()
+        service.clock = at.addingTimeInterval(-1)
+        await model.refresh()
+        #expect(disk.file.state?.readAt == at && model.lastError != nil)
+        service.clock = at.addingTimeInterval(1); service.sessions[0].revision = 2
+        await model.refresh()
+        #expect(model.sessions[0].revision == 3)
+        service.sessions[0].revision = 3; service.sessions[0].experiment = false
+        await model.refresh()
+        #expect(model.sessions[0].isExperiment && service.applicationRequests.isEmpty)
+        service.sessions[0].experiment = true; service.sessions[0].revision = 4; service.sessions[0].status = .paused
+        await model.refresh()
+        #expect(model.sessions[0].revision == 4 && model.sessions[0].status == .paused)
+    }
+
+    @Test func syntheticPomodoroUsesSharedCacheOnlyAndNeverCreatesActualBlocksOrHistory() async throws {
+        let container = try ModelContainer(for: PlanBlock.self, ExecutionSession.self,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let plans = PlanStore(context: container.mainContext), service = Service()
+        let tasks = BridgeTaskViewModel(service: service, persistence: BridgeTaskMemoryPersistence(), enabled: { true }, now: { service.clock })
+        let execution = ExecutionViewModel(calendarStore: FakeCalendarStore(),
+                                           reschedule: RescheduleService(planStore: plans, planner: NaivePlanningEngine()),
+                                           planStore: plans, reminderStore: FakeReminderStore(), liveActivity: NoLiveActivity(),
+                                           sessionStore: ExecutionSessionStore(context: container.mainContext),
+                                           persistsRunState: false, canonicalTasks: tasks)
+        tasks.onChange = { [weak execution] in execution?.syncCanonicalPresentation() }
+        await tasks.refresh()
+        await tasks.start(title: "ISOLATED POMO", mode: .pomodoro, focusMinutes: 25, experiment: true)
+        await tasks.act(.pause, on: tasks.sessions[0])
+        await tasks.act(.resume, on: tasks.sessions[0])
+        await tasks.act(.finish, on: tasks.sessions[0])
+        #expect(tasks.sessions.isEmpty && execution.active == nil)
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<ExecutionSession>()) == 0)
+        #expect(try plans.actualBlocks(on: Date()).isEmpty)
+        #expect(service.requests.map(\.action) == [.start, .pause, .resume, .finish])
+    }
+
+    @Test func timerModeRequestPreflightRejectsMissingDurationAndModeChangesOnPause() throws {
+        let at = NativeRemoteJSON.timestamp(Date())
+        let base: [String: BridgeJSON] = ["version": .number(1), "commandId": .string(UUID().uuidString), "deviceId": .string("fixture"),
+            "kind": .string("timer"), "action": .string("start"), "title": .string("ISOLATED"), "userRequest": .string("ISOLATED"),
+            "occurredAt": at, "expiresAt": at, "mode": .string("pomodoro"), "focusMinutes": .number(25), "experiment": .bool(true)]
+        try NativeRemoteRequestValidation.validate(base, expiresAt: at)
+        var bad = base; bad.removeValue(forKey: "focusMinutes")
+        #expect(throws: Error.self) { try NativeRemoteRequestValidation.validate(bad, expiresAt: at) }
+        bad = base; bad["action"] = .string("pause"); bad["sessionId"] = .string("session"); bad["expectedRevision"] = .number(1); bad.removeValue(forKey: "title")
+        #expect(throws: Error.self) { try NativeRemoteRequestValidation.validate(bad, expiresAt: at) }
+    }
+
 }

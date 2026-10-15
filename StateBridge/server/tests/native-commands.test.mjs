@@ -422,3 +422,19 @@ test('closed, expired and revoked native requests never reopen; effective state 
  await assert.rejects(f.core.nativeCommands.decideFromDevice(nativeDecision(...requests[1]),d),e=>e.current.state==='expired');
  assert.equal((await f.core.nativeCommands.pending({},d)).commands.length,0);
 });
+
+test('confirmed pomodoro binds mode duration and experiment to the same approved request and session',async()=>{
+ const f=fixture(),d=await setup(f);await timerGrant(f,d);
+ const v=timerRequest(f,1700,'start',{mode:'pomodoro',focusMinutes:25,experiment:true});
+ const offered=await f.core.nativeCommands.submit(v,'owner');
+ const form=nativeFormResult(offered.value,offered.approval).inputRequests.bc_native_confirmation.params;
+ assert.match(form.requestedSchema.properties.confirm.description,/番茄 25 分钟.*静默转正计时/);
+ assert.match(form.requestedSchema.properties.confirm.description,/合成测试：是/);
+ await f.core.nativeCommands.approve(offered.approval,'owner');
+ const identity={commandId:v.commandId,requestHash:offered.value.requestHash,attemptId:id(1701)};
+ await f.core.nativeCommands.claim(identity,d);const saved=await f.core.nativeCommands.executeTimer(identity,d);
+ assert.equal(saved.mode,'pomodoro');assert.equal(saved.focusMinutes,25);assert.equal(saved.experiment,true);
+ assert.deepEqual(await f.core.nativeCommands.executeTimer(identity,d),saved);
+ for(const fields of [{mode:'pomodoro'}, {mode:'light',focusMinutes:25}, {mode:'pomodoro',focusMinutes:0}, {mode:'pomodoro',focusMinutes:25,experiment:1}])await assert.rejects(f.core.nativeCommands.submit(timerRequest(f,1702,'start',fields),'owner'));
+ await assert.rejects(f.core.nativeCommands.submit(timerRequest(f,1703,'pause',{sessionId:saved.id,expectedRevision:1,experiment:true}),'owner'),/仅在开始/);
+});
