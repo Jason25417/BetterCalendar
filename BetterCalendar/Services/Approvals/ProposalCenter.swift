@@ -9,6 +9,21 @@
 
 import Foundation
 import Observation
+#if os(iOS)
+import UIKit
+#endif
+
+/// 本机在多端审批里的身份（复用多端跟随的安装级 ID）。
+@MainActor enum ProposalDevice {
+    static var id: String { FocusFollow.deviceID }
+    static var label: String {
+        #if os(macOS)
+        Host.current().localizedName ?? "Mac"
+        #else
+        UIDevice.current.name
+        #endif
+    }
+}
 
 @MainActor @Observable final class ProposalCenter {
     private(set) var proposals: [Proposal] = []
@@ -33,8 +48,27 @@ import Observation
         self.deviceId = deviceId; self.deviceLabel = deviceLabel; self.now = now
     }
 
+    /// App 在前台时为 true：前台每 20 秒兜底刷新一次（推送丢失也能收敛）。
+    var isForeground = false
+    private var pollTask: Task<Void, Never>?
+
+    /// 前台兜底轮询（测试环境不要启动：游离任务会拖垮 test host）。
+    func startPolling(every seconds: Double = 20) {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard let self else { return }
+                if self.isForeground { await self.refresh() }
+            }
+        }
+    }
+
     /// 报错一直显示到用户主动关掉（失败必须可见，不因下一次成功刷新而静默消失）。
     func clearError() { lastError = nil }
+
+    func notificationPermission() async -> Bool? { await notifier.permission() }
+    func requestNotificationPermission() async -> Bool { await notifier.requestPermission() }
 
     var pending: [Proposal] { proposals.filter { $0.effectiveState(at: now()) == .pending } }
 

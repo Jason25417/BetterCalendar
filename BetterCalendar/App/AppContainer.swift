@@ -46,6 +46,8 @@ final class AppContainer {
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
     let nativeJournal: any NativeJournalAccessing // Independent read/text-write capability, sharing the native command boundary.
     let nativeApprovals: NativeApprovalInbox
+    let proposals: ProposalCenter              // SPEC §19 多端审批（CloudKit 中转；旧 nativeApprovals 冻结）
+    let proposalStore: CloudKitProposalStore?  // 测试环境为 nil（内存中转）
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
@@ -119,6 +121,33 @@ final class AppContainer {
             await inbox?.decideFromNotification(binding, decision: decision)
         }
         if !TestHost.isActive { Task { await NativeApprovalNotification.registerCategories() } }
+        // SPEC §19 多端审批：CloudKit 私有库独立 zone；测试环境走内存中转、不碰网络与通知中心。
+        if TestHost.isActive {
+            self.proposalStore = nil
+            self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
+                                            notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
+                                            deviceId: "test-host", deviceLabel: "测试")
+        } else {
+            let store = CloudKitProposalStore()
+            self.proposalStore = store
+            self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: ExperimentOnlyExecutor(),
+                                            notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
+                                            deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
+        }
+        notificationDelegate.handleProposal = { [weak center = proposals] id, decision in
+            if let decision { await center?.decide(id, decision) } else { await center?.refresh() }
+        }
+        if !TestHost.isActive, let store = proposalStore {
+            ProposalWake.onPush = { [weak center = proposals] in await center?.refresh() }
+            Task { [weak center = proposals] in
+                await LocalProposalNotifier.registerCategories()
+                do { try await store.ensureSubscription() } catch {
+                    DevLog.shared.error("多端审批", "订阅审批推送失败（将靠前台轮询兜底）：\(error.localizedDescription)")
+                }
+                await center?.refresh()
+            }
+            proposals.startPolling()
+        }
         nativeApprovals.start()
         remote.startPolling()
         if !TestHost.isActive {

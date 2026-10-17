@@ -14,6 +14,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleReminderViewed: ((String) async -> Void)?
     var handleApprovalViewed: ((String) async -> Void)?
     var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
+    /// SPEC §19 多端审批：decision 为 nil = 只打开详情（点通知本身绝不当作批准）。
+    var handleProposal: ((UUID, ProposalDecision?) async -> Void)?
 
     init(router: AppRouter) {
         self.router = router
@@ -24,6 +26,17 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if let route = LocalProposalNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            if route.decision == nil {
+                router.proposalFocusId = route.id
+                router.openProposals = true
+                #if os(macOS)
+                if !TestHost.isActive { AppLifecycle.shared?.showMainWindow() }
+                #endif
+            }
+            await handleProposal?(route.id, route.decision)
+            return
+        }
         if case let .decision(binding, decision) = NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: response.actionIdentifier) {
             // Persist/report the click alongside the decision, without waiting
             // for receipt network latency before handling the human choice.

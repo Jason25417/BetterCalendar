@@ -14,6 +14,9 @@ final class AppRouter {
     enum Tab: String, Hashable { case schedule, today, longterm, journal }
     var selectedTab: Tab = .schedule
     var openNativeApprovals = false
+    /// SPEC §19 多端审批（新，CloudKit）面板；proposalFocusId = 从通知「查看详情」进来时要定位的提案。
+    var openProposals = false
+    var proposalFocusId: UUID?
     var nativeApprovalCommandId: String?
     var nativeApprovalPreviewRequest: UUID?
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。

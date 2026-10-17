@@ -70,6 +70,17 @@ struct BetterCalendarApp: App {
             .overlay(alignment: .top) { AchievementToastView() }
             .toolbar {
                 Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
+                Button { container.router.openProposals = true } label: { Label("多端审批", systemImage: "checkmark.seal").accessibilityIdentifier("bc.proposals.open") }
+            }
+            .sheet(isPresented: Binding(get: { container.router.openProposals }, set: { container.router.openProposals = $0 })) {
+                NavigationStack {
+                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId)
+                        .navigationTitle("多端审批")
+                        .toolbar { Button("关闭") { container.router.openProposals = false; container.router.proposalFocusId = nil } }
+                }
+                #if os(macOS)
+                .frame(minWidth: 480, idealWidth: 620, maxWidth: 760, minHeight: 420, idealHeight: 650)
+                #endif
             }
             .sheet(isPresented: Binding(get: { container.router.openNativeApprovals }, set: { container.router.openNativeApprovals = $0 })) {
                 NavigationStack {
@@ -147,7 +158,9 @@ struct BetterCalendarApp: App {
                     Task { await StateBridgeCollector.shared.recover() }
                     Task { await container.bridgeTasks.refresh() }
                     Task { await container.nativeApprovals.refresh() }
+                    Task { await container.proposals.refresh() }
                 }
+                container.proposals.isForeground = phase == .active
                 FocusFollow.setForeground(phase == .active)
             }
             // 早通知 deep-link（0.23 A）：打开执行界面 + 第一件「待开始」（不自动计时）

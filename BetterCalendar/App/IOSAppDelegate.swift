@@ -20,7 +20,11 @@ final class IOSAppDelegate: NSObject, UIApplicationDelegate {
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
         Task {
-            await FocusFollow.handlePush(userInfo)
+            if CloudKitProposalStore.isProposalPush(userInfo) {
+                await ProposalWake.onPush?()   // SPEC §19 多端审批：本 zone 推送 → 刷新提案
+            } else {
+                await FocusFollow.handlePush(userInfo)
+            }
             completionHandler(.newData)
         }
     }

@@ -80,6 +80,15 @@ nonisolated struct AskAlwaysGate: ProposalGate {
     func withdraw(_ id: UUID) async
     /// 本机当前还挂着通知的提案。
     func shownIds() async -> Set<UUID>
+    /// 系统通知是否允许（nil = 尚未询问）。
+    func permission() async -> Bool?
+    /// 只由用户点击按钮触发。
+    func requestPermission() async -> Bool
+}
+
+extension ProposalNotifying {
+    func permission() async -> Bool? { true }
+    func requestPermission() async -> Bool { true }
 }
 
 // MARK: - 操作留底（SPEC §19 A5）
@@ -167,4 +176,12 @@ actor InMemoryProposalTransport: ProposalTransport {
         store[id] = p
         return p
     }
+}
+
+/// 测试 host 用：不碰系统通知中心。
+@MainActor final class SilentProposalNotifier: ProposalNotifying {
+    private var shown: Set<UUID> = []
+    func show(_ proposal: Proposal) async { shown.insert(proposal.id) }
+    func withdraw(_ id: UUID) async { shown.remove(id) }
+    func shownIds() async -> Set<UUID> { shown }
 }
