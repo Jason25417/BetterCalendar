@@ -1,0 +1,698 @@
+{
+  "version": 1,
+  "evidence": "actual research-log call events plus agent-reported UI readiness, not human device acceptance",
+  "range": {
+    "afterId": 225400,
+    "throughId": 225700,
+    "nextCursor": 225700,
+    "hasMore": false,
+    "from": "2026-10-17T01:31:48.918Z",
+    "to": "2026-10-17T01:36:12.587Z"
+  },
+  "calls": [
+    {
+      "id": 225596,
+      "kind": "call_started",
+      "createdAt": "2026-10-17T01:35:12.440Z",
+      "callId": "research_fb2113db-4573-474a-8d9e-6f6bc647d9dd",
+      "tool": "read_instructions"
+    },
+    {
+      "id": 225597,
+      "kind": "call_returned",
+      "createdAt": "2026-10-17T01:35:12.542Z",
+      "callId": "research_eab01515-3af8-455f-8054-c29b078002fd",
+      "tool": "read_instructions",
+      "responseHash": "08e5335c024aaf3e6b59b36c7f51def140db4d33ec39d9ee16bcd18d935d3120",
+      "references": {
+        "observationIds": [],
+        "changeIds": [],
+        "nativeCommandIds": [],
+        "commandIds": [],
+        "ingestion": {
+          "accepted": null,
+          "ignored": null,
+          "receivedAt": null
+        },
+        "delivery": {
+          "batchId": null,
+          "delivered": null,
+          "decision": null
+        },
+        "sessionVersions": [],
+        "snapshotEventId": null,
+        "noteIds": [],
+        "sourceMetadata": [],
+        "coverage": null,
+        "pagination": {
+          "hasMore": null,
+          "nextCursor": null,
+          "throughId": null,
+          "valuesIncluded": null
+        },
+        "saved": null,
+        "interpretation": "References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store."
+      }
+    },
+    {
+      "id": 225598,
+      "kind": "call_started",
+      "createdAt": "2026-10-17T01:35:15.778Z",
+      "callId": "research_d075b3ed-036a-4aed-b4fd-29d1516390a1",
+      "tool": "read_native_capabilities"
+    },
+    {
+      "id": 225599,
+      "kind": "call_returned",
+      "createdAt": "2026-10-17T01:35:15.940Z",
+      "callId": "research_2e0c9335-6406-4faf-83ac-1b2e2b504e37",
+      "tool": "read_native_capabilities",
+      "responseHash": "ae07987979c94991f4b6a059c631d18dd85eb12cfac8fdc9dbb7e894b0cefda0",
+      "references": {
+        "observationIds": [],
+        "changeIds": [],
+        "nativeCommandIds": [],
+        "commandIds": [],
+        "ingestion": {
+          "accepted": null,
+          "ignored": null,
+          "receivedAt": null
+        },
+        "delivery": {
+          "batchId": null,
+          "delivered": null,
+          "decision": null
+        },
+        "sessionVersions": [],
+        "snapshotEventId": null,
+        "noteIds": [],
+        "sourceMetadata": [],
+        "coverage": null,
+        "pagination": {
+          "hasMore": null,
+          "nextCursor": null,
+          "throughId": null,
+          "valuesIncluded": null
+        },
+        "saved": null,
+        "interpretation": "References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store."
+      }
+    },
+    {
+      "id": 225600,
+      "kind": "call_started",
+      "createdAt": "2026-10-17T01:35:19.449Z",
+      "callId": "research_1265c928-e480-45fe-948e-f54f362bfd08",
+      "tool": "read_current_state"
+    },
+    {
+      "id": 225601,
+      "kind": "call_returned",
+      "createdAt": "2026-10-17T01:35:19.796Z",
+      "callId": "research_1e39f1ad-3e84-4543-af95-541541ddd8fd",
+      "tool": "read_current_state",
+      "responseHash": "d925fc319f80a9b18021e1d08edaa24ce68204f6c9fa469b3e14dd4679364bb7",
+      "references": {
+        "observationIds": [
+          "5E5D39B0-2789-4682-B0FA-B09CADBA7C8A",
+          "1479781E-EFCB-43AC-A449-591904C61BCC"
+        ],
+        "changeIds": [],
+        "nativeCommandIds": [],
+        "commandIds": [],
+        "ingestion": {
+          "accepted": null,
+          "ignored": null,
+          "receivedAt": null
+        },
+        "delivery": {
+          "batchId": null,
+          "delivered": null,
+          "decision": null
+        },
+        "sessionVersions": [],
+        "snapshotEventId": null,
+        "noteIds": [
+          "activity-20261012-campus-departure-201106",
+          "jason-bc-research-audit-request-20261012-200240"
+        ],
+        "sourceMetadata": [
+          {
+            "sourceKey": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960:device.status",
+            "eventId": "5E5D39B0-2789-4682-B0FA-B09CADBA7C8A",
+            "assertion": "observed",
+            "observedAt": "2026-10-17T01:28:14.000Z",
+            "receivedAt": "2026-10-17T01:28:34.504Z",
+            "expiresAt": "2026-10-17T01:31:14.000Z",
+            "freshness": "stale",
+            "availability": "available"
+          },
+          {
+            "sourceKey": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d:device.status",
+            "eventId": "1479781E-EFCB-43AC-A449-591904C61BCC",
+            "assertion": "observed",
+            "observedAt": "2026-10-17T01:34:49.000Z",
+            "receivedAt": "2026-10-17T01:34:51.031Z",
+            "expiresAt": "2026-10-17T01:37:49.000Z",
+            "freshness": "current",
+            "availability": "available"
+          }
+        ],
+        "coverage": [
+          {
+            "deviceId": "clock_6ccfd332-4c1e-4ed0-acb8-6e38fa8d3836",
+            "label": "Independent minute clock",
+            "revoked": false,
+            "sources": [
+              {
+                "source": "bridge.clock",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              }
+            ]
+          },
+          {
+            "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+            "label": "Jason iPhone",
+            "revoked": false,
+            "sources": [
+              {
+                "source": "calendar.events",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:23.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:54.612Z"
+              },
+              {
+                "source": "reminders.items",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:23.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:54.910Z"
+              },
+              {
+                "source": "device.status",
+                "availability": "available",
+                "freshness": "stale",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:34.504Z"
+              },
+              {
+                "source": "source.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.app",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.focus",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "home.occupancy",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:33.026Z"
+              },
+              {
+                "source": "user.context",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.status",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:54.151Z"
+              },
+              {
+                "source": "health.sleep",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:53.044Z"
+              },
+              {
+                "source": "health.steps",
+                "availability": "available",
+                "freshness": "stale",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:53.485Z"
+              },
+              {
+                "source": "health.resting-heart-rate",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:53.708Z"
+              },
+              {
+                "source": "health.workouts",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:53.928Z"
+              },
+              {
+                "source": "ios.location",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:15.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:54.374Z"
+              },
+              {
+                "source": "ios.visit",
+                "availability": "available",
+                "freshness": "stale",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-16T22:52:26.000Z",
+                "lastReceivedAt": "2026-10-17T00:52:33.297Z"
+              },
+              {
+                "source": "ios.motion",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:52.327Z"
+              },
+              {
+                "source": "home.status",
+                "availability": "error",
+                "freshness": "current",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:33.537Z"
+              },
+              {
+                "source": "bc.pool",
+                "availability": "available",
+                "freshness": "stale",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-17T01:28:14.000Z",
+                "lastReceivedAt": "2026-10-17T01:28:40.483Z"
+              }
+            ]
+          },
+          {
+            "deviceId": "jason-iphone-20261005",
+            "label": "Jason iPhone",
+            "revoked": false,
+            "sources": [
+              {
+                "source": "calendar.events",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "reminders.items",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "device.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "source.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.sleep",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.steps",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.resting-heart-rate",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "health.workouts",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.location",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.visit",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.motion",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "home.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "home.occupancy",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.app",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.focus",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "user.context",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "bc.pool",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              }
+            ]
+          },
+          {
+            "deviceId": "jason-mac-20261005",
+            "label": "Jason Mac",
+            "revoked": false,
+            "sources": [
+              {
+                "source": "mac.activity",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "mac.browser",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "calendar.events",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "reminders.items",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "files.activity",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "device.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "source.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.app",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "ios.focus",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "home.occupancy",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "user.context",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "bc.pool",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              }
+            ]
+          },
+          {
+            "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+            "label": "Jason Mac collector",
+            "revoked": false,
+            "sources": [
+              {
+                "source": "calendar.events",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:48.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:50.513Z"
+              },
+              {
+                "source": "reminders.items",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:48.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:50.766Z"
+              },
+              {
+                "source": "device.status",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:49.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:51.031Z"
+              },
+              {
+                "source": "source.status",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "mac.activity",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:48.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:49.782Z"
+              },
+              {
+                "source": "mac.browser",
+                "availability": "error",
+                "freshness": "current",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-17T01:34:48.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:50.031Z"
+              },
+              {
+                "source": "mac.history",
+                "availability": "available",
+                "freshness": "stale",
+                "usableForCurrentState": false,
+                "lastObservedAt": "2026-10-16T23:00:33.000Z",
+                "lastReceivedAt": "2026-10-16T23:00:50.745Z"
+              },
+              {
+                "source": "files.activity",
+                "availability": "partial",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:49.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:50.269Z"
+              },
+              {
+                "source": "user.context",
+                "availability": "not_received",
+                "freshness": "unknown",
+                "usableForCurrentState": false,
+                "lastObservedAt": null,
+                "lastReceivedAt": null
+              },
+              {
+                "source": "bc.pool",
+                "availability": "available",
+                "freshness": "current",
+                "usableForCurrentState": true,
+                "lastObservedAt": "2026-10-17T01:34:49.000Z",
+                "lastReceivedAt": "2026-10-17T01:34:51.571Z"
+              }
+            ]
+          },
+          {
+            "deviceId": "transport-probe-20261005",
+            "label": "Synthetic transport test",
+            "revoked": false,
+            "sources": []
+          }
+        ],
+        "pagination": {
+          "hasMore": null,
+          "nextCursor": null,
+          "throughId": null,
+          "valuesIncluded": true
+        },
+        "saved": null,
+        "interpretation": "References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store."
+      }
+    }
+  ],
+  "agentReported": {
+    "macVersion": "0.65.21/178",
+    "macObservedAt": "2026-10-17T01:34:49Z",
+    "phoneVersionAtLastReport": "0.65.21/178",
+    "phoneObservedAt": "2026-10-17T01:28:14Z",
+    "phoneCurrentVersion": "unknown_stale",
+    "dataSyncDiagnostics": "not present",
+    "crossDeviceAllNotifications": "not independently confirmed enabled",
+    "newProposals": "none requested or observed in this diagnostic"
+  },
+  "screenshotLocalOnly": "/private/tmp/bc179-dots-readiness.jpg"
+}

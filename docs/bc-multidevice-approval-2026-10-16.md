@@ -13,7 +13,7 @@ Jason在2026-10-16明确改为iPhone、Mac都收到同一审批通知；一端�
 
 原始定位和筛选后的合成记录见`evidence/notification-approval178-result.json`；保留旧pending证据不追写历史。该样本不计B06/B10真机通知入口通过。
 
-## 本批实现（0.65.22 /179，发布状态另核）
+## 本批实现（0.65.22 /179，双端已可安装）
 
 - 显式`notificationMode=all_reviewers`：原执行端及独立opt-in的审核端共用一份commandId/requestHash/业务状态。未授权端不入组，开启通知仍是各端本机设置，不由模型配置。
 - 0009只新增冻结收件集合表和(commandId,deviceId)投递表，旧单端表保留。每端独立claim/OS提交/点击回执，不增加第二份执行。重启/丢回包结果未知时不盲重发。
@@ -35,4 +35,8 @@ Jason在2026-10-16明确改为iPhone、Mac都收到同一审批通知；一端�
 
 两端新版本可安装后再通知Jason更新；各端本人允许跨设备审批及审批通知，再用唯一标记todo逐条提出新变更，由本人核对批准。不得由模型代批、重提旧取消请求或启动真实计时。普通提醒权限仍默认关闭，提醒时间/内容/声音另确认。
 
-关闭本机审批通知或跨设备审批即可停止该端参与；离线撤回先本机锁定，服务器确认另核。回滚保留0009增量表/旧请求，不清库、不改旧hash、不复活旧命令。无SwiftData @Model变更，不需要本批CloudKit schema部署。
+关闭本机审批通知或跨设备审批即可停止该端参与；离线撤回先本机锁定，服务器确认另核。回滚保留0009增量表/旧请求，不清库、不改旧hash、不复活旧命令。服务41不认识新多端路由：存在未结束的fanout请求时不盲回滚到41；先停止新提案，并由本人处理既有请求，或使用仍认识新路由表的兼容修复版。不能通过自动取消请求来凑回滚条件。无SwiftData @Model变更，不需要本批CloudKit schema部署。
+
+发布核验：服务42 succeeded/has_mcp，两端179均VALID、IN_BETA_TESTING及中文notes读回；归档源f52d43f36b54e9ee9fe39ae75de4fb2941234124。精确发布记录见evidence/multidevice-approval-release179.json。已向Dots发送仅只读增量核对，不生成新提案；已请本人更新并在两端明确开启跨设备审批，不能代开或把安装可用当实测通过。
+
+Dots只读回报已收到；研究日志225596–225601实见read_instructions/capabilities/current_state各一次及返回hash。Mac上报仍178、手机最后178且stale，新dataSync与跨端开启未证。详见evidence/multidevice-approval179-dots-readiness.json；截图仅本地/private/tmp/bc179-dots-readiness.jpg，不向Git复制私人聊天。

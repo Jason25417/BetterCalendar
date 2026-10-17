@@ -1,0 +1,113 @@
+{
+  "version": "0.65.22",
+  "build": 179,
+  "status": "both_platforms_available",
+  "sourceCommit": "f52d43f36b54e9ee9fe39ae75de4fb2941234124",
+  "service": {
+    "version": 42,
+    "status": "succeeded",
+    "sourceCommit": "a2302742b2d15b0570638f6ce19f56da487a5e87",
+    "deploymentId": "appgdep_6ad2ce79ae908191820fae4b7c7e2a7b",
+    "projectId": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+    "audience": "unchanged owner-private, one account, zero external visitors",
+    "migration": "0009 additive frozen recipient set and per-device deliveries",
+    "liveChecks": [
+      "new tables present via read_database_overview",
+      "formal MCP instructions include new multi-device requirement"
+    ]
+  },
+  "tests": {
+    "nativeUnit": {
+      "passed": 407,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.16_21-24-23--0400.xcresult"
+    },
+    "nativeTargeted": 39,
+    "server": 162,
+    "serverFailures": 0,
+    "serverSkipped": 0,
+    "typescript": "passed",
+    "productionBuild": "passed",
+    "iosGenericDeviceUnsignedBuild": "passed",
+    "uiTests": "full-target attempt failed loading the empty macOS UITests bundle; not counted as UI success",
+    "simulator": "CoreSimulator service version mismatch; not claimed passed"
+  },
+  "toolchain": {
+    "xcode": "27.1",
+    "build": "27A9275",
+    "developerDir": "/Applications/Xcode.app/Contents/Developer"
+  },
+  "upload": {
+    "build": 179,
+    "sourceCommit": "f52d43f36b54e9ee9fe39ae75de4fb2941234124",
+    "pid": 31466,
+    "stage": "uploaded-both",
+    "platforms": {
+      "macOS": {
+        "archive": "/private/tmp/bc-release-179/macOS.xcarchive",
+        "version": "0.65.22",
+        "build": "179",
+        "archiveSucceeded": true,
+        "exportSucceeded": true
+      },
+      "iOS": {
+        "archive": "/private/tmp/bc-release-179/iOS.xcarchive",
+        "version": "0.65.22",
+        "build": "179",
+        "archiveSucceeded": true,
+        "exportSucceeded": true
+      }
+    },
+    "updatedAt": "2026-10-17T01:31:16.553321+00:00"
+  },
+  "appStoreConnect": {
+    "build": "179",
+    "checkedAt": "2026-10-17T01:34:21.476Z",
+    "builds": [
+      {
+        "id": "a6ab1afa-386a-497d-a998-a441dc0fc0b4",
+        "platform": "IOS",
+        "version": "0.65.22",
+        "build": "179",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      },
+      {
+        "id": "0f577527-3224-440a-9fb9-e0ebb0b00ea6",
+        "platform": "MAC_OS",
+        "version": "0.65.22",
+        "build": "179",
+        "processing": "VALID",
+        "internal": "IN_BETA_TESTING",
+        "external": "READY_FOR_BETA_SUBMISSION",
+        "notesVerified": true
+      }
+    ]
+  },
+  "physicalAcceptance": {
+    "macNativeNotificationDecision": "not verified;178 actual decision was chat_confirmation",
+    "iphoneNativeNotificationDecision": "not verified",
+    "bothNoticesAndPeerCleanup": "not verified",
+    "iphoneItemReadback": "old revision at01:10:57Z afterMac applied; root cause unproven",
+    "newPermissionsEnabledByAgent": false,
+    "timerOrRingTestStartedByAgent": false
+  },
+  "apns": {
+    "implemented": false,
+    "authorization": "asked separately, awaiting human response",
+    "currentDelivery": "local poll ~20seconds while app runs; no background/locked guarantee"
+  },
+  "realSample": "notification-approval178-result.json",
+  "next": "When both builds are installable, send Dots a read-only incremental readiness message; human opts in on both devices before new proposals. Do not recreate closed request.",
+  "dotsMessage": {
+    "sentVia": "Edge extension, existing personal Dots page",
+    "sentAfterBothAvailable": true,
+    "scope": "only instructions/capabilities/device.status; no new proposals or stable-source retests",
+    "reply": "read-only readiness completed; Mac reports178, phone last178 stale, no dataSync yet; cross-device enablement unconfirmed; no new proposal",
+    "evidence": "multidevice-approval179-dots-readiness.json"
+  }
+}
