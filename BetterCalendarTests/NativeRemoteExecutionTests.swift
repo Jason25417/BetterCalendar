@@ -108,6 +108,25 @@ import SwiftData
         #expect(!executor.permitsCrossReview(context))
         #expect(service.claims.isEmpty && service.receipts.isEmpty)
     }
+    @Test func crossReviewMatchesWireMillisecondExpiryWithoutAcceptingAnotherExpiry() throws {
+        let (service, store, writer, _) = try fixture(envelope())
+        let localExpiry = at.addingTimeInterval(86400.645133)
+        store.file.grant?.expiresAt = localExpiry
+        let executor = NativeRemoteExecutor(service: service, persistence: store, writer: writer, alarms: UnsupportedNativeAlarms(), now: { self.at })
+        var context = try NativeApprovalReviewContext(.object([
+            "reviewerDeviceId": .string("fixture-device"), "executionDeviceId": .string("fixture-other-device"),
+            "grantRevision": .number(1), "policyRevision": .number(1), "expiresAt": NativeRemoteJSON.timestamp(localExpiry), "authority": .string("explicit_cross_device_review")]))
+        #expect(context.expiresAt != localExpiry) // Production JSON preserves sub-millisecond precision locally only.
+        #expect(executor.permitsCrossReview(context))
+        context.expiresAt = try NativeRemoteJSON.date(NativeRemoteJSON.timestamp(localExpiry.addingTimeInterval(0.001)))
+        #expect(!executor.permitsCrossReview(context)) // No tolerance window accepting a different wire deadline.
+        context.expiresAt = try NativeRemoteJSON.date(NativeRemoteJSON.timestamp(localExpiry))
+        store.file.grant?.synchronized = false
+        #expect(!executor.permitsCrossReview(context))
+        store.file.grant?.synchronized = true; store.file.grant?.revision = 2
+        #expect(!executor.permitsCrossReview(context))
+        #expect(service.claims.isEmpty && service.receipts.isEmpty)
+    }
     @Test func realStoreWriteAndLostResponseRetryAfterRestartNeverDuplicate() async throws {
         let (service, store, writer, c) = try fixture(envelope())
         service.loseReceiptResponse = true

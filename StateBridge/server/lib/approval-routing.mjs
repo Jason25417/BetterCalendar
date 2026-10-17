@@ -9,10 +9,20 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
  const q=(sql,...args)=>db.prepare(sql).bind(...args),one=(sql,...args)=>q(sql,...args).first();
  const fanout=createApprovalFanout(db,time,{canReview,requestView});
  async function rawPolicy(){return await one("SELECT * FROM native_approval_policy WHERE id='personal'")??{revision:0,body:canonical({primaryDeviceId:null,reviewers:[]}),last_request_hash:null};}
- async function canReview(id){
-  const reviewer=JSON.parse((await rawPolicy()).body).reviewers.find(r=>r.deviceId===id);if(!reviewer)return false;
+ async function reviewStatus(id,policy){
+  const reviewer=policy.reviewers.find(r=>r.deviceId===id);if(!reviewer)return {configured:false,enabled:false,reason:'not_enabled'};
   await device(id);const g=await one('SELECT * FROM native_grants WHERE device_id=?',id);
-  return !!g&&g.revision===reviewer.grantRevision&&g.expires_at===reviewer.expiresAt&&g.expires_at>time();
+  if(!g)return {configured:true,enabled:false,reason:'no_current_grant'};
+  if(g.revision!==reviewer.grantRevision||g.expires_at!==reviewer.expiresAt)return {configured:true,enabled:false,reason:'grant_changed_requires_explicit_reconfirmation'};
+  return {configured:true,enabled:g.expires_at>time(),reason:g.expires_at>time()?'active':'grant_expired_requires_explicit_reconfirmation'};
+ }
+ async function canReview(id){return (await reviewStatus(id,JSON.parse((await rawPolicy()).body))).enabled;}
+ // Read-only discovery is diagnostic evidence, never an execution grant.
+ async function discovery(ids){
+  const row=await rawPolicy(),policy=JSON.parse(row.body);
+  return {policyRevision:row.revision,notificationMode:policy.notificationMode??'single_device',primaryDeviceId:policy.primaryDeviceId,
+   delivery:'local_poll_while_app_runs',remotePush:false,authority:'diagnostic_only_rechecked_for_each_request',
+   devices:await Promise.all(ids.map(async deviceId=>({deviceId,...await reviewStatus(deviceId,policy)})))};
  }
  async function readiness(){
   const rows=(await q("SELECT d.id,d.label,s.body,s.observed_at,s.received_at FROM devices d JOIN native_grants g ON g.device_id=d.id LEFT JOIN states s ON s.source_key=d.id||':device.status' WHERE d.revoked_at IS NULL AND g.expires_at>? AND json_array_length(g.body,'$.capabilities')>0",time()).all()).results;
@@ -99,5 +109,5 @@ export function createApprovalRouting(db,time,{device,grant,requestView}){
   ]);
   const saved=await one(`SELECT * FROM ${table} WHERE command_id=? AND device_id=?`,v.commandId,d.id);return {version:1,commandId:v.commandId,state:saved.state,systemSubmittedAt:saved.system_submitted_at??null,clickedAt:saved.clicked_at??null,userSeen:'unknown'};
  }
- return {read,configure,canReview,allowed,decisionGuard,claim,receipt};
+ return {read,configure,canReview,allowed,decisionGuard,claim,receipt,discovery};
 }

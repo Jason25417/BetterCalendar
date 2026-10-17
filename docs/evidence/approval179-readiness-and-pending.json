@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "status": "awaiting_human_notification_acceptance",
+  "scope": "one_marked_test_todo_only_no_timers_or_permissions",
+  "recordId": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+  "readiness": {
+    "readAt": "2026-10-17T02:26:01.533Z",
+    "sources": [
+      {
+        "source": "device.status",
+        "eventId": "E912D83A-72F2-4489-B14D-AABAD43730F7",
+        "value": {
+          "approvalNotifications": {
+            "systemAuthorization": "authorized",
+            "remoteApprovalPush": false,
+            "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+            "enabled": true,
+            "routingProtocol": 1,
+            "delivery": "local_poll_20s_while_app_runs"
+          },
+          "collector": {
+            "build": "179",
+            "name": "BetterCalendar",
+            "version": "0.65.22",
+            "schemaVersion": 2
+          },
+          "dataSync": {
+            "coverage": "this_process_lifetime_not_complete_history",
+            "lastEventPhase": "export",
+            "storage": "cloudKit",
+            "otherDeviceApplied": "unknown",
+            "lastFailureAt": null,
+            "lastFailureCode": null,
+            "version": 1,
+            "lastImportAt": "2026-10-17T02:03:39Z",
+            "lastExportAt": "2026-10-17T02:03:39Z",
+            "lastFailurePhase": null,
+            "lastEventSucceeded": true,
+            "lastEventAt": "2026-10-17T02:03:39Z",
+            "lastFailureDomain": null
+          },
+          "platform": "Version 27.2 (Build 24B5110a)",
+          "availability": "online"
+        },
+        "assertion": "observed",
+        "sequence": 19545,
+        "observedAt": "2026-10-17T02:03:40.000Z",
+        "schemaVersion": 1,
+        "expiresAt": "2026-10-17T02:06:40.000Z",
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "receivedAt": "2026-10-17T02:03:51.288Z",
+        "sourceKey": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960:device.status",
+        "freshness": "stale",
+        "availability": "available",
+        "observationAgeSeconds": 1341.533,
+        "deliveryDelaySeconds": 11.288,
+        "freshnessMeaning": "content_expiry_not_continuous_sampling",
+        "collectionRecency": "older_than_5_minutes",
+        "reason": "online",
+        "lastObservedAt": "2026-10-17T02:03:40.000Z",
+        "lastReceivedAt": "2026-10-17T02:03:51.288Z",
+        "lastSuccessfulReadAt": "2026-10-17T02:03:40.000Z",
+        "dataRole": "source-data",
+        "usableForCurrentState": false
+      },
+      {
+        "schemaVersion": 1,
+        "eventId": "6A63A69D-E482-4483-98FF-B7A9CC29211E",
+        "expiresAt": "2026-10-17T02:28:18.000Z",
+        "value": {
+          "dataSync": {
+            "lastFailureAt": null,
+            "version": 1,
+            "coverage": "this_process_lifetime_not_complete_history",
+            "lastFailurePhase": null,
+            "lastImportAt": "2026-10-17T01:51:27Z",
+            "lastEventAt": "2026-10-17T01:54:32Z",
+            "lastFailureDomain": null,
+            "lastEventSucceeded": true,
+            "storage": "cloudKit",
+            "lastEventPhase": "export",
+            "lastFailureCode": null,
+            "otherDeviceApplied": "unknown",
+            "lastExportAt": "2026-10-17T01:54:32Z"
+          },
+          "collector": {
+            "schemaVersion": 2,
+            "version": "0.65.22",
+            "build": "179",
+            "name": "BetterCalendar"
+          },
+          "approvalNotifications": {
+            "systemAuthorization": "authorized",
+            "enabled": true,
+            "delivery": "local_poll_20s_while_app_runs",
+            "routingProtocol": 1,
+            "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+            "remoteApprovalPush": false
+          },
+          "availability": "online",
+          "platform": "Version 27.2 (Build 26B5086k)"
+        },
+        "assertion": "observed",
+        "source": "device.status",
+        "observedAt": "2026-10-17T02:25:18.000Z",
+        "sequence": 105558,
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "receivedAt": "2026-10-17T02:25:19.895Z",
+        "sourceKey": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d:device.status",
+        "freshness": "current",
+        "availability": "available",
+        "observationAgeSeconds": 43.533,
+        "deliveryDelaySeconds": 1.895,
+        "freshnessMeaning": "content_expiry_not_continuous_sampling",
+        "collectionRecency": "recent",
+        "reason": "online",
+        "lastObservedAt": "2026-10-17T02:25:18.000Z",
+        "lastReceivedAt": "2026-10-17T02:25:19.895Z",
+        "lastSuccessfulReadAt": "2026-10-17T02:25:18.000Z",
+        "dataRole": "source-data",
+        "usableForCurrentState": true
+      }
+    ],
+    "research": {
+      "callId": "research_105822ac-bf20-42c3-8b11-aff69a699339",
+      "responseHash": "ae8b6599b808f9246ab297b4da2dfee34f5f9c243e1e0d0698aca3af42c0c632",
+      "recorded": true
+    }
+  },
+  "sameRecordReadbacks": [
+    {
+      "readAt": "2026-10-17T02:06:31.151Z",
+      "observedAt": "2026-10-17T02:03:40.000Z",
+      "receivedAt": "2026-10-17T02:03:51.961Z",
+      "sourceDeviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "complete": true,
+      "hasMore": false,
+      "records": [
+        {
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "revision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+          "values": {
+            "cadenceMinutesPerWeek": null,
+            "checkpoints": [],
+            "createdAt": 1792007516159,
+            "deadline": null,
+            "deletedAt": null,
+            "deletionContext": null,
+            "deletionId": null,
+            "doneAt": null,
+            "family": null,
+            "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+            "isInTrash": false,
+            "modifiedAt": 1792198626000,
+            "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+            "restoredDeletionId": null,
+            "spilledFromDay": null,
+            "status": "active",
+            "title": "BC 联调测试｜通知审批178",
+            "totalMinutes": null,
+            "unitMinutes": null,
+            "zone": "todo"
+          }
+        }
+      ],
+      "research": {
+        "callId": "research_cddf83d5-575a-4fef-b8c4-82a249a05014",
+        "responseHash": "074225b74dc0424306e9002cd60e2b37d734b1c6d882860be55d29ebac28e0bd",
+        "recorded": true
+      }
+    },
+    {
+      "readAt": "2026-10-17T02:06:31.529Z",
+      "observedAt": "2026-10-17T02:06:18.000Z",
+      "receivedAt": "2026-10-17T02:06:20.688Z",
+      "sourceDeviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "complete": true,
+      "hasMore": false,
+      "records": [
+        {
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "revision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+          "values": {
+            "cadenceMinutesPerWeek": null,
+            "checkpoints": [],
+            "createdAt": 1792007516159,
+            "deadline": null,
+            "deletedAt": null,
+            "deletionContext": null,
+            "deletionId": null,
+            "doneAt": null,
+            "family": null,
+            "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+            "isInTrash": false,
+            "modifiedAt": 1792198626000,
+            "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+            "restoredDeletionId": null,
+            "spilledFromDay": null,
+            "status": "active",
+            "title": "BC 联调测试｜通知审批178",
+            "totalMinutes": null,
+            "unitMinutes": null,
+            "zone": "todo"
+          }
+        }
+      ],
+      "research": {
+        "callId": "research_a24ef85d-5704-4bfe-89a0-d11f934b96ae",
+        "responseHash": "5f05508bf4011db60c15c6c10f80193bee7c0297d56d77db40478025c3b311e8",
+        "recorded": true
+      }
+    }
+  ],
+  "command": {
+    "version": 1,
+    "nativeCommandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+    "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+    "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+    "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+    "request": {
+      "action": "update",
+      "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+      "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "expectedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+      "expiresAt": "2026-10-18T02:28:51.693Z",
+      "kind": "item",
+      "occurredAt": "2026-10-17T02:28:35.000Z",
+      "patch": {
+        "title": "BC 联调测试｜双端通知179"
+      },
+      "recordId": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+      "userRequest": "Jason明确要求本轮仅将唯一合成测试待办标题从「BC 联调测试｜通知审批178」改为「BC 联调测试｜双端通知179」，其他字段不变。iPhone执行；允许同一请求自然出现聊天卡，但本人本轮在iPhone系统通知核对并决定。模型不得批准。24小时确认期。",
+      "version": 1
+    },
+    "permission": "item.update",
+    "grantRevision": 8,
+    "state": "awaiting_confirmation",
+    "acceptedAt": "2026-10-17T02:28:51.871Z",
+    "expiresAt": "2026-10-18T02:28:51.693Z",
+    "approvedAt": null,
+    "attemptId": null,
+    "result": null,
+    "resultAt": null,
+    "serverAccepted": true,
+    "deviceApplication": "unknown",
+    "userSeen": "unknown",
+    "operationEffect": "mutation",
+    "userRequestEvidence": "agent_report_confirmation_required",
+    "research": {
+      "callId": "research_08838a23-9024-4acd-b81c-463769c0e519",
+      "responseHash": "e77b12b5f71977dcf4cfc0500d4d1e8af46aa74d8e37d03b89fd7b1beeaa4d94",
+      "recorded": true
+    }
+  },
+  "tests": {
+    "server": {
+      "passed": 171,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nativeApproval": {
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.16_22-27-33--0400.xcresult"
+    },
+    "typescript": "passed",
+    "productionBuild": "passed_before_instruction_copy_change"
+  },
+  "limits": [
+    "OS submission is device-reported, not user-seen or approval evidence",
+    "iPhone review binding to grant7 is invalid after device grant8; no automatic renewal",
+    "Mac chat 2px not fixed",
+    "No real APNs registration or provider network",
+    "No new code deployment or app release this turn"
+  ]
+}

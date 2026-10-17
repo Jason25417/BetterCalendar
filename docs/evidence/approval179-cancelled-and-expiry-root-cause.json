@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "status": "cancelled_without_approval_or_execution",
+  "command": {
+    "version": 1,
+    "nativeCommandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+    "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+    "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+    "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+    "request": {
+      "action": "update",
+      "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+      "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "expectedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+      "expiresAt": "2026-10-18T02:28:51.693Z",
+      "kind": "item",
+      "occurredAt": "2026-10-17T02:28:35.000Z",
+      "patch": {
+        "title": "BC 联调测试｜双端通知179"
+      },
+      "recordId": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+      "userRequest": "Jason明确要求本轮仅将唯一合成测试待办标题从「BC 联调测试｜通知审批178」改为「BC 联调测试｜双端通知179」，其他字段不变。iPhone执行；允许同一请求自然出现聊天卡，但本人本轮在iPhone系统通知核对并决定。模型不得批准。24小时确认期。",
+      "version": 1
+    },
+    "permission": "item.update",
+    "grantRevision": 8,
+    "state": "cancelled",
+    "acceptedAt": "2026-10-17T02:28:51.871Z",
+    "expiresAt": "2026-10-18T02:28:51.693Z",
+    "approvedAt": null,
+    "attemptId": null,
+    "result": null,
+    "resultAt": null,
+    "serverAccepted": true,
+    "deviceApplication": "unknown",
+    "userSeen": "unknown",
+    "operationEffect": "mutation",
+    "userRequestEvidence": "agent_report_confirmation_required",
+    "research": {
+      "callId": "research_5b9fc760-617a-4c2a-9719-b419d7c13404",
+      "responseHash": "9d52198a72880caecb6e624569b546aed30528f3b83edc539df3a4c369bececa",
+      "recorded": true
+    }
+  },
+  "researchWindow": {
+    "afterId": 229036,
+    "throughId": 229666,
+    "complete": true
+  },
+  "events": [
+    {
+      "id": 229453,
+      "callId": "research_9fe29ccf-b9d2-4577-95ee-018a734548d8",
+      "kind": "native_confirmation_prepared",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:28:53.239Z",
+      "body": {
+        "version": 1,
+        "originTool": "submit_native_command",
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "grantRevision": 8,
+        "expectedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+        "sessionId": null,
+        "expiresAt": "2026-10-18T02:28:51.693Z",
+        "state": "awaiting_confirmation",
+        "presentationVersion": 2,
+        "presentationHash": "798a6122fa188bc57c2efee9b8097255ff92793856e5fccf9a9e229c8fe52bf6",
+        "beforeSource": {
+          "snapshotEventId": "9D96FFA1-E342-43C6-B7C8-BF8DB83BACCD",
+          "observedAt": "2026-10-17T02:28:35.000Z",
+          "receivedAt": "2026-10-17T02:28:38.456Z",
+          "freshness": "current",
+          "revision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+          "beforeHash": "b653a3ef50b50c4ec22772369057e6d82b53996e301829dc48e41c44e7c05ea0"
+        },
+        "messageCharacters": 11,
+        "descriptionCharacters": 132,
+        "hostDisplayed": "unknown",
+        "cancelCause": "unknown"
+      }
+    },
+    {
+      "id": 229476,
+      "callId": "approval_route_0ffe4718-6585-4b10-8012-dd6caa7f3ee2",
+      "kind": "approval_notification_route_frozen",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:28:58.521Z",
+      "body": {
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "deviceIds": [
+          "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+          "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d"
+        ],
+        "mode": "all_reviewers",
+        "policyRevision": 2,
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "version": 1
+      }
+    },
+    {
+      "id": 229484,
+      "callId": "approval_notice_2a29dd36-fb1d-4c1b-baba-0f35722aee7f",
+      "kind": "approval_notification_receipt",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:29:02.015Z",
+      "body": {
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "evidence": "device_report",
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "state": "system_submitted",
+        "userSeen": "unknown",
+        "version": 1
+      }
+    },
+    {
+      "id": 229616,
+      "callId": "research_676670d0-e684-4226-a8ad-176cef8e50d5",
+      "kind": "native_confirmation_response_received",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:30:18.987Z",
+      "body": {
+        "version": 1,
+        "callbackTraceId": "6e67a754-9246-468f-be97-c247a5469499",
+        "originTool": "submit_native_command",
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "storedState": "awaiting_confirmation",
+        "effectiveState": "awaiting_confirmation",
+        "expiresAt": "2026-10-18T02:28:51.693Z",
+        "approvedAt": null,
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "candidateRequestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "expectedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+        "sessionId": null,
+        "responseShape": {
+          "responseType": "object",
+          "presentFields": [
+            "action"
+          ],
+          "unknownEnvelopeFieldCount": 0,
+          "resultTypeType": "undefined",
+          "metadataType": "undefined",
+          "contentType": "undefined",
+          "contentFieldCount": null,
+          "confirmType": "undefined",
+          "reviewType": "undefined",
+          "unknownContentFieldCount": null,
+          "envelopeFields": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "contentFields": [],
+          "missingFields": [],
+          "missingContentFields": [
+            "confirm"
+          ]
+        },
+        "source": "host_response",
+        "userGesture": "unknown",
+        "cause": "unknown"
+      }
+    },
+    {
+      "id": 229620,
+      "callId": "native_decision_869e6ee2-90e9-49b6-81c2-a08de612b179",
+      "kind": "native_approval_decision",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:30:19.427Z",
+      "body": {
+        "cancelCause": "unknown",
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "decision": "cancel",
+        "grantRevision": 8,
+        "priorEffectiveState": "awaiting_confirmation",
+        "priorStoredState": "awaiting_confirmation",
+        "producer": "authenticated_transport",
+        "producerGesture": "not_observed",
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "resolution": "host_cancel",
+        "source": "chat_confirmation",
+        "state": "cancelled",
+        "userGesture": "transport_report_not_independent_observation",
+        "version": 1
+      }
+    },
+    {
+      "id": 229622,
+      "callId": "research_f3f4d25e-bdae-48bb-a1ac-6a05057de0f6",
+      "kind": "native_confirmation_response_processed",
+      "batchId": null,
+      "createdAt": "2026-10-17T02:30:19.585Z",
+      "body": {
+        "version": 1,
+        "callbackTraceId": "6e67a754-9246-468f-be97-c247a5469499",
+        "originTool": "submit_native_command",
+        "commandId": "869e6ee2-90e9-49b6-81c2-a08de612b179",
+        "storedState": "awaiting_confirmation",
+        "effectiveState": "awaiting_confirmation",
+        "expiresAt": "2026-10-18T02:28:51.693Z",
+        "approvedAt": null,
+        "requestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "candidateRequestHash": "f32f5b5313d77ef8a18510ee302ce32185df2c3deacf3a471686747444061380",
+        "expectedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+        "sessionId": null,
+        "responseShape": {
+          "responseType": "object",
+          "presentFields": [
+            "action"
+          ],
+          "unknownEnvelopeFieldCount": 0,
+          "resultTypeType": "undefined",
+          "metadataType": "undefined",
+          "contentType": "undefined",
+          "contentFieldCount": null,
+          "confirmType": "undefined",
+          "reviewType": "undefined",
+          "unknownContentFieldCount": null,
+          "envelopeFields": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "contentFields": [],
+          "missingFields": [],
+          "missingContentFields": [
+            "confirm"
+          ]
+        },
+        "source": "host_response",
+        "userGesture": "unknown",
+        "cause": "unknown",
+        "state": "cancelled",
+        "grantRevision": 8,
+        "deviceApplication": "unknown"
+      }
+    }
+  ],
+  "rootCause": {
+    "component": "NativeRemoteExecutor.permitsCrossReview",
+    "localExpiry": "2026-11-11T13:50:21.645133Z",
+    "serverExpiry": "2026-11-11T13:50:21.645Z",
+    "evidence": "Read-only installed Mac durable grant metadata and server reviewer grant; visible BC error; isolated red then green regression",
+    "fix": "Exact ISO millisecond wire identity comparison, no relaxed tolerance; retain both live expiry checks and durable revision/synchronized checks"
+  },
+  "limits": [
+    "host cancel user gesture and cause unknown",
+    "new developer message preceded cancel; correlation is not causal proof",
+    "no automatic revival or replacement of cancelled command",
+    "Mac had no OS submission; phone system submission not user-seen"
+  ]
+}

@@ -178,6 +178,7 @@ extension NativeApprovalNotifying {
     private(set) var policy = NativeApprovalPolicy()
     private(set) var crossReviewLocallyEnabled: Bool
     var crossReviewEnabled: Bool { crossReviewLocallyEnabled && policy.reviewOtherDevices && mayReadOther() }
+    var crossReviewNeedsConfirmation: Bool { crossReviewLocallyEnabled && policy.revision > 0 && !policy.reviewOtherDevices }
     var primaryNotificationsHere: Bool { policy.primaryDeviceId != nil && policy.primaryDeviceId == service.nativeDeviceId }
     private(set) var notificationsEnabled: Bool
     private(set) var notificationAuthorization: NativeApprovalNotificationAuthorization = .unknown

@@ -273,7 +273,7 @@ export function createNativeCommands(db,time,executeTask,{approvalTTLSeconds=864
  }
  async function capabilities(){
   const rows=(await q('SELECT g.device_id,g.revision,g.body,g.expires_at,d.label FROM native_grants g JOIN devices d ON d.id=g.device_id WHERE d.revoked_at IS NULL AND g.expires_at>? ORDER BY g.device_id',time()).all()).results;
-  return {readAt:time(),approvalPolicy:policy(),devices:rows.map(r=>({deviceId:r.device_id,label:r.label,revision:r.revision,capabilities:JSON.parse(r.body).capabilities,expiresAt:r.expires_at,confirmation:'chat_button',availability:'execution_requires_device_online_not_heartbeat_proof'}))};
+  return {readAt:time(),approvalPolicy:policy(),approvalRouting:await routing.discovery(rows.map(r=>r.device_id)),devices:rows.map(r=>({deviceId:r.device_id,label:r.label,revision:r.revision,capabilities:JSON.parse(r.body).capabilities,expiresAt:r.expires_at,confirmation:'chat_button',availability:'execution_requires_device_online_not_heartbeat_proof'}))};
  }
  function journalQuery(v){
   keys(v,['start','end','text','includeTrash','limit','cursor']);

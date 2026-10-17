@@ -22,6 +22,27 @@ async function fixture(t){
  return{core,sqlite,devices,submit,config,decision,reopen,beforeBatch(fn){beforeBatch=fn;},failAudit(v){failAudit=v;},advance(ms){now=new Date(now.getTime()+ms);}};
 }
 const identity=r=>({commandId:r.commandId,requestHash:r.requestHash});
+test('capability discovery explains stale reviewer grants without refreshing permission or creating routes',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;
+ let routing=(await f.core.nativeCommands.capabilities()).approvalRouting;
+ assert.equal(routing.notificationMode,'single_device');
+ assert.deepEqual(routing.devices.find(d=>d.deviceId===phone.id),{deviceId:phone.id,configured:false,enabled:false,reason:'not_enabled'});
+ await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ routing=(await f.core.nativeCommands.capabilities()).approvalRouting;
+ assert.equal(routing.notificationMode,'all_reviewers');
+ assert.equal(routing.devices.find(d=>d.deviceId===phone.id).enabled,true);
+ await f.core.nativeCommands.setGrant({revision:2,capabilities:['item.create'],expiresAt:'2026-10-16T14:00:00.000Z'},phone);
+ const policyBefore=f.sqlite.prepare('SELECT * FROM native_approval_policy').all();
+ routing=(await f.reopen().nativeCommands.capabilities()).approvalRouting;
+ assert.equal(routing.authority,'diagnostic_only_rechecked_for_each_request');
+ assert.deepEqual(routing.devices.find(d=>d.deviceId===phone.id),{deviceId:phone.id,configured:true,enabled:false,reason:'grant_changed_requires_explicit_reconfirmation'});
+ assert.equal(routing.devices.find(d=>d.deviceId===mac.id).reason,'not_enabled');
+ assert.deepEqual(f.sqlite.prepare('SELECT * FROM native_approval_policy').all(),policyBefore);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_routes').get().n,0);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,0);
+ const r=await f.submit(199);
+ await assert.rejects(f.core.nativeCommands.approvalStatus({commandId:r.commandId},phone),e=>e.status===403);
+});
 test('all-reviewer mode gives each authorized device one independent durable notice, one business command',async t=>{
  const f=await fixture(t),[mac,phone]=f.devices;
  await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});

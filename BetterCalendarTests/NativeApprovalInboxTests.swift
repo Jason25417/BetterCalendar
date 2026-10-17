@@ -272,6 +272,22 @@ import AppKit
         service.routing.failConfigure = false; await inbox.refresh()
         #expect(!service.routing.review && !inbox.crossReviewEnabled && !prefs.bool(forKey: "bc.nativeApprovalPendingRevoke"))
     }
+    @Test func changedServerReviewGrantShowsReconfirmationAndNeverAutomaticallyRestoresIt() async throws {
+        let (service, disk, prefs) = try fixture()
+        let inbox = NativeApprovalInbox(service: service, persistence: disk, preferences: prefs, now: { self.at },
+                                        mayReviewOther: { _ in true }, mayReadOther: { true })
+        await inbox.configurePolicy(review: true, notificationMode: "all_reviewers")
+        #expect(inbox.crossReviewEnabled && !inbox.crossReviewNeedsConfirmation)
+        let policyRevision = service.routing.revision
+        service.routing.review = false // The server invalidated the old grant binding.
+        await inbox.refresh()
+        #expect(!inbox.crossReviewEnabled && inbox.crossReviewNeedsConfirmation)
+        #expect(service.routing.revision == policyRevision && !service.routing.review && service.decisions.isEmpty)
+        await inbox.refresh()
+        #expect(inbox.crossReviewNeedsConfirmation && service.routing.revision == policyRevision)
+        await inbox.configurePolicy(review: true, notificationMode: "all_reviewers")
+        #expect(inbox.crossReviewEnabled && !inbox.crossReviewNeedsConfirmation)
+    }
     @Test func explicitMultideviceOptInIsVerifiedAndAClosedPeerRequestClearsItsNotification() async throws {
         let (service, disk, prefs) = try fixture(); service.executionDeviceId = "fixture-other-device"
         let notifier = ApprovalNotifier()

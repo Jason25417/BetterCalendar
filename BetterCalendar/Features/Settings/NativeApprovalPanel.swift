@@ -65,6 +65,10 @@ struct NativeApprovalPanel: View {
                         Button("让所有已授权设备接收新审批通知") { Task { await model.configurePolicy(notificationMode: "all_reviewers") } }.disabled(model.busy)
                     }
                 } else {
+                    if model.crossReviewNeedsConfirmation {
+                        Text("本机此前开启过跨设备审批，但服务器当前未确认有效许可。保存新权限、权限到期或其他端关闭后，需要在下方重新确认；不会自动恢复。自己的请求仍可在本机审批。")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
                     Button("允许本机接收并审批其他设备的请求") { Task { await model.configurePolicy(review: true, notificationMode: "all_reviewers") } }.disabled(model.busy)
                 }
                 Text(model.policy.notificationMode == "all_reviewers" ? "新审批将发给执行设备及已单独允许跨设备审批的设备；每台设备同一请求只提醒一次。" : "当前仍沿用旧的单设备提醒策略；可在上方切换多端通知。")

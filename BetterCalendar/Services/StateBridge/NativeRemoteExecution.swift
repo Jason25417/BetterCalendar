@@ -189,7 +189,12 @@ nonisolated enum NativeRemoteJSON {
         // Read durable local revocation, not a potentially stale UI flag.
         guard let grant = try? persistence.load().grant, grant.synchronized,
               grant.deviceId == deviceId, grant.revision == context.grantRevision,
-              grant.expiresAt > now(), context.expiresAt == grant.expiresAt, !grant.capabilities.isEmpty else { return false }
+              grant.expiresAt > now(), context.expiresAt > now(),
+              // Grants are sent as ISO milliseconds; local Codable Dates may
+              // retain microseconds. Compare the exact wire identity, without
+              // a tolerance that could accept a different service deadline.
+              NativeRemoteJSON.timestamp(context.expiresAt) == NativeRemoteJSON.timestamp(grant.expiresAt),
+              !grant.capabilities.isEmpty else { return false }
         return true
     }
     // Called only by the human's native settings button, never a remote tool.
