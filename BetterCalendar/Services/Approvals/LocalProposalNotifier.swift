@@ -8,6 +8,7 @@
 
 import Foundation
 import UserNotifications
+import Observation
 
 @MainActor final class LocalProposalNotifier: ProposalNotifying {
     static let category = "BC_PROPOSAL"
@@ -46,8 +47,19 @@ import UserNotifications
     }
 
     /// 解析通知点击：批准/拒绝 → 带决定；点通知本身或「查看详情」→ 只打开详情，绝不当作批准。
+    /// 本机通知（bcProposalId）或云端可见推送（B5，记录名）都能解析出提案 id。
+    static func proposalId(from userInfo: [AnyHashable: Any]) -> UUID? {
+        if let raw = userInfo[userInfoKey] as? String { return UUID(uuidString: raw) }
+        return CloudKitProposalStore.proposalId(fromAlertPush: userInfo)
+    }
+
+    /// 是否是 B5 云端代发的可见推送（而非本机生成的通知）。
+    static func isRemoteAlert(_ userInfo: [AnyHashable: Any]) -> Bool {
+        userInfo[userInfoKey] == nil && CloudKitProposalStore.proposalId(fromAlertPush: userInfo) != nil
+    }
+
     static func route(userInfo: [AnyHashable: Any], actionIdentifier: String) -> (id: UUID, decision: ProposalDecision?)? {
-        guard let raw = userInfo[userInfoKey] as? String, let id = UUID(uuidString: raw) else { return nil }
+        guard let id = proposalId(from: userInfo) else { return nil }
         switch actionIdentifier {
         case approveAction: return (id, .approve)
         case declineAction: return (id, .decline)
@@ -64,16 +76,28 @@ import UserNotifications
 
     func withdraw(_ id: UUID) async {
         let identifier = Self.idPrefix + id.uuidString
-        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        // 云端代发的可见推送（B5）标识由系统生成，按载荷里的记录名找到再收起。
+        let remote = await center.deliveredNotifications()
+            .filter { Self.isRemoteAlert($0.request.content.userInfo) && Self.proposalId(from: $0.request.content.userInfo) == id }
+            .map(\.request.identifier)
+        center.removeDeliveredNotifications(withIdentifiers: [identifier] + remote)
         center.removePendingNotificationRequests(withIdentifiers: [identifier])
     }
 
+    /// 本机已挂着通知的提案：本机生成的 + 云端代发的（避免同一提案弹两条）。
     func shownIds() async -> Set<UUID> {
-        let delivered = await center.deliveredNotifications().map(\.request.identifier)
-        let pending = await center.pendingNotificationRequests().map(\.identifier)
-        return Set((delivered + pending).compactMap { identifier in
+        let delivered = await center.deliveredNotifications()
+        let pending = await center.pendingNotificationRequests()
+        let local = (delivered.map(\.request.identifier) + pending.map(\.identifier)).compactMap { identifier in
             identifier.hasPrefix(Self.idPrefix) ? UUID(uuidString: String(identifier.dropFirst(Self.idPrefix.count))) : nil
-        })
+        }
+        let remote = delivered.compactMap { Self.isRemoteAlert($0.request.content.userInfo) ? Self.proposalId(from: $0.request.content.userInfo) : nil }
+        return Set(local + remote)
+    }
+
+    /// 前台去重：本机已为同一提案挂了通知时，云端代发的那条不再展示。
+    func hasLocalNotification(for id: UUID) async -> Bool {
+        await center.deliveredNotifications().contains { $0.request.identifier == Self.idPrefix + id.uuidString }
     }
 
     func permission() async -> Bool? {
@@ -92,4 +116,33 @@ import UserNotifications
 /// 推送唤醒的接缝：AppDelegate 收到本 zone 的推送后调用；由组装点挂上 ProposalCenter.refresh。
 @MainActor enum ProposalWake {
     static var onPush: (() async -> Void)?
+}
+
+/// B5 可见推送开关（实验，默认关）。订阅存在 iCloud 账户里：一端打开，所有设备生效；状态以云端为准。
+@MainActor @Observable final class ProposalAlertPushControl {
+    static let key = "approvals.alertPush.enabled"
+    private(set) var enabled: Bool
+    private(set) var lastError: String?
+    private let store: CloudKitProposalStore
+    init(store: CloudKitProposalStore) {
+        self.store = store
+        enabled = UserDefaults.standard.bool(forKey: Self.key)
+    }
+    /// 从云端读真实状态（其他设备可能已切换过）。
+    func reload() async {
+        do { enabled = try await store.isAlertPushEnabled(); UserDefaults.standard.set(enabled, forKey: Self.key) }
+        catch { lastError = "读取推送状态失败：\(error.localizedDescription)" }
+    }
+
+    func set(_ on: Bool) async {
+        do {
+            try await store.setAlertPush(enabled: on)
+            enabled = on; lastError = nil
+            UserDefaults.standard.set(on, forKey: Self.key)
+            DevLog.shared.info("多端审批", "App 关闭时推送（实验）已\(on ? "开启" : "关闭")")
+        } catch {
+            lastError = "切换失败：\(error.localizedDescription)"
+            DevLog.shared.error("多端审批", lastError!)
+        }
+    }
 }

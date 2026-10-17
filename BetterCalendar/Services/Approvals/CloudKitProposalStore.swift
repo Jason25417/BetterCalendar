@@ -43,6 +43,8 @@ nonisolated enum ProposalRecordCodec {
 actor CloudKitProposalStore: ProposalRecordStore {
     static let zoneID = CKRecordZone.ID(zoneName: "BCApprovals", ownerName: CKCurrentUserDefaultName)
     static let subscriptionID = "bc-approvals-zone-sub"
+    /// B5（实验，默认关）：新提案的可见推送——App 没运行也能弹出带批准/拒绝的通知。
+    static let alertSubscriptionID = "bc-approvals-alert-sub"
 
     private let db: CKDatabase
     /// 最近一次从服务器拿到的记录（含版本信息），供条件保存。
@@ -56,7 +58,40 @@ actor CloudKitProposalStore: ProposalRecordStore {
 
     /// 推送是否来自本 zone 的订阅。
     nonisolated static func isProposalPush(_ userInfo: [AnyHashable: Any]) -> Bool {
-        CKNotification(fromRemoteNotificationDictionary: userInfo)?.subscriptionID == subscriptionID
+        [subscriptionID, alertSubscriptionID].contains(CKNotification(fromRemoteNotificationDictionary: userInfo)?.subscriptionID)
+    }
+
+    /// 可见推送对应的提案 id（云端代发的通知没有本机写入的 bcProposalId，只能从推送载荷里取记录名）。
+    nonisolated static func proposalId(fromAlertPush userInfo: [AnyHashable: Any]) -> UUID? {
+        guard let note = CKNotification(fromRemoteNotificationDictionary: userInfo) as? CKQueryNotification,
+              note.subscriptionID == alertSubscriptionID, let name = note.recordID?.recordName else { return nil }
+        return UUID(uuidString: name)
+    }
+
+    /// B5 可见推送订阅是否存在（订阅属于 iCloud 账户：一端打开，所有设备都会收到）。
+    func isAlertPushEnabled() async throws -> Bool {
+        do { _ = try await db.subscription(for: Self.alertSubscriptionID); return true }
+        catch let error as CKError where error.code == .unknownItem { return false }
+    }
+
+    /// 打开/关闭 B5 可见推送订阅。只在新建提案时触发（新提案必为待确认）；文案由云端代入记录的 title/body。
+    func setAlertPush(enabled: Bool) async throws {
+        try await ensureZone()
+        guard enabled else {
+            do { _ = try await db.deleteSubscription(withID: Self.alertSubscriptionID) }
+            catch let error as CKError where error.code == .unknownItem {}
+            return
+        }
+        let sub = CKQuerySubscription(recordType: ProposalRecordCodec.recordType, predicate: NSPredicate(value: true),
+                                      subscriptionID: Self.alertSubscriptionID, options: [.firesOnRecordCreation])
+        sub.zoneID = Self.zoneID
+        let info = CKSubscription.NotificationInfo()
+        info.titleLocalizationKey = "BC_PROPOSAL_PUSH_TITLE"; info.titleLocalizationArgs = ["title"]
+        info.alertLocalizationKey = "BC_PROPOSAL_PUSH_BODY"; info.alertLocalizationArgs = ["body"]
+        info.category = "BC_PROPOSAL"
+        info.soundName = "default"
+        sub.notificationInfo = info
+        _ = try await db.save(sub)
     }
 
     func ensureSubscription() async throws {

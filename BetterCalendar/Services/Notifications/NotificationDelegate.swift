@@ -91,6 +91,12 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        // SPEC §19 B5 去重：同一提案本机已有通知时，不再展示云端代发的那条。
+        let info = notification.request.content.userInfo
+        if LocalProposalNotifier.isRemoteAlert(info), let id = LocalProposalNotifier.proposalId(from: info),
+           await LocalProposalNotifier().hasLocalNotification(for: id) {
+            return []
+        }
+        return [.banner, .sound]
     }
 }

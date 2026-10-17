@@ -48,6 +48,7 @@ final class AppContainer {
     let nativeApprovals: NativeApprovalInbox
     let proposals: ProposalCenter              // SPEC §19 多端审批（CloudKit 中转；旧 nativeApprovals 冻结）
     let proposalStore: CloudKitProposalStore?  // 测试环境为 nil（内存中转）
+    let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验，默认关；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
@@ -125,12 +126,14 @@ final class AppContainer {
         // SPEC §19 多端审批：CloudKit 私有库独立 zone；测试环境走内存中转、不碰网络与通知中心。
         if TestHost.isActive {
             self.proposalStore = nil
+            self.alertPush = nil
             self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
                                             notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
                                             deviceId: "test-host", deviceLabel: "测试")
         } else {
             let store = CloudKitProposalStore()
             self.proposalStore = store
+            self.alertPush = ProposalAlertPushControl(store: store)
             self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: ExperimentOnlyExecutor(),
                                             notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
                                             deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)

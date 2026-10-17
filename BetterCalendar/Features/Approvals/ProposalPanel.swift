@@ -12,6 +12,7 @@ struct ProposalPanel: View {
     @Bindable var center: ProposalCenter
     var focusId: UUID?
     var bridge: AgentBridge? = nil
+    var alertPush: ProposalAlertPushControl? = nil
     @State private var notificationAllowed: Bool?
 
     var body: some View {
@@ -46,6 +47,14 @@ struct ProposalPanel: View {
                 }
             }
             #endif
+            if let alertPush {
+                Section("App 关闭时也推送（实验，B5）") {
+                    Toggle("新提案由 iCloud 直接推送", isOn: Binding(get: { alertPush.enabled }, set: { on in Task { await alertPush.set(on) } }))
+                    Text("打开后，App 没运行也能弹出带批准/拒绝的通知；作用于你所有设备。和本机通知重复时只保留一条。").font(.caption).foregroundStyle(.secondary)
+                    if let e = alertPush.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
+                }
+                .task { await alertPush.reload() }
+            }
             Section("开发期工具") {
                 Text("本机：\(center.deviceLabel)").font(.footnote).foregroundStyle(.secondary)
                 notificationRow

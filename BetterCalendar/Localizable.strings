@@ -1,0 +1,3 @@
+/* SPEC §19 B5：CloudKit 可见推送的文案模板——参数由云端代入提案记录的 title / body 字段。 */
+"BC_PROPOSAL_PUSH_TITLE" = "%1$@";
+"BC_PROPOSAL_PUSH_BODY" = "%1$@";
