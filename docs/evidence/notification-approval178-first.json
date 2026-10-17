@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "scope": "build178 first notification approval, synthetic marked todo only",
+  "status": "awaiting_human_notification_approval",
+  "deviceVerification": {
+    "readAt": "2026-10-17T00:55:26.566Z",
+    "research": {
+      "callId": "research_e034a868-e56c-47f0-8e75-1f646027e139",
+      "responseHash": "f6560685bed46804859c2563fb1f3541445fce4e696f136cea852d5711a8ecb4",
+      "recorded": true
+    },
+    "sources": [
+      {
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "observedAt": "2026-10-17T00:52:53.000Z",
+        "receivedAt": "2026-10-17T00:53:17.795Z",
+        "freshnessAtRead": "current",
+        "collector": {
+          "name": "BetterCalendar",
+          "version": "0.65.21",
+          "schemaVersion": 2,
+          "build": "178"
+        },
+        "approvalNotifications": {
+          "systemAuthorization": "authorized",
+          "routingProtocol": 1,
+          "enabled": true,
+          "delivery": "local_poll_20s_while_app_runs",
+          "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+          "remoteApprovalPush": false
+        }
+      },
+      {
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "observedAt": "2026-10-17T00:54:49.000Z",
+        "receivedAt": "2026-10-17T00:54:51.163Z",
+        "freshnessAtRead": "current",
+        "collector": {
+          "schemaVersion": 2,
+          "name": "BetterCalendar",
+          "version": "0.65.21",
+          "build": "178"
+        },
+        "approvalNotifications": {
+          "systemAuthorization": "authorized",
+          "enabled": true,
+          "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+          "delivery": "local_poll_20s_while_app_runs",
+          "remoteApprovalPush": false,
+          "routingProtocol": 1
+        }
+      }
+    ]
+  },
+  "beforeReadback": [
+    {
+      "sourceDeviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "readAt": "2026-10-17T00:56:16.872Z",
+      "observedAt": "2026-10-17T00:55:49.000Z",
+      "receivedAt": "2026-10-17T00:55:51.262Z",
+      "complete": true,
+      "hasMore": false,
+      "totalRecordCount": 28,
+      "research": {
+        "callId": "research_57ba438a-57c1-49e9-ae63-ec148c9a4a41",
+        "responseHash": "9fb5ba8681320b8132dd3017bb457c283c8e5326ce674c7e6cef5e898786d9eb",
+        "recorded": true
+      },
+      "record": {
+        "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+        "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+        "values": {
+          "cadenceMinutesPerWeek": null,
+          "checkpoints": [],
+          "createdAt": 1792007516159,
+          "deadline": null,
+          "deletedAt": null,
+          "deletionContext": null,
+          "deletionId": null,
+          "doneAt": null,
+          "family": null,
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "isInTrash": false,
+          "modifiedAt": 1792013121119,
+          "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+          "restoredDeletionId": null,
+          "spilledFromDay": null,
+          "status": "active",
+          "title": "BC 联调测试｜双入口验收",
+          "totalMinutes": null,
+          "unitMinutes": null,
+          "zone": "todo"
+        }
+      }
+    },
+    {
+      "sourceDeviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "readAt": "2026-10-17T00:56:16.907Z",
+      "observedAt": "2026-10-17T00:52:53.000Z",
+      "receivedAt": "2026-10-17T00:53:20.316Z",
+      "complete": true,
+      "hasMore": false,
+      "totalRecordCount": 28,
+      "research": {
+        "callId": "research_b590b98e-1d7c-4568-a698-423409bd7810",
+        "responseHash": "a6323a37dd48a4fcc7a6912f37badd1531b5c77211a34f9da6eb62d32a839823",
+        "recorded": true
+      },
+      "record": {
+        "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+        "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+        "values": {
+          "cadenceMinutesPerWeek": null,
+          "checkpoints": [],
+          "createdAt": 1792007516159,
+          "deadline": null,
+          "deletedAt": null,
+          "deletionContext": null,
+          "deletionId": null,
+          "doneAt": null,
+          "family": null,
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "isInTrash": false,
+          "modifiedAt": 1792013121119,
+          "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+          "restoredDeletionId": null,
+          "spilledFromDay": null,
+          "status": "active",
+          "title": "BC 联调测试｜双入口验收",
+          "totalMinutes": null,
+          "unitMinutes": null,
+          "zone": "todo"
+        }
+      }
+    }
+  ],
+  "proposal": {
+    "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+    "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+    "acceptedAt": "2026-10-17T00:57:57.039Z",
+    "expiresAt": "2026-10-18T00:57:56.895Z",
+    "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+    "permission": "item.update",
+    "grantRevision": 1,
+    "recordId": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+    "expectedRevision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+    "patch": {
+      "title": "BC 联调测试｜通知审批178"
+    },
+    "stateAtRead": "awaiting_confirmation",
+    "approvedAt": null,
+    "result": null,
+    "research": {
+      "callId": "research_a1079529-9bb7-4827-bd0d-89338e1dd77a",
+      "responseHash": "2c999f91785fc38c7a3c153691958fc77653b369cf77c6b6888a5b6f5344de45",
+      "recorded": true
+    }
+  },
+  "notificationRouting": {
+    "policy": "no policy row; target-only default; no cross-device or primary opt-in enabled by agent",
+    "rows": [
+      {
+        "command_id": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+        "request_hash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+        "device_id": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "policy_revision": 0,
+        "claim_id": "295b8bc5-06e0-439d-9e0f-ac3e4d9cefaf",
+        "state": "system_submitted",
+        "system_submitted_at": "2026-10-17T00:58:13.662Z",
+        "clicked_at": null,
+        "updated_at": "2026-10-17T00:58:13.662Z"
+      }
+    ]
+  },
+  "systemSubmission": {
+    "id": 223301,
+    "callId": "approval_notice_271ad95b-2959-457b-945f-28ca9ce61fb6",
+    "kind": "approval_notification_receipt",
+    "batchId": null,
+    "createdAt": "2026-10-17T00:58:13.662Z",
+    "body": {
+      "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+      "evidence": "device_report",
+      "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+      "state": "system_submitted",
+      "userSeen": "unknown",
+      "version": 1
+    },
+    "acceptToSystemReportedSeconds": 16.623
+  },
+  "browserEvidence": {
+    "localOnlyScreenshot": "/private/tmp/bc178-notification-test-proposal.jpg",
+    "purpose": "pending Dots proposal visible; not proof of native OS notice visibility or human approval",
+    "agentSelectedAnyApproval": false
+  },
+  "unverified": [
+    "actual system notice visible and complete",
+    "human direct notification approve/reject action",
+    "decision origin",
+    "device application",
+    "after revision and readback",
+    "phone native approval and notification UI",
+    "cross-device opt-in policy, route dedup and old notice cleanup"
+  ],
+  "next": "Jason expands this Mac BC system notification and personally approves; no new command, no auto approval."
+}

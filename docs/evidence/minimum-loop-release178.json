@@ -28,7 +28,7 @@
     "typescript": "passed",
     "productionBuild": "passed"
   },
-  "realDeviceAcceptance": "not yet attempted; no true timer, new notification/ring, item mutation or permission change",
+  "realDeviceAcceptance": "in progress: both178 receipts verified; one synthetic item title proposal awaiting human Mac system-notification approval; device reports system_submitted, not human seen/applied",
   "dotsMessage": {
     "sentVia": "Edge extension / personal Dots page",
     "sentAfterBothAppsAvailable": true,
@@ -53,7 +53,7 @@
     },
     "snapshotLocalOnly": "/private/tmp/bc178-dots-receipt.jpg",
     "execution": "none; no new proposals/timers/reminder schedules/permission changes",
-    "latestResult": "refreshed metadata visible; awaiting physical 178 installation and explicit human approvals"
+    "latestResult": "refreshed metadata visible; physical178 installation verified on both; first notification-approval proposal pending human action"
   },
   "appStoreConnect": {
     "appId": "6787325341",
@@ -97,5 +97,6 @@
     "observedAt": "2026-10-15T22:04:36.675318+00:00",
     "evidenceLevel": "Dots visible tool-definition report; no new operation/query executed",
     "screenshotLocalOnly": "/private/tmp/bc178-dots-refreshed.jpg"
-  }
+  },
+  "incrementalEvidence": "notification-approval178-first.json"
 }
