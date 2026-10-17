@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "status": "offline_only_not_wired_or_deployed",
+  "files": [
+    "StateBridge/server/lib/apns-provider.mjs",
+    "StateBridge/server/lib/apns-attempt.mjs",
+    "StateBridge/server/tests/apns-offline.test.mjs"
+  ],
+  "tests": {
+    "command": "node --test tests/apns-offline.test.mjs",
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0,
+    "log": "/private/tmp/bc-apns-offline-tests.log",
+    "realNetworkCalls": 0,
+    "keySource": "ephemeral generated test key, in-memory only",
+    "storeRestartScope": "SQLite close/reopen and dispatcher recreation, not actual Worker process restart"
+  },
+  "production": {
+    "serviceVersion": 42,
+    "appBuild": 179,
+    "changed": false,
+    "tokenRegistration": false,
+    "credentialChanges": false,
+    "notificationPermissionChanges": false,
+    "realNotificationsSent": false
+  },
+  "remaining": [
+    "user APNs authorization choice",
+    "native token opt-in/registration/rotation/revocation and full payload binding",
+    "adapt existing per-device notification CAS so local and APNs cannot both send",
+    "bounded explicit-rejection scheduler and token invalidation race",
+    "real Cloudflare HTTP/2/provider and physical foreground/background/locked/quit tests"
+  ],
+  "capabilityCaveat": "Apple HTTP/2 requirements verified in official documentation; Cloudflare production fetch feasibility remains unverified, upstream issue is only a user report",
+  "latestUserGate": {
+    "readAt": "2026-10-17T01:50:02.687Z",
+    "research": {
+      "callId": "research_f872b085-2c73-4638-88c6-bdccd6db383d",
+      "responseHash": "5465e1ad7bbd9f4eff4499647a0d9a1858098932e12fd548c7ee7cbaa7e56104",
+      "recorded": true
+    },
+    "devices": [
+      {
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "observedAt": "2026-10-17T01:43:42.000Z",
+        "freshness": "stale",
+        "collector": {
+          "build": "178",
+          "schemaVersion": 2,
+          "version": "0.65.21",
+          "name": "BetterCalendar"
+        }
+      },
+      {
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "observedAt": "2026-10-17T01:48:49.000Z",
+        "freshness": "current",
+        "collector": {
+          "name": "BetterCalendar",
+          "schemaVersion": 2,
+          "build": "178",
+          "version": "0.65.21"
+        }
+      }
+    ],
+    "policyRows": 0,
+    "apnsAnswer": "not received"
+  }
+}
