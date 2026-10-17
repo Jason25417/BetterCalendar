@@ -74,7 +74,7 @@ struct BetterCalendarApp: App {
             }
             .sheet(isPresented: Binding(get: { container.router.openProposals }, set: { container.router.openProposals = $0 })) {
                 NavigationStack {
-                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId)
+                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId, bridge: container.agentBridge)
                         .navigationTitle("多端审批")
                         .toolbar { Button("关闭") { container.router.openProposals = false; container.router.proposalFocusId = nil } }
                 }

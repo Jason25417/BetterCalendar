@@ -105,6 +105,7 @@ nonisolated struct OperationRecord: Codable, Equatable, Sendable, Identifiable {
     var proposalId: UUID?
     /// 上下级：这一步由哪个提案/操作引出
     var parentId: UUID?
+    var parentRef: String? = nil
     var detail: String
 }
 

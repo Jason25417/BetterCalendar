@@ -99,6 +99,8 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var decidedByDeviceId: String?
     var appliedAt: Date?
     var resultNote: String?
+    /// 非 UUID 形式的上级引用（如智能体事件 id「event-…」）；与 parentId 二选一或并存。
+    var parentRef: String? = nil
 
     /// 以此刻判断的有效状态：未决定且已过截止时间 = 已过期（不复活，不执行）。
     func effectiveState(at now: Date) -> ProposalState {
@@ -128,6 +130,9 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
 
 /// 发起时只填这些；身份、时间、状态由 ProposalCenter 统一盖章。
 nonisolated struct ProposalDraft: Sendable {
+    /// 指定提案 id（智能体桥接导入时沿用智能体给的 id，保证重复导入幂等）；nil = 新生成。
+    var id: UUID? = nil
+    var parentRef: String? = nil
     var origin: ProposalOrigin
     var originLabel: String
     var parentId: UUID? = nil

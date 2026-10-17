@@ -88,11 +88,11 @@ import UIKit
     @discardableResult
     func submit(_ draft: ProposalDraft) async -> Proposal? {
         let at = now()
-        let proposal = Proposal(id: UUID(), createdAt: at, expiresAt: at.addingTimeInterval(draft.lifetime),
+        let proposal = Proposal(id: draft.id ?? UUID(), createdAt: at, expiresAt: at.addingTimeInterval(draft.lifetime),
                                 origin: draft.origin, originLabel: draft.originLabel, originDeviceId: deviceId,
                                 parentId: draft.parentId, targetDeviceId: draft.targetDeviceId,
                                 title: draft.title, changes: draft.changes, reason: draft.reason,
-                                action: draft.action, experiment: draft.experiment, state: .pending)
+                                action: draft.action, experiment: draft.experiment, state: .pending, parentRef: draft.parentRef)
         do {
             try await transport.submit(proposal)
             record(proposal.origin, proposal.originLabel, "submitted", proposal, "发起：\(proposal.title)")
@@ -182,7 +182,7 @@ import UIKit
 
     private func record(_ actor: ProposalOrigin, _ label: String, _ event: String, _ p: Proposal?, _ detail: String) {
         ledger.append(OperationRecord(at: now(), actor: actor, actorLabel: label, deviceId: deviceId, event: event,
-                                      proposalId: p?.id, parentId: p?.parentId, detail: detail))
+                                      proposalId: p?.id, parentId: p?.parentId, parentRef: p?.parentRef, detail: detail))
     }
 
     private func fail(_ what: String, _ error: Error, _ p: Proposal?) {

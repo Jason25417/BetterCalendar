@@ -11,6 +11,7 @@ import SwiftUI
 struct ProposalPanel: View {
     @Bindable var center: ProposalCenter
     var focusId: UUID?
+    var bridge: AgentBridge? = nil
     @State private var notificationAllowed: Bool?
 
     var body: some View {
@@ -32,6 +33,19 @@ struct ProposalPanel: View {
                 if closed.isEmpty { Text("还没有").foregroundStyle(.secondary) }
                 ForEach(Array(closed)) { p in historyRow(p) }
             }
+            #if os(macOS)
+            if let bridge {
+                Section("BetterCalendar 智能体桥接（Mac）") {
+                    Text(bridge.folderPath.map { "已连接：\($0)" } ?? "未连接：请选择智能体工作区里的 bridge 文件夹").font(.footnote)
+                    if let last = bridge.lastSync { Text("上次同步 \(last.formatted(date: .omitted, time: .standard)) · 已导入 \(bridge.importedCount) 份提案").font(.caption).foregroundStyle(.secondary) }
+                    if let error = bridge.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
+                    HStack {
+                        Button(bridge.connected ? "重新选择文件夹" : "选择 bridge 文件夹") { bridge.chooseFolder() }
+                        if bridge.connected { Button("断开", role: .destructive) { bridge.disconnect() } }
+                    }
+                }
+            }
+            #endif
             Section("开发期工具") {
                 Text("本机：\(center.deviceLabel)").font(.footnote).foregroundStyle(.secondary)
                 notificationRow
