@@ -40,3 +40,5 @@ Jason在2026-10-16明确改为iPhone、Mac都收到同一审批通知；一端�
 发布核验：服务42 succeeded/has_mcp，两端179均VALID、IN_BETA_TESTING及中文notes读回；归档源f52d43f36b54e9ee9fe39ae75de4fb2941234124。精确发布记录见evidence/multidevice-approval-release179.json。已向Dots发送仅只读增量核对，不生成新提案；已请本人更新并在两端明确开启跨设备审批，不能代开或把安装可用当实测通过。
 
 Dots只读回报已收到；研究日志225596–225601实见read_instructions/capabilities/current_state各一次及返回hash。Mac上报仍178、手机最后178且stale，新dataSync与跨端开启未证。详见evidence/multidevice-approval179-dots-readiness.json；截图仅本地/private/tmp/bc179-dots-readiness.jpg，不向Git复制私人聊天。
+
+后续只读诊断：iPhone01:35:45Z新快照仍旧revision，距Mac applied1934.326秒；这是点样本，不证明全程未导入或未回退。Mac实际/Applications包178有Store receipt、正确Production容器；179 iPhone最终导出签名为同容器Production，不能替代手机当前178签名证据。预导出archive的development签名不是最终上传产物，未当成根因。两端已有APNs entitlement，但BC推送token/服务/凭据未接通；待授权范围已更正为这条新通道，而非重开现有系统通知授权。见evidence/sync-gap178-followup.json。

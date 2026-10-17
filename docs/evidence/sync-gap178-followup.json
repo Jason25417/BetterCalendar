@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "deviceRead": {
+    "readAt": "2026-10-17T01:38:03.673Z",
+    "research": {
+      "callId": "research_46ef5db6-31e1-4c7f-a708-6ae9a8fa81d0",
+      "responseHash": "55a7fa5420b074afac1b8c69b97129c8b93291d81b1652b5fcd9e5eef99eb0c6",
+      "recorded": true
+    },
+    "sources": [
+      {
+        "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+        "observedAt": "2026-10-17T01:35:45.000Z",
+        "receivedAt": "2026-10-17T01:35:52.357Z",
+        "freshness": "current",
+        "collector": {
+          "schemaVersion": 2,
+          "build": "178",
+          "name": "BetterCalendar",
+          "version": "0.65.21"
+        },
+        "approvalNotifications": {
+          "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+          "enabled": true,
+          "systemAuthorization": "authorized",
+          "delivery": "local_poll_20s_while_app_runs",
+          "remoteApprovalPush": false,
+          "routingProtocol": 1
+        }
+      },
+      {
+        "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+        "observedAt": "2026-10-17T01:37:49.000Z",
+        "receivedAt": "2026-10-17T01:37:51.429Z",
+        "freshness": "current",
+        "collector": {
+          "schemaVersion": 2,
+          "version": "0.65.21",
+          "build": "178",
+          "name": "BetterCalendar"
+        },
+        "approvalNotifications": {
+          "notificationDecision": "short_complete_item_title_note_only_requires_human_action",
+          "systemAuthorization": "authorized",
+          "enabled": true,
+          "delivery": "local_poll_20s_while_app_runs",
+          "remoteApprovalPush": false,
+          "routingProtocol": 1
+        }
+      }
+    ]
+  },
+  "policy": {
+    "rows": [],
+    "hasMore": false
+  },
+  "phoneRecordRead": {
+    "readAt": "2026-10-17T01:38:12.284Z",
+    "observedAt": "2026-10-17T01:35:45.000Z",
+    "receivedAt": "2026-10-17T01:35:53.033Z",
+    "freshness": "current",
+    "complete": true,
+    "hasMore": false,
+    "snapshotEventId": "F15AFAD7-8AF9-4DD9-BB67-EE4942C432D7",
+    "records": [
+      {
+        "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+        "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+        "values": {
+          "cadenceMinutesPerWeek": null,
+          "checkpoints": [],
+          "createdAt": 1792007516159,
+          "deadline": null,
+          "deletedAt": null,
+          "deletionContext": null,
+          "deletionId": null,
+          "doneAt": null,
+          "family": null,
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "isInTrash": false,
+          "modifiedAt": 1792013121119,
+          "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+          "restoredDeletionId": null,
+          "spilledFromDay": null,
+          "status": "active",
+          "title": "BC 联调测试｜双入口验收",
+          "totalMinutes": null,
+          "unitMinutes": null,
+          "zone": "todo"
+        }
+      }
+    ],
+    "research": {
+      "callId": "research_76215cb1-f226-45dc-8c5c-541f9bfc950a",
+      "responseHash": "e3774e32cefda513cf7f31e6c716d3eec3c2e960539834c96dcfb9c9d75a4a47",
+      "recorded": true
+    }
+  },
+  "comparison": {
+    "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+    "macAppliedAt": "2026-10-17T01:03:30.674Z",
+    "macPersistedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+    "phoneStillOldAt": "2026-10-17T01:35:45Z",
+    "secondsAfterApplied": 1934.326,
+    "continuity": "point samples only; does not prove no intervening import or rollback"
+  },
+  "macProcess": {
+    "pid": 916,
+    "path": "/Applications/BetterCalendar.app/Contents/MacOS/BetterCalendar",
+    "installedBundle": "com.jason.BetterCalendar",
+    "installedVersion": "0.65.21",
+    "installedBuild": "178",
+    "storeReceiptPresent": true,
+    "cloudKitContainer": "iCloud.com.jason.BetterCalendar",
+    "cloudKitEnvironment": "Production",
+    "apsEnvironment": "production"
+  },
+  "ios179DistributionProduct": {
+    "path": "/var/folders/76/118gbhf12hdf6vh8rnq76k6w0000gn/T/XcodeDistPipeline.~~~Zzp8Wo/Root/Payload/BetterCalendar.app",
+    "cloudKitContainer": "iCloud.com.jason.BetterCalendar",
+    "cloudKitEnvironment": "Production",
+    "apsEnvironment": "production",
+    "scope": "final exported product, not proof of the currently installed iPhone178 entitlements",
+    "rawArchiveNotFinal": "pre-export archive has development APS; exporter re-signed the final product as production; not a diagnosed defect"
+  },
+  "apns": {
+    "existingEntitlements": true,
+    "bridgeTransportConnected": false,
+    "providerCredentialsOrDeviceTokenRegistrationChanged": false,
+    "authorizationStillRequiredFor": "BC-specific device token registration/storage and APNs provider credential use; existing notification permissions are not re-requested"
+  },
+  "rootCause": "not established; need iPhone179 import/export diagnostics or authenticated targeted CloudKit record read",
+  "next": "await already-requested two179 updates/explicit cross-device review; no new command or duplicate approval request"
+}
