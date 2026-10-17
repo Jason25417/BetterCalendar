@@ -126,7 +126,9 @@ actor CloudKitProposalStore: ProposalRecordStore {
             }
             for (id, result) in changes.modificationResultsByID {
                 switch result {
-                case let .success(modification): known[id] = modification.record
+                case let .success(modification):
+                    // 同分区还有智能体消息（BCAgentMessage）：只收提案记录，其余静默跳过。
+                    if modification.record.recordType == ProposalRecordCodec.recordType { known[id] = modification.record }
                 case let .failure(error):
                     DevLog.shared.warn("多端审批", "拉取一条提案失败（\(id.recordName.prefix(8))）：\(error.localizedDescription)")
                 }
