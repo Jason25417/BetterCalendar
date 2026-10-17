@@ -75,6 +75,12 @@ struct ProposalPanel: View {
             Text(p.title)
             Text([state.label, who.map { "决定于\($0)" }, p.resultNote].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
+            let l = center.latency(for: p.id)
+            if l.notify != nil || l.withdraw != nil {
+                Text("本机延迟：通知 \(l.notify.map { String(format: "%.1f 秒", $0) } ?? "—") · 收起 \(l.withdraw.map { String(format: "%.1f 秒", $0) } ?? "—")")
+                    .font(.caption2.monospaced()).foregroundStyle(.secondary)
+            }
+
         }
     }
 

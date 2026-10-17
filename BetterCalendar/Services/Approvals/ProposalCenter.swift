@@ -67,6 +67,17 @@ import UIKit
     /// 报错一直显示到用户主动关掉（失败必须可见，不因下一次成功刷新而静默消失）。
     func clearError() { lastError = nil }
 
+    /// SPEC §19 B2 延迟埋点（本机视角）：提交 → 本机弹通知、决定 → 本机收起。
+    /// 跨设备时含两台设备的时钟差，只作观察值，不是保证值。
+    func latency(for id: UUID) -> (notify: TimeInterval?, withdraw: TimeInterval?) {
+        guard let p = proposals.first(where: { $0.id == id }) else { return (nil, nil) }
+        let mine = ledger.records().filter { $0.proposalId == id && $0.deviceId == deviceId }
+        let notified = mine.first { $0.event == "notified" }?.at
+        let withdrawn = mine.first { $0.event == "withdrawn" }?.at
+        return (notified.map { $0.timeIntervalSince(p.createdAt) },
+                withdrawn.flatMap { w in p.decidedAt.map { w.timeIntervalSince($0) } })
+    }
+
     func notificationPermission() async -> Bool? { await notifier.permission() }
     func requestNotificationPermission() async -> Bool { await notifier.requestPermission() }
 

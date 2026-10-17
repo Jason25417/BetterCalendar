@@ -147,6 +147,9 @@ final class AppContainer {
                 await center?.refresh()
             }
             proposals.startPolling()
+            #if DEBUG && os(macOS)
+            DevProposalHooks.install(center: proposals)
+            #endif
         }
         nativeApprovals.start()
         remote.startPolling()
