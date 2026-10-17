@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core";
 export const devices = sqliteTable("devices", { id:text("id").primaryKey(),label:text("label").notNull(),tokenHash:text("token_hash").notNull(),scopes:text("scopes").notNull(),createdAt:text("created_at").notNull(),revokedAt:text("revoked_at") });
 export const observations = sqliteTable("observations", { id:text("id").primaryKey(),sourceKey:text("source_key").notNull(),deviceId:text("device_id").notNull(),seq:integer("seq").notNull(),observedAt:text("observed_at").notNull(),receivedAt:text("received_at").notNull(),body:text("body").notNull() },t=>[index("idx_observations_source_time").on(t.sourceKey,t.observedAt,t.id)]);
 export const states = sqliteTable("states", { sourceKey:text("source_key").primaryKey(),deviceId:text("device_id").notNull(),seq:integer("seq").notNull(),observedAt:text("observed_at").notNull(),receivedAt:text("received_at").notNull(),expiresAt:text("expires_at"),valueHash:text("value_hash").notNull(),body:text("body").notNull() });
@@ -33,3 +33,12 @@ export const nativeApprovalNotifications = sqliteTable("native_approval_notifica
   policyRevision:integer("policy_revision").notNull(), claimId:text("claim_id").notNull(), state:text("state").notNull(),
   systemSubmittedAt:text("system_submitted_at"), clickedAt:text("clicked_at"), updatedAt:text("updated_at").notNull()
 });
+export const nativeApprovalNotificationRoutes = sqliteTable("native_approval_notification_routes", {
+  commandId:text("command_id").primaryKey(), requestHash:text("request_hash").notNull(),
+  policyRevision:integer("policy_revision").notNull(), deviceIds:text("device_ids").notNull(), createdAt:text("created_at").notNull()
+});
+export const nativeApprovalNotificationDeliveries = sqliteTable("native_approval_notification_deliveries", {
+  commandId:text("command_id").notNull(), requestHash:text("request_hash").notNull(), deviceId:text("device_id").notNull(),
+  policyRevision:integer("policy_revision").notNull(), claimId:text("claim_id").notNull(), state:text("state").notNull(),
+  systemSubmittedAt:text("system_submitted_at"), clickedAt:text("clicked_at"), updatedAt:text("updated_at").notNull()
+},t=>[primaryKey({columns:[t.commandId,t.deviceId]})]);

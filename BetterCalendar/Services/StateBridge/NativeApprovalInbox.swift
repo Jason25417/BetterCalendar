@@ -337,7 +337,7 @@ extension NativeApprovalNotifying {
         }
         policy = latest
     }
-    func configurePolicy(review: Bool? = nil, primaryHere: Bool? = nil) async {
+    func configurePolicy(review: Bool? = nil, primaryHere: Bool? = nil, notificationMode: String? = nil) async {
         guard !isDisplayTest, !busy, let device = service.nativeDeviceId else { return }
         if review == false {
             crossReviewLocallyEnabled = false; preferences.set(false, forKey: "bc.nativeApprovalCrossReview")
@@ -352,17 +352,21 @@ extension NativeApprovalNotifying {
             var body: [String: BridgeJSON] = ["expectedRevision": .number(Double(current.revision))]
             if let review { body["reviewOtherDevices"] = .bool(review) }
             if let primaryHere { body["primaryHere"] = .bool(primaryHere) }
+            if let notificationMode { body["notificationMode"] = .string(notificationMode) }
             let latest = try NativeApprovalPolicy(await service.nativeRequest("native/approval-policy/configure", body: .object(body)))
             guard service.nativeDeviceId == device, latest.revision > current.revision,
                   review == nil || latest.reviewOtherDevices == review,
-                  primaryHere != true || latest.primaryDeviceId == device else { throw DataArchiveError.invalid("审批设置回执未核实，没有扩大本机权限") }
+                  primaryHere != true || latest.primaryDeviceId == device,
+                  notificationMode == nil || latest.notificationMode == notificationMode else { throw DataArchiveError.invalid("审批设置回执未核实，没有扩大本机权限") }
             policy = latest
             if let review {
                 crossReviewLocallyEnabled = review
                 preferences.set(review, forKey: "bc.nativeApprovalCrossReview")
                 preferences.set(false, forKey: "bc.nativeApprovalPendingRevoke")
             }
-            message = "审批设置已保存；只有本人具体确认才执行。主要设备仅影响之后新建的请求，不自动故障转移。"
+            message = latest.notificationMode == "all_reviewers"
+                ? "审批设置已保存：新请求通知所有已授权并开启提醒的设备；任一端决定后其他端读取同一结果并清理旧通知。"
+                : "审批设置已保存；只有本人具体确认才执行。新设置只影响之后新建的请求。"
         } catch { fail(error) }
     }
     func recordNotificationClick(_ id: String) async {

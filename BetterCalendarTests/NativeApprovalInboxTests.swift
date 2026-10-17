@@ -272,6 +272,23 @@ import AppKit
         service.routing.failConfigure = false; await inbox.refresh()
         #expect(!service.routing.review && !inbox.crossReviewEnabled && !prefs.bool(forKey: "bc.nativeApprovalPendingRevoke"))
     }
+    @Test func explicitMultideviceOptInIsVerifiedAndAClosedPeerRequestClearsItsNotification() async throws {
+        let (service, disk, prefs) = try fixture(); service.executionDeviceId = "fixture-other-device"
+        let notifier = ApprovalNotifier()
+        let inbox = NativeApprovalInbox(service: service, persistence: disk, notifier: notifier, preferences: prefs,
+                                        now: { self.at }, mayReviewOther: { _ in true }, mayReadOther: { true })
+        await inbox.configurePolicy(review: true, notificationMode: "all_reviewers")
+        #expect(inbox.crossReviewEnabled && inbox.policy.notificationMode == "all_reviewers")
+        #expect(inbox.policy.primaryDeviceId == nil && service.decisions.isEmpty)
+        await inbox.refresh(); await inbox.open(service.id)
+        #expect(inbox.selected?.state == "awaiting_confirmation")
+        service.state = "queued" // Another device or chat already decided the same command.
+        await inbox.refresh()
+        #expect(inbox.pending.isEmpty && inbox.selected?.state == "queued")
+        #expect(notifier.reconciled.last == [])
+        await inbox.decide("accept")
+        #expect(service.decisions.isEmpty) // A stale button is never another approval/execution.
+    }
     @Test func notificationSubmissionLostReceiptSurvivesRestartWithoutSecondOSSubmission() async throws {
         let (service, _, _) = try fixture(), notifier = ApprovalNotifier(), disk = NativeApprovalNoticeMemoryPersistence()
         let entry = try NativeApproval(service.envelope(), deviceId: "fixture-device")
@@ -533,22 +550,24 @@ import AppKit
 @MainActor private final class ApprovalRoutingFixture {
     var revision = 0, review = false
     var primary: String?
+    var notificationMode = "single_device"
     var claims: Set<String> = []
     var receiptStates: [String: String] = [:]
     var failReceipts = 0
     var failConfigure = false
     var wrongReceipt = false
-    static func policy(revision: Int = 0, review: Bool = false, primary: String? = nil) -> BridgeJSON {
-        .object(["version": .number(1), "revision": .number(Double(revision)), "reviewOtherDevices": .bool(review), "primaryDeviceId": primary.map(BridgeJSON.string) ?? .null, "routingReadiness": .object(["ready": .bool(true)])])
+    static func policy(revision: Int = 0, review: Bool = false, primary: String? = nil, notificationMode: String = "single_device") -> BridgeJSON {
+        .object(["version": .number(1), "revision": .number(Double(revision)), "reviewOtherDevices": .bool(review), "primaryDeviceId": primary.map(BridgeJSON.string) ?? .null, "notificationMode": .string(notificationMode), "routingReadiness": .object(["ready": .bool(true)])])
     }
     func response(_ path: String, body: BridgeJSON, device: String) throws -> BridgeJSON? {
-        if path == "native/approval-policy/read" { return Self.policy(revision: revision, review: review, primary: primary) }
+        if path == "native/approval-policy/read" { return Self.policy(revision: revision, review: review, primary: primary, notificationMode: notificationMode) }
         let value = try NativeRemoteJSON.object(body)
         if path == "native/approval-policy/configure" {
             if failConfigure { throw URLError(.notConnectedToInternet) }
             if case let .bool(v) = value["reviewOtherDevices"] { review = v }
             if case let .bool(v) = value["primaryHere"] { primary = v ? device : nil }
-            revision += 1; return Self.policy(revision: revision, review: review, primary: primary)
+            if case let .string(v) = value["notificationMode"] { notificationMode = v; if v == "all_reviewers" { primary = nil } }
+            revision += 1; return Self.policy(revision: revision, review: review, primary: primary, notificationMode: notificationMode)
         }
         if path == "native/notification/claim" {
             let id = try NativeRemoteJSON.string(value["commandId"])

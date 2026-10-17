@@ -57,19 +57,19 @@ struct NativeApprovalPanel: View {
             }
             if !model.isDisplayTest {
                 Divider()
-                Text("跨设备审批与单端提醒").font(.headline)
+                Text("多端审批通知与状态同步").font(.headline)
                 Text("独立开启后，本机能查看并确认同一账户其他设备的具体请求，包括其已有授权的事项、计时或闹钟。仍由目标设备执行；不新增目标设备权限。关闭时本机立即停止跨设备确认，服务器撤回结果会明确显示。").font(.caption).foregroundStyle(.secondary)
                 if model.crossReviewEnabled {
                     Button("关闭本机跨设备审批") { Task { await model.configurePolicy(review: false) } }.disabled(model.busy)
-                    Button("仅在这台设备提醒新的审批") { Task { await model.configurePolicy(primaryHere: true) } }.disabled(model.busy || !model.policy.routingReady || !model.notificationsEnabled || ![.authorized, .provisional].contains(model.notificationAuthorization))
-                    Text(model.policy.routingReadinessMessage).font(.caption).foregroundStyle(.secondary)
-                    if !model.notificationsEnabled { Text("先在这台设备开启审批通知，再选择主要通知设备。").font(.caption).foregroundStyle(.secondary) }
+                    if model.policy.notificationMode != "all_reviewers" {
+                        Button("让所有已授权设备接收新审批通知") { Task { await model.configurePolicy(notificationMode: "all_reviewers") } }.disabled(model.busy)
+                    }
                 } else {
-                    Button("允许本机跨设备查看和确认") { Task { await model.configurePolicy(review: true) } }.disabled(model.busy)
+                    Button("允许本机接收并审批其他设备的请求") { Task { await model.configurePolicy(review: true, notificationMode: "all_reviewers") } }.disabled(model.busy)
                 }
-                Text(model.policy.primaryDeviceId == nil ? "尚未选择主要通知设备：沿用每个请求指定的执行设备提醒。" : model.primaryNotificationsHere ? "主要通知设备：这台设备。" : "主要通知设备：另一台设备。")
+                Text(model.policy.notificationMode == "all_reviewers" ? "新审批将发给执行设备及已单独允许跨设备审批的设备；每台设备同一请求只提醒一次。" : "当前仍沿用旧的单设备提醒策略；可在上方切换多端通知。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("只影响设置之后新建的请求；旧请求保持原提醒设备，不自动故障转移。请先将参与设备全部更新并打开，再选择主要设备。系统通知设置由你决定。").font(.caption).foregroundStyle(.secondary)
+                Text("iPhone和Mac需分别允许跨设备审批及审批通知。任一端同意或拒绝后，各端读取同一结果并清理旧通知；离线端重连后补齐，旧按钮不重复执行。新设置不补发已结束请求，也不更改系统通知权限。").font(.caption).foregroundStyle(.secondary)
                 Text(model.notificationAuthorization.label).font(.caption).foregroundStyle(.secondary)
                 Text("短且完整的事项改动可展开系统通知，选择批准／拒绝；点通知正文打开详情。长内容必须到详情核对。系统预览可能显示事项和修改内容，可在系统设置隐藏锁屏预览。通知不会代你批准。").font(.caption).foregroundStyle(.secondary)
                 Text("当前 BC 运行时约每20秒检查；iPhone锁屏／后台可能延迟，尚未接通服务端远程审批推送。系统专注模式也可能隐藏横幅。").font(.caption).foregroundStyle(.secondary)

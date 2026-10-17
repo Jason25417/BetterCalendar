@@ -28,7 +28,7 @@
     "typescript": "passed",
     "productionBuild": "passed"
   },
-  "realDeviceAcceptance": "in progress: both178 receipts verified; one synthetic item title proposal awaiting human Mac system-notification approval; device reports system_submitted, not human seen/applied",
+  "realDeviceAcceptance": "both178 verified; synthetic title change approved via chat_confirmation, Mac applied and read back; phone later snapshot still old; native notification buttons and dual-device acceptance not verified",
   "dotsMessage": {
     "sentVia": "Edge extension / personal Dots page",
     "sentAfterBothAppsAvailable": true,
@@ -98,5 +98,6 @@
     "evidenceLevel": "Dots visible tool-definition report; no new operation/query executed",
     "screenshotLocalOnly": "/private/tmp/bc178-dots-refreshed.jpg"
   },
-  "incrementalEvidence": "notification-approval178-first.json"
+  "incrementalEvidence": "notification-approval178-first.json",
+  "incrementalResultEvidence": "notification-approval178-result.json"
 }

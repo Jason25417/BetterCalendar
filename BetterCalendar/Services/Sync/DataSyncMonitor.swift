@@ -15,11 +15,13 @@ final class DataSyncMonitor {
     private(set) var issue: String?
     private(set) var account = "尚未检查"
     private(set) var storage = "正在打开"
+    private var transportEvidence = DataSyncTransportEvidence()
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var refresh: (() -> Void)?
 
     func storageOpened(cloud: Bool, error: Error? = nil) {
+        transportEvidence.opened(cloud: cloud)
         storage = cloud ? "CloudKit 同步库（传输状态见下方）" : "仅本地保存 · 云同步未启用"
         if let error { report("数据库未能启用 CloudKit：\(error.localizedDescription)") }
     }
@@ -33,7 +35,14 @@ final class DataSyncMonitor {
             guard let event = note.userInfo?[NSPersistentCloudKitContainer.eventNotificationUserInfoKey]
                     as? NSPersistentCloudKitContainer.Event else { return }
             Task { @MainActor [weak self] in
-                guard let self, event.endDate != nil else { return }
+                guard let self, let endedAt = event.endDate else { return }
+                let phase: DataSyncTransportEvidence.Phase
+                switch event.type {
+                case .import: phase = .import
+                case .export: phase = .export
+                default: phase = .setup
+                }
+                self.transportEvidence.finished(phase, at: endedAt, succeeded: event.succeeded, error: event.error)
                 if let error = event.error { self.report("CloudKit \(event.type)：\(error.localizedDescription)") }
                 if event.succeeded {
                     switch event.type {
@@ -49,6 +58,10 @@ final class DataSyncMonitor {
         ) { [weak self] _ in Task { @MainActor [weak self] in self?.scheduleRefresh() } })
         Task { await checkAccount() }
     }
+
+    /// Safe bounded metadata for the existing device.status source; no error
+    /// descriptions, userInfo, record contents, account IDs or credentials.
+    func diagnostics() -> BridgeJSON { transportEvidence.diagnostics() }
 
     func report(_ message: String) {
         guard issue != message else { return }

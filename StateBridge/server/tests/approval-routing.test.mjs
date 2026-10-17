@@ -22,6 +22,69 @@ async function fixture(t){
  return{core,sqlite,devices,submit,config,decision,reopen,beforeBatch(fn){beforeBatch=fn;},failAudit(v){failAudit=v;},advance(ms){now=new Date(now.getTime()+ms);}};
 }
 const identity=r=>({commandId:r.commandId,requestHash:r.requestHash});
+test('all-reviewer mode gives each authorized device one independent durable notice, one business command',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;
+ await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ const r=await f.submit(101),[a,b]=await Promise.all(f.devices.map(d=>f.core.nativeCommands.routing.claim(identity(r),d)));
+ assert.equal(a.deviceId,mac.id);assert.equal(b.deviceId,phone.id);
+ assert.equal(a.beginSubmission,true);assert.equal(b.beginSubmission,true);assert.notEqual(a.claimId,b.claimId);
+ for(const [d,c] of [[mac,a],[phone,b]]){
+  const receipt=await f.core.nativeCommands.routing.receipt({...identity(r),claimId:c.claimId,state:'system_submitted'},d);
+  assert.equal(receipt.state,'system_submitted');assert.equal(receipt.userSeen,'unknown');
+  const again=await f.reopen().nativeCommands.routing.claim(identity(r),d);
+  assert.equal(again.claimId,c.claimId);assert.equal(again.beginSubmission,false);assert.equal(again.maySubmit,false);
+ }
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_requests').get().n,1);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_routes').get().n,1);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_deliveries').get().n,2);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notifications').get().n,0);
+ await assert.rejects(f.core.nativeCommands.routing.receipt({...identity(r),claimId:a.claimId,state:'clicked'},phone),e=>e.status===403);
+});
+test('multidevice notification decisions converge and late clicks cannot execute twice',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ const r=await f.submit(102),a=await f.core.nativeCommands.routing.claim(identity(r),mac),b=await f.core.nativeCommands.routing.claim(identity(r),phone);
+ const status=await f.core.nativeCommands.approvalStatus({commandId:r.commandId},phone);
+ const accept=f.decision(r,{reviewerGrantRevision:status.reviewContext.grantRevision,reviewerPolicyRevision:status.reviewContext.policyRevision});
+ assert.equal((await f.core.nativeCommands.decideFromDevice(accept,phone)).state,'queued');
+ assert.equal((await f.core.nativeCommands.decideFromDevice(f.decision(r),mac)).state,'queued');
+ await assert.rejects(f.core.nativeCommands.decideFromDevice({...f.decision(r),decision:'decline'},mac),e=>e.status===409);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).maySubmit,false);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),phone)).maySubmit,false);
+ await f.core.nativeCommands.routing.receipt({...identity(r),claimId:a.claimId,state:'clicked'},mac);
+ await f.core.nativeCommands.routing.receipt({...identity(r),claimId:b.claimId,state:'clicked'},phone);
+ for(const d of f.devices)assert.equal((await f.core.nativeCommands.approvalList({},d)).commands[0].state,'queued');
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM research_log WHERE kind='native_approval_decision'").get().n,1);
+});
+test('an offline recipient joins its frozen route once; revoked review never submits and mode changes do not reroute old requests',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ const r=await f.submit(103),a=await f.core.nativeCommands.routing.claim(identity(r),mac);
+ await f.config(mac,{reviewOtherDevices:true,primaryHere:true});f.advance(1000);
+ const late=await f.reopen().nativeCommands.routing.claim(identity(r),phone);assert.equal(late.deviceId,phone.id);assert.equal(late.beginSubmission,true);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).claimId,a.claimId);
+ await f.config(phone,{reviewOtherDevices:false});
+ await assert.rejects(f.core.nativeCommands.routing.claim(identity(r),phone),e=>e.status===403);
+ await assert.rejects(f.config(phone,{notificationMode:'all_reviewers'}),e=>e.status===403);
+});
+test('switching to fanout never duplicates an already routed legacy or closed approval',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;
+ const r=await f.submit(104),old=await f.core.nativeCommands.routing.claim(identity(r),mac);
+ await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ const other=await f.core.nativeCommands.routing.claim(identity(r),phone);assert.equal(other.maySubmit,false);assert.equal(other.deviceId,mac.id);
+ assert.equal((await f.core.nativeCommands.routing.claim(identity(r),mac)).claimId,old.claimId);
+ const closed=await f.submit(105);await f.core.nativeCommands.decideFromDevice({...f.decision(closed),decision:'decline'},mac);
+ for(const d of f.devices)assert.equal((await f.core.nativeCommands.routing.claim(identity(closed),d)).maySubmit,false);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_routes').get().n,0);
+});
+test('fanout route audit failure is atomic and same-device concurrent claim reserves once',async t=>{
+ const f=await fixture(t),[mac,phone]=f.devices;await f.config(phone,{reviewOtherDevices:true,notificationMode:'all_reviewers'});
+ const r=await f.submit(106);f.failAudit(true);
+ await assert.rejects(f.core.nativeCommands.routing.claim(identity(r),mac));
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_routes').get().n,0);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM native_approval_notification_deliveries').get().n,0);
+ f.failAudit(false);
+ const claims=await Promise.all([f.core,f.reopen()].map(core=>core.nativeCommands.routing.claim(identity(r),mac)));
+ assert.equal(claims.filter(x=>x.beginSubmission).length,1);assert.equal(claims[0].claimId,claims[1].claimId);
+});
 test('legacy target-only boundary remains until separate opt-in; clock devices cannot change routing',async t=>{
  const f=await fixture(t),[mac,phone]=f.devices,r=await f.submit(1);
  assert.equal((await f.core.nativeCommands.approvalList({},phone)).commands.length,0);

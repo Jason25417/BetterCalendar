@@ -64,6 +64,13 @@
       "when": 1792099856766,
       "tag": "0008_shared_timer_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792199989442,
+      "tag": "0009_approval_multidevice",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,523 @@
+{
+  "schemaVersion": 1,
+  "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+  "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+  "acceptedAt": "2026-10-17T00:57:57.039Z",
+  "approvedAt": "2026-10-17T01:03:16.738Z",
+  "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+  "resultAt": "2026-10-17T01:03:30.674Z",
+  "state": "applied",
+  "result": {
+    "authority": "swiftdata",
+    "commandId": "A92D51C7-73E4-4CE8-8D1E-64FE20B9A178",
+    "deviceApplication": "local_store_saved",
+    "persistedRevision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+    "recoverable": true,
+    "saved": true,
+    "screenVisible": "unknown",
+    "syncOtherDevices": "unknown"
+  },
+  "research": {
+    "callId": "research_aa0c016c-41f8-442b-af04-c9ea963155c1",
+    "responseHash": "1ca20f8b3907c4884e0eabb3381d15ea8dde0a1331c645e25a8e089d64315ecd",
+    "recorded": true
+  },
+  "approvalEvidence": {
+    "event": {
+      "id": 223565,
+      "callId": "native_decision_a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+      "kind": "native_approval_decision",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:16.738Z",
+      "body": {
+        "cancelCause": "unknown",
+        "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+        "decision": "accept",
+        "grantRevision": 1,
+        "priorEffectiveState": "awaiting_confirmation",
+        "priorStoredState": "awaiting_confirmation",
+        "producer": "authenticated_transport",
+        "producerGesture": "not_observed",
+        "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+        "resolution": "explicit_button",
+        "source": "chat_confirmation",
+        "state": "queued",
+        "userGesture": "transport_report_not_independent_observation",
+        "version": 1
+      }
+    },
+    "hostResponse": {
+      "id": 223564,
+      "callId": "research_1562c5da-11f9-48e0-8181-1d7b2ecde499",
+      "kind": "native_confirmation_response_received",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:16.250Z",
+      "body": {
+        "version": 1,
+        "callbackTraceId": "df4b9c63-0370-4c0a-b21c-0df0bb4187f4",
+        "originTool": "submit_native_command",
+        "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+        "storedState": "awaiting_confirmation",
+        "effectiveState": "awaiting_confirmation",
+        "expiresAt": "2026-10-18T00:57:56.895Z",
+        "approvedAt": null,
+        "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+        "candidateRequestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+        "expectedRevision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+        "sessionId": null,
+        "responseShape": {
+          "responseType": "object",
+          "presentFields": [
+            "action",
+            "content",
+            "_meta"
+          ],
+          "unknownEnvelopeFieldCount": 0,
+          "resultTypeType": "undefined",
+          "metadataType": "object",
+          "contentType": "object",
+          "contentFieldCount": 1,
+          "confirmType": "boolean",
+          "reviewType": "undefined",
+          "unknownContentFieldCount": 0,
+          "envelopeFields": [
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "content",
+              "type": "object"
+            },
+            {
+              "name": "_meta",
+              "type": "object"
+            }
+          ],
+          "contentFields": [
+            {
+              "name": "confirm",
+              "type": "boolean"
+            }
+          ],
+          "missingFields": [],
+          "missingContentFields": []
+        },
+        "source": "host_response",
+        "userGesture": "unknown",
+        "cause": "unknown"
+      }
+    },
+    "independentHumanClickObserved": false,
+    "notificationButtonAcceptance": false
+  },
+  "executionEvidence": [
+    {
+      "id": 223579,
+      "callId": "research_3752217e-efc5-44b6-9742-486e0ac8c9c9",
+      "kind": "call_started",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:29.645Z",
+      "body": {
+        "version": 1,
+        "tool": "native/claim",
+        "arguments": {
+          "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+          "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+          "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2"
+        },
+        "startedAt": "2026-10-17T01:03:29.645Z",
+        "permission": {
+          "transport": "authenticated_owner_or_scoped_device",
+          "operation": "pending_validation",
+          "userIntent": null
+        }
+      }
+    },
+    {
+      "id": 223581,
+      "callId": "research_ceba8a1b-d0fd-4ff3-a4be-df179554c780",
+      "kind": "call_returned",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:30.138Z",
+      "body": {
+        "version": 1,
+        "callId": "research_3752217e-efc5-44b6-9742-486e0ac8c9c9",
+        "tool": "native/claim",
+        "arguments": {
+          "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+          "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+          "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2"
+        },
+        "startedAt": "2026-10-17T01:03:29.645Z",
+        "finishedAt": "2026-10-17T01:03:30.138Z",
+        "responseHash": "08025c435011801af78ca2603eeba75990a3aa78fe8d752296193f0cfecc49da",
+        "references": {
+          "observationIds": [],
+          "changeIds": [],
+          "nativeCommandIds": [
+            "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178"
+          ],
+          "commandIds": [],
+          "ingestion": {
+            "accepted": null,
+            "ignored": null,
+            "receivedAt": null
+          },
+          "delivery": {
+            "batchId": null,
+            "delivered": null,
+            "decision": null
+          },
+          "sessionVersions": [],
+          "snapshotEventId": null,
+          "noteIds": [],
+          "sourceMetadata": [],
+          "coverage": null,
+          "pagination": {
+            "hasMore": null,
+            "nextCursor": null,
+            "throughId": null,
+            "valuesIncluded": null
+          },
+          "saved": null,
+          "interpretation": "References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store."
+        },
+        "deviceApplication": "unknown_unless_separate_device_receipt"
+      }
+    },
+    {
+      "id": 223582,
+      "callId": "research_8ea4d65d-e6f1-42ec-9966-06cb94422535",
+      "kind": "call_started",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:30.460Z",
+      "body": {
+        "version": 1,
+        "tool": "native/receipt",
+        "arguments": {
+          "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+          "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+          "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+          "outcome": "applied"
+        },
+        "startedAt": "2026-10-17T01:03:30.460Z",
+        "permission": {
+          "transport": "authenticated_owner_or_scoped_device",
+          "operation": "pending_validation",
+          "userIntent": null
+        }
+      }
+    },
+    {
+      "id": 223583,
+      "callId": "native_result_a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+      "kind": "native_result",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:30.674Z",
+      "body": {
+        "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+        "nativeCommandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+        "outcome": "applied",
+        "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+        "resultHash": "22664202c32db74c3e5f6022a97369af0a18e55a559db5b4f93a32551c034085",
+        "version": 1
+      }
+    },
+    {
+      "id": 223584,
+      "callId": "research_cf602b92-1089-43cf-bfc1-54a2e0ff7e34",
+      "kind": "call_returned",
+      "batchId": null,
+      "createdAt": "2026-10-17T01:03:30.824Z",
+      "body": {
+        "version": 1,
+        "callId": "research_8ea4d65d-e6f1-42ec-9966-06cb94422535",
+        "tool": "native/receipt",
+        "arguments": {
+          "commandId": "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178",
+          "attemptId": "40f1b02b-40bc-4736-b0d2-8729caf32d0f",
+          "requestHash": "76dab2ce39deb9378c23be094874b539d1a428c03f80154b3981aba415a0ffe2",
+          "outcome": "applied"
+        },
+        "startedAt": "2026-10-17T01:03:30.460Z",
+        "finishedAt": "2026-10-17T01:03:30.824Z",
+        "responseHash": "1ca20f8b3907c4884e0eabb3381d15ea8dde0a1331c645e25a8e089d64315ecd",
+        "references": {
+          "observationIds": [],
+          "changeIds": [],
+          "nativeCommandIds": [
+            "a92d51c7-73e4-4ce8-8d1e-64fe20b9a178"
+          ],
+          "commandIds": [],
+          "ingestion": {
+            "accepted": null,
+            "ignored": null,
+            "receivedAt": null
+          },
+          "delivery": {
+            "batchId": null,
+            "delivered": null,
+            "decision": null
+          },
+          "sessionVersions": [],
+          "snapshotEventId": null,
+          "noteIds": [],
+          "sourceMetadata": [],
+          "coverage": null,
+          "pagination": {
+            "hasMore": null,
+            "nextCursor": null,
+            "throughId": null,
+            "valuesIncluded": null
+          },
+          "saved": null,
+          "interpretation": "References are evidence locations, not proof that the agent understood them. Raw tool response is not copied to a new cloud store."
+        },
+        "deviceApplication": "unknown_unless_separate_device_receipt"
+      }
+    }
+  ],
+  "logRange": {
+    "afterId": 223315,
+    "throughId": 224192,
+    "nextCursor": 224192,
+    "hasMore": false
+  },
+  "readback": {
+    "mac": {
+      "schemaVersion": 1,
+      "authority": "device-swiftdata",
+      "readAt": "2026-10-17T01:13:02.525Z",
+      "sourceDeviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+      "snapshotEventId": "E09C7C70-3031-419C-8917-E22D028214E1",
+      "observedAt": "2026-10-17T01:12:50.000Z",
+      "receivedAt": "2026-10-17T01:12:52.068Z",
+      "freshness": "current",
+      "availability": "available",
+      "usableForCurrentState": true,
+      "devices": [
+        {
+          "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+          "availability": "available",
+          "freshness": "current",
+          "observedAt": "2026-10-17T01:12:50.000Z",
+          "receivedAt": "2026-10-17T01:12:52.068Z",
+          "contentHash": "272cb9818b51e1c4a57495f450f9b1851afe5d25291d8bebcc8ded3bfcb42fef"
+        },
+        {
+          "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+          "availability": "available",
+          "freshness": "current",
+          "observedAt": "2026-10-17T01:10:57.000Z",
+          "receivedAt": "2026-10-17T01:11:02.207Z",
+          "contentHash": "0a0984f875f7430c43d74c626f3da4f7fc580ec8d1835d6103719587f0fe1df0"
+        }
+      ],
+      "deviceViewsDiffer": true,
+      "pinnedSnapshot": false,
+      "deviceViewsDifferBasis": "whole_snapshot_including_legacy_history_not_proof_of_item_conflict",
+      "interpretation": "这是设备读取的SwiftData目录副本，不是另一套事项真相。不同设备目录不同可能是同步延迟；不自动合并或覆盖。分页固定这一份快照，旧快照不能冒充当前状态。",
+      "recordType": "item",
+      "contentHash": "272cb9818b51e1c4a57495f450f9b1851afe5d25291d8bebcc8ded3bfcb42fef",
+      "complete": true,
+      "totalRecordCount": 28,
+      "matchedRecordCount": 12,
+      "records": [
+        {
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "revision": "35175a9f779a93196b11b8ebff50718221181b8a985ccca625fead50feaafe90",
+          "values": {
+            "cadenceMinutesPerWeek": null,
+            "checkpoints": [],
+            "createdAt": 1792007516159,
+            "deadline": null,
+            "deletedAt": null,
+            "deletionContext": null,
+            "deletionId": null,
+            "doneAt": null,
+            "family": null,
+            "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+            "isInTrash": false,
+            "modifiedAt": 1792198626000,
+            "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+            "restoredDeletionId": null,
+            "spilledFromDay": null,
+            "status": "active",
+            "title": "BC 联调测试｜通知审批178",
+            "totalMinutes": null,
+            "unitMinutes": null,
+            "zone": "todo"
+          }
+        }
+      ],
+      "byteBudgetExceeded": false,
+      "hasMore": false,
+      "nextCursor": null,
+      "research": {
+        "callId": "research_1554916f-efcc-4e6a-861c-238265e953e3",
+        "responseHash": "cfa55bd98737ba09db9717b81ab00d2b222205965d999b1de3528edb3263b09c",
+        "recorded": true
+      }
+    },
+    "iphone": {
+      "schemaVersion": 1,
+      "authority": "device-swiftdata",
+      "readAt": "2026-10-17T01:13:02.586Z",
+      "sourceDeviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "snapshotEventId": "58972C3E-29FD-4F07-8365-271382AFC28B",
+      "observedAt": "2026-10-17T01:10:57.000Z",
+      "receivedAt": "2026-10-17T01:11:02.207Z",
+      "freshness": "current",
+      "availability": "available",
+      "usableForCurrentState": true,
+      "devices": [
+        {
+          "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+          "availability": "available",
+          "freshness": "current",
+          "observedAt": "2026-10-17T01:12:50.000Z",
+          "receivedAt": "2026-10-17T01:12:52.068Z",
+          "contentHash": "272cb9818b51e1c4a57495f450f9b1851afe5d25291d8bebcc8ded3bfcb42fef"
+        },
+        {
+          "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+          "availability": "available",
+          "freshness": "current",
+          "observedAt": "2026-10-17T01:10:57.000Z",
+          "receivedAt": "2026-10-17T01:11:02.207Z",
+          "contentHash": "0a0984f875f7430c43d74c626f3da4f7fc580ec8d1835d6103719587f0fe1df0"
+        }
+      ],
+      "deviceViewsDiffer": true,
+      "pinnedSnapshot": false,
+      "deviceViewsDifferBasis": "whole_snapshot_including_legacy_history_not_proof_of_item_conflict",
+      "interpretation": "这是设备读取的SwiftData目录副本，不是另一套事项真相。不同设备目录不同可能是同步延迟；不自动合并或覆盖。分页固定这一份快照，旧快照不能冒充当前状态。",
+      "recordType": "item",
+      "contentHash": "0a0984f875f7430c43d74c626f3da4f7fc580ec8d1835d6103719587f0fe1df0",
+      "complete": true,
+      "totalRecordCount": 28,
+      "matchedRecordCount": 12,
+      "records": [
+        {
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+          "values": {
+            "cadenceMinutesPerWeek": null,
+            "checkpoints": [],
+            "createdAt": 1792007516159,
+            "deadline": null,
+            "deletedAt": null,
+            "deletionContext": null,
+            "deletionId": null,
+            "doneAt": null,
+            "family": null,
+            "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+            "isInTrash": false,
+            "modifiedAt": 1792013121119,
+            "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+            "restoredDeletionId": null,
+            "spilledFromDay": null,
+            "status": "active",
+            "title": "BC 联调测试｜双入口验收",
+            "totalMinutes": null,
+            "unitMinutes": null,
+            "zone": "todo"
+          }
+        }
+      ],
+      "byteBudgetExceeded": false,
+      "hasMore": false,
+      "nextCursor": null,
+      "research": {
+        "callId": "research_e98ab472-389d-4de2-a0e1-5a4339a80047",
+        "responseHash": "0dfa45be310bfdff94cecfabe07dc8a1050e9533daa8325440004c09becd9e6a",
+        "recorded": true
+      }
+    },
+    "iphoneLater": {
+      "schemaVersion": 1,
+      "authority": "device-swiftdata",
+      "readAt": "2026-10-17T01:14:33.566Z",
+      "sourceDeviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+      "snapshotEventId": "58972C3E-29FD-4F07-8365-271382AFC28B",
+      "observedAt": "2026-10-17T01:10:57.000Z",
+      "receivedAt": "2026-10-17T01:11:02.207Z",
+      "freshness": "stale",
+      "availability": "available",
+      "usableForCurrentState": false,
+      "devices": [
+        {
+          "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+          "availability": "available",
+          "freshness": "current",
+          "observedAt": "2026-10-17T01:13:49.000Z",
+          "receivedAt": "2026-10-17T01:13:51.397Z",
+          "contentHash": "272cb9818b51e1c4a57495f450f9b1851afe5d25291d8bebcc8ded3bfcb42fef"
+        },
+        {
+          "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+          "availability": "available",
+          "freshness": "stale",
+          "observedAt": "2026-10-17T01:10:57.000Z",
+          "receivedAt": "2026-10-17T01:11:02.207Z",
+          "contentHash": "0a0984f875f7430c43d74c626f3da4f7fc580ec8d1835d6103719587f0fe1df0"
+        }
+      ],
+      "deviceViewsDiffer": true,
+      "pinnedSnapshot": false,
+      "deviceViewsDifferBasis": "whole_snapshot_including_legacy_history_not_proof_of_item_conflict",
+      "interpretation": "这是设备读取的SwiftData目录副本，不是另一套事项真相。不同设备目录不同可能是同步延迟；不自动合并或覆盖。分页固定这一份快照，旧快照不能冒充当前状态。",
+      "recordType": "item",
+      "contentHash": "0a0984f875f7430c43d74c626f3da4f7fc580ec8d1835d6103719587f0fe1df0",
+      "complete": true,
+      "totalRecordCount": 28,
+      "matchedRecordCount": 12,
+      "records": [
+        {
+          "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+          "revision": "23066b6108c25db9d870ad444ff93b0494def72a188279b16b1c9cafd3608332",
+          "values": {
+            "cadenceMinutesPerWeek": null,
+            "checkpoints": [],
+            "createdAt": 1792007516159,
+            "deadline": null,
+            "deletedAt": null,
+            "deletionContext": null,
+            "deletionId": null,
+            "doneAt": null,
+            "family": null,
+            "id": "C5472AF0-89C2-466E-9704-7E260A984C1D",
+            "isInTrash": false,
+            "modifiedAt": 1792013121119,
+            "note": "开发验收，不计生活活动。第一步：仅验证测试待办创建与审批回执。\nMac App审批验收177",
+            "restoredDeletionId": null,
+            "spilledFromDay": null,
+            "status": "active",
+            "title": "BC 联调测试｜双入口验收",
+            "totalMinutes": null,
+            "unitMinutes": null,
+            "zone": "todo"
+          }
+        }
+      ],
+      "byteBudgetExceeded": false,
+      "hasMore": false,
+      "nextCursor": null,
+      "research": {
+        "callId": "research_db39250f-6e3a-48b1-9269-0aa8ca74a421",
+        "responseHash": "265b5e0b05825a6e0f006185d368a7a2ad443dc27adb41d82f45647c8e2ce646",
+        "recorded": true
+      }
+    }
+  },
+  "conclusions": {
+    "macSavedAndReadBack": true,
+    "phoneSameRecordStillOldAtObservedTime": "2026-10-17T01:10:57Z",
+    "phoneOldObservationAfterResultSeconds": 446.326,
+    "phoneScreen": "unknown",
+    "rootCause": "unproven; investigating CloudKit import vs registered context cache",
+    "systemNotificationDecision": "not observed; actual accepted decision source chat_confirmation",
+    "ordinaryReminderOrTimerStarted": false
+  }
+}

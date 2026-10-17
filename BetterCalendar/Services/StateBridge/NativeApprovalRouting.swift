@@ -24,6 +24,7 @@ nonisolated struct NativeApprovalPolicy: Equatable {
     var revision = 0
     var reviewOtherDevices = false
     var primaryDeviceId: String?
+    var notificationMode = "single_device"
     var routingReady = false
     var routingReadinessMessage = "尚未核实各设备的审批协议"
     init() {}
@@ -38,6 +39,12 @@ nonisolated struct NativeApprovalPolicy: Equatable {
             routingReadinessMessage = ready ? "参与设备已报告新版审批协议" : "请更新并打开所有参与设备；旧版本或超过15分钟的状态不能启用单端提醒"
         }
         reviewOtherDevices = review
+        if let mode = v["notificationMode"] {
+            notificationMode = try NativeRemoteJSON.string(mode)
+            guard ["single_device", "all_reviewers"].contains(notificationMode) else {
+                throw DataArchiveError.invalid("审批通知模式未知；未扩大通知范围")
+            }
+        }
         primaryDeviceId = v["primaryDeviceId"] == .null ? nil : try NativeRemoteJSON.string(v["primaryDeviceId"])
     }
 }

@@ -33,6 +33,24 @@ import SwiftData
         try context.save(); context.insert(LongTask(id: task.id, title: "同身份")); try context.save()
         #expect(throws: (any Error).self) { try SwiftDataBridgePoolReader(context: context).snapshot() }
     }
+    @Test func importedSaveMustNotRepublishPreviouslyRegisteredValues() throws {
+        let c = try container(), context = c.mainContext
+        let task = LongTask(title: "同步前", zone: .todo)
+        context.insert(task); try context.save()
+        let reader = SwiftDataBridgePoolReader(context: context)
+        _ = try reader.snapshot() // Register the original object in the UI context.
+        let importer = ModelContext(c)
+        let imported = try #require(importer.fetch(FetchDescriptor<LongTask>()).first)
+        imported.title = "另一上下文已保存"
+        imported.modifiedAt = Date(timeIntervalSince1970: 1000)
+        try importer.save()
+        let snapshot = try reader.snapshot()
+        let payload = try #require(JSONSerialization.jsonObject(with: snapshot.data) as? [String: Any])
+        let rows = try #require(payload["records"] as? [[String: Any]])
+        let values = try #require(rows.first?["values"] as? [String: Any])
+        #expect(values["title"] as? String == "另一上下文已保存")
+        #expect(!context.hasChanges && !importer.hasChanges)
+    }
     @Test func oldOutboxAndMultipartDirectorySurviveRestartWithoutIdentityChanges() throws {
         let old = Data("{\"nextSequence\":1,\"observations\":[]}".utf8)
         var queue = try JSONDecoder().decode(BridgeOutbox.self, from: old)

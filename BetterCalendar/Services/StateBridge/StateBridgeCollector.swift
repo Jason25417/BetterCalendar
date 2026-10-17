@@ -141,6 +141,7 @@ import CryptoKit
         guard enabled else { return }
         let approvalNotificationStatus = await NativeApprovalNotification().authorization()
         client.emit("device.status",value:.object(["availability":.string("online"),
+            "dataSync":DataSyncMonitor.shared.diagnostics(),
             "approvalNotifications":NativeApprovalNotificationBinding.diagnostics(enabled:UserDefaults.standard.bool(forKey:"bc.nativeApprovalNotifications"),authorization:approvalNotificationStatus),
             "platform":.string(ProcessInfo.processInfo.operatingSystemVersionString),
             "collector":.object(["name":.string("BetterCalendar"),"version":.string(AppInfo.version),
