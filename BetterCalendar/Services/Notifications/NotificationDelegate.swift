@@ -16,6 +16,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
     /// SPEC §19 多端审批：decision 为 nil = 只打开详情（点通知本身绝不当作批准）。
     var handleProposal: ((UUID, ProposalDecision?) async -> Void)?
+    /// SPEC §19 C4：智能体消息的反应；reaction 为 nil = 只打开面板。
+    var handleAgentMessage: ((UUID, AgentMessage.Reaction?) async -> Void)?
 
     init(router: AppRouter) {
         self.router = router
@@ -26,6 +28,16 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if let route = LocalAgentMessageNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            if route.reaction == nil {
+                router.openProposals = true
+                #if os(macOS)
+                if !TestHost.isActive { AppLifecycle.shared?.showMainWindow() }
+                #endif
+            }
+            await handleAgentMessage?(route.id, route.reaction)
+            return
+        }
         if let route = LocalProposalNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
             if route.decision == nil {
                 router.proposalFocusId = route.id

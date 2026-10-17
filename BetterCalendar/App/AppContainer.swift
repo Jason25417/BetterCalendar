@@ -48,6 +48,7 @@ final class AppContainer {
     let nativeApprovals: NativeApprovalInbox
     let proposals: ProposalCenter              // SPEC §19 多端审批（CloudKit 中转；旧 nativeApprovals 冻结）
     let proposalStore: CloudKitProposalStore?  // 测试环境为 nil（内存中转）
+    let agentMessages: AgentMessageCenter      // SPEC §19 C2–C4 智能体主动消息（打扰规则由 App 强制；默认关）
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验，默认关；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
     let nativeActions: NativeActionsViewModel
@@ -127,6 +128,9 @@ final class AppContainer {
         if TestHost.isActive {
             self.proposalStore = nil
             self.alertPush = nil
+            self.agentMessages = AgentMessageCenter(transport: InMemoryAgentMessageTransport(), notifier: SilentAgentMessageNotifier(),
+                                                    ledger: MemoryOperationLedger(), deviceId: "test-host",
+                                                    defaults: UserDefaults(suiteName: "bc-test-attention")!)
             self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
                                             notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
                                             deviceId: "test-host", deviceLabel: "测试")
@@ -134,17 +138,25 @@ final class AppContainer {
             let store = CloudKitProposalStore()
             self.proposalStore = store
             self.alertPush = ProposalAlertPushControl(store: store)
+            self.agentMessages = AgentMessageCenter(transport: CloudKitAgentMessageStore(), notifier: LocalAgentMessageNotifier(),
+                                                    ledger: FileOperationLedger(), deviceId: ProposalDevice.id)
             self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: ExperimentOnlyExecutor(),
                                             notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
                                             deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
+        }
+        notificationDelegate.handleAgentMessage = { [weak messages = agentMessages] id, reaction in
+            if let reaction { await messages?.react(id, reaction) } else { await messages?.refresh() }
         }
         notificationDelegate.handleProposal = { [weak center = proposals] id, decision in
             if let decision { await center?.decide(id, decision) } else { await center?.refresh() }
         }
         if !TestHost.isActive, let store = proposalStore {
-            ProposalWake.onPush = { [weak center = proposals] in await center?.refresh() }
+            ProposalWake.onPush = { [weak center = proposals, weak messages = agentMessages] in
+                await center?.refresh(); await messages?.refresh()
+            }
             Task { [weak center = proposals] in
                 await LocalProposalNotifier.registerCategories()
+                await LocalAgentMessageNotifier.registerCategories()
                 do { try await store.ensureSubscription() } catch {
                     DevLog.shared.error("多端审批", "订阅审批推送失败（将靠前台轮询兜底）：\(error.localizedDescription)")
                 }
@@ -192,11 +204,15 @@ final class AppContainer {
         if TestHost.isActive {
             self.agentBridge = nil
         } else {
-            let bridge = AgentBridge(center: proposals) { [weak planStore, weak execution] in
+            let bridge = AgentBridge(center: proposals, messages: agentMessages) { [weak planStore, weak execution] in
                 AgentBridgeContext.snapshot(planStore: planStore, active: execution?.active.map { ($0.title, $0.start) })
             }
             self.agentBridge = bridge
             bridge.start()
+            execution.onBlockFinished = { [weak bridge] title, seconds in
+                bridge?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
+                             payload: ["title": title, "seconds": seconds])
+            }
         }
         #else
         self.agentBridge = nil

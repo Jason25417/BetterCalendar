@@ -13,6 +13,8 @@ struct ProposalPanel: View {
     var focusId: UUID?
     var bridge: AgentBridge? = nil
     var alertPush: ProposalAlertPushControl? = nil
+    var messages: AgentMessageCenter? = nil
+    @State private var eventsOn = AgentEventSettings.enabled
     @State private var notificationAllowed: Bool?
 
     var body: some View {
@@ -47,6 +49,7 @@ struct ProposalPanel: View {
                 }
             }
             #endif
+            if let messages { attentionSection(messages) }
             if let alertPush {
                 Section("App 关闭时也推送（实验，B5）") {
                     Toggle("新提案由 iCloud 直接推送", isOn: Binding(get: { alertPush.enabled }, set: { on in Task { await alertPush.set(on) } }))
@@ -75,6 +78,43 @@ struct ProposalPanel: View {
             notificationAllowed = await center.notificationPermission()
             await center.refresh()
         }
+    }
+
+    @ViewBuilder private func attentionSection(_ m: AgentMessageCenter) -> some View {
+        Section("智能体主动找你（实验，C1–C4）") {
+            Toggle("关键时刻唤醒智能体（做完一件事、提案有结论）", isOn: Binding(get: { eventsOn }, set: { eventsOn = $0; AgentEventSettings.enabled = $0 }))
+            Text("每次唤醒都会消耗 Claude 订阅额度（实测每次约 20 秒）。需要 Mac 上已连接 bridge 文件夹。").font(.caption).foregroundStyle(.secondary)
+            Toggle("允许智能体主动通知你", isOn: Binding(get: { m.settings.enabled }, set: { m.settings.enabled = $0 }))
+            Stepper("每小时最多 \(m.settings.maxPerHour) 条", value: Binding(get: { m.settings.maxPerHour }, set: { m.settings.maxPerHour = $0 }), in: 1...6)
+            Stepper("每天最多 \(m.settings.maxPerDay) 条", value: Binding(get: { m.settings.maxPerDay }, set: { m.settings.maxPerDay = $0 }), in: 1...20)
+            Stepper("安静时段从 \(m.settings.quietStartHour):00", value: Binding(get: { m.settings.quietStartHour }, set: { m.settings.quietStartHour = $0 }), in: 0...23)
+            Stepper("安静时段到 \(m.settings.quietEndHour):00", value: Binding(get: { m.settings.quietEndHour }, set: { m.settings.quietEndHour = $0 }), in: 0...23)
+            if let until = m.settings.mutedUntil, until > .now {
+                HStack {
+                    Text("静音到 \(until.formatted(date: .omitted, time: .shortened))").font(.footnote)
+                    Button("取消静音") { m.settings.mutedUntil = nil }
+                }
+            } else {
+                Button("静音 2 小时") { m.settings.mutedUntil = .now.addingTimeInterval(2 * 3600) }
+            }
+            if let e = m.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
+            ForEach(Array(m.messages.prefix(10))) { msg in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(msg.title).font(.subheadline)
+                    Text(msg.body).font(.caption)
+                    Text([msg.delivery == .delivered ? "已通知" : "已拦下：\(msg.suppressReason ?? "")",
+                          msg.reaction.map { $0 == .muted ? "你选了静音" : "你点了好" }].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                    if msg.delivery == .delivered, msg.reaction == nil {
+                        HStack {
+                            Button("好") { Task { await m.react(msg.id, .acknowledged) } }
+                            Button("静音 2 小时") { Task { await m.react(msg.id, .muted) } }
+                        }.font(.caption)
+                    }
+                }
+            }
+        }
+        .task { await m.refresh() }
     }
 
     private func pendingCard(_ p: Proposal) -> some View {

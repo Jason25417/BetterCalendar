@@ -62,4 +62,46 @@ import Testing
         let after = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("results/\(id).json"))) as! [String: Any]
         #expect(after["state"] as? String == "applied")
     }
+
+    @Test func importsAgentMessagesThroughAttentionGateAndWritesResults() async throws {
+        let root = try tempRoot(), io = AgentBridgeIO(root: root)
+        try io.prepare()
+        let id = UUID().uuidString
+        let msg = #"{"schemaVersion":1,"id":"\#(id)","title":"下一步","body":"要不要先看一眼 N1 表格要填什么？","reason":"空档 + 他说过想做","parentEventId":"evt-1"}"#
+        try io.writeAtomic(Data(msg.utf8), to: "messages/\(id).json")
+        try io.writeAtomic(Data(#"{"schemaVersion":1,"id":"\#(UUID().uuidString)","title":"t","body":"b"}"#.utf8), to: "messages/noreason.json")
+        let center = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
+                                    notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(), deviceId: "mac", deviceLabel: "Mac")
+        let messages = AgentMessageCenter(transport: InMemoryAgentMessageTransport(), notifier: SilentAgentMessageNotifier(),
+                                          ledger: MemoryOperationLedger(), deviceId: "mac",
+                                          defaults: UserDefaults(suiteName: "bc-msg-" + UUID().uuidString)!)
+        let bridge = AgentBridge(center: center, messages: messages, defaults: UserDefaults(suiteName: "bc-bridge-" + UUID().uuidString)!) { [:] }
+        bridge.eventsEnabled = { false }
+        await bridge.sync(io: io)
+        #expect(messages.messages.count == 1 && messages.messages[0].parentRef == "evt-1")
+        #expect(messages.messages[0].delivery == .suppressed)   // 总开关默认关：拦下但保存
+        let result = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("results/messages/\(id).json"))) as! [String: Any]
+        #expect(result["delivery"] as? String == "suppressed" && (result["suppressReason"] as? String)?.contains("未开启") == true)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("messages/rejected/noreason.json").path))
+    }
+
+    @Test func resolvedAgentProposalEmitsOneEventOnlyWhenEnabled() async throws {
+        let root = try tempRoot(), io = AgentBridgeIO(root: root)
+        try io.prepare()
+        try io.writeAtomic(Data(Self.realAgentProposal.utf8), to: "proposals/good.json")
+        let center = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
+                                    notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(), deviceId: "mac", deviceLabel: "Mac")
+        let bridge = AgentBridge(center: center, defaults: UserDefaults(suiteName: "bc-bridge-" + UUID().uuidString)!) { [:] }
+        var on = false
+        bridge.eventsEnabled = { on }
+        await bridge.sync(io: io)
+        await center.decide(center.proposals[0].id, .decline)
+        await bridge.sync(io: io)
+        let events = { try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("events").path).filter { $0.hasSuffix(".json") } }
+        #expect(try events().isEmpty)                         // 关着：不写事件、不耗额度
+        on = true
+        await bridge.sync(io: io); await bridge.sync(io: io)
+        let written = try events()
+        #expect(written.count == 1 && written[0].contains("proposal_resolved"))   // 只写一次
+    }
 }

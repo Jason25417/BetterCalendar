@@ -74,7 +74,7 @@ struct BetterCalendarApp: App {
             }
             .sheet(isPresented: Binding(get: { container.router.openProposals }, set: { container.router.openProposals = $0 })) {
                 NavigationStack {
-                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId, bridge: container.agentBridge, alertPush: container.alertPush)
+                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId, bridge: container.agentBridge, alertPush: container.alertPush, messages: container.agentMessages)
                         .navigationTitle("多端审批")
                         .toolbar { Button("关闭") { container.router.openProposals = false; container.router.proposalFocusId = nil } }
                 }
@@ -159,6 +159,7 @@ struct BetterCalendarApp: App {
                     Task { await container.bridgeTasks.refresh() }
                     Task { await container.nativeApprovals.refresh() }
                     Task { await container.proposals.refresh() }
+                    Task { await container.agentMessages.refresh() }
                 }
                 container.proposals.isForeground = phase == .active
                 FocusFollow.setForeground(phase == .active)

@@ -27,7 +27,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     private var fm: FileManager { .default }
 
     func prepare() throws {
-        for sub in ["events", "proposals/imported", "proposals/rejected", "results"] {
+        for sub in ["events", "proposals/imported", "proposals/rejected", "results/messages", "messages/imported", "messages/rejected"] {
             try fm.createDirectory(at: root.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
     }
@@ -46,11 +46,59 @@ nonisolated struct AgentBridgeIO: Sendable {
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    func move(_ file: URL, to sub: String, note: String? = nil) throws {
-        let dest = root.appendingPathComponent("proposals/\(sub)/\(file.lastPathComponent)")
+    func move(_ file: URL, to sub: String, note: String? = nil, kind: String = "proposals") throws {
+        let dest = root.appendingPathComponent("\(kind)/\(sub)/\(file.lastPathComponent)")
         if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
         try fm.moveItem(at: file, to: dest)
-        if let note { try writeAtomic(Data(note.utf8), to: "proposals/\(sub)/\(file.deletingPathExtension().lastPathComponent).reason.txt") }
+        if let note { try writeAtomic(Data(note.utf8), to: "\(kind)/\(sub)/\(file.deletingPathExtension().lastPathComponent).reason.txt") }
+    }
+
+    func pendingMessageFiles() throws -> [URL] {
+        try fm.contentsOfDirectory(at: root.appendingPathComponent("messages"), includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    func writeMessageResult(_ m: AgentMessage) throws {
+        let iso = ISO8601DateFormatter()
+        let object: [String: Any] = ["id": m.id.uuidString, "title": m.title, "delivery": m.delivery.rawValue,
+                                     "suppressReason": m.suppressReason ?? NSNull(), "reaction": m.reaction?.rawValue ?? NSNull(),
+                                     "reactedAt": m.reactedAt.map { iso.string(from: $0) } ?? NSNull(), "createdAt": iso.string(from: m.createdAt)]
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        let relative = "results/messages/\(m.id.uuidString).json"
+        if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
+    }
+
+    /// 写一个事件文件（调度器监听 events/ 唤醒智能体）。文件名按时间排序。
+    func writeEvent(kind: String, summary: String, payload: [String: Any], at now: Date) throws {
+        let id = UUID().uuidString
+        let stamp = Self.eventStamp.string(from: now)
+        let object: [String: Any] = ["schemaVersion": 1, "id": "\(kind)-\(id.prefix(8))", "at": ISO8601DateFormatter().string(from: now),
+                                     "kind": kind, "summary": summary, "payload": payload]
+        try writeAtomic(JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+                        to: "events/\(stamp)-\(kind)-\(id.prefix(8)).json")
+    }
+
+    private static let eventStamp: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyyMMddHHmmss"; return f
+    }()
+
+    /// 智能体消息文件 → 草稿（一句话、可忽略；理由必填）。
+    static func messageDraft(from data: Data) throws -> AgentMessageDraft {
+        guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any], o["schemaVersion"] as? Int == 1 else {
+            throw AgentBridgeError.invalid("不是 v1 消息文件")
+        }
+        guard let raw = o["id"] as? String, let id = UUID(uuidString: raw) else { throw AgentBridgeError.invalid("消息 id 缺失或不是 UUID") }
+        guard let title = (o["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty, title.count <= 60 else {
+            throw AgentBridgeError.invalid("消息标题缺失或过长（≤60 字）")
+        }
+        guard let body = (o["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty, body.count <= 300 else {
+            throw AgentBridgeError.invalid("消息正文缺失或过长（≤300 字）")
+        }
+        guard let reason = (o["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty else {
+            throw AgentBridgeError.invalid("缺少理由（为什么此刻值得说）")
+        }
+        return AgentMessageDraft(id: id, originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
+                                 parentRef: o["parentEventId"] as? String, title: title, body: body, reason: reason)
     }
 
     /// 只在内容变化时重写，避免无谓的文件抖动。
@@ -98,12 +146,14 @@ nonisolated struct AgentBridgeIO: Sendable {
     private(set) var importedCount = 0
 
     private let center: ProposalCenter
+    private let messages: AgentMessageCenter?
     private let contextProvider: () -> [String: Any]
     private let defaults: UserDefaults
     private var loop: Task<Void, Never>?
 
-    init(center: ProposalCenter, defaults: UserDefaults = .standard, contextProvider: @escaping () -> [String: Any]) {
-        self.center = center; self.defaults = defaults; self.contextProvider = contextProvider
+    init(center: ProposalCenter, messages: AgentMessageCenter? = nil, defaults: UserDefaults = .standard,
+         contextProvider: @escaping () -> [String: Any]) {
+        self.center = center; self.messages = messages; self.defaults = defaults; self.contextProvider = contextProvider
         folderPath = resolveFolder()?.path
     }
 
@@ -172,8 +222,57 @@ nonisolated struct AgentBridgeIO: Sendable {
                 }
             }
             for p in center.proposals where p.origin == .agent { try io.writeResult(p, at: .now) }
+            if let messages {
+                for file in try io.pendingMessageFiles() {
+                    do {
+                        let draft = try AgentBridgeIO.messageDraft(from: Data(contentsOf: file))
+                        guard await messages.receive(draft) != nil else { continue }   // 失败留原处下轮重试
+                        try io.move(file, to: "imported", kind: "messages")
+                    } catch {
+                        try? io.move(file, to: "rejected", note: error.localizedDescription, kind: "messages")
+                        report("拒绝导入智能体消息 \(file.lastPathComponent)", error)
+                    }
+                }
+                for m in messages.messages { try io.writeMessageResult(m) }
+            }
+            try emitResolvedProposals(io: io)
             lastSync = .now
         } catch { report("桥接同步失败", error) }
+    }
+
+    // MARK: 事件（SPEC §19 C1，默认关）
+
+    /// 做完一件事等关键时刻：写事件唤醒智能体。未开启或未连接时什么都不做。
+    func emit(kind: String, summary: String, payload: [String: Any] = [:]) {
+        guard eventsEnabled(), let url = resolveFolder() else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let io = AgentBridgeIO(root: url)
+            try io.prepare()
+            try io.writeContext(contextProvider())   // 先刷新快照，智能体读到的就是此刻
+            try io.writeEvent(kind: kind, summary: summary, payload: payload, at: .now)
+            DevLog.shared.info("智能体桥接", "已写事件 \(kind)：\(summary)")
+        } catch { report("写事件失败", error) }
+    }
+
+    /// 测试可注入；生产读 AgentEventSettings。
+    var eventsEnabled: () -> Bool = { AgentEventSettings.enabled }
+
+    /// 智能体提案有了结论（2 小时内）→ 一次性事件，让它知道结果、决定要不要跟进。
+    private func emitResolvedProposals(io: AgentBridgeIO) throws {
+        guard eventsEnabled() else { return }
+        let key = "agentBridge.resolvedEmitted"
+        var done = Set(defaults.stringArray(forKey: key) ?? [])
+        let now = Date.now
+        for p in center.proposals where p.origin == .agent && !done.contains(p.id.uuidString) {
+            let state = p.effectiveState(at: now)
+            guard state.isClosed, now.timeIntervalSince(p.appliedAt ?? p.decidedAt ?? p.expiresAt) < 7200 else { continue }
+            try io.writeEvent(kind: "proposal_resolved", summary: "提案「\(p.title)」：\(state.label)",
+                              payload: ["proposalId": p.id.uuidString, "state": state.rawValue], at: now)
+            done.insert(p.id.uuidString)
+        }
+        defaults.set(Array(done.suffix(300)), forKey: key)
     }
 
     // MARK: 内部

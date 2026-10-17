@@ -989,9 +989,14 @@ final class ExecutionViewModel {
     /// 收尾信号用（0.38，#33）：最后一次完成的时刻（会话内存态即可——收尾卡只在当天使用中出现）。
     private(set) var lastCompletionAt: Date?
 
+    /// SPEC §19 C1：做完一件事的回调（智能体桥接据此写事件；未开启时桥接自己不写）。参数=标题、已用秒数。
+    var onBlockFinished: ((String, Int) -> Void)?
+
     func completeCurrent() async {
         if usesCanonicalTiming, let tasks = canonicalTasks, let session = tasks.primary {
+            let title = active?.title, sec = Int(currentElapsed)
             await tasks.act(.finish, on: session)
+            if let title { onBlockFinished?(title, sec) }
             return
         }
         lastCompletionAt = .now
@@ -1013,6 +1018,7 @@ final class ExecutionViewModel {
         if persistsRunState, let t = doneTitle {
             BehaviorLog.record("完成", t + (wasPromoted ? "（接替块）" : "") + (wasBonus ? "（计划外）" : ""))
         }
+        if let t = doneTitle { onBlockFinished?(t, doneSec) }
     }
 
     /// Focus Filter 联动（§5.7，0.20.4）：进入配置了「自动休息」的系统专注 → 开始休息；
