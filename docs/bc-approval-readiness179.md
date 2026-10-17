@@ -32,3 +32,15 @@
 02:30:18.987Z日志229616收到host_response（action字段，无confirm，userGesture/cause均unknown）；02:30:19.427Z日志229620原子变为cancelled，source=chat_confirmation、resolution=host_cancel。未过期，approvedAt/attemptId/result均空；不是已知本人主动取消。该时段开发向Dots发过“保留原请求等待修复”消息，与回调时间邻近，只是可能解释，缺宿主因果证据，不能确定新消息触发取消。研究日志229036→229666已完整分页；截图/回调字段类型、原hash可定位，不读取宿主私有文件。
 
 此请求保留终态，禁止复活/重放。修复版可安装后才另行安排一个新的具体测试步骤，仍由本人确认；不要让用户继续点此旧卡。不能把系统提交说成用户看到，Mac聊天2px及宿主取消原因仍未修。
+
+## 服务43实际发布与停止/回滚
+
+服务43已于02:34:14Z在原私有Site成功部署，has_mcp=true；source a4c8a48195cdb030494bbe3915f922d3f81237ea，deployment appgdep_6ad2de9caebc8191b31d7e4164ac4065。发布包只从canonical复制5个审批诊断源文件，没有带入离线APNs模块、改表、扩权限或换受众。独立checkout routing19项、TypeScript和生产构建已过。
+
+02:34:33Z正式read_native_capabilities已读到新approvalRouting：all_reviewers、policyRevision2，Mac enabled/active，iPhone configured但disabled/grant_changed_requires_explicit_reconfirmation；call research_dc3d2a55-7ad2-435b-baf3-cfecb4dba03b。只读诊断上线已验证，不等于原生180已安装或通知闭环已通过。
+
+停止本轮测试只停止新提案，不自动改通知设置、撤权限或处理其他真实待办。旧869e请求已取消，无需再次取消。用户可自行关闭本机审批通知；不替用户开关。服务43可回到兼容的42以撤回诊断字段，保留既有路由/投递表和原业务状态；不能为回滚清表。180回到179会重新出现本次跨端精度缺陷，只宜作为已知限制下的回退，不宣称修复仍在。APNs仍未启用；物理验收前不更改原SPEC真实测试复选框。
+
+## 2026-10-17 交接补记
+
+180 双端 xcodebuild 均报告 Upload succeeded（macOS 22:35:58、iOS 22:38:19 EDT），状态文件 stage=uploaded-both；ASC 处理状态与中文测试说明尚未核验。同日起主线转为 SPEC §19（多端审批改走 CloudKit、智能体改用 Claude Code），StateBridge/Dots 线冻结，本文件保留为档案。

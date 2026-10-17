@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "runtimeSourceCommit": "7215fe7df262cbdd3dc5622abe40e32c621e265b",
+  "app": {
+    "version": "0.65.23",
+    "build": 180,
+    "status": "uploaded_both_platforms_asc_processing_unverified",
+    "stateFile": "/private/tmp/bc-release-180/status.json",
+    "uploadEvidence": {
+      "macOS": "2026-10-16 22:35:58 EDT xcodebuild \"Upload succeeded\"",
+      "iOS": "2026-10-16 22:38:19 EDT xcodebuild \"Upload succeeded\"",
+      "statusFileStage": "uploaded-both",
+      "ascVerified": false,
+      "note": "2026-10-17 Claude 接手核对上传日志；ASC VALID/IN_BETA_TESTING 与中文测试说明尚未核验"
+    }
+  },
+  "service": {
+    "version": 43,
+    "project_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+    "checkout_path": "/private/tmp/bc-site-release43",
+    "commit_sha": "a4c8a48195cdb030494bbe3915f922d3f81237ea",
+    "archive": "/private/tmp/bc-statebridge43.tar.gz",
+    "deployment": {
+      "id": "appgdep_6ad2de9caebc8191b31d7e4164ac4065",
+      "project_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc",
+      "title": "个人状态接入",
+      "version_id": "appgprj_6ac3bb816d3c8191949bac68d45a62bc~appgver_874d4f06283c8191a16bd65694174952",
+      "type": "publish",
+      "status": "succeeded",
+      "url": "https://jason-state-bridge.jason25417.chatgpt.site",
+      "has_mcp": true,
+      "screenshot_asset_pointer": null,
+      "provider_deployment_id": "site---6ac3bb816d3c8191949bac68d45a62bc",
+      "failure_message": null,
+      "env_set_revision": 1,
+      "updated_at": "2026-10-17T02:34:14.343908+00:00"
+    }
+  },
+  "liveReadOnlyVerification": {
+    "readAt": "2026-10-17T02:34:33.141Z",
+    "approvalRouting": {
+      "policyRevision": 2,
+      "notificationMode": "all_reviewers",
+      "primaryDeviceId": null,
+      "delivery": "local_poll_while_app_runs",
+      "remotePush": false,
+      "authority": "diagnostic_only_rechecked_for_each_request",
+      "devices": [
+        {
+          "deviceId": "iphone_a8fbdfb4-7b3a-40a2-aa12-4776c88fc960",
+          "configured": true,
+          "enabled": false,
+          "reason": "grant_changed_requires_explicit_reconfirmation"
+        },
+        {
+          "deviceId": "mac_97e5fa26-6b84-4fce-89c7-d830ac55fe8d",
+          "configured": true,
+          "enabled": true,
+          "reason": "active"
+        }
+      ]
+    },
+    "research": {
+      "callId": "research_dc3d2a55-7ad2-435b-baf3-cfecb4dba03b",
+      "responseHash": "f0ac18d8d93c9d930929e4302ae8e1e1d4e82f2560d1f134b3e692cb50858566",
+      "recorded": true
+    }
+  },
+  "tests": {
+    "server": {
+      "passed": 171,
+      "failed": 0,
+      "skipped": 0,
+      "includesEightOfflineAPNsTests": true
+    },
+    "siteCheckoutRouting": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0
+    },
+    "native": {
+      "passed": 66,
+      "failed": 0,
+      "skipped": 0,
+      "xcresult": "/tmp/bc-loop-dd/Logs/Test/Test-BetterCalendar-2026.10.16_22-31-18--0400.xcresult"
+    },
+    "iosDeviceUnsignedCompile": "exit_0",
+    "typescript": "passed",
+    "productionSiteBuild": "passed"
+  },
+  "authorization": {
+    "audiencePreserved": "owner_private_custom_one_account_zero_external_policy_revision_1",
+    "newPermission": false,
+    "newCloudKitSchema": false,
+    "newAPNsTokenRegistration": false,
+    "newAPNsCredentialUse": false,
+    "realOperationExecuted": false
+  },
+  "physicalAcceptance": {
+    "multideviceNotification": "not_passed",
+    "notificationDecision": "unverified",
+    "siblingCleanup": "unverified",
+    "macChatLayout": "unfixed"
+  },
+  "terminatedTest": "869e6ee2-90e9-49b6-81c2-a08de612b179_cancelled_never_replay"
+}
