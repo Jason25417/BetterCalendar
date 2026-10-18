@@ -11,6 +11,7 @@
 //  · 不调 projection（实时日绿色本来清空、画面归 updatePreview 橙色链）——翻闸后才接管投影；
 //  · 三层分频（§14.1）：计算=事件驱动+分钟兜底（搭执行层 1s 守护 ticker，不新增定时器）；
 //    执行=位移 ≥10 分钟或顺序变化才写；呈现=写后发 planChangedExternally（带自家标记防自激）。
+//    外部变更只认真外部来源：本机保存回声（DataSyncMonitor 标 localStoreSave）不触发重算（B10，见 PlanChangeSource）。
 //  手改冷却（D12）：对账回流/亲手编辑的块 30 分钟内映射为钉死——用户最后动作赢（对账合同延伸）。
 //
 
@@ -84,13 +85,7 @@ final class TimelineCoordinator {
         listeners.append(Task { [weak self] in
             for await note in NotificationCenter.default.notifications(named: ReconcileService.planChangedExternally) {
                 guard let self else { return }
-                // 自家写回也发这个通知（刷新 UI 用）——跳过防自激
-                if note.userInfo?["source"] as? String == "timelineCoordinator" { continue }
-                // 对账回流的块进手改冷却（D12：用户最后动作赢）
-                if let ids = note.userInfo?["updatedIDs"] as? [UUID] {
-                    self.noteManualEdits(ids: ids)
-                }
-                await self.recompute(reason: "外部变更")
+                await self.handlePlanChangedExternally(userInfo: note.userInfo)
             }
         })
         listeners.append(Task { [weak self] in
@@ -98,6 +93,21 @@ final class TimelineCoordinator {
                 await self?.recompute(reason: "计划编辑")
             }
         })
+    }
+
+    /// planChangedExternally 的分流（B10 修复，P4.0-7）：
+    /// · 自家写回（timelineCoordinator）与本机保存回声（localStoreSave）→ 不重算——否则「写 → 保存 → 回声 → 重算 → 又写」自激；
+    /// · 带 updatedIDs 的（日历手改回流 / 智能体批准的挪块）→ 先进手改冷却（D12 用户最后动作赢），再重算；
+    /// · CloudKit 导入、显式重新读取、没标来源的旧发出方 → 照常当外部变更重算。
+    /// 返回本次写回的块数（不重算 = 0）。
+    @discardableResult
+    func handlePlanChangedExternally(userInfo: [AnyHashable: Any]?) async -> Int {
+        let source = userInfo?[PlanChangeSource.key] as? String
+        if let source, PlanChangeSource.ignoredByCoordinator.contains(source) { return 0 }
+        if let ids = userInfo?["updatedIDs"] as? [UUID] {
+            noteManualEdits(ids: ids)
+        }
+        return await recompute(reason: "外部变更")
     }
 
     /// 分钟兜底脉冲（执行层守护 ticker 每 60 tick 调一次）：纯函数重算，无变化零写入。
@@ -129,7 +139,7 @@ final class TimelineCoordinator {
             guard let blocks = try? planStore.plannedBlocks(on: today),
                   blocks.contains(where: { $0.id == e.blockID }) else { continue }
             try? planStore.updatePlanned(id: e.blockID, start: e.beforeStart, end: e.beforeEnd,
-                                         title: e.title)
+                                         title: e.title, reason: .undo)
             restored.insert(e.blockID)
         }
         guard !restored.isEmpty else { return 0 }
@@ -144,7 +154,7 @@ final class TimelineCoordinator {
         DevLog.shared.info("时间线", lastWriteNote)
         SmokeLog.hit("一键撤", "恢复 \(restored.count) 块到原位")
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
-                                        userInfo: ["source": "timelineCoordinator"])
+                                        userInfo: [PlanChangeSource.key: PlanChangeSource.timelineCoordinator])
         return restored.count
     }
 
@@ -203,12 +213,13 @@ final class TimelineCoordinator {
             guard let block = candidates.first(where: { $0.id == c.id }) else { continue }
             switch decision {
             case .dissolve:
-                try? planStore.deletePlanned(ids: [c.id])   // 零记录、明天照常、不进偏差叙事
+                try? planStore.deletePlanned(ids: [c.id], reason: .spill)   // 零记录、明天照常、不进偏差叙事
             case .forward(let target):
                 // 用户显式「排到明天」：同钟点平移（懒物化——明天重算时自然归位）
                 let shift = target.timeIntervalSince(day)
                 try? planStore.updatePlanned(id: c.id, start: block.start.addingTimeInterval(shift),
-                                             end: block.end.addingTimeInterval(shift), title: block.title)
+                                             end: block.end.addingTimeInterval(shift), title: block.title,
+                                             reason: .spill)
                 traces.append(ChangeTraceEntry(time: now(), blockID: c.id, title: c.title, kind: "顺延",
                                                beforeStart: block.start, beforeEnd: block.end,
                                                afterStart: block.start.addingTimeInterval(shift),
@@ -218,7 +229,7 @@ final class TimelineCoordinator {
             case .returnToPool, .escalate:
                 // 收待办区（池投放件回它的长期任务——addTodo 的归属让路自动处理）；
                 // escalate（DDL 挡路/显式 ask）同收池但保露脸：晨间摘要置顶（E5d 按 DDL 排序）
-                try? planStore.deletePlanned(ids: [c.id])
+                try? planStore.deletePlanned(ids: [c.id], reason: .spill)
                 longTasks?.addTodo(title: c.title,
                                    family: block.family,
                                    spilledFromDay: day,
@@ -312,7 +323,8 @@ final class TimelineCoordinator {
         if let pr = prediction, let row = blocks.first(where: { $0.id == pr.id }),
            abs(row.start.timeIntervalSince(pr.start)) >= threshold
             || abs(row.end.timeIntervalSince(pr.end)) >= threshold {
-            try? planStore.updatePlanned(id: pr.id, start: pr.start, end: pr.end, title: row.title)
+            try? planStore.updatePlanned(id: pr.id, start: pr.start, end: pr.end, title: row.title,
+                                         reason: .timelineCoordinator)
             traces.append(ChangeTraceEntry(time: now0, blockID: pr.id, title: row.title, kind: "活动预报",
                                            beforeStart: row.start, beforeEnd: row.end,
                                            afterStart: pr.start, afterEnd: pr.end,
@@ -336,7 +348,8 @@ final class TimelineCoordinator {
 
         if bigMove || (orderChanged && !moves.isEmpty) {
             for (b, p) in moves {
-                try? planStore.updatePlanned(id: b.id, start: p.start, end: p.end, title: b.title)
+                try? planStore.updatePlanned(id: b.id, start: p.start, end: p.end, title: b.title,
+                                             reason: .timelineCoordinator)
                 traces.append(ChangeTraceEntry(time: now0, blockID: b.id, title: b.title, kind: "顺延",
                                                beforeStart: b.start, beforeEnd: b.end,
                                                afterStart: p.start, afterEnd: p.end,
@@ -352,7 +365,7 @@ final class TimelineCoordinator {
         SmokeLog.hit("影子直写绿", "\(reason)·写回 \(wrote)·软标 \(softSpilledIDs.count)")
         // 呈现层通知（带自家标记防自激）：排日程页干净则重载、编辑中亮徽标——复用现成分流
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
-                                        userInfo: ["source": "timelineCoordinator"])
+                                        userInfo: [PlanChangeSource.key: PlanChangeSource.timelineCoordinator])
         // 影子期不调 projection（D7）：实时日绿色本来清空，真相变化无画面语义；翻闸后接管投影
         return wrote
     }

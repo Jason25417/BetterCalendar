@@ -3,7 +3,7 @@
 //  BetterCalendar
 //
 //  写/读「带色日历」。生产唯一实现 = EventKitCalendarStore（真 Apple 日历）；测试注入 FakeCalendarStore（测试 target）。
-//  逻辑稳了再换 EventKitCalendarStore（写真实绿/蓝日历，需 full access）。
+//  铁律（P4.0）：实现只能删/改**带 BetterCalendar 章**的事件；无章事件是用户的，永不删改（决定逻辑见 CalendarSyncPlanner）。
 //
 
 import Foundation
@@ -11,11 +11,13 @@ import Foundation
 protocol CalendarStore: AnyObject {
     func write(_ drafts: [CalendarEventDraft]) async throws
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft]
-    /// 清空某一类（如橙色预览日终消失）。
+    /// 读某时间窗内与之相交的事件（P4.0-5：对账/投影按自己的扫描范围读，不受 read(kind:) 的「此刻前后 7 天」限制）。
+    func read(kind: PlanCalendarKind, in window: DateInterval) async throws -> [CalendarEventDraft]
+    /// 清空某一类（如橙色预览日终消失）——只清带章事件。
     func clear(kind: PlanCalendarKind) async throws
 
     /// 权威对齐（重构 P2，ProjectionService 专用）：把窗口内该 kind 的事件与 drafts 对齐——
-    /// 按 blockID 匹配（无章旧事件按 标题+起始 认领补章），改的改、缺的建、多的删；
+    /// 按 blockID 匹配（仅 claimsUnstamped 草稿可认领同 标题+起始 的无章事件并补章），改的改、缺的建、多的（带章的）删；
     /// **drafts 为空 = 清空窗口**（与 write 的"空数组早退"相反，语义是"这个窗口就该是这样"）。
     /// 归属按事件 start ∈ [window.start, window.end)（半开区间），跨界重叠事件不误删。
     func apply(_ drafts: [CalendarEventDraft], kind: PlanCalendarKind, window: DateInterval) async throws
@@ -30,6 +32,10 @@ protocol CalendarStore: AnyObject {
 }
 
 extension CalendarStore {
+    /// 默认：在 read(kind:) 结果里按时间窗过滤（测试替身用；EventKit 实现直接按窗口查询）。
+    func read(kind: PlanCalendarKind, in window: DateInterval) async throws -> [CalendarEventDraft] {
+        try await read(kind: kind).filter { $0.start < window.end && $0.end > window.start }
+    }
     func existingEvents(on day: Date) async -> [BusySlot] { [] }
     func systemEvents(in window: DateInterval) async throws -> [SystemCalendarEvent] { [] }
 }

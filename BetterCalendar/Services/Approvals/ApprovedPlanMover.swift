@@ -136,7 +136,8 @@ enum PlanMoveRules {
             throw ProposalExecutionError.conflict("「\(current.title)」在提案之后被改过（现在 \(PlanMoveRules.span(current.start, current.end))），不覆盖")
         }
         let checked = try PlanMoveRules.validate(id: id, start: start, end: end, in: ctx)
-        try planStore.updatePlanned(id: id, start: checked.start, end: checked.end, title: current.title)
+        try planStore.updatePlanned(id: id, start: checked.start, end: checked.end, title: current.title,
+                                   reason: .agentApproval)
         var after = current; after.start = checked.start; after.end = checked.end
         var note = "已把「\(current.title)」从 \(PlanMoveRules.span(current.start, current.end)) 挪到 \(PlanMoveRules.span(checked.start, checked.end))"
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,

@@ -21,6 +21,8 @@ struct ReminderDraft: Sendable, Identifiable {
 
 protocol ReminderStore: AnyObject {
     func write(_ drafts: [ReminderDraft]) async throws
+    /// 按章差量写入（P4.0-9）：scope = 这次确认负责的块 id（其中不再需要提醒的才删）；别的日子的提醒不动。
+    func sync(_ drafts: [ReminderDraft], scope: Set<UUID>, now: Date) async throws
     /// **今天**打勾完成、且带本 App 身份章的提醒的 blockID（被动信号按 ID 精确匹配——0.25.4 根治
     /// 「同名任务被往日打勾的旧提醒误标完成」）。无章老提醒不参与（宁可漏认，绝不误认）。
     func completedBlockIDs() async -> Set<UUID>
@@ -32,6 +34,7 @@ protocol ReminderStore: AnyObject {
 }
 
 extension ReminderStore {
+    func sync(_ drafts: [ReminderDraft], scope: Set<UUID>, now: Date) async throws { try await write(drafts) }
     func dueReminders(on day: Date) async -> [String] { [] }
     func markCompleted(blockIDs: Set<UUID>) async {}
 }

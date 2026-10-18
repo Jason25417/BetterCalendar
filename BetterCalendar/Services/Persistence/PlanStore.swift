@@ -28,12 +28,33 @@ extension PlanReading {
 @MainActor
 protocol PlanWriting: AnyObject {
     func replacePlanned(_ blocks: [ScheduledBlock], on day: Date) throws
-    /// 按 ID 就地更新单块的 时间/标题（对账回流：日历手改 → 真相源；逻辑日归桶随 start 自动跟走）。
-    func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws
-    /// 追加若干块（对账回流：日历里新建的日程经确认后入库；逻辑日归桶随 start 自动落位）。
-    func insertPlanned(_ blocks: [ScheduledBlock]) throws
-    /// 按 ID 删除若干块（对账回流：日历删除经用户确认后 → 真相源）。
-    func deletePlanned(ids: [UUID]) throws
+    /// 按 ID 就地更新单块的 时间/标题（逻辑日归桶随 start 自动跟走）。值没变 = 不保存（不制造同步噪声）。
+    /// reason = 真实调用方（P4.0-8：日志按它写，不再把所有写入都记成「对账回流」）。
+    func updatePlanned(id: UUID, start: Date, end: Date, title: String, reason: PlanWriteReason) throws
+    /// 追加若干块（逻辑日归桶随 start 自动落位）。
+    func insertPlanned(_ blocks: [ScheduledBlock], reason: PlanWriteReason) throws
+    /// 按 ID 删除若干块（进回收站，可恢复）。
+    func deletePlanned(ids: [UUID], reason: PlanWriteReason) throws
+}
+
+/// 计划块写入的真实来源（P4.0-8）：PlanStore 日志据此标注。曾经所有写入都叫「对账回流」，
+/// 协调器顺延、单件入线、溢出硬执行在日志里全像日历对账，排查 B10 时被它误导过。
+nonisolated enum PlanWriteReason: String, Sendable {
+    case unspecified = "未标注来源"
+    case calendarReconcile = "日历对账回流"
+    case timelineCoordinator = "时间线协调器"
+    case undo = "一键撤销"
+    case spill = "溢出硬执行"
+    case poolAdmit = "单件入线"
+    case agentApproval = "智能体批准的改动"
+}
+
+extension PlanWriting {
+    func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws {
+        try updatePlanned(id: id, start: start, end: end, title: title, reason: .unspecified)
+    }
+    func insertPlanned(_ blocks: [ScheduledBlock]) throws { try insertPlanned(blocks, reason: .unspecified) }
+    func deletePlanned(ids: [UUID]) throws { try deletePlanned(ids: ids, reason: .unspecified) }
 }
 
 // MARK: - 蓝色实际（真相源，蓝对账 0.27 起）
@@ -130,17 +151,19 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         DevLog.shared.info("PlanStore", "写入 \(blocks.count) 计划块 @ \(Self.dayStr(day))")
     }
 
-    /// 按 ID 就地更新（0.20 对账回流）：只动 时间/标题（固定/★/计时方式日历没有对应概念、保持库值）。
-    func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws {
+    /// 按 ID 就地更新：只动 时间/标题（固定/★/计时方式日历没有对应概念、保持库值）。
+    /// 值没变就不保存（B10 防线：无效保存也会触发 NSPersistentStoreRemoteChange 和 CloudKit 导出）。
+    func updatePlanned(id: UUID, start: Date, end: Date, title: String, reason: PlanWriteReason) throws {
         guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
             .first(where: { !$0.isInTrash && $0.id == id && $0.kind == .planned }) else { return }
+        guard block.start != start || block.end != end || block.title != title else { return }
         block.start = start; block.end = end; block.title = title
         try context.save()
-        DevLog.shared.info("PlanStore", "对账回流更新「\(title)」→ \(Self.dayStr(start))")
+        DevLog.shared.info("PlanStore", "\(reason.rawValue)：更新「\(title)」→ \(Self.dayStr(start))")
     }
 
-    /// 追加块（0.20.2 对账回流：日历新建经确认后入库，默认弹性/轻计时/普通优先级）。
-    func insertPlanned(_ blocks: [ScheduledBlock]) throws {
+    /// 追加块（日历新建经确认后入库 / 单件入线等；默认弹性/轻计时/普通优先级）。
+    func insertPlanned(_ blocks: [ScheduledBlock], reason: PlanWriteReason) throws {
         guard !blocks.isEmpty else { return }
         let allRows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned }
         let activeIDs = Set(allRows.filter { !$0.isInTrash }.map(\.id))
@@ -155,17 +178,17 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
                                      deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID))
         }
         try context.save()
-        DevLog.shared.info("PlanStore", "对账回流新增 \(blocks.count) 块（日历新建）")
+        DevLog.shared.info("PlanStore", "\(reason.rawValue)：新增 \(blocks.count) 块")
     }
 
-    /// 按 ID 删除（0.20 对账回流：日历删除经用户确认后落库）。
-    func deletePlanned(ids: [UUID]) throws {
+    /// 按 ID 删除（进回收站）。
+    func deletePlanned(ids: [UUID], reason: PlanWriteReason) throws {
         guard !ids.isEmpty else { return }
         let idSet = Set(ids)
         let victims = try context.fetch(FetchDescriptor<PlanBlock>())
             .filter { !$0.isInTrash && $0.kind == .planned && idSet.contains($0.id) }
         try RetainedDeletion.save(victims, in: context)
-        DevLog.shared.info("PlanStore", "对账回流删除 \(victims.count) 块")
+        DevLog.shared.info("PlanStore", "\(reason.rawValue)：删除 \(victims.count) 块")
     }
 
     // MARK: - 蓝色实际（真相源）

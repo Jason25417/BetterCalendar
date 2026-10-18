@@ -16,33 +16,58 @@ actor EventKitReminderStore: ReminderStore {
     private static let listTitle = "BetterCalendar · 要紧事 (Dev)"
 
     func write(_ drafts: [ReminderDraft]) async throws {
+        try await sync(drafts, scope: [], now: Date())
+    }
+
+    /// 按章差量写入（P4.0-9 修 B9，决定逻辑与单测在 ReminderSyncPlanner）：不再先清空列表。
+    /// 只碰带 BetterCalendar 章的提醒；别的日子的、你手动加进本列表的、你已打勾完成的都原样保留。
+    func sync(_ drafts: [ReminderDraft], scope: Set<UUID>, now: Date) async throws {
         try await ensureAccess()
-        guard !drafts.isEmpty else { return }
-        let list = try reminderList()   // 专用列表，可明确找到、可整本删
-        // 覆盖：先清掉本列表里旧的未完成提醒，避免多次确认重复累积
-        // P4.0-1 止血（2026-10-18）：只清带 BetterCalendar 章的；用户自己加进本列表的提醒永远不删。
-        for r in await existingReminders(in: list) where !r.isCompleted {
-            guard EventKitCalendarStore.blockID(from: r.url) != nil else { continue }
-            try? store.remove(r, commit: false)
+        let found = store.calendars(for: .reminder).first(where: { $0.title == Self.listTitle })
+        if drafts.isEmpty, found == nil { return }   // 没东西要写、列表也不存在：别为此建列表
+        let list = try found ?? reminderList()   // 专用列表，可明确找到、可整本删
+        let existing = await existingReminders(in: list)
+        let plan = ReminderSyncPlanner.plan(existing: existing.map(Self.snapshot), drafts: drafts,
+                                            scope: scope, now: now)
+        for u in plan.updates {
+            Self.fill(existing[u.index], with: u.draft)
+            try store.save(existing[u.index], commit: false)
         }
-        for d in drafts {
+        for d in plan.creates {
             let r = EKReminder(eventStore: store)
             r.calendar = list
-            r.title = d.title
-            r.notes = d.notes
-            r.priority = d.priority
-            r.url = d.blockID.flatMap(EventKitCalendarStore.stampURL)   // 身份章：完成信号按 ID 匹配
-            if let due = d.due {
-                r.dueDateComponents = Calendar.current.dateComponents(
-                    [.year, .month, .day, .hour, .minute], from: due)
-                if let lead = d.leadMinutes {
-                    r.addAlarm(EKAlarm(relativeOffset: TimeInterval(-lead * 60)))   // 到期前 N 分钟
-                }
-            }
+            Self.fill(r, with: d)
             try store.save(r, commit: false)
         }
-        try store.commit()
-        await DevLog.shared.info("提醒", "写入提醒事项 \(drafts.count) 项 → 「\(Self.listTitle)」列表")
+        for i in plan.deletes { try? store.remove(existing[i], commit: false) }
+        let changed = plan.updates.count + plan.creates.count + plan.deletes.count
+        if changed > 0 { try store.commit() }
+        await DevLog.shared.info("提醒", "提醒事项「\(Self.listTitle)」：新建 \(plan.creates.count) · 更新 \(plan.updates.count) · 移除 \(plan.deletes.count)")
+    }
+
+    /// 把草稿写进提醒（标题/备注/优先级/身份章/截止/提前提醒）。
+    private static func fill(_ r: EKReminder, with d: ReminderDraft) {
+        r.title = d.title
+        r.notes = d.notes
+        r.priority = d.priority
+        r.url = ReminderStamp.url(for: d)   // 身份章：完成信号/差量写入按章匹配
+        for a in r.alarms ?? [] { r.removeAlarm(a) }
+        if let due = d.due {
+            r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+            if let lead = d.leadMinutes {
+                r.addAlarm(EKAlarm(relativeOffset: TimeInterval(-lead * 60)))   // 到期前 N 分钟
+            }
+        } else {
+            r.dueDateComponents = nil
+        }
+    }
+
+    private static func snapshot(_ r: EKReminder) -> ReminderSnapshot {
+        ReminderSnapshot(url: r.url, isCompleted: r.isCompleted, title: r.title ?? "", notes: r.notes,
+                         priority: r.priority,
+                         due: r.dueDateComponents.flatMap { Calendar.current.date(from: $0) },
+                         leadMinutes: r.alarms?.first.map { Int((-$0.relativeOffset / 60).rounded()) },
+                         creationDate: r.creationDate, externalID: r.calendarItemExternalIdentifier)
     }
 
     /// 找/建专用提醒列表（同日历的 Dev 专用思路）。

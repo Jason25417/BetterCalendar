@@ -395,7 +395,7 @@ final class HomeViewModel {
                                              parsedFamily: nil, longTasks: longTaskStore)
             if fam != FamilyTaxonomy.fallback { sb.labels.append(ScheduledBlock.familyPrefix + fam) }
         }
-        try? planStore.insertPlanned([sb])
+        try? planStore.insertPlanned([sb], reason: .poolAdmit)
         try? await projection.project(label: DayContext.logicalStartOfDay(sb.start))
         NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
         DevLog.shared.info("投放", "单件入线：「\(sb.title)」\(sb.start.formatted(date: .omitted, time: .shortened))")
@@ -550,12 +550,17 @@ final class HomeViewModel {
                     .sorted { $0.start < $1.start }
                 if excluded > 0 { note = "\(excluded) 件在你编辑期间已完成/进行中，保持原样。" }
             }
+            // 提醒按章差量（P4.0-9）：这次确认负责的块 = 涉及的逻辑日上确认前后的所有块；别的日子的提醒不动
+            var reminderScope = Set(sorted.map(\.id))
+            for label in byLabel.keys {
+                reminderScope.formUnion(((try? planStore.plannedBlocks(on: label)) ?? []).map(\.id))
+            }
             for (label, dayBlocks) in byLabel {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
                 try await projection.project(label: label)
             }
-            try await reminderStore.write(reminders)  // 有 DDL 的事项 → 提醒事项（响在 p−m−N）
+            try await reminderStore.sync(reminders, scope: reminderScope, now: now())  // 有 DDL 的事项 → 提醒事项（响在 p−m−N）
             // 过点 clamp：p−m−N 已过去的（加得太晚），不写过期 VTODO（不会响），直接立刻发一条前向通知
             for n in pastDueNudges {
                 await notifier.notifyNow(title: "「\(n.title)」该开始了",
