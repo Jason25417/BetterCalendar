@@ -76,24 +76,29 @@ nonisolated enum ActivityStableID {
     }
 }
 
-/// 快捷指令「记录 App 打开/关闭」的业务逻辑（Intent 只是壳，这里可单测）。
+/// 快捷指令「记录 App 打开 / 关闭」的业务逻辑（Intent 只是壳，这里可单测）。打开 / 关闭的判断见 PhoneAppSession。
+/// 状态读 → 改 → 存在主线程上一气呵成（两个动作几乎同时触发也不会互相覆盖），之后才异步写日志 / 上传。
 enum ActivityShortcutRecorder {
-    enum Result: Equatable { case recorded(ActivityPhoneSink.Outcome), notRecording }
+    enum Result: Equatable { case recorded([ActivityEvent], ActivityPhoneSink.Outcome), notRecording }
 
-    static func event(opened: Bool, appName: String?, at: Date, deviceId: String, platform: String,
-                      extra: [String: String] = [:]) -> ActivityEvent {
-        let name = appName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var detail = extra
-        if name?.isEmpty != false { detail["appUnknown"] = "true" }   // 「所有 App」一条自动化：系统不告诉是哪个 App
-        return ActivityEvent(at: at, kind: opened ? .appOpened : .appClosed, source: .shortcut, deviceId: deviceId, platform: platform,
-                             appName: (name?.isEmpty == false) ? String(name!.prefix(80)) : nil, detail: detail.isEmpty ? nil : detail)
+    /// 「记录 App 打开」：appName = 自动化里「获取当前 App」的结果。
+    static func recordOpened(appName: String?, at: Date, deviceId: String, platform: String, sink: ActivityPhoneSink,
+                             defaults: UserDefaults = .standard, extra: [String: String] = [:]) async throws -> Result {
+        guard ActivitySettings.isRecording(at: at, defaults) else { return .notRecording }
+        var session = PhoneAppSession.load(defaults)
+        let events = session.opened(appName, at: at, .init(deviceId: deviceId, platform: platform, extra: extra))
+        session.save(defaults)
+        return .recorded(events, try await sink.record(events))
     }
 
-    static func record(opened: Bool, appName: String?, at: Date, deviceId: String, platform: String,
-                       sink: ActivityPhoneSink, defaults: UserDefaults = .standard, extra: [String: String] = [:]) async throws -> Result {
+    /// 「记录 App 关闭」：frontApp = 关闭触发后等 2 秒再「获取当前 App」的结果（回到主屏幕为空）。
+    static func recordClosed(frontApp: String?, at: Date, deviceId: String, platform: String, sink: ActivityPhoneSink,
+                             defaults: UserDefaults = .standard, extra: [String: String] = [:]) async throws -> Result {
         guard ActivitySettings.isRecording(at: at, defaults) else { return .notRecording }
-        let e = event(opened: opened, appName: appName, at: at, deviceId: deviceId, platform: platform, extra: extra)
-        return .recorded(try await sink.record([e]))
+        var session = PhoneAppSession.load(defaults)
+        let events = session.closed(front: frontApp, at: at, .init(deviceId: deviceId, platform: platform, extra: extra))
+        session.save(defaults)
+        return .recorded(events, try await sink.record(events))
     }
 
     static var platform: String {

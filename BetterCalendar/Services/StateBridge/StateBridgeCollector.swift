@@ -29,6 +29,8 @@ import CryptoKit
     private var lastBrowserFailure: BridgeJSON?
     private let browserReader: any StateBridgeBrowserReading = AppleScriptBridgeBrowserReader()
     #endif
+    /// W13 守卫：冻结的 Dots 采集永不读 / 上传浏览器网址（见 sample() 里的说明）。
+    nonisolated static let emitsBrowserURLs = false
     var enabled: Bool { UserDefaults.standard.bool(forKey:"dotStateBridge.enabled") }
     func setEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled,forKey:"dotStateBridge.enabled")
@@ -114,19 +116,25 @@ import CryptoKit
         #if os(macOS)
         let app = NSWorkspace.shared.frontmostApplication
         sampleActivity(force:true)
-        let browser = await browserReader.snapshot(bundleID: app?.bundleIdentifier, at: now)
-        guard enabled else { return }
-        if case let .object(fields) = browser.value,
-           case let .string(availability) = fields["availability"],
-           ["not-authorized", "read-unavailable"].contains(availability) {
-            if lastBrowserFailure != browser.value {
-                let reason: String
-                if case let .string(value) = fields["reason"] { reason = value } else { reason = "browser-read-failed" }
-                DevLog.shared.warn("StateBridge", "浏览器状态读取未成功：\(reason)；未将它当作空页面。")
-                lastBrowserFailure = browser.value
-            }
-        } else { lastBrowserFailure = nil }
-        client.emit("mac.browser", value: browser.value, observedAt: browser.observedAt)
+        // W13 守卫（2026-10-18 Jason 批准给 W13 加 com.apple.security.temporary-exception.apple-events）：
+        // 那条沙盒例外是为 W13 设备活动记录加的；Dots 时代已冻结，绝不能因此开始读到 / 上传浏览器网址。
+        // 这里无条件跳过浏览器读取，也不发 mac.browser（加例外之前它本来就只能读到 -600 失败）。
+        // 要恢复须 Jason 另行决定，并同时删掉 W13ActivityTests 里的守卫测试。
+        if Self.emitsBrowserURLs {
+            let browser = await browserReader.snapshot(bundleID: app?.bundleIdentifier, at: now)
+            guard enabled else { return }
+            if case let .object(fields) = browser.value,
+               case let .string(availability) = fields["availability"],
+               ["not-authorized", "read-unavailable"].contains(availability) {
+                if lastBrowserFailure != browser.value {
+                    let reason: String
+                    if case let .string(value) = fields["reason"] { reason = value } else { reason = "browser-read-failed" }
+                    DevLog.shared.warn("StateBridge", "浏览器状态读取未成功：\(reason)；未将它当作空页面。")
+                    lastBrowserFailure = browser.value
+                }
+            } else { lastBrowserFailure = nil }
+            client.emit("mac.browser", value: browser.value, observedAt: browser.observedAt)
+        }
         await sampleFiles()
         guard enabled else { return }
         sampleHistory()
