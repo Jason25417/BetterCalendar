@@ -125,7 +125,7 @@ struct ActivityDisclosureText: View {
                 Text("存在哪").bold()
                 Text("每台设备本机 App 容器里按天存一个文件。Mac 每 20 秒把文件复制到智能体工作区的 bridge/activity/。iPhone 的记录经你自己的 iCloud 私有数据库（只有你的账户能读）传到 Mac，云端副本 14 天后删除。")
                 Text("谁会读").bold()
-                Text("BetterCalendar 智能体（Mac 上的 Claude Code 专用会话，读本机文件）。哨兵（W14）会把一份摘要发给云端模型（Anthropic API）来判断要不要叫醒智能体——也就是说摘要会离开你的设备。")
+                Text("BetterCalendar 智能体（Mac 上的 Claude Code 专用会话，读本机文件）。哨兵（W14，Mac）会把一份摘要（含 App 名、网站域名）发给云端的判断模型来决定要不要叫醒智能体：首选 TypeSafe Jev（经 OpenRouter），也可选 OpenAI Decisions，兜底时用 Claude（Anthropic API）——也就是说摘要会离开你的设备。")
                 Text("留多久").bold()
                 Text("本机与 bridge 里保留 90 天，过期自动删除（这是防止文件无限变大的稳定性边界）。关掉开关不会删已有记录。")
                 Text("红线").bold()

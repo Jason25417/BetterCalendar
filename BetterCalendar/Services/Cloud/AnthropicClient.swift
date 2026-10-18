@@ -8,6 +8,16 @@
 
 import Foundation
 
+/// 一次问答的文本 + 用量（W14 哨兵记 token 与成本）。input = 未命中缓存的输入；缓存读/写另计。
+struct LLMCompletion: Sendable {
+    var text: String
+    var inputTokens: Int
+    var outputTokens: Int
+    var cacheReadTokens: Int
+    var cacheWriteTokens: Int
+    var stopReason: String?
+}
+
 struct AnthropicError: Error, LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -20,6 +30,8 @@ struct AnthropicClient {
     var apiKey: () -> String? = { KeychainStore.loadAPIKey(account: CloudSettings.provider.keychainAccount) }
     var model: () -> String = { CloudSettings.activeModel }
     var useCloud: () -> Bool = { CloudSettings.useCloud }
+    /// HTTP 层（W14：测试注入假实现，单测绝不真调 API）。生产 = URLSession.shared。流式请求不走它。
+    var transport: (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) }
 
     /// 连通性测试（设置页「测试」按钮）：验证 key + 模型可用，**顺带探测结构化输出支持**
     /// （0.20，Jason 提：格式保证=约束解码，模型支不支持 schema 直接决定抽风率——测试时就该知道）。
@@ -112,6 +124,21 @@ struct AnthropicClient {
     // MARK: Anthropic 原生
 
     private func completeAnthropic(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool, jsonSchema: [String: Any]?, cachedSystemPrefix: String? = nil) async throws -> String {
+        try await completeAnthropicDetailed(key: key, system: system, user: user, maxTokens: maxTokens, jsonMode: jsonMode,
+                                            jsonSchema: jsonSchema, cachedSystemPrefix: cachedSystemPrefix).text
+    }
+
+    /// W14 哨兵：带用量的一次问答（只走 Anthropic 原生；记成本要 usage）。结构化输出 = 传 jsonSchema（output_config.format），**不用 prefill**。
+    func completeWithUsage(system: String, user: String, maxTokens: Int = 1024, jsonSchema: [String: Any]? = nil,
+                           cachedSystemPrefix: String? = nil) async throws -> LLMCompletion {
+        guard useCloud() else { throw AnthropicError(message: "云端已关闭") }
+        guard let key = apiKey(), !key.isEmpty else { throw AnthropicError(message: "未配置 API key") }
+        guard provider() == .anthropic else { throw AnthropicError(message: "带用量的调用只支持 Anthropic") }
+        return try await completeAnthropicDetailed(key: key, system: system, user: user, maxTokens: maxTokens,
+                                                   jsonMode: jsonSchema != nil, jsonSchema: jsonSchema, cachedSystemPrefix: cachedSystemPrefix)
+    }
+
+    private func completeAnthropicDetailed(key: String, system: String, user: String, maxTokens: Int, jsonMode: Bool, jsonSchema: [String: Any]?, cachedSystemPrefix: String? = nil) async throws -> LLMCompletion {
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
         req.httpMethod = "POST"
         req.timeoutInterval = maxTokens >= 4000 ? 150 : 60   // 长输出非流式会久，给足；日后上流式再收紧
@@ -147,7 +174,10 @@ struct AnthropicClient {
             throw AnthropicError(message: "回复超长被截断（max_tokens=\(maxTokens)）")
         }
         guard !text.isEmpty else { throw AnthropicError(message: "空回复") }
-        return text
+        let usage = obj["usage"] as? [String: Any] ?? [:]
+        return LLMCompletion(text: text, inputTokens: usage["input_tokens"] as? Int ?? 0, outputTokens: usage["output_tokens"] as? Int ?? 0,
+                             cacheReadTokens: usage["cache_read_input_tokens"] as? Int ?? 0,
+                             cacheWriteTokens: usage["cache_creation_input_tokens"] as? Int ?? 0, stopReason: stop)
     }
 
     // MARK: Anthropic 流式（SSE，0.20.1）
@@ -272,7 +302,7 @@ struct AnthropicClient {
     // MARK: 共用发送
 
     private func send(_ req: URLRequest, provider: String) async throws -> [String: Any] {
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (data, resp) = try await transport(req)
         guard let http = resp as? HTTPURLResponse else { throw AnthropicError(message: "无 HTTP 响应") }
         guard http.statusCode == 200 else {
             let detail = String(data: data, encoding: .utf8) ?? ""

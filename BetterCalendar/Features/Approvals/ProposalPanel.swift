@@ -14,6 +14,9 @@ struct ProposalPanel: View {
     var bridge: AgentBridge? = nil
     var alertPush: ProposalAlertPushControl? = nil
     var messages: AgentMessageCenter? = nil
+    #if os(macOS)
+    @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // W14 哨兵（组装点经 environment 注入；没有就不显示）
+    #endif
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var notificationAllowed: Bool?
@@ -51,6 +54,7 @@ struct ProposalPanel: View {
                     }
                 }
                 if bridge.connected { AgentRuntimeSection(bridge: bridge) }   // SPEC §19 批次 11：最近运行 / 调度失败 / 越权记录
+                if let sentinel { SentinelSection(engine: sentinel) }   // SPEC §19 C1 W14：哨兵（要不要叫醒智能体）
             }
             #endif
             Section("智能体能看到什么（A2）") {

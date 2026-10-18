@@ -68,14 +68,17 @@ nonisolated struct AgentBridgeIO: Sendable {
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
     }
 
-    /// 写一个事件文件（调度器监听 events/ 唤醒智能体）。文件名按时间排序。
-    func writeEvent(kind: String, summary: String, payload: [String: Any], at now: Date) throws {
+    /// 写一个事件文件（调度器监听 events/ 唤醒智能体）。文件名按时间排序。返回事件 id（W14 哨兵记进决策日志）。
+    @discardableResult
+    func writeEvent(kind: String, summary: String, payload: [String: Any], at now: Date) throws -> String {
         let id = UUID().uuidString
         let stamp = Self.eventStamp.string(from: now)
-        let object: [String: Any] = ["schemaVersion": 1, "id": "\(kind)-\(id.prefix(8))", "at": ISO8601DateFormatter().string(from: now),
+        let eventId = "\(kind)-\(id.prefix(8))"
+        let object: [String: Any] = ["schemaVersion": 1, "id": eventId, "at": ISO8601DateFormatter().string(from: now),
                                      "kind": kind, "summary": summary, "payload": payload]
         try writeAtomic(JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
                         to: "events/\(stamp)-\(kind)-\(id.prefix(8)).json")
+        return eventId
     }
 
     private static let eventStamp: DateFormatter = {
@@ -595,6 +598,19 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 测试可注入；生产读 AgentEventSettings。
     var eventsEnabled: () -> Bool = { AgentEventSettings.enabled }
+
+    /// SPEC §19 C1 W14 哨兵：在桥接目录里做一件事（写唤醒事件 / runtime/sentinel.json）。
+    /// 不受「关键时刻唤醒」开关管——哨兵有自己的开关。refreshContext = 先刷新 context.json（唤醒前用）。
+    /// 没连接或出错 → 抛出，由调用方写进自己的状态（失败可见）。
+    func performInFolder(refreshContext: Bool, _ body: (AgentBridgeIO) throws -> Void) async throws {
+        guard let url = resolveFolder() else { throw AgentBridgeError.invalid("桥接目录未连接") }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let io = AgentBridgeIO(root: url)
+        try io.prepare()
+        if refreshContext { try io.writeContext(await contextProvider()) }
+        try body(io)
+    }
 
     /// 智能体提案有了结论（2 小时内）→ 一次性事件，让它知道结果、决定要不要跟进。
     private func emitResolvedProposals(io: AgentBridgeIO) throws {

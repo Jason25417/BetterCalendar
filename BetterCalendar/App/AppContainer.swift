@@ -65,6 +65,7 @@ final class AppContainer {
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
+    let sentinel: SentinelEngine?                  // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（Mac；测试环境为 nil）
     #endif
 
     init() {
@@ -336,6 +337,7 @@ final class AppContainer {
         #if os(macOS)
         if TestHost.isActive {
             self.agentBridge = nil
+            self.sentinel = nil
         } else {
             // SPEC §19 A2：智能体看到的一天（全部只读；日记默认不给，面板开关允许后才附）。
             let context = AgentContextGatherer(
@@ -365,6 +367,22 @@ final class AppContainer {
             let wake = ProposalWake.onPush
             ProposalWake.onPush = { [weak bridge] in await wake?(); await bridge?.sync() }
             bridge.start()
+            // SPEC §19 C1 W14 哨兵：高频看设备活动 / 计划 / 计时，判断要不要叫醒智能体（只写 sentinel_wake 事件，从不直接通知你）。
+            // 判断器：首选 TypeSafe Jev（OpenRouter）→ OpenAI Decisions → Claude Haiku → 规则兜底（Jason 10-18 同意把摘要发给 OpenRouter / OpenAI）。
+            let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
+                                          log: FileSentinelDecisionLog(), bridge: bridge,
+                                          activity: activity.log) { await context.gather(now: $0) }
+            sentinel.recentAgentWakes = { [weak bridge] in
+                (bridge?.runtime?.runs ?? []).filter { ($0.attempt ?? 0) >= 1 }
+                    .map { SentinelRecentWake(at: $0.at, kind: $0.kind ?? "?", summary: $0.summary ?? "") }
+            }
+            sentinel.recentNotices = { [weak messages = agentMessages] in
+                (messages?.messages ?? []).map { SentinelRecentNotice(at: $0.createdAt, title: $0.title, delivered: $0.delivery == .delivered,
+                                                                      suppressReason: $0.suppressReason, reaction: $0.reaction?.rawValue) }
+            }
+            sentinel.attention = { [weak messages = agentMessages] in messages?.settings ?? AttentionSettings.load() }
+            self.sentinel = sentinel
+            sentinel.start()
             // P4 Q3：日历里删了块 → 已照办；写事件让智能体按上下文决定要不要问一句（不再弹四选窗）
             reconcile.onUserDeleted = { [weak bridge] deletions in
                 bridge?.emit(kind: "calendar_user_deleted",
