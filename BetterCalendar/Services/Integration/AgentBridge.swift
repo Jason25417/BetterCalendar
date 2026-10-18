@@ -144,6 +144,10 @@ nonisolated struct AgentBridgeIO: Sendable {
     private(set) var lastSync: Date?
     private(set) var lastError: String?
     private(set) var importedCount = 0
+    /// SPEC §19 批次 11：调度器运行时（最近运行、死信、越权记录），每轮同步时读取；告警 = 调度失败（醒目可见）。
+    private(set) var runtime: AgentRuntimeSnapshot?
+    private(set) var runtimeAlerts: [AgentRuntimeAlert] = []
+    private var reportedRuntimeAlerts: Set<String> = []
 
     private let center: ProposalCenter
     private let messages: AgentMessageCenter?
@@ -238,6 +242,37 @@ nonisolated struct AgentBridgeIO: Sendable {
             try emitResolvedProposals(io: io)
             lastSync = .now
         } catch { report("桥接同步失败", error) }
+        refreshRuntime(io: io)
+    }
+
+    // MARK: 智能体运行时（SPEC §19 批次 11）
+
+    /// 测试可注入时钟（健康判断：事件等待多久算调度器没在运行）。
+    var runtimeNow: () -> Date = Date.init
+
+    /// 读调度器写的运行记录 / 状态 / 死信 / 越权镜像；新出现的告警各写一次 DevLog（失败必须可见）。
+    func refreshRuntime(io: AgentBridgeIO) {
+        let snap = io.readRuntime()
+        runtime = snap
+        runtimeAlerts = AgentRuntimeHealth.alerts(snap, now: runtimeNow())
+        for a in runtimeAlerts where !reportedRuntimeAlerts.contains(a.key) {
+            reportedRuntimeAlerts.insert(a.key)
+            if a.severity == .error { DevLog.shared.error("智能体运行", a.message) } else { DevLog.shared.warn("智能体运行", a.message) }
+        }
+    }
+
+    /// 死信重新排队（只由用户点击触发）：移回 events/，调度器会再处理一次。
+    func requeueDeadLetter(_ file: String) { withFolder("重新排队失败") { try $0.requeueDeadLetter(file) } }
+    /// 收起死信（只由用户点击触发）：移入 events/failed/dismissed/，保留可查。
+    func dismissDeadLetter(_ file: String) { withFolder("收起失败事件失败") { try $0.dismissDeadLetter(file) } }
+
+    private func withFolder(_ what: String, _ body: (AgentBridgeIO) throws -> Void) {
+        guard let url = resolveFolder() else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let io = AgentBridgeIO(root: url)
+        do { try body(io) } catch { report(what, error) }
+        refreshRuntime(io: io)
     }
 
     // MARK: 事件（SPEC §19 C1，默认关）

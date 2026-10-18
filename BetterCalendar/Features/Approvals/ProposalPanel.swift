@@ -36,6 +36,7 @@ struct ProposalPanel: View {
                 if closed.isEmpty { Text("还没有").foregroundStyle(.secondary) }
                 ForEach(Array(closed)) { p in historyRow(p) }
             }
+            AgentTranslationStatsSection(center: center, messages: messages)   // SPEC §19 批次 6：转译偏差统计（只统计）
             #if os(macOS)
             if let bridge {
                 Section("BetterCalendar 智能体桥接（Mac）") {
@@ -47,6 +48,7 @@ struct ProposalPanel: View {
                         if bridge.connected { Button("断开", role: .destructive) { bridge.disconnect() } }
                     }
                 }
+                if bridge.connected { AgentRuntimeSection(bridge: bridge) }   // SPEC §19 批次 11：最近运行 / 调度失败 / 越权记录
             }
             #endif
             if let messages { attentionSection(messages) }
