@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, AppLifecycleControllin
         Task {
             if CloudKitProposalStore.isProposalPush(userInfo) {
                 await ProposalWake.onPush?()   // SPEC §19 多端审批：本 zone 推送 → 刷新提案
+            } else if CloudKitSharedTimerStore.isTimerPush(userInfo) {
+                await SharedTimerWake.onPush?()   // W5：iCloud 共享计时 zone 推送 → 刷新计时显示
             } else {
                 await FocusFollow.handlePush(userInfo)
             }

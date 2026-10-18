@@ -133,6 +133,7 @@ nonisolated enum NativeRemoteJSON {
     private let reminders: NativeReminderScheduler?
     private let journal: (any NativeJournalAccessing)?
     private let canonicalTasks: BridgeTaskViewModel?
+    static let icloudTimerRefusal = "共享计时已改记在 iCloud，旧通道（Dots）的计时命令不再执行"
     private let now: () -> Date
     private var timer: Timer?
     private var polling = false
@@ -208,6 +209,7 @@ nonisolated enum NativeRemoteJSON {
             refreshLocal()
             if alarm { guard alarms.inspect().supported, alarms.inspect().authorization == "authorized" else { throw DataArchiveError.invalid("先在原生闹钟面板主动取得系统授权") } }
             if timer { guard canonicalTasks?.isEnabled == true else { throw DataArchiveError.invalid("本机共享计时尚未连接") } }
+            if timer, canonicalTasks?.backend == .icloud { throw DataArchiveError.invalid(Self.icloudTimerRefusal) }
             if journalRead || journalWrite { guard journal != nil else { throw DataArchiveError.invalid("本机尚未提供日记入口") } }
             if reminderRead || reminderWrite { guard reminders != nil else { throw DataArchiveError.invalid("本机普通提醒入口尚未接通") } }
             let server = try NativeRemoteJSON.object(await service.nativeRequest("native/grant/read", body: .object([:])))
@@ -404,6 +406,8 @@ nonisolated enum NativeRemoteJSON {
                 attempt.receipt = try writer.execute(command, userConfirmed: true)
             } else if try NativeRemoteJSON.string(r["kind"]) == "timer" {
                 guard let canonicalTasks, canonicalTasks.isEnabled else { throw DataArchiveError.invalid("本机共享计时尚未连接") }
+                // W5：iCloud 后端下不再经 StateBridge 执行计时（否则会在旧通道建出一份本机看不见的计时）。
+                guard canonicalTasks.backend == .stateBridge else { throw DataArchiveError.invalid(Self.icloudTimerRefusal) }
                 let result = try await service.nativeRequest("native/timer", body: identity(attempt))
                 let fields = try NativeRemoteJSON.object(result)
                 guard fields["saved"] == .bool(true), try NativeRemoteJSON.string(fields["commandId"]) == id else { throw URLError(.cannotParseResponse) }

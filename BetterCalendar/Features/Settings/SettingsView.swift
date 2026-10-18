@@ -154,6 +154,11 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            // W5：共享计时后端（开发期，默认关；下次启动生效）
+            if let timerControl = SharedTimerBackendControl.current {
+                Section("共享计时（开发期）") { SharedTimerBackendPanel(control: timerControl) }
+            }
+
             // 进阶设置（渐进披露，§5.9）：手动折叠（DisclosureGroup 在 macOS Form 里收不回）
             Section("进阶设置") {
                 Button { withAnimation(Motion.standard) { showAdvanced.toggle() } } label: {   // 动效令牌（条文10）
