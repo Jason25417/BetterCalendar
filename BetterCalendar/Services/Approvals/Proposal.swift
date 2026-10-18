@@ -62,17 +62,67 @@ nonisolated struct ProposalChange: Codable, Equatable, Sendable {
     var after: String?
 }
 
+/// 计时指令（SPEC §19 D1/D2）。结束计时 = 记下这段投入，**不等于**完成事项。
+nonisolated enum ProposalTimerCommand: String, Codable, Sendable, CaseIterable {
+    case start, pause, resume, stop
+    var label: String {
+        switch self {
+        case .start: "开始计时"
+        case .pause: "暂停计时"
+        case .resume: "继续计时"
+        case .stop: "结束计时"
+        }
+    }
+}
+
 /// 机器执行的内容。新增种类时在这里加 case，并在 ProposalExecuting 实现里处理；
 /// 未识别的种类一律执行失败，绝不猜测。
+/// expectedRevision = 提案时目标的版本（ProposalRevision）；执行时目标版本已变 → 失败并说明，不覆盖用户事实。
+/// nil 只出现在刚解析、尚未 prepare 的草稿里——ProposalCenter 提交前一律补成当时的版本。
 nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 联调用的空改动：批准后只记录「已应用」，不碰任何真实数据。
     case experimentNoop(note: String)
+    /// 事项：新增一条待办（待办区）。id 在提交前就定下，撤销 = 按 id 移入回收站。
+    case itemCreate(id: UUID, title: String, note: String?)
+    /// 事项：改标题 / 备注（nil = 该字段不改）。
+    case itemEdit(id: UUID, title: String?, note: String?, expectedRevision: String?)
+    /// 事项：标完成（done=true）/ 取消完成（done=false）。
+    case itemSetDone(id: UUID, done: Bool, expectedRevision: String?)
+    /// 事项：移入回收站（30 天内可恢复）。只作「新增待办」的逆操作，智能体不能直接提。
+    case itemDiscard(id: UUID, expectedRevision: String?)
+    /// 计时：开始（今天某计划块 blockId，或一件计划外的事 title）/ 暂停 / 继续 / 结束。
+    /// expectedRevision = 执行设备上的计时状态版本（计时是设备本地状态）。
+    case timer(command: ProposalTimerCommand, blockId: UUID?, title: String?, expectedRevision: String?)
+    /// 时间线：挪动今天某个计划块（end=nil 则保持原时长）。必须过本地排布规则校验。
+    case moveBlock(id: UUID, start: Date, end: Date?, expectedRevision: String?)
 
     var kindLabel: String {
         switch self {
         case .experimentNoop: "测试改动（不改真实数据）"
+        case .itemCreate: "事项：新增待办"
+        case .itemEdit: "事项：改标题/备注"
+        case let .itemSetDone(_, done, _): done ? "事项：标完成" : "事项：取消完成"
+        case .itemDiscard: "事项：移入回收站"
+        case let .timer(command, _, _, _): "计时：" + command.label
+        case .moveBlock: "时间线：挪动计划块"
         }
     }
+
+    /// 稳定的机器名（桥接协议 action.kind 同名；操作留底、统计用）。
+    var kind: String {
+        switch self {
+        case .experimentNoop: "experimentNoop"
+        case .itemCreate: "itemCreate"
+        case .itemEdit: "itemEdit"
+        case .itemSetDone: "itemSetDone"
+        case .itemDiscard: "itemDiscard"
+        case .timer: "timer"
+        case .moveBlock: "moveBlock"
+        }
+    }
+
+    /// 是否会改真实数据（测试改动不会）。
+    var touchesRealData: Bool { if case .experimentNoop = self { false } else { true } }
 }
 
 nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
@@ -101,6 +151,16 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var resultNote: String?
     /// 非 UUID 形式的上级引用（如智能体事件 id「event-…」）；与 parentId 二选一或并存。
     var parentRef: String? = nil
+    // —— 撤销（SPEC §19 A3 后半）。全部 Optional：旧版本写的记录照常解码。——
+    /// 执行时保存的逆操作（带「执行后」的版本；目标再被改过 → 拒绝撤销）。nil = 不能撤销。
+    var undoAction: ProposalAction? = nil
+    /// 只能在这台设备上撤销（计时是设备本地状态）；nil = 任一设备。
+    var undoDeviceId: String? = nil
+    /// 不能撤销时给人看的原因（例如「结束计时已把投入记下」）。
+    var undoUnavailableReason: String? = nil
+    var undoneAt: Date? = nil
+    var undoneByDeviceId: String? = nil
+    var undoNote: String? = nil
 
     /// 以此刻判断的有效状态：未决定且已过截止时间 = 已过期（不复活，不执行）。
     func effectiveState(at now: Date) -> ProposalState {

@@ -50,7 +50,7 @@ nonisolated struct ConflictCheckedProposalTransport: ProposalTransport {
         throw ProposalTransportError.invalidTransition("连续冲突，决定未提交；请稍后重试")
     }
 
-    func report(id: UUID, state: ProposalState, note: String, at: Date) async throws -> Proposal {
+    func report(id: UUID, state: ProposalState, note: String, undo: ProposalUndoInfo?, at: Date) async throws -> Proposal {
         guard [.applied, .failed].contains(state) else {
             throw ProposalTransportError.invalidTransition("只能回报 applied / failed")
         }
@@ -60,12 +60,26 @@ nonisolated struct ConflictCheckedProposalTransport: ProposalTransport {
                 throw ProposalTransportError.invalidTransition("\(p.state.rawValue) → \(state.rawValue)")
             }
             p.state = state; p.appliedAt = at; p.resultNote = note
+            if state == .applied { undo?.apply(to: &p) }
             switch try await store.update(p) {
             case let .saved(saved): return saved
             case .conflict: continue
             }
         }
         throw ProposalTransportError.invalidTransition("连续冲突，执行结果未回报")
+    }
+
+    /// 首个撤销生效：读最新 → 检查（applied 且未撤销）→ 条件保存；冲突后重读，已被别的端撤销则抛错。
+    func markUndone(id: UUID, deviceId: String, note: String, at: Date) async throws -> Proposal {
+        for _ in 0..<maxAttempts {
+            guard var p = try await store.latest(id) else { throw ProposalTransportError.notFound(id) }
+            try p.applyUndone(deviceId: deviceId, note: note, at: at)
+            switch try await store.update(p) {
+            case let .saved(saved): return saved
+            case .conflict: continue
+            }
+        }
+        throw ProposalTransportError.invalidTransition("连续冲突，撤销结果未记下")
     }
 }
 

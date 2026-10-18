@@ -13,7 +13,8 @@ import Testing
     }
     @MainActor struct FailingExecutor: ProposalExecuting {
         struct Boom: Error, LocalizedError { var errorDescription: String? { "模拟网络中断" } }
-        func execute(_ proposal: Proposal) async throws -> String { throw Boom() }
+        func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction { PreparedProposalAction(action: action, changes: nil) }
+        func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome { throw Boom() }
     }
 
     final class Clock { var now = Date(timeIntervalSince1970: 1_792_000_000) }
