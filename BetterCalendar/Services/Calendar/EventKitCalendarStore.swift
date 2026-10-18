@@ -38,15 +38,18 @@ actor EventKitCalendarStore: CalendarStore {
         try await ensureAccess()
         guard !drafts.isEmpty else { return }
         var changed = 0
+        var notes: [String] = []
         for (kind, group) in Dictionary(grouping: drafts, by: \.kind) {
             let cal = try await calendar(for: kind)
             let cal0 = Calendar.current
             let lo = cal0.startOfDay(for: group.map(\.start).min() ?? Date())
             let hi = cal0.date(byAdding: .day, value: 1,
                                to: cal0.startOfDay(for: group.map(\.end).max() ?? Date())) ?? Date()
-            changed += try syncEvents(group, calendar: cal, from: lo, to: hi)
+            let r = try syncEvents(group, calendar: cal, from: lo, to: hi)
+            changed += r.changed; notes += r.notes
         }
         if changed > 0 { try store.commit() }
+        for n in notes { await DevLog.shared.warn("日历", n) }
         await DevLog.shared.info("日历", "写真日历 \(drafts.count) 项 · 实际变更 \(changed)")
     }
 
@@ -55,70 +58,57 @@ actor EventKitCalendarStore: CalendarStore {
         // 空草稿 + 日历本就不存在 → 无事可清，别为了清空去创建日历
         if drafts.isEmpty, existingCalendar(for: kind) == nil { return }
         let cal = try await calendar(for: kind)
-        let changed = try syncEvents(drafts, calendar: cal, from: window.start, to: window.end)
+        let (changed, notes) = try syncEvents(drafts, calendar: cal, from: window.start, to: window.end)
         if changed > 0 { try store.commit() }
+        for n in notes { await DevLog.shared.warn("日历", n) }
         await DevLog.shared.info("投影", "对齐「\(titles[kind] ?? "?")」\(drafts.count) 项 · 实际变更 \(changed)")
     }
 
-    /// 差量对齐核心（write / apply 共用）：范围内该日历的事件与 drafts 对齐。
-    /// 匹配优先级：① blockID 盖章（跨设备稳定，改标题/挪时间不删重建）
-    /// ② 无章旧事件按 标题+起始 认领并**补章**（存量数据自迁移，不删不重建）
-    /// ③ 都对不上且 start ∈ [lo, hi) → 删（范围外的跨界重叠事件不动，防误删邻日）。
+    /// 差量对齐核心（write / apply 共用）：EKEvent → 快照 → `CalendarSyncPlanner` 决定 → 这里只执行。
+    /// 铁律（P4.0 止血，决定逻辑与单测都在 CalendarSyncPlanner）：
+    /// ① 只删带 BetterCalendar 章的事件——无章事件不是我们写的（例如用户在日历 App 里误存进本日历的课程），
+    ///    永远不删、不改（此前真机：一个重复课程系列被删掉 12 次）；
+    /// ② 不再按「标题＋起始」认领无章事件（D2），只有用户明确「加进计划」的那件才认领补章；
+    /// ③ 同章多份按创建时间/外部标识确定性保留一份（两端一致，不会各删一份）。
     private func syncEvents(_ drafts: [CalendarEventDraft], calendar cal: EKCalendar,
-                            from lo: Date, to hi: Date) throws -> Int {
+                            from lo: Date, to hi: Date) throws -> (changed: Int, notes: [String]) {
         let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
         let existing = store.events(matching: pred)
-        var byID: [UUID: EKEvent] = [:]
-        var unstamped: [String: EKEvent] = [:]
-        for ev in existing {
-            if let bid = Self.blockID(from: ev.url) { byID[bid] = ev }
-            else { unstamped[Self.eventKey(ev.title ?? "", ev.startDate)] = ev }
-        }
+        let plan = CalendarSyncPlanner.plan(existing: existing.map(Self.snapshot), drafts: drafts,
+                                            from: lo, to: hi)
         var changed = 0
-        var keep = Set<ObjectIdentifier>()
-        for d in drafts {
-            var target: EKEvent?
-            if let bid = d.blockID { target = byID[bid] }
-            if target == nil { target = unstamped.removeValue(forKey: Self.eventKey(d.title, d.start)) }
-            let wantURL = d.blockID.flatMap(Self.stampURL)
-            if let ev = target {
-                keep.insert(ObjectIdentifier(ev))
-                let titleChanged = (ev.title ?? "") != d.title
-                let startChanged = abs(ev.startDate.timeIntervalSince(d.start)) >= 30
-                let endChanged = abs(ev.endDate.timeIntervalSince(d.end)) >= 30
-                let notesChanged = (ev.notes ?? "") != (d.notes ?? "")
-                // 普通块从不弹通知（alarm=[]）；仅固定块/会议挂会前提醒（⑤）。按期望态调整。
-                let wantAlarm = d.alarmLeadMinutes != nil
-                let hasAlarm = !(ev.alarms ?? []).isEmpty
-                // 只在有章可盖时改 URL（认领补章/换章）；draft 无章不抹既有 URL
-                let urlChanged = wantURL != nil && ev.url != wantURL
-                if titleChanged || startChanged || endChanged || notesChanged || wantAlarm != hasAlarm || urlChanged {
-                    ev.title = d.title; ev.startDate = d.start; ev.endDate = d.end
-                    ev.notes = d.notes; ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)
-                    if let wantURL { ev.url = wantURL }
-                    try store.save(ev, span: .thisEvent, commit: false); changed += 1
-                }
-            } else {
-                let ev = EKEvent(eventStore: store)
-                ev.calendar = cal; ev.title = d.title
-                ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
-                ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)   // 普通块 nil→[]（不弹）；固定块→会前提醒
-                ev.url = wantURL
-                try store.save(ev, span: .thisEvent, commit: false); changed += 1
-            }
+        for u in plan.updates {
+            let ev = existing[u.index], d = u.draft
+            ev.title = d.title; ev.startDate = d.start; ev.endDate = d.end
+            ev.notes = d.notes; ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)   // 普通块 []；固定块会前提醒
+            if let bid = d.blockID, let url = Self.stampURL(bid) { ev.url = url }
+            try store.save(ev, span: .thisEvent, commit: false); changed += 1
         }
-        // 删除只针对**归属本范围**（start ∈ [lo, hi)）的未匹配事件；同 ID 重复事件也在此收敛。
-        // 2026-10-18 止血（P4.0-1）：只删带 BetterCalendar 章的事件——无章事件不是我们写的（例如用户在日历 App
-        // 里误存进本日历的课程），永远不删。此前会误删这类事件（真机：一个重复课程系列被删掉 12 次）。
-        for ev in existing where !keep.contains(ObjectIdentifier(ev))
-            && ev.startDate >= lo && ev.startDate < hi {
-            guard Self.blockID(from: ev.url) != nil else {
-                DevLog.shared.warn("日历", "本日历里有一个不是 BetterCalendar 写的事件「\(ev.title ?? "")」，已保留不删（建议挪到你自己的日历）")
-                continue
-            }
-            try? store.remove(ev, span: .thisEvent, commit: false); changed += 1
+        for d in plan.creates {
+            let ev = EKEvent(eventStore: store)
+            ev.calendar = cal; ev.title = d.title
+            ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
+            ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)
+            ev.url = d.blockID.flatMap(Self.stampURL)
+            try store.save(ev, span: .thisEvent, commit: false); changed += 1
         }
-        return changed
+        for i in plan.deletes {
+            try? store.remove(existing[i], span: .thisEvent, commit: false); changed += 1
+        }
+        // 日志（开发期失败可见）交给调用方在 commit 之后 await 写，避免在暂存与提交之间让出 actor
+        var notes = plan.keptForeign.map {
+            "「\(cal.title)」里有一个不是 BetterCalendar 写的事件「\(existing[$0].title ?? "")」，已保留不删（建议挪到你自己的日历）"
+        }
+        if !plan.droppedUnstampedDrafts.isEmpty {
+            notes.append("\(plan.droppedUnstampedDrafts.count) 条不带章的草稿没有写入（BetterCalendar 只写带章事件）")
+        }
+        return (changed, notes)
+    }
+
+    nonisolated private static func snapshot(_ ev: EKEvent) -> CalendarEventSnapshot {
+        CalendarEventSnapshot(title: ev.title ?? "", start: ev.startDate, end: ev.endDate, notes: ev.notes,
+                              hasAlarm: !(ev.alarms ?? []).isEmpty, blockID: blockID(from: ev.url),
+                              creationDate: ev.creationDate, externalID: ev.calendarItemExternalIdentifier)
     }
 
     // MARK: - 盖章（重构 P1「稳定身份」）
@@ -135,11 +125,6 @@ actor EventKitCalendarStore: CalendarStore {
         return UUID(uuidString: url.lastPathComponent)
     }
 
-    /// 事件去重键：标题 + 起始分钟（无章旧事件的认领键）。
-    nonisolated private static func eventKey(_ title: String, _ start: Date) -> String {
-        "\(title)#\(Int(start.timeIntervalSinceReferenceDate / 60))"
-    }
-
     /// 会前提醒（⑤会议自动化）：lead 分钟前响一次；nil/负 → 无提醒（普通块）。
     nonisolated private static func alarms(lead: Int?) -> [EKAlarm] {
         guard let lead, lead >= 0 else { return [] }
@@ -147,32 +132,39 @@ actor EventKitCalendarStore: CalendarStore {
     }
 
     func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft] {
-        try await ensureAccess()
-        guard let title = titles[kind],
-              let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return [] }
         let cal0 = Calendar.current
         let lo = cal0.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let hi = cal0.date(byAdding: .day, value: 7, to: Date()) ?? Date()
-        let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
+        return try await read(kind: kind, in: DateInterval(start: lo, end: max(lo, hi)))
+    }
+
+    /// 读某时间窗（P4.0-5）：对账/投影传自己的扫描范围，不再受「此刻前后 7 天」限制（第 7 天晚上的块曾被误报删除）。
+    func read(kind: PlanCalendarKind, in window: DateInterval) async throws -> [CalendarEventDraft] {
+        try await ensureAccess()
+        guard let title = titles[kind],
+              let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return [] }
+        let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: [cal])
         return store.events(matching: pred).map {
             CalendarEventDraft(title: $0.title ?? "", start: $0.startDate, end: $0.endDate,
-                               kind: kind, notes: $0.notes, blockID: Self.blockID(from: $0.url))
+                               kind: kind, notes: $0.notes,
+                               // 带回会前提醒：原样保留（pass-through）的事件不会被顺手抹掉提醒
+                               alarmLeadMinutes: $0.alarms?.first.map { Int((-$0.relativeOffset / 60).rounded()) },
+                               blockID: Self.blockID(from: $0.url),
+                               creationDate: $0.creationDate, externalID: $0.calendarItemExternalIdentifier)
         }
     }
 
     func clear(kind: PlanCalendarKind) async throws {
         try await ensureAccess()
-        guard let title = titles[kind],
-              let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return }
+        guard let cal = existingCalendar(for: kind) else { return }
         let cal0 = Calendar.current
         let lo = cal0.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let hi = cal0.date(byAdding: .day, value: 7, to: Date()) ?? Date()
-        let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
-        // P4.0-1：只清带 BetterCalendar 章的事件；无章事件（用户误存进本日历的）永远不删。
-        for ev in store.events(matching: pred) where Self.blockID(from: ev.url) != nil {
-            try? store.remove(ev, span: .thisEvent, commit: false)
-        }
-        try store.commit()
+        // P4.0-1：清空 = 与空清单对齐，走同一个决定函数——只删带 BetterCalendar 章的事件；
+        // 无章事件（用户误存进本日历的）永远不删。
+        let (changed, notes) = try syncEvents([], calendar: cal, from: lo, to: hi)
+        if changed > 0 { try store.commit() }
+        for n in notes { await DevLog.shared.warn("日历", n) }
     }
 
     /// 清空某一天某一类（删光当天所有块后确认写入 → 清该日绿色事件；不碰别天）。

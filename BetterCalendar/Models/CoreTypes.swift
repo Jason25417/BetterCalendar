@@ -173,4 +173,10 @@ struct CalendarEventDraft: Sendable, Identifiable {
     /// 事件对应的计划块 id（重构 P1「稳定身份」）：写进事件 URL（bettercalendar://block/UUID），
     /// 随 iCloud 日历同步到所有设备——匹配一律按它，不再按标题模糊匹配。nil=无主（旧事件/外部事件）。
     var blockID: UUID?
+    /// 读回时带上（P4.0-2 同章去重的确定性排序键：两台设备看到的相同）；写入时忽略。
+    var creationDate: Date? = nil
+    var externalID: String? = nil
+    /// 写入用（P4.0-1 / D2）：用户明确选了「把日历里新建的这件加进计划」→ 允许认领同「标题＋起始分钟」的
+    /// 无章事件并补章。默认 false：BetterCalendar 绝不认领、修改或删除不带章的事件。
+    var claimsUnstamped: Bool = false
 }
