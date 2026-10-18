@@ -50,6 +50,16 @@ struct BetterCalendarApp: App {
             SkinFittingView()
         }
 
+        // SPEC §19 A1：跟 BetterCalendar 智能体说话（Mac = 独立窗口，可与主窗口并排）。入口=主窗口工具栏「对话」/ 通知 / 窗口菜单。
+        Window("BetterCalendar 智能体", id: AgentChatWindow.id) {
+            NavigationStack {
+                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge)
+            }
+            .environment(\.appTheme, ThemeSettings.current)
+            .tint(ThemeSettings.current.accent)
+            .frame(minWidth: 380, idealWidth: 460, minHeight: 420, idealHeight: 640)
+        }
+
         // 引擎观察窗（开发期，统一时间线 P1 配套）：窗口菜单打开。逐批扩节，M8 摘除。
         Window("引擎观察窗", id: "engine-window") {
             EngineWindowView()
@@ -69,6 +79,9 @@ struct BetterCalendarApp: App {
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
             .toolbar {
+                #if os(macOS)
+                AgentChatWindow.OpenButton(router: container.router)
+                #endif
                 Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
                 Button { container.router.openProposals = true } label: { Label("多端审批", systemImage: "checkmark.seal").accessibilityIdentifier("bc.proposals.open") }
             }
@@ -125,6 +138,13 @@ struct BetterCalendarApp: App {
                 }
                 .tag(AppRouter.Tab.today)
                 .tabItem { Label("今天", systemImage: "play.circle") }
+                // SPEC §19 A1：跟智能体说话——iPhone 上一步可达（iOS 首页没有根工具栏，所以放标签栏）
+                NavigationStack {
+                    AgentChatView(chat: container.agentChat, proposals: container.proposals)
+                }
+                .tag(AppRouter.Tab.chat)
+                .tabItem { Label("智能体", systemImage: "bubble.left.and.bubble.right") }
+                .badge(container.agentChat.unreadCount)
                 #endif
                 // #40 长期 tab（2026-07-15 S1 修订四 tab 终局）：第二时间尺度——跨日周期的排程态
                 LongTermView(store: container.longTasks, router: container.router,
@@ -258,6 +278,8 @@ struct BetterCalendarApp: App {
         case .journal:
             container.router.selectedTab = .journal
             container.router.journalRequest = .now
+        case .chat:
+            container.router.openChat()
         }
     }
 

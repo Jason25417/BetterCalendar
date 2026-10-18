@@ -154,6 +154,12 @@ nonisolated struct AgentBridgeIO: Sendable {
     private let contextProvider: () async -> [String: Any]
     private let defaults: UserDefaults
     private var loop: Task<Void, Never>?
+    /// SPEC §19 A1 / F1：对话（组装点设置；nil = 不桥接对话）。晚间复盘的事实素材由组装点提供。
+    var chat: AgentChatCenter?
+    var eveningFacts: () -> [String: Any] = { [:] }
+    /// 同步互斥：推送唤醒与定时轮询可能撞在一起；进行中再来的请求合并成「做完再跑一轮」，避免重复转交。
+    private var syncing = false
+    private var resyncRequested = false
 
     init(center: ProposalCenter, messages: AgentMessageCenter? = nil, defaults: UserDefaults = .standard,
          contextProvider: @escaping () async -> [String: Any]) {
@@ -205,6 +211,12 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 一轮同步（可直接用临时目录测试）。
     func sync(io: AgentBridgeIO) async {
+        if syncing { resyncRequested = true; return }
+        syncing = true; defer { syncing = false }
+        repeat { resyncRequested = false; await syncOnce(io: io) } while resyncRequested
+    }
+
+    private func syncOnce(io: AgentBridgeIO) async {
         do {
             try io.prepare()
             try io.writeContext(await contextProvider())
@@ -238,6 +250,10 @@ nonisolated struct AgentBridgeIO: Sendable {
                     }
                 }
                 for m in messages.messages { try io.writeMessageResult(m) }
+            }
+            if let chat {
+                try await AgentChatBridgeStep.run(io: io, chat: chat, proposals: center.proposals, defaults: defaults,
+                                                  eveningFacts: eveningFacts, now: .now, report: report)
             }
             try emitResolvedProposals(io: io)
             lastSync = .now

@@ -71,6 +71,8 @@ enum BetterCalendarHandoff {
             return "BetterCalendar - 长期"
         case .journal:
             return "BetterCalendar - 日记"
+        case .chat:
+            return "BetterCalendar - 智能体"
         }
     }
 }

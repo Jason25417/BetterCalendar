@@ -24,6 +24,7 @@ enum SettingsSync {
         "distraction.enabled", "distraction.keywords",
         "integration.focusFollow",
         "agentContext.allowRecentJournal",   // SPEC §19 A2：允许智能体读最近日记（隐私偏好，两端一致；默认关）
+        "agentChat.eveningReview.enabled", "agentChat.eveningReview.minute",   // SPEC §19 F1：iPhone 上设、Mac 触发
     ]
 
     /// 远程设置到达通知（设置页据此重读 @State 刷新）。

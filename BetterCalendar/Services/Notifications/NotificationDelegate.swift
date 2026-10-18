@@ -18,6 +18,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleProposal: ((UUID, ProposalDecision?) async -> Void)?
     /// SPEC §19 C4：智能体消息的反应；reaction 为 nil = 只打开面板。
     var handleAgentMessage: ((UUID, AgentMessage.Reaction?) async -> Void)?
+    /// SPEC §19 A1：智能体对话通知；text 非 nil = 在通知上直接回复了一句，nil = 只打开对话。
+    var handleAgentChat: ((UUID, String?) async -> Void)?
 
     init(router: AppRouter) {
         self.router = router
@@ -28,6 +30,17 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if let route = LocalAgentChatNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier,
+                                                    typedText: (response as? UNTextInputNotificationResponse)?.userText) {
+            if route.text == nil {
+                router.openChat()
+                #if os(macOS)
+                if !TestHost.isActive { AppLifecycle.shared?.showMainWindow() }
+                #endif
+            }
+            await handleAgentChat?(route.id, route.text)
+            return
+        }
         if let route = LocalAgentMessageNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
             if route.reaction == nil {
                 router.openProposals = true
