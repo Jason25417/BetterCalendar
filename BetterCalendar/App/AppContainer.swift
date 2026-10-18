@@ -214,6 +214,14 @@ final class AppContainer {
             }
             // 开发期：带 BC_DEV_SEED_CHAT=1 启动 → 存一条智能体对话消息（主动型，按打扰规则通常不弹），
             // 用于在 CloudKit Development 建出 BCChatMessage 记录类型（字段 payload/author/text/kind/createdAtLocal），再部署到 Production。
+            // 开发期：带 BC_DEV_SEED_TIMER=1 启动 → 写一条已结束、不显示的计时探针，在 Development 建出 BCTimerSession（W5）。
+            if ProcessInfo.processInfo.environment["BC_DEV_SEED_TIMER"] == "1" {
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    do { try await CloudKitSharedTimerStore().seedDevelopmentSchema(now: .now); print("BC_DEV_SEED timer=ok") }
+                    catch { print("BC_DEV_SEED timer=FAIL \(error.localizedDescription)") }
+                }
+            }
             if ProcessInfo.processInfo.environment["BC_DEV_SEED_CHAT"] == "1" {
                 Task { [weak chat = agentChat] in
                     try? await Task.sleep(for: .seconds(3))
