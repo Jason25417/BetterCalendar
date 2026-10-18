@@ -30,6 +30,17 @@ final class PlanBlock: RetainedRecord {
     var deletionID: UUID?
     var restoredDeletionID: UUID?
     var deletionContext: Data?
+    // —— P4（SPEC §19.13，2026-10-18）：CloudKit additive 字段，发 TestFlight 前须 Development 建出并 Deploy ——
+    /// 图钉截止（Q6）：你亲手改过时间的块，当天之内自动调整一律绕开。nil = 没钉。
+    var pinnedUntil: Date?
+    /// 同步版本（Q7/Q8）：每次真改动 = max(现在毫秒, 旧值+1)。0 = 旧数据。
+    var syncVersion: Int64 = 0
+    /// 最后写入它的设备 id（作者宽限：别的设备暂不替它新建日历事件，防重复）。
+    var syncWriter: String?
+    /// 最后一次写入的来源（PlanWriteReason.rawValue）：判「你的改动 vs 自动调整」谁赢。
+    var syncSource: String?
+    /// 实际行状态（仅 kind=.actual）：nil = 记下的实际；"live" = 正在做（蓝色在长）；"auto" = 被动推断（固定块到点，不画蓝）。
+    var actualState: String?
 
     init(id: UUID = UUID(),
          title: String,

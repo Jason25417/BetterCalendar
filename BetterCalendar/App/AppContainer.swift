@@ -40,7 +40,7 @@ final class AppContainer {
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
     let trash: RetainedTrashService
-    let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿/橙计划事件的地方
+    let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿色计划事件的地方（P4：橙色预览已退役）
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
@@ -284,14 +284,18 @@ final class AppContainer {
         self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
-        self.projection = ProjectionService(planStore: planStore, calendarStore: calendarStore,
-                                            startedDays: startedDays)
+        self.projection = ProjectionService(planStore: planStore, calendarStore: calendarStore)
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
         self.trash = RetainedTrashService(context: SharedModelContainer.shared.mainContext,
                                           calendar: calendarStore, projection: projection)
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
-                                          calendarStore: calendarStore, projection: projection,
-                                          startedDays: startedDays)
+                                          calendarStore: calendarStore, projection: projection)
+        // P4 Q3：你在苹果日历里删了 BetterCalendar 的块 → 照办后收进待办区（可找回）
+        reconcile.collectTodo = { [weak longTasks] block, _ in
+            guard let longTasks else { return false }
+            _ = longTasks.addTodo(title: block.title, family: block.family, deadline: block.deadline)
+            return true
+        }
         // L2 固化（2026-07-10 拍板）：reflow 默认走本地 V2（试验台 50/50 满分、瞬时、零出云）；
         // LLM reflow 保留在试验台作对照。arrange 仍走 LLM（self.planner），待试验台跑分后再议。
         self.reschedule = RescheduleService(planStore: planStore, planner: NaivePlanningEngine())
@@ -342,6 +346,12 @@ final class AppContainer {
             let wake = ProposalWake.onPush
             ProposalWake.onPush = { [weak bridge] in await wake?(); await bridge?.sync() }
             bridge.start()
+            // P4 Q3：日历里删了块 → 已照办；写事件让智能体按上下文决定要不要问一句（不再弹四选窗）
+            reconcile.onUserDeleted = { [weak bridge] deletions in
+                bridge?.emit(kind: "calendar_user_deleted",
+                             summary: AgentCalendarEvents.deletionSummary(deletions),
+                             payload: AgentCalendarEvents.deletionPayload(deletions))
+            }
             execution.onBlockFinished = { [weak bridge] title, seconds in
                 bridge?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
                              payload: ["title": title, "seconds": seconds])
@@ -366,6 +376,18 @@ final class AppContainer {
                                             traces: changeTraces)
         timeline.progress = execution
         timeline.longTasks = longTasks   // E5c：溢出硬执行 → 收待办区/回长期池
+        // P4 Q4：你的日历事件作为「已占用」参与排布（只读；按设置挑日历，默认全部）。读失败 = 不看（记日志）
+        let calendarForBusy = calendarStore
+        timeline.externalBusy = { window in
+            do {
+                return ExternalCalendarSettings.busy(try await calendarForBusy.externalEvents(in: window),
+                                                     excluding: ExternalCalendarSettings.excludedTitles)
+            } catch {
+                DevLog.shared.warn("时间线", "读你的日历失败，这一轮排布不绕开它：\(error.localizedDescription)")
+                return []
+            }
+        }
+        projection.startFollowingTimeline()   // P4 Q2：协调器改了今天的真相 → 绿色跟着重画
         timeline.start()
         TimelineCoordinator.sharedForDev = timeline   // 引擎观察窗桥（开发期，M8 摘除）
         execution.minutePulse = { [weak timeline] in timeline?.notePulse() }   // 分钟兜底（不新增定时器）

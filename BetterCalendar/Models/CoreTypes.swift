@@ -104,6 +104,19 @@ struct ScheduledBlock: Sendable, Identifiable {
     var deadline: Date?
     var linkedTaskID: UUID?      // 精确归属：本块属于哪个未来任务（0.18.2）
     var labels: [String] = []    // 扩展标签（0.22 首用：并行组 "parallel:<组名>"，同组=同时段、reflow 绑定）
+    /// 图钉（P4 Q6，SPEC §19.13）：你亲手改过时间的块，到这一刻之前自动调整一律绕开；nil=没钉。只读回、不经 replacePlanned 写。
+    var pinnedUntil: Date? = nil
+    /// 同步版本（P4 Q7/Q8）：每次真改动单调递增（毫秒时间戳，Lamport 式 max(现在, 旧值+1)）；0=旧数据。只读回。
+    var syncVersion: Int64 = 0
+    /// 最后写入它的设备（作者宽限：别的设备先不替它新建日历事件）。只读回。
+    var syncWriter: String? = nil
+    /// 最后一次写入的来源（PlanWriteReason.rawValue）：你的改动 vs 自动调整谁赢。只读回。
+    var syncSource: String? = nil
+}
+
+extension ScheduledBlock {
+    /// 此刻是否是图钉（P4 Q6）。
+    func isPinned(at now: Date) -> Bool { (pinnedUntil.map { $0 > now }) ?? false }
 }
 
 extension ScheduledBlock {
@@ -179,4 +192,11 @@ struct CalendarEventDraft: Sendable, Identifiable {
     /// 写入用（P4.0-1 / D2）：用户明确选了「把日历里新建的这件加进计划」→ 允许认领同「标题＋起始分钟」的
     /// 无章事件并补章。默认 false：BetterCalendar 绝不认领、修改或删除不带章的事件。
     var claimsUnstamped: Bool = false
+    /// 章 v2（P4 Q7/Q8，见 CalendarStamp）：写入时随章写进事件 URL、读回时解析出来。
+    /// stampHash = 写入那一刻（起止分钟＋标题）的短哈希：事件内容的哈希仍等于它 = 没人动过（事件自证，跨设备有效）。
+    /// 两者都 nil = 旧章（只有 bettercalendar://block/UUID）或不需要 v2 的写入（蓝色实际）。
+    var stampVersion: Int64? = nil
+    var stampHash: String? = nil
+    /// 读回时带上：事件最后修改时间（两边都是你亲手改时「后改的赢」用）。写入时忽略。
+    var lastModified: Date? = nil
 }

@@ -17,7 +17,7 @@ import WidgetKit
 @Observable
 final class ExecutionViewModel {
     private let calendarStore: CalendarStore
-    private let reschedule: RescheduleService
+    private let reschedule: RescheduleService   // P4：橙色连续预览退役后执行层不再调它；注入保留到 E5f 算法半重审时定去留
     // 执行层：读计划 + 读/写蓝色实际（真相源，蓝对账 A2）；**不改计划结构**（title/time/固定 仍只由确认写入 & 对账回流）。
     private let planStore: PlanReading & ActualReading & ActualWriting
     private let reminderStore: ReminderStore
@@ -76,6 +76,8 @@ final class ExecutionViewModel {
         var title: String
         var start: Date
         var end: Date
+        /// 被动推断（固定块到点自动完成，P4 Q4c）：算做成、记数据，但**不画蓝**（你点完成或计过时才画）。
+        var isAuto: Bool = false
     }
     struct ActiveBlock {
         var plannedID: UUID?
@@ -364,7 +366,9 @@ final class ExecutionViewModel {
             if let id = selected?.id { selected = planned.first { $0.id == id } }
             if let id = active?.plannedID, let item = planned.first(where: { $0.id == id }) { active?.title = item.title }
             if active == nil, background.isEmpty {
-                done = actuals.map { ActualRecord(plannedID: $0.id, title: $0.title, start: $0.start, end: $0.end) }
+                done = actuals.filter { !runningIDs.contains($0.id) }
+                    .map { ActualRecord(plannedID: $0.id, title: $0.title, start: $0.start, end: $0.end,
+                                        isAuto: $0.state == .auto) }
             }
         } catch { DataSyncMonitor.shared.report("执行列表重读失败：\(error.localizedDescription)") }
     }
@@ -387,8 +391,10 @@ final class ExecutionViewModel {
             // 已采集的实际（菜单之前攒的 / 回填的）→ 同步进 done，避免重复呈现为「未做」。
             // 蓝对账 A2：以 PlanStore(.actual) 为真相；再并入日历里带章、真相源还没有的实际
             // （老数据迁移 + 跨设备日历同步来的；无章的留给 Stage B 认领弹窗）。
-            var merged = stored.map { ActualRecord(plannedID: $0.id, title: $0.title,
-                                                   start: $0.start, end: $0.end) }
+            // 正在做（或待恢复）的那件的「在长」实际不算做完（P4：它的绿色还要画剩下那段）
+            var merged = stored.filter { !($0.state == .live && runningIDs.contains($0.id)) }
+                .map { ActualRecord(plannedID: $0.id, title: $0.title,
+                                    start: $0.start, end: $0.end, isAuto: $0.state == .auto) }
             let storedIDs = Set(stored.map(\.id))
             for c in a where DayContext.isSameLogicalDay(c.start, .now) {
                 // 只并入**带章**、真相源还没有的实际（迁移+跨设备）。**无章事件与数据库无关 → 一律忽略**
@@ -410,8 +416,9 @@ final class ExecutionViewModel {
                 let meetingHappened = item.isFixed && item.end < now && MeetingSettings.autoCompleteFixedBlocks
                 let reminderChecked = completedIDs.contains(item.id)
                 if meetingHappened || reminderChecked {
+                    // P4 Q4c：固定块到点 = 被动推断，只记数据不画蓝；提醒事项里打勾 = 你的动作，照常画蓝
                     merged.append(ActualRecord(plannedID: item.id, title: item.title,
-                                               start: item.start, end: item.end))
+                                               start: item.start, end: item.end, isAuto: !reminderChecked))
                 }
             }
 
@@ -429,6 +436,14 @@ final class ExecutionViewModel {
             lastError = error.localizedDescription
             DevLog.shared.warn("执行", "读取今日计划/实际失败：\(error.localizedDescription)")
         }
+    }
+
+    /// 本机正在计时（含待恢复快照）的计划块 id：它们的「在长」实际行不并进 done。
+    private var runningIDs: Set<UUID> {
+        var ids = Set([active?.plannedID, pendingRunRestore?.active?.plannedID].compactMap { $0 })
+        ids.formUnion(background.compactMap(\.plannedID))
+        ids.formUnion(pendingRunRestore?.background.compactMap(\.plannedID) ?? [])
+        return ids
     }
 
     /// 手动对账（蓝对账 Stage B）：把用户在 Apple 日历里对**蓝色实际**的删除同步进真相源。
@@ -567,26 +582,22 @@ final class ExecutionViewModel {
     /// v1 只长计划内任务（有稳定 plannedID）；计划外 bonus 无稳定 id、留后续。
     var shouldGrowActive: Bool { active?.plannedID != nil && Date.now.timeIntervalSince(lastActualGrow) >= 300 }
 
-    /// 正在做一件事时把它的蓝色实际块延长到此刻（日历上看蓝色在长=实时进度、成就感），
-    /// 顺手清掉被红线越过的橙块（橙色A：end<now 的预览不再显示=不见错过多少）。不调 LLM。
+    /// 正在做一件事时把它的蓝色实际块延长到此刻（日历上看蓝色在长=实时进度、成就感）。不调 LLM。
+    /// P4 Q2「一件事只画一次」：实际行标「正在做」，随后重画今天——这件的绿色只剩「蓝色尽头 → 计划结束」那段。
+    /// （橙色预览日历已退役：不再清/写橙块。）
     func growActiveActual() async {
         guard let a = active, let id = a.plannedID else { return }
         lastActualGrow = .now
         let now = Date.now
-        // ① 延长/建正在做那件的蓝色实际块（start..now）——盖对应计划块章
-        try? planStore.upsertActuals([ActualBlock(id: id, title: a.title, start: a.start, end: now)])
+        // 延长/建正在做那件的蓝色实际块（start..now）——盖对应计划块章
+        do { try planStore.upsertActuals([ActualBlock(id: id, title: a.title, start: a.start, end: now, state: .live)]) }
+        catch { DevLog.shared.warn("执行", "延长正在做的实际记录失败：\(error.localizedDescription)") }
         let draft = CalendarEventDraft(title: a.title, start: a.start, end: now, kind: .actual, blockID: id)
-        if let existing = try? await calendarStore.read(kind: .actual) {
-            try? await calendarStore.write(CalendarMerge.union(existing: existing, additions: [draft], kind: .actual))
-        }
-        // ② 橙色A：清掉被红线越过的橙块（end ≤ now）
-        if let preview = try? await calendarStore.read(kind: .preview) {
-            let survivors = preview.filter { $0.end > now }
-            if survivors.count != preview.count {
-                try? await calendarStore.clear(kind: .preview)
-                if !survivors.isEmpty { try? await calendarStore.write(survivors) }
-            }
-        }
+        do {
+            let existing = try await calendarStore.read(kind: .actual)
+            try await calendarStore.write(CalendarMerge.union(existing: existing, additions: [draft], kind: .actual))
+        } catch { DevLog.shared.warn("执行", "延长蓝色实际失败：\(error.localizedDescription)") }
+        await projection?.repaintToday(reason: "蓝色延长")
         exportFocusState(event: "tick")
     }
 
@@ -1196,21 +1207,28 @@ final class ExecutionViewModel {
     /// 把 done 写进蓝色「实际」日历——**合并不覆盖**（工程债修复 2026-07-04）：
     /// 先读日历已有实际、与 done 做 union 再写，别处产生的实际（复盘回填/另一台设备）不会被删。
     private func flushActuals() async {
-        // 盖章：做的是计划块 → 盖计划块的 id（同一 UUID「换幕布」：橙随下次预览消失、蓝带同章出现）；
+        // 盖章：做的是计划块 → 盖计划块的 id（同一 UUID：绿色让位、蓝带同章出现）；
         // 计划外 bonus → 盖记录自己的 id（新章）。
-        let drafts = done.map {
+        // P4 Q4c：被动推断的（固定块到点）只记数据、不画蓝。
+        guard !done.isEmpty else { return }
+        let drafts = done.filter { !$0.isAuto }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual,
                                blockID: $0.plannedID ?? $0.id)
         }
-        guard !drafts.isEmpty else { return }
         do {
-            let existing = (try? await calendarStore.read(kind: .actual)) ?? []
-            let merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
-            try await calendarStore.write(merged)
+            var merged: [CalendarEventDraft] = []
+            if !drafts.isEmpty {
+                let existing = (try? await calendarStore.read(kind: .actual)) ?? []
+                merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
+                try await calendarStore.write(merged)
+            }
             // 蓝对账 A2：实际同时落 PlanStore 真相源（日历成投影）；按 id 幂等，不堆重复。
             try? planStore.upsertActuals(done.map {
-                ActualBlock(id: $0.plannedID ?? $0.id, title: $0.title, start: $0.start, end: $0.end)
+                ActualBlock(id: $0.plannedID ?? $0.id, title: $0.title, start: $0.start, end: $0.end,
+                            state: $0.isAuto ? .auto : .recorded)
             })
+            // P4 Q2：做完的只剩蓝 → 重画今天（这件的绿色让位）
+            await projection?.repaintToday(reason: "记下实际")
             // 双向：App 内完成 → 回勾对应提醒事项完成（幂等；无对应提醒的 id 自动忽略）。
             await reminderStore.markCompleted(blockIDs: Set(done.compactMap(\.plannedID)))
             DevLog.shared.info("执行", "实际已更新：日历合并 \(merged.count) · 真相源 upsert \(done.count)")
@@ -1237,58 +1255,23 @@ final class ExecutionViewModel {
     }
 
     /// 实时模式合并（0.23 A，SPEC §11 ①）：「开始今天」按钮已退役——开始工作这个动作本身就是信号。
-    /// 某逻辑日第一次 startBlock/startAlso 时：标记已开始（iCloud KV 两端同步）→ 重投影该日（绿淡出）。
-    /// 单向无损：PlanStore 一动不动，复盘基线完整；误开始也只是幕布切换。
+    /// 某逻辑日第一次 startBlock/startAlso 时：标记已开始（iCloud KV 两端同步）——时间线协调器（影子期）只在已开工的日子动真相。
+    /// P4 Q2：开工后**不再清空绿色**（1b 实时态退役），日历画面不因开工而变。
     private func enterLiveModeIfNeeded() async {
         guard let startedDays else { return }
         let label = DayContext.logicalDay(offset: 0)
         guard !startedDays.isStarted(label) else { return }
         startedDays.markStarted(label)
-        do { try await projection?.project(label: label) }
-        catch { DevLog.shared.warn("投影", "进实时模式投影失败：\(error.localizedDescription)") }
     }
 
     /// 等最近一次预览刷新落地（单测用；正常运行无人等它、照旧不挡按钮）。
     func waitForPreview() async { await previewTask?.value }
 
-    /// 剩余（既非已完成、也非正在做）从此刻 reflow → 橙色预览（当前时刻右侧）；无剩余则清空橙色（日终消失）。
+    /// 每次动作后的刷新点（小组件 + 聪音投影）。
+    /// P4 Q1：橙色「全天连续 reflow 预览」链退役（§13 E5f 呈现半）——不再另算一套排法写进预览日历；
+    /// 「从现在起」的时间线由时间线协调器维护绿色真相，日历跟着它画（ProjectionService 跟随）。
     private func updatePreview() async {
-        do {
-            let now0 = Date.now
-            var preview: [ScheduledBlock] = []
-            // ① 正在做的：从现在起 → 预测结束（计划时长 − 已投入），让橙色「当前时刻」就是这件事
-            if let a = active, let p = planned.first(where: { $0.id == a.plannedID }) {
-                let remain = max(60, (activePlannedDuration ?? p.end.timeIntervalSince(p.start)) - currentElapsed)
-                preview.append(ScheduledBlock(id: p.id, title: a.title, start: now0,
-                                              end: now0.addingTimeInterval(remain)))
-            }
-            // ② 之后接着排剩余（排除已做 + 前台正在做 + 后台并行），从①的预测结束起。
-            // 排除按 ID 优先（有章记录）；无章老记录才走标题兜底——同名两块做完一块另一块不消失。
-            var excludeIDs = Set(done.compactMap(\.plannedID))
-            var excludeTitles = done.filter { $0.plannedID == nil }.map(\.title)
-            if let a = active {
-                if let pid = a.plannedID { excludeIDs.insert(pid) } else { excludeTitles.append(a.title) }
-            }
-            for run in background {
-                if let pid = run.plannedID { excludeIDs.insert(pid) } else { excludeTitles.append(run.title) }
-            }
-            let restFrom = preview.last?.end ?? now0
-            preview += try await reschedule.continuousReflow(excludeIDs: excludeIDs,
-                                                             excludeTitles: excludeTitles, now: restFrom)
-
-            if preview.isEmpty {
-                try await calendarStore.clear(kind: .preview)
-            } else {
-                try await calendarStore.write(preview.map {
-                    CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .preview,
-                                       blockID: $0.id)   // 橙也盖章：挪时间只改不删建
-                })
-            }
-            publishIntegrations()   // 每次动作后的重排点 = 小组件 + 聪音投影 刷新点
-        } catch {
-            lastError = error.localizedDescription
-            DevLog.shared.warn("reflow", "更新橙色预览失败：\(error.localizedDescription)")
-        }
+        publishIntegrations()
     }
 
     // MARK: 聪音待办投影 + 回流（SPEC §11 过审 2026-07-10）

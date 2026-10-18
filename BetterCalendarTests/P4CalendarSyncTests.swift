@@ -213,27 +213,25 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
         let calendar: SimulatedEventKitCalendar
         let projection: ProjectionService
         let reconcile: ReconcileService
+        let defaults: UserDefaults
         let container: ModelContainer   // 保活
         func label(_ offset: Int) -> Date { DayContext.logicalDay(offset: offset, from: calendar.now) }
     }
 
-    private func make(addition: ReconcileAdditionPolicy = .ask,
-                      deletion: ReconcileDeletionPolicy = .ask) throws -> Fixture {
+    private func make() throws -> Fixture {
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
-        let plan = PlanStore(context: container.mainContext)
+        let fixed = now
+        let plan = PlanStore(context: container.mainContext, writerID: "mac", now: { fixed })
         let defaults = try #require(UserDefaults(suiteName: "bc-p4-int-\(UUID().uuidString)"))
         let calendar = SimulatedEventKitCalendar(now: now)
-        let started = StartedDayStore(persisted: false)
-        let fixed = now
-        let projection = ProjectionService(planStore: plan, calendarStore: calendar, startedDays: started,
+        let projection = ProjectionService(planStore: plan, calendarStore: calendar,
                                            fingerprintDefaults: defaults, now: { fixed })
         let reconcile = ReconcileService(planReader: plan, planWriter: plan, calendarStore: calendar,
-                                         projection: projection, startedDays: started, defaults: defaults,
-                                         now: { fixed }, calendarAuthorized: { true },
-                                         deletionPolicy: { deletion }, additionPolicy: { addition })
+                                         projection: projection, defaults: defaults,
+                                         now: { fixed }, calendarAuthorized: { true })
         return Fixture(plan: plan, calendar: calendar, projection: projection, reconcile: reconcile,
-                       container: container)
+                       defaults: defaults, container: container)
     }
 
     /// B1（真机事故的回归）：用户的课程系列误存进 BetterCalendar 的绿/橙/蓝日历——
@@ -252,8 +250,9 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
         try await f.projection.project(label: today)
         try f.plan.replacePlanned([], on: today)
         try await f.projection.project(label: today)            // 清空当天计划
-        try await f.calendar.clear(kind: .preview)              // 执行页清橙
+        try await f.calendar.clear(kind: .preview)              // 旧执行页清橙
         try await f.calendar.clear(kind: .planned)
+        _ = await f.projection.retirePreviewCalendar()          // P4 Q1 退役清扫
         for _ in 0..<2 {                                        // 蓝色：读回 ∪ 新增 再写（执行页 flushActuals 同款）
             let existing = try await f.calendar.read(kind: .actual)
             let done = CalendarEventDraft(title: "写作", start: at(20, 10), end: at(20, 10, 50), kind: .actual, blockID: a.id)
@@ -268,9 +267,9 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
         #expect(f.calendar.events(.planned).filter { $0.blockID != nil }.isEmpty)
     }
 
-    /// B4：在日历里把一块拖到后一天 / 前一天——采纳为改时间：不弹删除、不留幽灵、只剩一份。
-    @Test func dragToAnotherDayIsAdoptedAsMove() async throws {
-        let f = try make(deletion: .alwaysDelete)   // 旧行为在这个策略下会真删计划
+    /// B4：在日历里把一块拖到后一天 / 前一天——采纳为改时间：不删、不留幽灵、只剩一份；挪过的块成图钉（Q6）。
+    @Test func dragToAnotherDayIsAdoptedAsMoveAndPinned() async throws {
+        let f = try make()
         let fwd = ScheduledBlock(title: "整理笔记", start: at(21, 9), end: at(21, 10))
         let back = ScheduledBlock(title: "跑步", start: at(23, 18), end: at(23, 19))
         try f.plan.replacePlanned([fwd], on: f.label(1))
@@ -284,11 +283,12 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
 
         await f.reconcile.reconcileWindow()
 
-        #expect(f.reconcile.pendingDeletions.isEmpty)
         let day2 = try f.plan.plannedBlocks(on: f.label(2))
         #expect(Set(day2.map(\.id)) == [fwd.id, back.id], "两块都落到新的一天")
         #expect(day2.first { $0.id == fwd.id }?.start == at(22, 9))
         #expect(day2.first { $0.id == back.id }?.start == at(22, 18))
+        #expect(day2.allSatisfy { $0.isPinned(at: now) }, "你亲手挪过 = 图钉")
+        #expect(day2.first?.pinnedUntil == DayContext.logicalWindow(forLabel: f.label(2)).end, "当天有效")
         #expect(try f.plan.plannedBlocks(on: f.label(1)).isEmpty && f.plan.plannedBlocks(on: f.label(3)).isEmpty)
         #expect(f.calendar.events(.planned).filter { $0.blockID == fwd.id }.count == 1, "同一个章只有一份")
         #expect(f.calendar.events(.planned).filter { $0.blockID == back.id }.count == 1)
@@ -296,16 +296,15 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
 
     /// B5：第 7 天晚上的块（晚于「此刻＋7 天」）不再被误报成删除。
     @Test func lateSeventhDayBlockIsNotMisreadAsDeleted() async throws {
-        let f = try make(deletion: .alwaysDelete)
+        let f = try make()
         let late = ScheduledBlock(title: "夜读", start: at(27, 23, 30), end: at(27, 23, 55))
         try f.plan.replacePlanned([late], on: f.label(7))
         try await f.projection.project(label: f.label(7))
         await f.reconcile.reconcileWindow()
-        #expect(f.reconcile.pendingDeletions.isEmpty)
         #expect(try f.plan.plannedBlocks(on: f.label(7)).map(\.id) == [late.id])
     }
 
-    /// B7：一块判不清，只挂起那一块——同一天别的手改照常回流；挂起的块画面原样保留、下次仍挂起（不被投影抹掉）。
+    /// B7：一块判不清（旧章、指纹与两边都对不上），只挂起那一块——同一天别的手改照常回流；挂起的块画面原样保留。
     @Test func oneConflictHoldsOnlyThatBlock() async throws {
         let f = try make()
         let day = f.label(1)
@@ -313,41 +312,36 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
         let b = ScheduledBlock(title: "B", start: at(21, 14), end: at(21, 15))
         try f.plan.replacePlanned([a, b], on: day)
         try await f.projection.project(label: day)
-        try f.plan.updatePlanned(id: a.id, start: at(21, 9, 30), end: at(21, 10, 30), title: "A")   // App 这边改了 A
+        // A：一个旧章事件（无 v2），本机指纹又是第三个版本 → 判不清
         let ea = try #require(f.calendar.events(.planned).first { $0.blockID == a.id })
+        f.calendar.delete(ea.externalID)
+        f.calendar.seed(.planned, "A", at(21, 11), at(21, 12), blockID: a.id)
+        var prints = ProjectionFingerprints.get(day, defaults: f.defaults)
+        prints[a.id.uuidString] = ProjectionFingerprints.tuple(start: at(21, 9, 30), end: at(21, 10, 30), title: "A")
+        ProjectionFingerprints.set(day, prints, defaults: f.defaults, now: now)
         let eb = try #require(f.calendar.events(.planned).first { $0.blockID == b.id })
-        f.calendar.edit(ea.externalID, start: at(21, 11), end: at(21, 12))   // 日历里也改了 A → 判不清
         f.calendar.edit(eb.externalID, start: at(21, 16), end: at(21, 17))   // 日历里改了 B → 正常手改
 
         for _ in 0..<2 {
             await f.reconcile.reconcileWindow()
             let truth = try f.plan.plannedBlocks(on: day)
             #expect(truth.first { $0.id == b.id }?.start == at(21, 16), "B 照常回流")
-            #expect(truth.first { $0.id == a.id }?.start == at(21, 9, 30), "A 的真相不被猜着改")
+            #expect(truth.first { $0.id == a.id }?.start == at(21, 9), "A 的真相不被猜着改")
             #expect(f.calendar.events(.planned).first { $0.blockID == a.id }?.start == at(21, 11), "A 的画面原样保留")
         }
     }
 
-    /// D2 + 认领：日历里新建的事件「加进计划」→ 正是那一件被盖章，不新增副本。
-    @Test func adoptingUserEventStampsExactlyThatEvent() async throws {
-        let f = try make(addition: .alwaysAdd)
+    /// Q4：日历里新建（无章）的事件 = 你的：不复制成计划块、不删、不弹窗；App 里提示一句（可收起）。
+    @Test func userEventInGreenCalendarIsNeitherCopiedNorDeleted() async throws {
+        let f = try make()
         f.calendar.seed(.planned, "牙医", at(21, 15), at(21, 16))
         await f.reconcile.reconcileWindow()
-        let block = try #require(try f.plan.plannedBlocks(on: f.label(1)).first { $0.title == "牙医" })
-        let events = f.calendar.events(.planned).filter { $0.title == "牙医" }
-        #expect(events.count == 1)
-        #expect(events.first?.blockID == block.id)
-    }
-
-    /// 「忽略」要记住（无章事件不再被清除后，不记住就会每次日历变更都再问一遍）；事件留在日历里。
-    @Test func ignoredAdditionIsRememberedAndKept() async throws {
-        let f = try make(addition: .ask)
-        f.calendar.seed(.planned, "家里的事", at(21, 19), at(21, 20))
         await f.reconcile.reconcileWindow()
-        #expect(f.reconcile.pendingAdditions.count == 1)
-        await f.reconcile.resolveChangesAndWait(sync: false, remember: false)
+        #expect(try f.plan.plannedBlocks(on: f.label(1)).isEmpty, "不复制")
+        #expect(f.calendar.events(.planned).filter { $0.title == "牙医" && $0.blockID == nil }.count == 1, "不删")
+        #expect(f.reconcile.calendarNotice?.contains("不是 BetterCalendar 写的") == true)
+        f.reconcile.dismissCalendarNotice()
         await f.reconcile.reconcileWindow()
-        #expect(f.reconcile.pendingAdditions.isEmpty)
-        #expect(f.calendar.events(.planned).filter { $0.title == "家里的事" && $0.blockID == nil }.count == 1)
+        #expect(f.reconcile.calendarNotice == nil, "收起后同样的情况不再提示")
     }
 }

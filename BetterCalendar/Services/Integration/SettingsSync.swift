@@ -22,7 +22,7 @@ enum SettingsSync {
         "cloud.model", "cloud.provider", "cloud.sfModel", "cloud.useCloud", "cloud.onDeviceParser",
         "journal.privacyLock", "meeting.autoComplete", "reminder.lead", "push.intensity",
         "workHours.windDown", "pomo.earlyEndLimit", "theme.id", "disclosure.style", "placeholder.mode",
-        "reconcile.additionPolicy", "reconcile.deletionPolicy",
+        "calendar.busyExcludedTitles",         // P4 Q4：排布时不当作已占用的日历（存日历名，两端一致）
         "distraction.enabled", "distraction.keywords",
         "integration.focusFollow",
         "agentContext.allowRecentJournal",   // SPEC §19 A2：允许智能体读最近日记（隐私偏好，两端一致；默认关）

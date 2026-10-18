@@ -10,7 +10,8 @@
 //    理由：Jason 在卡片上批准的挪动 = 他亲手拖动（E1）的另一种输入方式，与对账回流同构——
 //    只按 ID 改块时间（updatePlanned），不整日覆盖、不碰标题以外的元数据。写后：
 //      · 发 planChangedExternally（带 updatedIDs）→ 时间线协调器把它当手改钉住 30 分钟（D12 用户最后动作赢）、排日程页刷新；
-//      · 未开工的日子由 ProjectionService 重投影绿色（实时日的画面归执行层橙色预览，同协调器影子期契约）。
+//      · 钉住（P4 Q6：你批准的位置等同你亲手放的，当天自动调整绕开）；
+//      · ProjectionService 重投影绿色（P4 Q2：开工的日子绿色也一直在，橙色预览已退役）。
 //    权限表（架构地图 §2「计划块」行）需补这一行，见 W1 交付报告。
 //
 
@@ -145,7 +146,7 @@ enum PlanMoveRules {
 @MainActor final class ApprovedPlanMover: PlanBlockMoving {
     private let planStore: PlanReading & PlanWriting
     private let projection: ProjectionService?
-    private let startedDays: StartedDayStore?
+    private let startedDays: StartedDayStore?   // P4 起不再按开工与否分流（保留注入，组装点不变）
     /// 执行进展（已完成 / 正在做）；组装点在执行层建好后挂上。
     weak var progress: (any ExecutionProgressReading)?
     private let now: () -> Date
@@ -245,12 +246,15 @@ enum PlanMoveRules {
         return (changes, note)
     }
 
-    /// 写后：通知时间线协调器（当手改钉住）+ 未开工的日子重投影绿色。返回附加说明（刷新失败时）。
+    /// 写后：钉住（P4 Q6：你批准的位置 = 你亲手放的，当天自动调整绕开）+ 通知时间线协调器 + 重投影绿色
+    /// （P4 Q2：开工的日子绿色也一直在，不再跳过）。返回附加说明（刷新失败时）。
     private func afterWrite(_ ids: [UUID]) async -> String {
+        do { try planStore.setPinned(ids: ids, until: ScheduledBlock.pinExpiry(forStart: now())) }
+        catch { DevLog.shared.warn("多端审批", "挪动已写入，但没能钉住（自动调整可能再挪它）：\(error.localizedDescription)") }
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
                                         userInfo: ["updatedIDs": ids, "source": Self.notificationSource])
         let label = label
-        guard !(startedDays?.isStarted(label) ?? false), let projection else { return "" }
+        guard let projection else { return "" }
         do { try await projection.project(label: label); return "" } catch {
             DevLog.shared.warn("多端审批", "挪动已写入，但日历画面刷新失败：\(error.localizedDescription)")
             return "（日历画面稍后同步：\(error.localizedDescription)）"

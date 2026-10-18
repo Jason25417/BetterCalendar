@@ -555,8 +555,17 @@ final class HomeViewModel {
             for label in byLabel.keys {
                 reminderScope.formUnion(((try? planStore.plannedBlocks(on: label)) ?? []).map(\.id))
             }
+            // P4 Q6：你在 App 里改过时间的已有块 = 图钉（当天有效）——确认前后对比，只钉「原来就有、时间被你改了」的
+            var storedSpans: [UUID: (Date, Date)] = [:]
+            for label in byLabel.keys {
+                for b in (try? planStore.plannedBlocks(on: label)) ?? [] { storedSpans[b.id] = (b.start, b.end) }
+            }
             for (label, dayBlocks) in byLabel {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
+                for b in dayBlocks.map(\.scheduled) {
+                    guard let old = storedSpans[b.id], old.0 != b.start || old.1 != b.end else { continue }
+                    try planStore.setPinned(ids: [b.id], until: ScheduledBlock.pinExpiry(forStart: b.start))
+                }
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
                 try await projection.project(label: label)
             }

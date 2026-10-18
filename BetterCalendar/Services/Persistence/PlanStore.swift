@@ -35,6 +35,8 @@ protocol PlanWriting: AnyObject {
     func insertPlanned(_ blocks: [ScheduledBlock], reason: PlanWriteReason) throws
     /// 按 ID 删除若干块（进回收站，可恢复）。
     func deletePlanned(ids: [UUID], reason: PlanWriteReason) throws
+    /// 钉住 / 取消钉住（P4 Q6 图钉）：until = 截止时刻（nil = 取消）。不改内容、不升版本（图钉不是日历上的内容）。
+    func setPinned(ids: [UUID], until: Date?) throws
 }
 
 /// 计划块写入的真实来源（P4.0-8）：PlanStore 日志据此标注。曾经所有写入都叫「对账回流」，
@@ -47,6 +49,31 @@ nonisolated enum PlanWriteReason: String, Sendable {
     case spill = "溢出硬执行"
     case poolAdmit = "单件入线"
     case agentApproval = "智能体批准的改动"
+    case userEdit = "你在 App 里的改动"
+
+    /// 是不是「你的操作」（含你批准的提案）——P4 冲突裁决：你的操作 ＞ 批准过的提案 ＞ 自动调整（原则 8）。
+    var isUsersOwn: Bool {
+        switch self {
+        case .calendarReconcile, .userEdit, .agentApproval, .undo, .unspecified: true
+        case .timelineCoordinator, .spill, .poolAdmit: false
+        }
+    }
+}
+
+extension PlanWriteReason {
+    /// PlanBlock.syncSource 读回（未知/旧数据 = unspecified，按「你的操作」保守对待）。
+    init(stored: String?) {
+        self = PlanWriteReason.allStored.first { $0.rawValue == stored } ?? .unspecified
+    }
+    static let allStored: [PlanWriteReason] = [.unspecified, .calendarReconcile, .timelineCoordinator, .undo,
+                                               .spill, .poolAdmit, .agentApproval, .userEdit]
+}
+
+extension ScheduledBlock {
+    /// 图钉的截止（P4 Q6「当天有效」）：块所在逻辑日的结束（下一个 4:00）。
+    static func pinExpiry(forStart start: Date) -> Date {
+        DayContext.logicalWindow(forLabel: DayContext.logicalStartOfDay(start)).end
+    }
 }
 
 extension PlanWriting {
@@ -88,14 +115,37 @@ struct ActualBlock: Sendable, Identifiable, Equatable {
     let title: String
     let start: Date
     let end: Date
+    /// P4：记下的 / 正在做 / 被动推断（只记数据不画蓝）。
+    var state: ActualState = .recorded
 }
 
 @MainActor
 final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
     private let context: ModelContext
+    /// 本机写者标识（P4 Q8 作者宽限）：写进 PlanBlock.syncWriter。
+    let writerID: String
+    private let now: () -> Date
 
-    init(context: ModelContext? = nil) {
+    init(context: ModelContext? = nil, writerID: String? = nil, now: @escaping () -> Date = { .now }) {
         self.context = context ?? SharedModelContainer.shared.mainContext
+        self.writerID = writerID ?? FocusFollow.deviceID
+        self.now = now
+    }
+
+    /// 真改动盖版本（P4 Q7/Q8）：版本 = max(现在毫秒, 旧版本+1)——单调，且另一台设备的旧版本永远小于本机新写的。
+    private func stampWrite(_ row: PlanBlock, _ reason: PlanWriteReason) {
+        let ms = Int64((now().timeIntervalSince1970 * 1000).rounded())
+        row.syncVersion = max(ms, row.syncVersion + 1)
+        row.syncWriter = writerID
+        row.syncSource = reason.rawValue
+    }
+
+    private static func scheduled(_ b: PlanBlock) -> ScheduledBlock {
+        ScheduledBlock(id: b.id, title: b.title, start: b.start, end: b.end,
+                       isFixed: b.isFixed, isAnchor: b.isAnchor, timingStyle: b.timingStyle,
+                       priority: b.priority, deadline: b.deadline, linkedTaskID: b.linkedTaskID,
+                       labels: b.labels, pinnedUntil: b.pinnedUntil, syncVersion: b.syncVersion,
+                       syncWriter: b.syncWriter, syncSource: b.syncSource)
     }
 
     /// 读回某**逻辑日**的「计划」块（重构 2026-07-07：跨午夜块归前一逻辑日，"睡前看书 00:30"不再被拆到次日）。
@@ -106,10 +156,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         let result = try context.fetch(FetchDescriptor<PlanBlock>())
             .filter { !$0.isInTrash && $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
-            .map { ScheduledBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
-                                  isFixed: $0.isFixed, isAnchor: $0.isAnchor, timingStyle: $0.timingStyle,
-                                  priority: $0.priority, deadline: $0.deadline, linkedTaskID: $0.linkedTaskID,
-                                  labels: $0.labels) }
+            .map(Self.scheduled)
         DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(Self.dayStr(day))")
         return result
     }
@@ -137,10 +184,13 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         let removed = stale.filter { !wanted.contains($0.id) }
         for b in blocks {
             let row: PlanBlock
-            if let existing = byID[b.id] { row = existing }
-            else {
+            if let existing = byID[b.id] {
+                row = existing
+                if row.title != b.title || row.start != b.start || row.end != b.end { stampWrite(row, .userEdit) }
+            } else {
                 row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end)
                 context.insert(row); byID[b.id] = row
+                stampWrite(row, .userEdit)
             }
             row.title = b.title; row.start = b.start; row.end = b.end
             row.isFixed = b.isFixed; row.isAnchor = b.isAnchor
@@ -158,6 +208,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
             .first(where: { !$0.isInTrash && $0.id == id && $0.kind == .planned }) else { return }
         guard block.start != start || block.end != end || block.title != title else { return }
         block.start = start; block.end = end; block.title = title
+        stampWrite(block, reason)
         try context.save()
         DevLog.shared.info("PlanStore", "\(reason.rawValue)：更新「\(title)」→ \(Self.dayStr(start))")
     }
@@ -172,10 +223,12 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
             throw DataArchiveError.invalid("计划仍在回收站，请先恢复")
         }
         for b in blocks where !activeIDs.contains(b.id) {
-            context.insert(PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
-                                     isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
-                                     timingStyle: b.timingStyle, priority: b.priority,
-                                     deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID))
+            let row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end,
+                                isFixed: b.isFixed, isAnchor: b.isAnchor, kind: .planned,
+                                timingStyle: b.timingStyle, priority: b.priority,
+                                deadline: b.deadline, labels: b.labels, linkedTaskID: b.linkedTaskID)
+            stampWrite(row, reason)
+            context.insert(row)
         }
         try context.save()
         DevLog.shared.info("PlanStore", "\(reason.rawValue)：新增 \(blocks.count) 块")
@@ -191,6 +244,17 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         DevLog.shared.info("PlanStore", "\(reason.rawValue)：删除 \(victims.count) 块")
     }
 
+    func setPinned(ids: [UUID], until: Date?) throws {
+        guard !ids.isEmpty else { return }
+        let idSet = Set(ids)
+        let rows = try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { !$0.isInTrash && $0.kind == .planned && idSet.contains($0.id) && $0.pinnedUntil != until }
+        guard !rows.isEmpty else { return }
+        for r in rows { r.pinnedUntil = until }
+        try context.save()
+        DevLog.shared.info("PlanStore", until == nil ? "取消图钉 \(rows.count) 块" : "图钉 \(rows.count) 块（当天有效）")
+    }
+
     // MARK: - 蓝色实际（真相源）
 
     /// 读回某**逻辑日**的实际块（蓝色）。day 语义同 plannedBlocks（4 点日界线、凌晨须先转标签）。
@@ -199,7 +263,8 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         return try context.fetch(FetchDescriptor<PlanBlock>())
             .filter { !$0.isInTrash && $0.kind == .actual && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
-            .map { ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end) }
+            .map { ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
+                               state: ActualState(stored: $0.actualState)) }
     }
 
     /// 某计划块的完成闩（读 planned 行的 completion；kind 过滤避免撞同 UUID 的实际行）。
@@ -227,8 +292,10 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
             }
             if let row = byID[b.id] {
                 row.title = b.title; row.start = b.start; row.end = b.end
+                row.actualState = b.state.stored
             } else {
                 let row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end, kind: .actual)
+                row.actualState = b.state.stored
                 context.insert(row); byID[b.id] = row
             }
         }

@@ -176,6 +176,20 @@ struct HomeView: View {
                     }
                 }
 
+                // P4 Q1：BetterCalendar 自家日历里有你的事件（预览日历退役后尤其）——提示挪走，可收起（不是错误）
+                if let notice = deps.reconcile.calendarNotice {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.secondary)
+                        Text(notice).font(.callout).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button { deps.reconcile.dismissCalendarNotice() } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.borderless).help("知道了")
+                    }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
                 // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
                 if deps.looseDays.isLoose(model.targetDay) {
                     HStack(spacing: 8) {
@@ -577,7 +591,8 @@ struct HomeView: View {
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
                     SettingsView(trash: deps.trash, nativeActions: deps.nativeActions,
-                                 proposals: deps.proposals, agentMessages: deps.agentMessages, alertPush: deps.alertPush)
+                                 proposals: deps.proposals, agentMessages: deps.agentMessages, alertPush: deps.alertPush,
+                                 calendarStore: deps.calendarStore)
                         .navigationTitle("设置")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {
@@ -622,25 +637,7 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: ExecutionProgressSignal.changed)) { _ in
                 model.noteExecutionProgress()
             }
-            // 0.20 双向同步 → 0.25.6 改带「不再询问」勾选 sheet（与运行态恢复统一交互）。
-            .sheet(isPresented: Binding(get: { deps.reconcile.hasPendingChanges },
-                                        set: { if !$0, deps.reconcile.hasPendingChanges {
-                                            deps.reconcile.resolveChanges(sync: false, remember: false) } })) {
-                let dels = deps.reconcile.pendingDeletions.map(\.title).joined(separator: "、")
-                let adds = deps.reconcile.pendingAdditions.map(\.title).joined(separator: "、")
-                RememberableConfirmSheet(
-                    title: "日历里有改动，要同步吗？",
-                    message: (dels.isEmpty ? "" : "移除了：\(dels)\n")
-                        + (adds.isEmpty ? "" : "新建了：\(adds)\n")
-                        + "（可随时在 设置→进阶 里改处理策略）",
-                    options: [
-                        .init(label: "同步（照日历的改）", role: .destructive, appliesRemember: true),
-                        .init(label: "保留现状（不同步）", role: nil, appliesRemember: true),
-                    ],
-                    onChoose: { i, remember in
-                        deps.reconcile.resolveChanges(sync: i == 0, remember: remember)
-                    })
-            }
+            // P4 Q3（2026-10-18）：日历改动不再弹窗询问——你在苹果日历里的操作直接生效（删了=收进待办区，可找回）。
             .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
             // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）
             .onChange(of: model.targetDay) { _, _ in

@@ -136,6 +136,39 @@ enum ProposalTimerRules {
 
     // MARK: prepare
 
+    /// W9（P4 Q6，SPEC §19.13，原则 8「审慎越级」）：挪块动到**图钉**（你亲手改过时间的块，当天有效）——
+    /// 提案必须带越级理由，否则拒收；带了就在改动清单最前面点名是哪几块（审批卡另有 W10 的越级横幅）。
+    /// 越级提案永远不被预授权放行（PreauthPolicy 看 Proposal.escalation）。撤销（整组挪回）是你的动作，不查。
+    func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction {
+        var prepared = try await prepare(action)
+        let pinned = try pinnedTargets(prepared.action)
+        guard !pinned.isEmpty else { return prepared }
+        let names = pinned.map { "「\($0)」" }.joined(separator: "、")
+        guard escalation != nil else {
+            throw ProposalExecutionError.invalid("\(names)是你亲手放的位置（图钉，当天有效）；要动它，提案必须标「越级」并写明理由")
+        }
+        let line = ProposalChange(field: "⚠️ 这会动你亲手放的位置：\(names)（图钉，今天自动调整都绕开它）", before: nil, after: nil)
+        var changes = prepared.changes ?? []
+        if !changes.contains(line) { changes.insert(line, at: 0) }
+        prepared.changes = changes
+        return prepared
+    }
+
+    /// 这项挪动会动到哪些图钉（标题）。只看挪块类；撤销用的整组挪回不算。
+    private func pinnedTargets(_ action: ProposalAction) throws -> [String] {
+        let ids: [UUID]
+        switch action {
+        case let .moveBlock(id, _, _, _): ids = [id]
+        case let .moveBlocks(moves, false): ids = moves.map(\.id)
+        default: return []
+        }
+        let mover = try planMover()
+        return try ids.compactMap { id in
+            guard let b = try mover.todayBlock(id: id), b.isPinned(at: now()) else { return nil }
+            return b.title
+        }
+    }
+
     func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction {
         switch action {
         case .experimentNoop:

@@ -44,7 +44,9 @@ enum AgentContextLimits {
 struct AgentContextInput {
     struct Block { var title: String; var start: Date; var end: Date; var isFixed = false; var important = false
         /// W1：真改动（挪块）要用的身份与版本、截止。
-        var id: UUID? = nil; var revision: String? = nil; var deadline: Date? = nil }
+        var id: UUID? = nil; var revision: String? = nil; var deadline: Date? = nil
+        /// P4 Q6：图钉（你亲手放的位置，到这一刻前有效）；要动它的提案必须带越级理由。
+        var pinnedUntil: Date? = nil }
     struct Run { var title: String; var start: Date; var pausedSeconds: TimeInterval = 0; var timingStyle: String? = nil }
     struct Running { var foreground: Run?; var background: [Run] = []; var onBreak = false }
     struct PoolEntry {
@@ -121,6 +123,7 @@ enum AgentBridgeContext {
             if let id = b.id { o["id"] = id.uuidString }
             if let r = b.revision { o["revision"] = r }
             o["deadline"] = b.deadline.map(t) ?? NSNull()
+            if let p = b.pinnedUntil { o["pinnedUntil"] = t(p) }   // P4：有此键 = 图钉，动它须越级
             return o
         }
         today["logicalDayStart"] = t(input.logicalDayStart)
@@ -252,7 +255,8 @@ enum AgentBridgeContext {
             do {
                 input.today.items = try planStore.plannedBlocks(on: input.logicalDayStart).sorted { $0.start < $1.start }.map {
                     .init(title: $0.title, start: $0.start, end: $0.end, isFixed: $0.isFixed, important: $0.priority == .important,
-                          id: $0.id, revision: ProposalRevision.block($0), deadline: $0.deadline)
+                          id: $0.id, revision: ProposalRevision.block($0), deadline: $0.deadline,
+                          pinnedUntil: $0.isPinned(at: input.now) ? $0.pinnedUntil : nil)
                 }
             } catch { input.today.error = fail("今天的计划", error) }
         }

@@ -13,6 +13,10 @@
 //    执行=位移 ≥10 分钟或顺序变化才写；呈现=写后发 planChangedExternally（带自家标记防自激）。
 //    外部变更只认真外部来源：本机保存回声（DataSyncMonitor 标 localStoreSave）不触发重算（B10，见 PlanChangeSource）。
 //  手改冷却（D12）：对账回流/亲手编辑的块 30 分钟内映射为钉死——用户最后动作赢（对账合同延伸）。
+//  P4（SPEC §19.13）只改**输入**、不改引擎：
+//  · Q6 图钉：你亲手改过时间的块（PlanBlock.pinnedUntil，当天有效、随 iCloud 同步）映射为钉死，活动预报也不改写它；
+//  · Q4 已占用：你自己日历里的事件（只读）作为钉死的障碍喂给引擎，绕开它排；关联上的块（同一件事）钉在原位。
+//    不接 externalBusy（nil）时与改动前逐字等价（影子期等价测试锁住）。
 //
 
 import Foundation
@@ -58,6 +62,11 @@ final class TimelineCoordinator {
 
     /// 溢出结算的幂等标记库（注入=测试不污染真实 UserDefaults——共享默认库的老坑）。
     private let markerDefaults: UserDefaults
+    /// P4 Q4：你的日历事件（只读，组装点按「排布时当作已占用的日历」设置过滤）。nil = 不看（旧行为）。
+    var externalBusy: ((DateInterval) async -> [SystemCalendarEvent])?
+    /// 重算串行化：读你的日历要 await，期间再来的触发只记一笔、本轮结束后补跑一次（不并发写真相）。
+    private var computing = false
+    private var rerunReason: String?
 
     init(planStore: PlanReading & PlanWriting & ActualReading,
          startedDays: StartedDayStore,
@@ -276,6 +285,18 @@ final class TimelineCoordinator {
 
     @discardableResult
     func recompute(reason: String) async -> Int {
+        guard !computing else { rerunReason = reason; return 0 }
+        computing = true
+        var wrote = await recomputeOnce(reason: reason)
+        while let again = rerunReason {
+            rerunReason = nil
+            wrote += await recomputeOnce(reason: again)
+        }
+        computing = false
+        return wrote
+    }
+
+    private func recomputeOnce(reason: String) async -> Int {
         let now0 = now()
         let today = DayContext.logicalStartOfDay(now0)
         // 影子闸（D7）：只在已开工的实时日动真相；E5f 翻闸时移除此 guard
@@ -283,6 +304,8 @@ final class TimelineCoordinator {
             softSpilledIDs = []
             return 0
         }
+        // P4 Q4：先读你的日历（await），再读真相——读到的真相是最新的
+        let external = await externalBusy?(DayContext.logicalWindow(forLabel: today)) ?? []
         guard let blocks = try? planStore.plannedBlocks(on: today) else { return 0 }
         let cleared = (try? planStore.clearedPlannedIDs(on: today)) ?? []
         let settled = progress?.settledPlannedIDs ?? []
@@ -299,8 +322,10 @@ final class TimelineCoordinator {
             !settled.contains(b.id) && !cleared.contains(b.id) && b.start < workEnd
         }
         let from = max(now0, prediction?.end ?? now0)
+        let links = external.isEmpty ? [:] : ExternalEventLinker.links(blocks: blocks, events: external)
         let modules = candidates.map { b -> FluidModule in
-            let held = manualHolds[b.id] != nil
+            // 钉死：手改冷却（D12）/ 图钉（Q6，你亲手放的位置）/ 关联了你的日历事件（Q4，同一件事钉在原位）
+            let held = manualHolds[b.id] != nil || b.isPinned(at: now0) || links[b.id] != nil
             let dur = b.end.timeIntervalSince(b.start)
             let calibrated = (b.isFixed || b.isAnchor || held)
                 ? nil : dur * DurationCalibration.defaultMultiplier
@@ -312,15 +337,24 @@ final class TimelineCoordinator {
                 family: b.family, parallelGroup: b.parallelGroup,
                 hardEndOverride: b.priority == .important ? dayEnd : nil)
         }
+        // P4 Q4：你的日历事件 = 钉死的障碍（不写回、不进结果）；已开始的从 from 截起，免得被引擎当成「不在本窗口」
+        let linkedEvents = Set(links.values.map { "\($0.externalID ?? $0.title)|\($0.start.timeIntervalSince1970)" })
+        let obstacles: [FluidModule] = external.compactMap { e in
+            guard !e.isAllDay, e.end > from,
+                  !linkedEvents.contains("\(e.externalID ?? e.title)|\(e.start.timeIntervalSince1970)") else { return nil }
+            let s = max(e.start, from)
+            return FluidModule(title: e.title, duration: e.end.timeIntervalSince(s), fluidity: .pinned, plannedStart: s)
+        }
 
-        let result = FluidLayoutEngine.layOut(modules: modules, from: from, hardEnd: workEnd)
-        softSpilledIDs = Set(result.overflow)
+        let result = FluidLayoutEngine.layOut(modules: modules + obstacles, from: from, hardEnd: workEnd)
+        let candidateIDs = Set(candidates.map(\.id))
+        softSpilledIDs = Set(result.overflow).intersection(candidateIDs)
         lastComputeAt = now0
         let threshold = TimeInterval(Self.writeThresholdMinutes * 60)
         var wrote = 0
 
-        // 活动块行维护（D-2「绿=活预报」）：[实际开始, 预测结束]——同受阈值节流
-        if let pr = prediction, let row = blocks.first(where: { $0.id == pr.id }),
+        // 活动块行维护（D-2「绿=活预报」）：[实际开始, 预测结束]——同受阈值节流；图钉不改写（Q6）
+        if let pr = prediction, let row = blocks.first(where: { $0.id == pr.id }), !row.isPinned(at: now0),
            abs(row.start.timeIntervalSince(pr.start)) >= threshold
             || abs(row.end.timeIntervalSince(pr.end)) >= threshold {
             try? planStore.updatePlanned(id: pr.id, start: pr.start, end: pr.end, title: row.title,
@@ -343,7 +377,7 @@ final class TimelineCoordinator {
         let placedIDs = Set(result.placed.map(\.id))
         let currentOrder = candidates.filter { placedIDs.contains($0.id) }
             .sorted { $0.start < $1.start }.map(\.id)
-        let newOrder = result.placed.sorted { $0.start < $1.start }.map(\.id)
+        let newOrder = result.placed.filter { candidateIDs.contains($0.id) }.sorted { $0.start < $1.start }.map(\.id)
         let orderChanged = currentOrder != newOrder
 
         if bigMove || (orderChanged && !moves.isEmpty) {

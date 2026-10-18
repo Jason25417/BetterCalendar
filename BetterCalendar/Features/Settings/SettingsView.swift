@@ -22,6 +22,10 @@ struct SettingsView: View {
     var proposals: ProposalCenter? = nil
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
+    /// P4 Q4：列出你的日历（「排布时当作已占用的日历」）。只读。
+    var calendarStore: CalendarStore? = nil
+    @State private var userCalendars: [String] = []
+    @State private var busyExcluded: Set<String> = Set(ExternalCalendarSettings.excludedTitles)
     @State private var apiKey: String = ""
     @State private var distractionOn: Bool = DistractionSettings.enabled   // 0.32.1：静态属性不触发视图重算，输入框曾打开开关也不出现
     @State private var model: String = CloudSettings.model
@@ -353,18 +357,22 @@ struct SettingsView: View {
                     Text("「控制台」「禅」目前还没有效果（选了暂时等同「向导」）。向导＝排日程页按时刻只显当刻所需（渐进披露 v2）。")
                         .font(.caption).foregroundStyle(.secondary)
 
-                    Picker("日历里删除计划块时", selection: Binding(
-                        get: { ReconcileSettings.deletionPolicy },
-                        set: { ReconcileSettings.deletionPolicy = $0 })) {
-                        ForEach(ReconcileDeletionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    Picker("日历里新建日程时", selection: Binding(
-                        get: { ReconcileSettings.additionPolicy },
-                        set: { ReconcileSettings.additionPolicy = $0 })) {
-                        ForEach(ReconcileAdditionPolicy.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    Text("双向同步（0.20）：在 系统日历里挪/改绿色计划块会自动同步回 App；删除/新建按上面两条策略处理。")
+                    Text("双向同步（P4，谁的东西谁做主）：在系统日历里挪/改绿色计划块，App 立即照办，挪过时间的块当天不再被自动调整（图钉）；删掉一块 = 从今天的时间线移走、收进待办区（可找回）。你自己日历里的事件 BetterCalendar 只读、不复制，同一件事只画你那一份。")
                         .font(.caption).foregroundStyle(.secondary)
+                    if !userCalendars.isEmpty {
+                        DisclosureGroup("排布时当作已占用的日历（\(userCalendars.count - busyExcluded.intersection(userCalendars).count)/\(userCalendars.count)）") {
+                            ForEach(userCalendars, id: \.self) { title in
+                                Toggle(title, isOn: Binding(
+                                    get: { !busyExcluded.contains(title) },
+                                    set: { on in
+                                        if on { busyExcluded.remove(title) } else { busyExcluded.insert(title) }
+                                        ExternalCalendarSettings.excludedTitles = Array(busyExcluded)
+                                    }))
+                            }
+                            Text("默认全部算：时间线自动调整时绕开这些日历里的事件（只读，不改你的日历）。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
 
                     Picker("退出时有任务在进行", selection: Binding(
                         get: { ExecutionViewModel.RunRestoreSettings.policy },
@@ -408,6 +416,7 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
             reloadSyncedState()
         }
+        .task { userCalendars = await calendarStore?.userCalendarTitles() ?? [] }   // P4 Q4：只读列出你的日历名
         #if os(macOS)
         // macOS `Settings` 场景的窗口不随内容长高、也不给用户缩放 → **固定尺寸**让 Form 内容超出时**内部滚动**。
         // 别再改成 min/ideal/max 弹性尺寸追「可缩放」：那会让窗口撑到内容高、超屏后无法滚被截断（0.18.22 踩过、0.18.38 回退）。
@@ -498,6 +507,7 @@ struct SettingsView: View {
         journalLock = JournalSettings.privacyLock
         distractionOn = DistractionSettings.enabled
         focusFollowOn = FocusFollowSettings.enabled
+        busyExcluded = Set(ExternalCalendarSettings.excludedTitles)
     }
 
     private func save() {

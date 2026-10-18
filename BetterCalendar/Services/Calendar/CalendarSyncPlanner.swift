@@ -27,6 +27,9 @@ nonisolated struct CalendarEventSnapshot: Equatable, Sendable {
     /// 同章去重的确定性排序键（两台设备看到的值相同：随 iCloud 日历同步）。
     var creationDate: Date?
     var externalID: String?
+    /// 章 v2（CalendarStamp）：旧章/无章 = nil。
+    var stampVersion: Int64? = nil
+    var stampHash: String? = nil
 }
 
 /// 对齐清单：执行方按 index 回指原事件数组。
@@ -129,7 +132,8 @@ nonisolated enum CalendarSyncPlanner {
     static func snapshot(_ d: CalendarEventDraft) -> CalendarEventSnapshot {
         CalendarEventSnapshot(title: d.title, start: d.start, end: d.end, notes: d.notes,
                               hasAlarm: d.alarmLeadMinutes != nil, blockID: d.blockID,
-                              creationDate: d.creationDate, externalID: d.externalID)
+                              creationDate: d.creationDate, externalID: d.externalID,
+                              stampVersion: d.stampVersion, stampHash: d.stampHash)
     }
 
     static func claimKey(_ title: String, _ start: Date) -> String {
@@ -144,5 +148,7 @@ nonisolated enum CalendarSyncPlanner {
     private static func needsUpdate(_ e: CalendarEventSnapshot, _ d: CalendarEventDraft) -> Bool {
         !sameContent(e, d) || (e.notes ?? "") != (d.notes ?? "")
             || e.hasAlarm != (d.alarmLeadMinutes != nil)   // 普通块不弹提醒；固定块挂会前提醒
+            // 章 v2：草稿带新版本/指纹而事件上的章不同（旧章补章、版本更新后重盖）→ 改章。不带 v2 的草稿（蓝色等）不动章。
+            || (d.stampHash != nil && (e.stampHash != d.stampHash || e.stampVersion != d.stampVersion))
     }
 }

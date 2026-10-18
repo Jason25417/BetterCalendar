@@ -21,12 +21,20 @@ final class SimulatedEventKitCalendar: CalendarStore {
         var blockID: UUID?
         var created: Date
         var externalID: String
+        /// 章 v2（P4）：与 EventKit 一样随 URL 存取。
+        var stampVersion: Int64? = nil
+        var stampHash: String? = nil
+        var lastModified: Date? = nil
     }
 
     private(set) var events: [Event] = []
+    /// 你自己的日历（P4 Q4：只读，externalEvents/userCalendarTitles 返回它们）。
+    var userEvents: [SystemCalendarEvent] = []
     private var serial = 0
     /// 模拟时钟：read(kind:) 的「此刻前后 7 天」与新建事件的创建时间都按它。
     var now: Date
+    /// 累计写入次数（增/改/删）：收敛测试断言「再跑一遍不再写」。
+    private(set) var writes = 0
 
     init(now: Date) { self.now = now }
 
@@ -41,11 +49,17 @@ final class SimulatedEventKitCalendar: CalendarStore {
         return ext
     }
 
-    /// 模拟用户在日历 App 里改一个事件（按外部标识）。
-    func edit(_ externalID: String, start: Date, end: Date, title: String? = nil) {
+    /// 模拟用户在日历 App 里改一个事件（按外部标识）。日历 App 编辑保留 URL（章原样），只改内容。
+    func edit(_ externalID: String, start: Date, end: Date, title: String? = nil, at modified: Date? = nil) {
         guard let i = events.firstIndex(where: { $0.externalID == externalID }) else { return }
         events[i].start = start; events[i].end = end
         if let title { events[i].title = title }
+        events[i].lastModified = modified ?? now
+    }
+
+    /// 模拟用户在日历 App 里删一个事件。
+    func delete(_ externalID: String) {
+        events.removeAll { $0.externalID == externalID }
     }
 
     func events(_ kind: PlanCalendarKind) -> [Event] { events.filter { $0.kind == kind } }
@@ -76,9 +90,21 @@ final class SimulatedEventKitCalendar: CalendarStore {
             let e = events[i]
             return CalendarEventDraft(title: e.title, start: e.start, end: e.end, kind: kind, notes: e.notes,
                                       alarmLeadMinutes: e.alarmLead, blockID: e.blockID,
-                                      creationDate: e.created, externalID: e.externalID)
+                                      creationDate: e.created, externalID: e.externalID,
+                                      stampVersion: e.stampVersion, stampHash: e.stampHash, lastModified: e.lastModified)
         }
     }
+
+    func externalEvents(in window: DateInterval) async throws -> [SystemCalendarEvent] {
+        let mine = userEvents.filter { $0.start < window.end && $0.end > window.start }
+        let misfiled = events.filter { $0.blockID == nil && $0.start < window.end && $0.end > window.start }.map {
+            SystemCalendarEvent(title: $0.title, start: $0.start, end: $0.end, isAllDay: false,
+                                calendarTitle: "BetterCalendar · \($0.kind)", externalID: $0.externalID, inBetterCalendar: true)
+        }
+        return (mine + misfiled).sorted { $0.start < $1.start }
+    }
+
+    func userCalendarTitles() async -> [String] { Array(Set(userEvents.map(\.calendarTitle))).sorted() }
 
     func clear(kind: PlanCalendarKind) async throws {
         sync([], kind: kind, from: now.addingTimeInterval(-7 * 86400), to: now.addingTimeInterval(7 * 86400))
@@ -97,21 +123,31 @@ final class SimulatedEventKitCalendar: CalendarStore {
             let e = events[i]
             return CalendarEventSnapshot(title: e.title, start: e.start, end: e.end, notes: e.notes,
                                          hasAlarm: e.alarmLead != nil, blockID: e.blockID,
-                                         creationDate: e.created, externalID: e.externalID)
+                                         creationDate: e.created, externalID: e.externalID,
+                                         stampVersion: e.stampVersion, stampHash: e.stampHash)
         }
         let plan = CalendarSyncPlanner.plan(existing: snaps, drafts: drafts, from: lo, to: hi)
         for u in plan.updates {
             let i = idx[u.index]
             events[i].title = u.draft.title; events[i].start = u.draft.start; events[i].end = u.draft.end
             events[i].notes = u.draft.notes; events[i].alarmLead = u.draft.alarmLeadMinutes
-            if let bid = u.draft.blockID { events[i].blockID = bid }
+            if let bid = u.draft.blockID {   // 写章：与 EventKitCalendarStore 同（草稿带 v2 写 v2，否则写旧章）
+                events[i].blockID = bid
+                events[i].stampVersion = u.draft.stampVersion; events[i].stampHash = u.draft.stampHash
+            }
+            events[i].lastModified = now
+            writes += 1
         }
         for d in plan.creates {
             serial += 1
             events.append(Event(kind: kind, title: d.title, start: d.start, end: d.end, notes: d.notes,
                                 alarmLead: d.alarmLeadMinutes, blockID: d.blockID, created: now,
-                                externalID: String(format: "ext-%04d", serial)))
+                                externalID: String(format: "ext-%04d", serial),
+                                stampVersion: d.blockID == nil ? nil : d.stampVersion,
+                                stampHash: d.blockID == nil ? nil : d.stampHash, lastModified: now))
+            writes += 1
         }
+        writes += plan.deletes.count
         let doomed = Set(plan.deletes.map { idx[$0] })
         events = events.enumerated().filter { !doomed.contains($0.offset) }.map(\.element)
     }

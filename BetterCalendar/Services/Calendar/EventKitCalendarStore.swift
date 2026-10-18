@@ -81,7 +81,7 @@ actor EventKitCalendarStore: CalendarStore {
             let ev = existing[u.index], d = u.draft
             ev.title = d.title; ev.startDate = d.start; ev.endDate = d.end
             ev.notes = d.notes; ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)   // 普通块 []；固定块会前提醒
-            if let bid = d.blockID, let url = Self.stampURL(bid) { ev.url = url }
+            if let bid = d.blockID, let url = Self.stampURL(bid, d) { ev.url = url }
             try store.save(ev, span: .thisEvent, commit: false); changed += 1
         }
         for d in plan.creates {
@@ -89,7 +89,7 @@ actor EventKitCalendarStore: CalendarStore {
             ev.calendar = cal; ev.title = d.title
             ev.startDate = d.start; ev.endDate = d.end; ev.notes = d.notes
             ev.alarms = Self.alarms(lead: d.alarmLeadMinutes)
-            ev.url = d.blockID.flatMap(Self.stampURL)
+            ev.url = d.blockID.flatMap { Self.stampURL($0, d) }
             try store.save(ev, span: .thisEvent, commit: false); changed += 1
         }
         for i in plan.deletes {
@@ -106,9 +106,11 @@ actor EventKitCalendarStore: CalendarStore {
     }
 
     nonisolated private static func snapshot(_ ev: EKEvent) -> CalendarEventSnapshot {
-        CalendarEventSnapshot(title: ev.title ?? "", start: ev.startDate, end: ev.endDate, notes: ev.notes,
-                              hasAlarm: !(ev.alarms ?? []).isEmpty, blockID: blockID(from: ev.url),
-                              creationDate: ev.creationDate, externalID: ev.calendarItemExternalIdentifier)
+        let stamp = CalendarStamp.parse(ev.url)
+        return CalendarEventSnapshot(title: ev.title ?? "", start: ev.startDate, end: ev.endDate, notes: ev.notes,
+                                     hasAlarm: !(ev.alarms ?? []).isEmpty, blockID: stamp?.blockID,
+                                     creationDate: ev.creationDate, externalID: ev.calendarItemExternalIdentifier,
+                                     stampVersion: stamp?.version, stampHash: stamp?.hash)
     }
 
     // MARK: - 盖章（重构 P1「稳定身份」）
@@ -116,13 +118,17 @@ actor EventKitCalendarStore: CalendarStore {
     /// blockID → 事件 URL 章（bettercalendar://block/UUID）：随 iCloud 日历同步到所有设备，
     /// 任何设备匹配都按它；日后可注册 URL scheme 做 deep link（点事件跳回 App 对应块）。
     nonisolated static func stampURL(_ id: UUID) -> URL? {
-        URL(string: "bettercalendar://block/\(id.uuidString)")
+        CalendarStamp(blockID: id).url
     }
 
-    /// 事件 URL → blockID（非本 App 的章 → nil）。
+    /// 带章 v2（P4）：草稿带版本/指纹就写 ?v=&h=，否则写旧章。
+    nonisolated static func stampURL(_ id: UUID, _ d: CalendarEventDraft) -> URL? {
+        CalendarStamp(blockID: id, version: d.stampVersion, hash: d.stampHash).url
+    }
+
+    /// 事件 URL → blockID（非本 App 的章 → nil；v2 章的查询参数不影响）。
     nonisolated static func blockID(from url: URL?) -> UUID? {
-        guard let url, url.scheme == "bettercalendar", url.host == "block" else { return nil }
-        return UUID(uuidString: url.lastPathComponent)
+        CalendarStamp.parse(url)?.blockID
     }
 
     /// 会前提醒（⑤会议自动化）：lead 分钟前响一次；nil/负 → 无提醒（普通块）。
@@ -145,12 +151,15 @@ actor EventKitCalendarStore: CalendarStore {
               let cal = store.calendars(for: .event).first(where: { $0.title == title }) else { return [] }
         let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: [cal])
         return store.events(matching: pred).map {
-            CalendarEventDraft(title: $0.title ?? "", start: $0.startDate, end: $0.endDate,
+            let stamp = CalendarStamp.parse($0.url)
+            return CalendarEventDraft(title: $0.title ?? "", start: $0.startDate, end: $0.endDate,
                                kind: kind, notes: $0.notes,
                                // 带回会前提醒：原样保留（pass-through）的事件不会被顺手抹掉提醒
                                alarmLeadMinutes: $0.alarms?.first.map { Int((-$0.relativeOffset / 60).rounded()) },
-                               blockID: Self.blockID(from: $0.url),
-                               creationDate: $0.creationDate, externalID: $0.calendarItemExternalIdentifier)
+                               blockID: stamp?.blockID,
+                               creationDate: $0.creationDate, externalID: $0.calendarItemExternalIdentifier,
+                               stampVersion: stamp?.version, stampHash: stamp?.hash,
+                               lastModified: $0.lastModifiedDate)
         }
     }
 
@@ -199,6 +208,30 @@ actor EventKitCalendarStore: CalendarStore {
             .map { SystemCalendarEvent(title: $0.title ?? "（无标题）", start: $0.startDate, end: $0.endDate,
                                        isAllDay: $0.isAllDay, calendarTitle: $0.calendar?.title ?? "") }
             .sorted { $0.start < $1.start }
+    }
+
+    /// 你的日历事件（P4 Q4，只读、不弹权限）：非 BetterCalendar 日历的全部事件 + 自家日历里不带章的事件。
+    func externalEvents(in window: DateInterval) async throws -> [SystemCalendarEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
+            throw CalendarError(message: "无日历 full access，读不到你的日历")
+        }
+        let ours = Set(titles.values)
+        let all = store.calendars(for: .event)
+        guard !all.isEmpty else { return [] }
+        let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: all)
+        return store.events(matching: pred).compactMap { ev -> SystemCalendarEvent? in
+            let inOurs = ours.contains(ev.calendar?.title ?? "")
+            if inOurs, Self.blockID(from: ev.url) != nil { return nil }   // 带章 = BetterCalendar 自己写的，不是你的
+            return SystemCalendarEvent(title: ev.title ?? "（无标题）", start: ev.startDate, end: ev.endDate,
+                                       isAllDay: ev.isAllDay, calendarTitle: ev.calendar?.title ?? "",
+                                       externalID: ev.calendarItemExternalIdentifier, inBetterCalendar: inOurs)
+        }.sorted { $0.start < $1.start }
+    }
+
+    func userCalendarTitles() async -> [String] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
+        let ours = Set(titles.values)
+        return Array(Set(store.calendars(for: .event).map(\.title).filter { !ours.contains($0) })).sorted()
     }
 
     // MARK: - 权限 / 日历

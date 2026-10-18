@@ -1435,8 +1435,7 @@ struct LogicTests {
             reminderStore: FakeReminderStore(),
             exporter: ICSExporter(),
             planStore: planStore,
-            projection: ProjectionService(planStore: planStore, calendarStore: calendar,
-                                          startedDays: startedDays),
+            projection: ProjectionService(planStore: planStore, calendarStore: calendar),
             notifier: NoNotify(),
             draftStore: draftStore,
             startedDays: startedDays,
@@ -1519,14 +1518,14 @@ struct LogicTests {
         #expect(try store.plannedBlocks(on: at(2026, 7, 8, 0)).count == 1)
     }
 
-    /// 投影：常规日 → 绿色带章；实时模式（开始今天）→ 绿清空、整日转橙。
-    @Test func projectionPaintsGreenThenFadesToOrangeWhenStarted() async throws {
+    /// 投影：绿色带章；P4 Q1/Q2：开工后**不再清空绿色、也不写橙色**（1b 实时态与橙色预览日历退役）。
+    @Test func projectionKeepsGreenAfterStartAndNeverWritesOrange() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let fake = FakeCalendarStore()
         let started = StartedDayStore(persisted: false)
-        let projection = ProjectionService(planStore: store, calendarStore: fake, startedDays: started)
+        let projection = ProjectionService(planStore: store, calendarStore: fake)
         let label = at(2026, 7, 7, 0)
         let block = ScheduledBlock(title: "写代码", start: at(2026, 7, 7, 9), end: at(2026, 7, 7, 11))
         try store.replacePlanned([block], on: label)
@@ -1538,10 +1537,8 @@ struct LogicTests {
 
         started.markStarted(label)
         try await projection.project(label: label)
-        #expect(try await fake.read(kind: .planned).isEmpty)          // 绿淡出
-        let orange = try await fake.read(kind: .preview)
-        #expect(orange.count == 1)                                    // 整日转橙
-        #expect(orange.first?.blockID == block.id)                    // 同一章「换幕布」
+        #expect(try await fake.read(kind: .planned).map(\.blockID) == [block.id])   // 开工后绿色照在
+        #expect(try await fake.read(kind: .preview).isEmpty)                        // 不再写橙色
     }
 
     /// apply 权威对齐按半开窗口归属：只动窗口内该 kind，邻日/别色不受伤。
@@ -1679,15 +1676,15 @@ struct LogicTests {
         #expect(try planStore.plannedBlocks(on: day).count == 1)         // 仍不写计划
     }
 
-    /// 实时模式合并（0.23 A）：某逻辑日**第一次真正开始一件事**即进实时模式——
-    /// markStarted + 绿色淡出；完成动作不触发；同日第二次开始幂等。
-    @Test func firstStartOfDayEntersLiveModeAndFadesGreen() async throws {
+    /// 实时模式合并（0.23 A）：某逻辑日**第一次真正开始一件事**即进实时模式（markStarted，同日幂等）。
+    /// P4 Q1/Q2：开工不再清空绿色、不写橙色；做完后这件只剩蓝色（绿色让位）——一件事只画一次。
+    @Test func firstStartOfDayMarksStartedKeepsGreenAndDoneLeavesOnlyBlue() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         let container = try ModelContainer(for: PlanBlock.self, configurations: config)
         let store = PlanStore(context: container.mainContext)
         let started = StartedDayStore(persisted: false)
         let cal = FakeCalendarStore()
-        let projection = ProjectionService(planStore: store, calendarStore: cal, startedDays: started)
+        let projection = ProjectionService(planStore: store, calendarStore: cal)
         let label = DayContext.logicalDay(offset: 0)
         let s = Calendar.current.date(byAdding: .hour, value: 10, to: label)!
         try store.replacePlanned([ScheduledBlock(title: "写代码", start: s,
@@ -1704,18 +1701,20 @@ struct LogicTests {
         await vm.loadToday()
         #expect(!started.isStarted(label))
 
-        // 第一次开始 → 进实时模式：标记 + 绿淡出
+        // 第一次开始 → 进实时模式：标记；绿色照在、没有橙色
         guard let first = vm.planned.first else { Issue.record("没有今日计划块"); return }
         await vm.startBlock(first)
         await vm.waitForPreview()
         #expect(started.isStarted(label))
-        #expect(try await cal.read(kind: .planned).isEmpty)      // 绿已淡出
-        #expect(try await !cal.read(kind: .preview).isEmpty)     // 橙在（从现在起）
+        #expect(try await cal.read(kind: .planned).count == 1)   // 绿照在
+        #expect(try await cal.read(kind: .preview).isEmpty)      // 橙色预览已退役
 
-        // 幂等：完成再开始不重复标记、不出错
+        // 完成 → 只剩蓝色（绿色让位）；幂等：不重复标记、不出错
         await vm.completeCurrent()
         await vm.waitForPreview()
         #expect(started.isStarted(label))
+        #expect(try await cal.read(kind: .planned).isEmpty, "做完的只画蓝")
+        #expect(try await cal.read(kind: .actual).map(\.blockID) == [first.id])
     }
 
     /// 微调防呆之二（0.23.1 #9）：模型只返回改动块 → 并回原清单（没回=未改；id 继承；新增保留）。
@@ -1845,14 +1844,14 @@ struct LogicTests {
                                                          end: at(2026,7,9,12), title: "写代码")])
         #expect(plan.deletions == [ReconcileService.Deletion(id: idC, title: "读书")])   // 只有 C 是删除
         #expect(plan.needsRepaint)   // D 缺投影 → 补画，而不是当删除
-        #expect(plan.additions.isEmpty)
+        #expect(plan.foreign.isEmpty)
 
-        // 日历里用户新建的无章事件 → additions（询问/按策略），不再直接当垃圾清掉（0.20.2）
+        // 日历里你新建的无章事件 → foreign（P4 Q4：你的事件，只读，不复制不删），不再直接当垃圾清掉
         let withNew = events + [CalendarEventDraft(title: "临时冒出来的事", start: at(2026,7,9,18),
                                                    end: at(2026,7,9,19), kind: .planned)]
         let plan2 = ReconcileService.diff(truth: truth, events: withNew, fingerprint: fp)
-        #expect(plan2.additions.count == 1)
-        #expect(plan2.additions.first?.title == "临时冒出来的事")
+        #expect(plan2.foreign.count == 1)
+        #expect(plan2.foreign.first?.title == "临时冒出来的事")
     }
 
     /// 复盘对比按 ID 精确配对：同名两块只有被执行的那块算 done，另一块如实 missed（不再连坐）。
