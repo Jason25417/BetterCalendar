@@ -28,6 +28,14 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.67.0", date: "2026-10", changes: [
+            "重要修复：BetterCalendar 不再删除它自己日历里不是它写的事件（例如误存进来的课程），也不再清掉你自己加进它提醒列表的提醒",
+            "新增「智能体」对话：iPhone 上是一个标签页，Mac 上是独立窗口；说一句，BetterCalendar 智能体会回复，提出的改动以卡片出现，和通知、面板是同一份",
+            "智能体现在能提出真实改动：新增或修改待办、标完成、开始或暂停计时、挪动今天的某一块；每一项都要你批准，做完可以在面板里撤销",
+            "智能体能看到更全的一天：待办和长期事项、未来几天的日历、最近几天实际做了什么；读日记需要你在面板里单独允许",
+            "面板新增智能体转译观察和运行记录；设置页里 Dots 时代的旧功能收进了「已冻结」分组",
+            "实验开关（默认关）：对话式晚间复盘、计时改由 iCloud 记录"
+        ]),
         ChangelogEntry(version: "0.66.1", date: "2026-10", changes: [
             "iPhone：设置页顶部新增「多端审批」入口（之前 iPhone 上找不到这个面板）"
         ]),
