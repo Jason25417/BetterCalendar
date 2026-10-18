@@ -20,7 +20,7 @@ import Foundation
 struct RecordAppOpenedIntent: AppIntent {
     static var title: LocalizedStringResource = "记录 App 打开"
     static var description = IntentDescription(
-        "给「App 已打开」自动化用：把「获取当前 App」的结果传进 App，在后台记一笔（不打开 BetterCalendar），经 iCloud 汇到 Mac 给 BetterCalendar 智能体当情境。设置 → 设备活动记录（实验）可暂停或关闭。")
+        "给「App 已打开」自动化用：把「获取当前 App」的结果传进 App，在后台记一笔（不打开 BetterCalendar），经 iCloud 同步给 BetterCalendar 智能体当情境。设置 → 设备活动记录（实验）可暂停或关闭。")
     static var openAppWhenRun = false
 
     @Parameter(title: "App", description: "接「获取当前 App」的结果；留空也能记，只是不知道是哪个 App。")
