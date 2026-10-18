@@ -56,6 +56,43 @@ final class LongTaskStore {
             }
     }
 
+    // MARK: 按 id 的写入（SPEC §19 W1：审批通过的真改动与撤销；时刻由调用方注入，失败抛错不吞）
+
+    /// 按 id 取事项（含回收站里的，供版本核对；不存在 = nil）。身份重复视为数据异常，抛错不猜。
+    func task(id: UUID) throws -> LongTask? {
+        let found = try context.fetch(FetchDescriptor<LongTask>(predicate: #Predicate { $0.id == id }))
+        guard found.count <= 1 else { throw DataArchiveError.invalid("事项身份重复，未执行") }
+        return found.first
+    }
+
+    /// 新增一条待办（待办区，指定 id；**不按标题去重**——审批卡上写的就是「新增」，不悄悄并入别的条目）。
+    func createTodo(id: UUID, title: String, note: String, at date: Date) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard try task(id: id) == nil else { throw DataArchiveError.invalid("这条事项已存在，不重复新增") }
+        let entry = LongTask(id: id, title: title, note: note, createdAt: date, modifiedAt: date, zone: .todo)
+        context.insert(entry)
+        do { try context.save() } catch { context.delete(entry); throw error }
+        reload()
+        DevLog.shared.info("待办区", "审批新增待办：\(title)")
+    }
+
+    /// 按 id 修改事项（标题/备注/状态等，由 change 决定）并保存；保存失败回滚本次改动后抛错。
+    func update(id: UUID, at date: Date, _ change: (LongTask) -> Void) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let task = try task(id: id), !task.isInTrash else { throw DataArchiveError.invalid("事项不存在或在回收站") }
+        change(task)
+        task.modifiedAt = date
+        do { try context.save() } catch { context.rollback(); throw error }
+        reload()
+    }
+
+    /// 按 id 移入回收站（30 天内可恢复；用于撤销「新增待办」）。
+    func discard(id: UUID, at date: Date) throws {
+        guard let task = try task(id: id), !task.isInTrash else { throw DataArchiveError.invalid("事项不存在或已在回收站") }
+        try RetainedDeletion.save([task], in: context, at: date)
+        reload()
+    }
+
     /// 长期区在途任务：有 DDL 的按 DDL 升序在前，无 DDL 的按创建时间。
     func active() -> [LongTask] { items }
 

@@ -154,14 +154,33 @@ struct ProposalPanel: View {
         let who = p.decidedByDeviceId.map { $0 == center.deviceId ? "本机" : "另一台设备" }
         return VStack(alignment: .leading, spacing: 2) {
             Text(p.title)
+            if p.action.touchesRealData, !p.changes.isEmpty {
+                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix("理由：") && !$0.hasPrefix("发起：") }
+                    .joined(separator: "\n")).font(.caption)
+            }
             Text([state.label, who.map { "决定于\($0)" }, p.resultNote].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
+            undoRow(p)
             let l = center.latency(for: p.id)
             if l.notify != nil || l.withdraw != nil {
                 Text("本机延迟：通知 \(l.notify.map { String(format: "%.1f 秒", $0) } ?? "—") · 收起 \(l.withdraw.map { String(format: "%.1f 秒", $0) } ?? "—")")
                     .font(.caption2.monospaced()).foregroundStyle(.secondary)
             }
 
+        }
+    }
+
+    /// SPEC §19 A3 后半：已完成的真改动可撤销（撤销 = 一条来源为「你」的操作，写进操作留底）。
+    @ViewBuilder private func undoRow(_ p: Proposal) -> some View {
+        if let at = p.undoneAt {
+            Text("已撤销 \(at.formatted(date: .omitted, time: .shortened))" + (p.undoNote.map { " · \($0)" } ?? ""))
+                .font(.caption).foregroundStyle(.secondary)
+        } else if p.state == .applied, p.action.touchesRealData {
+            if center.canUndo(p) {
+                Button("撤销") { Task { await center.undo(p.id) } }.font(.caption).buttonStyle(.bordered)
+            } else if let reason = center.undoBlockedReason(p) {
+                Text("不能撤销：\(reason)").font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

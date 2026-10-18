@@ -85,9 +85,38 @@ import UIKit
 
     // MARK: 发起
 
+    /// 提交前准备（严格校验 + 补全基线版本 + 由 App 依据真实数据算「改动前 → 改动后」）。
+    /// 抛错 = 这份提案不能提交，错误里带给人看的原因（桥接据此把文件移进 rejected/）。
+    /// 对同一份已准备好的草稿再调一次结果不变（幂等），submit 内部也会调。
+    func prepare(_ draft: ProposalDraft) async throws -> ProposalDraft {
+        var draft = draft
+        if draft.id == nil { draft.id = UUID() }
+        let prepared = try await executor.prepare(draft.action)
+        draft.action = prepared.action
+        if let changes = prepared.changes { draft.changes = changes }
+        if draft.action.touchesRealData { draft.experiment = false }
+        if let required = prepared.requiredDeviceId {
+            if let target = draft.targetDeviceId, target != required {
+                throw ProposalExecutionError.invalid("这项改动只能在读取状态的那台设备执行（指定设备与之不符）")
+            }
+            draft.targetDeviceId = required
+        }
+        return draft
+    }
+
     @discardableResult
-    func submit(_ draft: ProposalDraft) async -> Proposal? {
+    func submit(_ draftInput: ProposalDraft) async -> Proposal? {
         let at = now()
+        let draft: ProposalDraft
+        do { draft = try await prepare(draftInput) } catch {
+            let message = "提案未提交：\(error.localizedDescription)"
+            lastError = message
+            DevLog.shared.error("多端审批", message)
+            ledger.append(OperationRecord(at: at, actor: draftInput.origin, actorLabel: draftInput.originLabel, deviceId: deviceId,
+                                          event: "rejected", proposalId: draftInput.id, parentId: draftInput.parentId,
+                                          parentRef: draftInput.parentRef, detail: "\(draftInput.title)：\(error.localizedDescription)"))
+            return nil
+        }
         let proposal = Proposal(id: draft.id ?? UUID(), createdAt: at, expiresAt: at.addingTimeInterval(draft.lifetime),
                                 origin: draft.origin, originLabel: draft.originLabel, originDeviceId: deviceId,
                                 parentId: draft.parentId, targetDeviceId: draft.targetDeviceId,
@@ -145,14 +174,59 @@ import UIKit
         }
     }
 
+    // MARK: 撤销（SPEC §19 A3 后半）
+
+    /// 不能撤销时的原因；nil = 可以撤销（面板据此显示「撤销」按钮或一行说明）。
+    func undoBlockedReason(_ p: Proposal) -> String? {
+        guard p.state == .applied else { return "只有已完成的改动才能撤销" }
+        if p.undoneAt != nil { return "已撤销" }
+        guard p.undoAction != nil else { return p.undoUnavailableReason ?? (p.action.touchesRealData ? "这项改动不支持撤销" : "测试改动没有可撤销的内容") }
+        if let device = p.undoDeviceId, device != deviceId { return "只能在执行它的那台设备上撤销（计时是设备本地状态）" }
+        return nil
+    }
+
+    func canUndo(_ p: Proposal) -> Bool { undoBlockedReason(p) == nil }
+
+    /// 撤销 = 一条来源为「你」的操作：执行逆操作（目标版本已变则拒绝）→ 记下已撤销 → 写操作留底。
+    /// 返回是否撤销成功；失败原因可见（lastError + 留底 undo.failed + DevLog）。
+    @discardableResult
+    func undo(_ id: UUID, actorLabel: String = "你") async -> Bool {
+        if let latest = try? await transport.fetchRecent() { proposals = latest }
+        guard let p = proposals.first(where: { $0.id == id }) else {
+            undoFailed(nil, actorLabel, "找不到这份提案"); return false
+        }
+        if let reason = undoBlockedReason(p) { undoFailed(p, actorLabel, reason); return false }
+        guard !executing.contains(p.id), let action = p.undoAction else {
+            undoFailed(p, actorLabel, "这项改动正在处理中，请稍后再试"); return false
+        }
+        executing.insert(p.id); defer { executing.remove(p.id) }
+        do {
+            let outcome = try await executor.perform(action)
+            let marked = try await transport.markUndone(id: p.id, deviceId: deviceId, note: outcome.note, at: now())
+            record(.user, actorLabel, "undone", marked, "撤销「\(p.title)」（在 \(deviceLabel)）：\(outcome.note)")
+            if let latest = try? await transport.fetchRecent() { proposals = latest }
+            return true
+        } catch {
+            undoFailed(p, actorLabel, error.localizedDescription)
+            return false
+        }
+    }
+
+    private func undoFailed(_ p: Proposal?, _ actorLabel: String, _ reason: String) {
+        let message = "撤销失败：\(reason)"
+        lastError = message
+        DevLog.shared.error("多端审批", message)
+        record(.user, actorLabel, "undo.failed", p, message)
+    }
+
     // MARK: 内部
 
     private func execute(_ p: Proposal) async {
         executing.insert(p.id); defer { executing.remove(p.id) }
         do {
-            let note = try await executor.execute(p)
-            let done = try await transport.report(id: p.id, state: .applied, note: note, at: now())
-            record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, note)
+            let outcome = try await executor.execute(p)
+            let done = try await transport.report(id: p.id, state: .applied, note: outcome.note, undo: outcome.undo, at: now())
+            record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, "[\(p.action.kind)] " + outcome.note)
         } catch {
             let note = "执行失败：\(error.localizedDescription)"
             if let failed = try? await transport.report(id: p.id, state: .failed, note: note, at: now()) {

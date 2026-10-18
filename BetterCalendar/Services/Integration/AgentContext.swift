@@ -42,7 +42,9 @@ enum AgentContextLimits {
 
 /// 收集好的只读数据（来源 → DTO）。
 struct AgentContextInput {
-    struct Block { var title: String; var start: Date; var end: Date; var isFixed = false; var important = false }
+    struct Block { var title: String; var start: Date; var end: Date; var isFixed = false; var important = false
+        /// W1：真改动（挪块）要用的身份与版本、截止。
+        var id: UUID? = nil; var revision: String? = nil; var deadline: Date? = nil }
     struct Run { var title: String; var start: Date; var pausedSeconds: TimeInterval = 0; var timingStyle: String? = nil }
     struct Running { var foreground: Run?; var background: [Run] = []; var onBreak = false }
     struct PoolEntry {
@@ -66,6 +68,8 @@ struct AgentContextInput {
     struct Read<T> { var items: [T] = []; var error: String? = nil }
 
     var now: Date
+    /// W1：propose_change 真改动要用的目标身份与版本（事项 id/版本、本机计时状态版本）。
+    var actionTargets: [String: Any]? = nil
     var today = Read<Block>()
     var running = Running()
     var todos = Read<PoolEntry>()
@@ -112,11 +116,16 @@ enum AgentBridgeContext {
         // 今天的计划块（绿色计划的真相源）。字段 blocks / start / end（HH:mm）保持 v1 兼容。
         var today = section(source: "BetterCalendar 计划（PlanStore，今天这个逻辑日）", asOf: asOf, read: input.today,
                             limit: AgentContextLimits.todayBlocks, key: "blocks") { b in
-            ["title": clip(b.title), "start": hm.string(from: b.start), "end": hm.string(from: b.end),
-             "startAt": t(b.start), "endAt": t(b.end), "fixed": b.isFixed, "important": b.important] as [String: Any]
+            var o: [String: Any] = ["title": clip(b.title), "start": hm.string(from: b.start), "end": hm.string(from: b.end),
+             "startAt": t(b.start), "endAt": t(b.end), "fixed": b.isFixed, "important": b.important]
+            if let id = b.id { o["id"] = id.uuidString }
+            if let r = b.revision { o["revision"] = r }
+            o["deadline"] = b.deadline.map(t) ?? NSNull()
+            return o
         }
         today["logicalDayStart"] = t(input.logicalDayStart)
         context["today"] = today
+        if let targets = input.actionTargets { context["actionTargets"] = targets }
 
         // 当前计时（前台）。running 保持 v1 形状：null 或 {title, startedAt}，另补来源与细节。
         let run: (AgentContextInput.Run) -> [String: Any] = { r in
@@ -218,12 +227,15 @@ enum AgentBridgeContext {
     private let journalStore: JournalStore?
     private let running: () -> AgentContextInput.Running
     private let journalAllowed: () -> Bool
+    private let actionTargets: () -> [String: Any]?
     /// 同一来源同一错误只记一次日志（每 20 秒刷新，别刷屏）；错误本身每次都写进上下文。
     private var loggedErrors: [String: String] = [:]
 
     init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarStore)?,
          journalStore: JournalStore?, running: @escaping () -> AgentContextInput.Running,
-         journalAllowed: @escaping () -> Bool = { AgentContextSettings.allowRecentJournal }) {
+         journalAllowed: @escaping () -> Bool = { AgentContextSettings.allowRecentJournal },
+         actionTargets: @escaping () -> [String: Any]? = { nil }) {
+        self.actionTargets = actionTargets
         self.planStore = planStore; self.actualStore = actualStore; self.longTasks = longTasks; self.calendarStore = calendarStore
         self.journalStore = journalStore; self.running = running; self.journalAllowed = journalAllowed
     }
@@ -234,11 +246,13 @@ enum AgentBridgeContext {
 
     func gather(now: Date) async -> AgentContextInput {
         var input = AgentContextInput(now: now)
+        input.actionTargets = actionTargets()
         // 今天的计划
         if let planStore {
             do {
                 input.today.items = try planStore.plannedBlocks(on: input.logicalDayStart).sorted { $0.start < $1.start }.map {
-                    .init(title: $0.title, start: $0.start, end: $0.end, isFixed: $0.isFixed, important: $0.priority == .important)
+                    .init(title: $0.title, start: $0.start, end: $0.end, isFixed: $0.isFixed, important: $0.priority == .important,
+                          id: $0.id, revision: ProposalRevision.block($0), deadline: $0.deadline)
                 }
             } catch { input.today.error = fail("今天的计划", error) }
         }
@@ -312,5 +326,21 @@ enum AgentBridgeContext {
         let failing: [String: String?] = ["今天的计划": input.today.error, "最近推进": input.todos.error,
                                           "系统日历": input.calendar.error, "最近实际": input.actuals.error, "日记": input.journal.error]
         for (what, error) in failing where error == nil { loggedErrors[what] = nil }
+    }
+}
+
+extension AgentBridgeContext {
+    /// propose_change 真改动要用的目标身份与版本（W1）：事项 id/版本、本机计时状态版本。
+    /// 计划块的 id/版本在 today.blocks 里。只读副本；版本过时的提案会被 App 拒绝。
+    static func actionTargets(longTasks: LongTaskStore?, timer: ProposalTimerState?) -> [String: Any] {
+        let items = (longTasks.map { $0.todoItems() + $0.active() + $0.doneItems().prefix(20) } ?? []).map { t -> [String: Any] in
+            ["id": t.id.uuidString, "revision": ProposalRevision.item(t), "title": t.title,
+             "zone": t.poolZone.rawValue, "status": t.status.rawValue, "hasNote": !t.note.isEmpty]
+        }
+        var targets: [String: Any] = ["items": items, "deviceId": ProposalDevice.id]
+        targets["timer"] = timer.map { t -> [String: Any] in
+            ["phase": t.phase.rawValue, "title": t.title ?? NSNull(), "blockId": t.blockId?.uuidString ?? NSNull(), "revision": t.revision]
+        } ?? NSNull()
+        return targets
     }
 }
