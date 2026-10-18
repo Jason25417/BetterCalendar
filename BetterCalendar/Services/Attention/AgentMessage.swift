@@ -142,6 +142,12 @@ actor CloudKitAgentMessageStore: AgentMessageTransport {
         shownHere = Set((defaults.stringArray(forKey: "attention.shownHere") ?? []).compactMap(UUID.init))
     }
 
+    /// 设置从另一台设备同步过来后重读（W8：打扰设置随 iCloud 设置同步，一端静音两端生效）。
+    func reloadSettings() {
+        let latest = AttentionSettings.load(defaults)
+        if latest != settings { settings = latest }
+    }
+
     /// 智能体发来一句话（由 Mac 端桥接导入）：先过打扰规则，再保存并同步到各端。
     @discardableResult
     func receive(_ draft: AgentMessageDraft) async -> AgentMessage? {

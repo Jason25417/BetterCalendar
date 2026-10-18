@@ -120,6 +120,15 @@ nonisolated struct AgentDispatcherStatus: Equatable, Sendable {
         var contextTokens: Int?
         var events: Int?
     }
+    /// W8 额度监控：最近 N 天智能体运行的名义成本合计与运行次数（调度器从永久运行记录算）。
+    /// 名义成本与订阅额度百分比没有精确换算——只显示成本与次数，不臆测百分比。
+    struct Usage: Equatable, Sendable {
+        var windowDays: Int
+        var runs: Int
+        var costUsd: Double
+        var runsWithoutCost: Int
+        var errors: Int
+    }
     var dispatcherVersion: Int
     var updatedAt: Date?
     /// running / idle
@@ -130,6 +139,8 @@ nonisolated struct AgentDispatcherStatus: Equatable, Sendable {
     var lastFatal: Fatal?
     var lastRotation: Rotation?
     var configWarnings: [String]
+    /// 旧版调度器没有此字段 → nil（面板如实写「调度器还没提供」）。
+    var usage: Usage?
 
     init?(_ o: [String: Any]) {
         guard let state = AgentRuntimeJSON.string(o["state"]) else { return nil }
@@ -151,6 +162,20 @@ nonisolated struct AgentDispatcherStatus: Equatable, Sendable {
             lastRotation = Rotation(at: AgentRuntimeJSON.date(r["at"]), reason: reason, handoffOk: AgentRuntimeJSON.bool(r["handoffOk"]) ?? false)
         }
         configWarnings = (o["configWarnings"] as? [String]) ?? []
+        if let u = o["usage7d"] as? [String: Any], let runs = AgentRuntimeJSON.int(u["runs"]) {
+            usage = Usage(windowDays: AgentRuntimeJSON.int(u["windowDays"]) ?? 7, runs: runs,
+                          costUsd: AgentRuntimeJSON.double(u["costUsd"]) ?? 0,
+                          runsWithoutCost: AgentRuntimeJSON.int(u["runsWithoutCost"]) ?? 0,
+                          errors: AgentRuntimeJSON.int(u["errors"]) ?? 0)
+        }
+    }
+
+    /// 面板上的一行用量（纯函数，可测）。
+    static func usageLine(_ u: Usage?) -> String {
+        guard let u else { return "最近 7 天用量：调度器还没提供（需要调度器 W8 版本）" }
+        var line = "最近 \(u.windowDays) 天：智能体运行 \(u.runs) 次 · 名义成本 " + String(format: "$%.2f", u.costUsd)
+        if u.runsWithoutCost > 0 { line += "（另有 \(u.runsWithoutCost) 次没报成本）" }
+        return line
     }
 
 }

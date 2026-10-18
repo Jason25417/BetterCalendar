@@ -16,10 +16,13 @@ import Testing
 
     final class Clock { var now: Date; init(_ d: Date) { now = d } }
 
+    /// 这组测试的基线：主动通知总开关关、频率上限开（W8 起两者的出厂默认相反，这里显式写死，测的是规则本身）。
+    nonisolated static var attentionOff: AttentionSettings { var s = AttentionSettings(); s.enabled = false; s.capsOn = true; return s }
+
     func defaults() -> UserDefaults { UserDefaults(suiteName: "bc-chat-" + UUID().uuidString)! }
 
     func device(_ name: String, _ transport: InMemoryAgentChatTransport, _ bell: Bell, _ clock: Clock,
-                settings: AttentionSettings = AttentionSettings(), defaults d: UserDefaults? = nil) -> AgentChatCenter {
+                settings: AttentionSettings = Self.attentionOff, defaults d: UserDefaults? = nil) -> AgentChatCenter {
         let c = AgentChatCenter(transport: transport, notifier: bell, ledger: MemoryOperationLedger(), deviceId: name,
                                 deviceLabel: name, defaults: d ?? defaults(), now: { clock.now })
         c.attention = { settings }
@@ -124,7 +127,9 @@ import Testing
     // MARK: 通知规则
 
     @Test func notifyPolicySeparatesSolicitedFromProactive() {
-        var s = AttentionSettings()   // 总开关默认关
+        var s = AttentionSettings()
+        s.enabled = false             // 总开关关（W8 起默认开，这里显式关）
+        s.capsOn = true
         let reply = AgentChatReplyDraft(id: UUID(), text: "t", replyTo: UUID())
         let review = AgentChatReplyDraft(id: UUID(), text: "t", kind: .eveningReview)
         let proactive = AgentChatReplyDraft(id: UUID(), text: "t")
@@ -271,8 +276,9 @@ import Testing
             try await AgentChatBridgeStep.run(io: io, chat: mac, proposals: [], defaults: d, eveningFacts: { facts },
                                               now: clock.now, report: { what, _ in reports.append(what) })
         }
+        d.set(false, forKey: EveningReviewSettings.enabledKey)       // 手动关过（W8：从没设过才默认开）
         try await run()
-        #expect(try events(root).isEmpty)                            // 默认关：不写事件、不耗额度
+        #expect(try events(root).isEmpty)                            // 关着：不写事件、不耗额度
         d.set(true, forKey: EveningReviewSettings.enabledKey)
         try await run(); try await run()
         let written = try events(root)

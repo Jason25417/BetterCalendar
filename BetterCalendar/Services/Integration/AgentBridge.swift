@@ -109,6 +109,7 @@ nonisolated struct AgentBridgeIO: Sendable {
                                      "decidedByDeviceId": p.decidedByDeviceId ?? NSNull(), "resultNote": p.resultNote ?? NSNull(),
                                      "undoAvailable": p.state == .applied && p.undoAction != nil && p.undoneAt == nil,
                                      "undoUnavailableReason": p.undoUnavailableReason ?? NSNull(),
+                                     "undoHint": p.undoHint ?? NSNull(),
                                      "undoneAt": p.undoneAt.map { iso.string(from: $0) } ?? NSNull(), "undoNote": p.undoNote ?? NSNull(),
                                      "updatedAt": iso.string(from: p.undoneAt ?? p.appliedAt ?? p.decidedAt ?? p.createdAt)]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -149,7 +150,7 @@ nonisolated struct AgentBridgeIO: Sendable {
                              action: action, experiment: !action.touchesRealData, lifetime: lifetime)
     }
 
-    /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard 只用于撤销，不接受）。
+    /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard / timerDiscard / 整组挪回只用于撤销，不接受）。
     static func action(from a: [String: Any], proposalId: UUID) throws -> ProposalAction {
         guard let kind = a["kind"] as? String else { throw AgentBridgeError.invalid("action.kind 缺失") }
         let allowed: [String: Set<String>] = [
@@ -157,8 +158,9 @@ nonisolated struct AgentBridgeIO: Sendable {
             "itemCreate": ["title", "note"],
             "itemEdit": ["itemId", "title", "note", "expectedRevision"],
             "itemSetDone": ["itemId", "done", "expectedRevision"],
-            "timer": ["command", "blockId", "title", "expectedRevision"],
+            "timer": ["command", "blockId", "title", "expectedRevision", "startedAt"],
             "moveBlock": ["blockId", "start", "end", "expectedRevision"],
+            "moveBlocks": ["moves"],
         ]
         guard let keys = allowed[kind] else {
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
@@ -207,15 +209,39 @@ nonisolated struct AgentBridgeIO: Sendable {
                 throw AgentBridgeError.invalid("timer.command 必须是 start / pause / resume / stop")
             }
             let blockId = try uuid("blockId"), title = try string("title", max: 200)
+            // W8：startedAt = 回溯起点（智能体推断你大概从这一刻起就在做），只用于 start；合法性（不在未来、≤2 小时前、
+            // 不与已记下的实际/计时重叠）由 App 依据真实数据再查。
+            let startedAt = try date("startedAt")
             if command == .start {
                 guard (blockId == nil) != (title == nil) else { throw AgentBridgeError.invalid("timer start 需要二选一：blockId 或 title") }
             } else {
                 guard blockId == nil, title == nil else { throw AgentBridgeError.invalid("timer \(raw) 不带 blockId / title（作用于执行设备上正在计的那件）") }
+                guard startedAt == nil else { throw AgentBridgeError.invalid("只有 timer start 能带 startedAt（回溯起点）") }
             }
-            return .timer(command: command, blockId: blockId, title: title, expectedRevision: revision)
+            return .timer(command: command, blockId: blockId, title: title, expectedRevision: revision, startAt: startedAt)
         case "moveBlock":
             return .moveBlock(id: try required(uuid("blockId"), "blockId"), start: try required(date("start"), "start"),
                               end: try date("end"), expectedRevision: revision)
+        case "moveBlocks":
+            // W8：一次挪多块（撞到别的块时连带挪）。每项只认 blockId / start / end / expectedRevision；最终布局由 App 整体校验。
+            guard let raw = a["moves"] as? [[String: Any]], !raw.isEmpty else {
+                throw AgentBridgeError.invalid("moveBlocks.moves 必须是非空数组，每项 {blockId, start, end?, expectedRevision?}")
+            }
+            guard raw.count <= PlanMoveRules.maxGroup else { throw AgentBridgeError.invalid("moveBlocks 一次最多 \(PlanMoveRules.maxGroup) 块") }
+            let moves = try raw.enumerated().map { i, m -> ProposalBlockMove in
+                guard m["kind"] == nil else { throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 不认识的字段：kind") }
+                var item = m
+                item["kind"] = "moveBlock"
+                do {
+                    guard case let .moveBlock(id, start, end, rev) = try Self.action(from: item, proposalId: proposalId) else {
+                        throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 格式错误")
+                    }
+                    return ProposalBlockMove(id: id, start: start, end: end, expectedRevision: rev)
+                } catch let AgentBridgeError.invalid(why) {
+                    throw AgentBridgeError.invalid("moveBlocks.moves[\(i)]：" + why)
+                }
+            }
+            return .moveBlocks(moves: moves, isUndo: false)
         default:
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
         }

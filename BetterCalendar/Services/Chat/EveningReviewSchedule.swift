@@ -2,7 +2,7 @@
 //  EveningReviewSchedule.swift
 //  BetterCalendar
 //
-//  SPEC §19 F1：对话式晚间复盘。到了你设的时刻（默认关），Mac 端写一个 evening_review 事件，
+//  SPEC §19 F1：对话式晚间复盘。到了你设的时刻（W8 起默认开，从没设过才按默认；21:30），Mac 端写一个 evening_review 事件，
 //  智能体按正反馈原则在对话里写「今天做成了什么」，你可以回一句补充。
 //  设置随 iCloud 设置同步（SettingsSync 白名单），所以在 iPhone 上开、由 Mac 触发也成立。
 //
@@ -19,7 +19,9 @@ nonisolated enum EveningReviewSettings {
     /// 错过时刻后最多补发多久（Mac 睡着醒来时不发一条过时的复盘）。
     static let lateWindow: TimeInterval = 3 * 3600
 
-    static func enabled(_ d: UserDefaults = .standard) -> Bool { d.bool(forKey: enabledKey) }
+    /// W8（Jason 2026-10-18）：默认开——只作用于从没设过的设备；手动关过的保留。
+    static let defaultEnabled = true
+    static func enabled(_ d: UserDefaults = .standard) -> Bool { ExperimentDefaults.bool(enabledKey, default: defaultEnabled, in: d) }
     static func minute(_ d: UserDefaults = .standard) -> Int {
         let v = d.object(forKey: minuteKey) as? Int ?? defaultMinute
         return min(max(v, 0), 24 * 60 - 1)

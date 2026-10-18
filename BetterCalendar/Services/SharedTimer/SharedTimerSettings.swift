@@ -2,7 +2,8 @@
 //  SharedTimerSettings.swift
 //  BetterCalendar
 //
-//  W5：共享计时后端开关（默认关 = 旧通道 StateBridge，行为与改动前完全一致）。
+//  W5：共享计时后端开关。W8（Jason 2026-10-18）：从没设过 = 开（iCloud）；手动关过的保留。
+//  开关随设置同步（两端用同一个后端才看得到彼此的计时），每台设备仍在下次启动时各自过下面的闸门。
 //  - 开关只在 App 启动时生效：一次运行只用一个后端，绝不双写、不混读。
 //  - 切换闸门：当前通道还有非测试的进行中计时或未发送命令时拒绝切换（启动时再查一遍旧本机文件）。
 //  设计见 docs/bc-shared-timer-icloud.md §7。
@@ -14,7 +15,8 @@ import Observation
 @MainActor enum SharedTimerSettings {
     static let key = "sharedTimer.icloud.enabled"
 
-    static func requested(_ defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: key) }
+    static let defaultRequested = true
+    static func requested(_ defaults: UserDefaults = .standard) -> Bool { ExperimentDefaults.bool(key, default: defaultRequested, in: defaults) }
     static func setRequested(_ value: Bool, _ defaults: UserDefaults = .standard) { defaults.set(value, forKey: key) }
 
     /// 启动决定：开关关 → 旧通道；开关开但旧通道还有进行中计时/待发命令（或旧文件读不出）→ 推迟，仍用旧通道。

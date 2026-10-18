@@ -4,7 +4,9 @@
 //
 //  SPEC §19 W1：多端审批的「真改动」执行器（替换只做空改动的 ExperimentOnlyExecutor；协议缝不变）。
 //  三类动作：① 事项（新增待办 / 改标题备注 / 标完成·取消完成）② 计时（开始 / 暂停 / 继续 / 结束）
-//  ③ 时间线（挪动今天某个计划块，经 PlanMoveRules 校验）。
+//  ③ 时间线（挪动今天某个计划块；W8 起可一次挪多块，经 PlanMoveRules 对最终整体布局校验）。
+//  W8（Jason 2026-10-18）：开始计时可带回溯起点 startAt（像 Apple Watch 检测到运动：「你大概从 13:00 起就在做」），
+//  批准前不写任何东西；批准后从 startAt 起算；开始计时不提供撤销（要结束另提「结束计时」）。撤销多块挪动 = 整组挪回。
 //  每种动作：
 //    - prepare：严格校验 + 补全基线版本（expectedRevision）+ 由 App 依据真实数据算「改动前 → 改动后」；
 //    - perform：执行前再核版本——目标在提案后被改过就失败并说明，绝不覆盖用户事实；
@@ -78,10 +80,28 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
     var proposalTimerState: ProposalTimerState { get }
     /// 今天计划里某块的标题（不在今天的执行列表 = nil；作息锚点不计时）。
     func proposalPlanItemTitle(_ id: UUID) async -> String?
-    func proposalStartTimer(blockId: UUID?, title: String?) async throws
+    /// at = 回溯起点（W8）；nil = 从此刻起算。
+    func proposalStartTimer(blockId: UUID?, title: String?, at: Date?) async throws
     func proposalPauseTimer() async throws
     func proposalResumeTimer() async throws
     func proposalStopTimer() async throws
+    /// 今天已经占用的时间段（W8，回溯起点查重叠用）：已记下的实际 + 正在跑的计时（前台 / 同时做 / 共享计时，算到此刻）。
+    func proposalBusySpans() async -> [ProposalBusySpan]
+}
+
+/// 已被占用的一段时间（标题 + 起止），给回溯起点查重叠。
+nonisolated struct ProposalBusySpan: Equatable, Sendable {
+    var title: String
+    var start: Date
+    var end: Date
+}
+
+/// 开始计时回溯起点的规则（W8，Jason 2026-10-18）。
+enum ProposalTimerRules {
+    /// 最多回溯多久（提交时查）。
+    nonisolated static let maxBackdate: TimeInterval = 2 * 3600
+    /// 早于此刻不到这么久的视为「从此刻起」，不算回溯（时钟抖动 / 智能体写的就是当下）。
+    nonisolated static let nowTolerance: TimeInterval = 60
 }
 
 // MARK: - 执行器
@@ -148,11 +168,13 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
         case .itemDiscard:
             throw ProposalExecutionError.invalid("「移入回收站」只用于撤销新增的待办，不能单独提出")
 
-        case let .timer(command, blockId, title, expected):
+        case let .timer(command, blockId, title, expected, startAt):
             let control = try timerControl()
             let state = control.proposalTimerState
             var resolvedTitle = title
+            var resolvedStart: Date? = nil
             var changes: [ProposalChange] = []
+            if startAt != nil, command != .start { throw ProposalExecutionError.invalid("只有开始计时能带回溯起点 startAt") }
             switch command {
             case .start:
                 switch (blockId, title?.trimmingCharacters(in: .whitespacesAndNewlines)) {
@@ -171,7 +193,15 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
                     changes.append(ProposalChange(field: "「\(state.title ?? "")」计时", before: state.phase == .paused ? "暂停中" : "进行中",
                                                   after: "结束（记下已投入的时间，不标完成）"))
                 }
-                changes.append(ProposalChange(field: "计时", before: state.label, after: "正在计时「\(resolvedTitle ?? "")」"))
+                if let startAt {
+                    resolvedStart = try await Self.checkBackdate(startAt, now: now(), state: state, control: control)
+                }
+                changes.append(ProposalChange(field: "计时", before: state.label,
+                                              after: "正在计时「\(resolvedTitle ?? "")」" + (resolvedStart.map { "（从 \(PlanMoveRules.hm($0)) 开始计）" } ?? "")))
+                if let s = resolvedStart {
+                    changes.append(ProposalChange(field: "从 \(PlanMoveRules.hm(s)) 开始计：什么时候批准都从这个时刻算；拒绝或过期 = 什么都不记", before: nil, after: nil))
+                }
+
             case .pause:
                 guard blockId == nil, title == nil else { throw ProposalExecutionError.invalid("暂停计时不带 blockId/title（作用于这台设备正在计的那件）") }
                 guard state.phase == .running else { throw ProposalExecutionError.invalid("这台设备现在没有进行中的计时（\(state.label)）") }
@@ -190,8 +220,28 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
             let revision = try Self.baseline(expected, current: state.revision, what: "计时状态")
             return PreparedProposalAction(action: .timer(command: command, blockId: command == .start ? blockId : nil,
                                                          title: command == .start && blockId == nil ? resolvedTitle : nil,
-                                                         expectedRevision: revision),
+                                                         expectedRevision: revision, startAt: resolvedStart),
                                           changes: changes, requiredDeviceId: deviceId)
+
+        case let .moveBlocks(moves, isUndo):
+            guard !isUndo else { throw ProposalExecutionError.invalid("「整组挪回」只用于撤销，不能单独提出") }
+            let mover = try planMover()
+            var baselined: [ProposalBlockMove] = []
+            for m in moves {
+                guard let block = try mover.todayBlock(id: m.id) else {
+                    throw ProposalExecutionError.invalid("今天的计划里找不到其中一块（可能已删除或不在今天）")
+                }
+                let revision = try Self.baseline(m.expectedRevision, current: ProposalRevision.block(block), what: "「\(block.title)」")
+                baselined.append(ProposalBlockMove(id: m.id, start: m.start, end: m.end, expectedRevision: revision))
+            }
+            let checked = try mover.checkGroup(moves.map { PlanMoveRules.Move(id: $0.id, start: $0.start, end: $0.end) }, restoring: false)
+            let resolved = zip(baselined, checked).map { ProposalBlockMove(id: $0.id, start: $1.start, end: $1.end, expectedRevision: $0.expectedRevision) }
+            var changes = checked.map { k in
+                ProposalChange(field: "「\(k.block.title)」时间", before: PlanMoveRules.span(k.block.start, k.block.end),
+                               after: PlanMoveRules.span(k.start, k.end))
+            }
+            changes.append(ProposalChange(field: "一起挪动 \(checked.count) 块；事后可整组挪回", before: nil, after: nil))
+            return PreparedProposalAction(action: .moveBlocks(moves: resolved, isUndo: false), changes: changes)
 
         case let .moveBlock(id, start, end, expected):
             let mover = try planMover()
@@ -255,36 +305,47 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
             return ProposalExecutionOutcome(note: "「\(task.title)」已移入回收站（30 天内可恢复）",
                                             undo: ProposalUndoInfo(unavailableReason: "要找回请到回收站恢复"))
 
-        case let .timer(command, blockId, title, expected):
+        case let .timer(command, blockId, title, expected, startAt):
             let control = try timerControl()
             let before = control.proposalTimerState
             guard let expected else { throw ProposalExecutionError.invalid("缺少计时状态的基线版本，未执行") }
             guard before.revision == expected else {
                 throw ProposalExecutionError.conflict("这台设备的计时状态在提案之后变了（现在：\(before.label)）")
             }
+            if let startAt, command == .start {
+                // 批准时再查一遍：审批期间你可能已经记下了别的实际，回溯起点不能和它重叠。
+                // 回溯上限只在提交时查（有效期内什么时候批准都从 startAt 算，这是约定）。
+                _ = try await Self.checkBackdate(startAt, now: now(), state: before, control: control, enforceLimit: false)
+            }
             switch command {
-            case .start: try await control.proposalStartTimer(blockId: blockId, title: title)
+            case .start: try await control.proposalStartTimer(blockId: blockId, title: title, at: startAt)
             case .pause: try await control.proposalPauseTimer()
             case .resume: try await control.proposalResumeTimer()
             case .stop: try await control.proposalStopTimer()
             }
             let after = control.proposalTimerState
-            let note = "\(command.label)：\(before.label) → \(after.label)"
+            let note = "\(command.label)：\(before.label) → \(after.label)" + (startAt.map { "（从 \(PlanMoveRules.hm($0)) 开始计）" } ?? "")
             let undo: ProposalUndoInfo
             switch command {
             case .pause:
-                undo = ProposalUndoInfo(action: .timer(command: .resume, blockId: nil, title: nil, expectedRevision: after.revision), deviceId: deviceId)
+                undo = ProposalUndoInfo(action: .timer(command: .resume, blockId: nil, title: nil, expectedRevision: after.revision, startAt: nil), deviceId: deviceId)
             case .resume:
-                undo = ProposalUndoInfo(action: .timer(command: .pause, blockId: nil, title: nil, expectedRevision: after.revision), deviceId: deviceId)
-            case .start where before.phase == .idle:
-                // 撤销「开始」= 结束这次计时：已计的时间照常记下（不删除任何记录）。
-                undo = ProposalUndoInfo(action: .timer(command: .stop, blockId: nil, title: nil, expectedRevision: after.revision), deviceId: deviceId)
+                undo = ProposalUndoInfo(action: .timer(command: .pause, blockId: nil, title: nil, expectedRevision: after.revision, startAt: nil), deviceId: deviceId)
             case .start:
-                undo = ProposalUndoInfo(unavailableReason: "开始前在计的那件已结束并记下投入，无法恢复原状")
+                // W8（Jason 2026-10-18）：开始计时批准执行后不提供撤销；结束计时是另一份提案，不是撤销。
+                undo = ProposalUndoInfo(unavailableReason: "要结束计时请另提「结束计时」")
             case .stop:
                 undo = ProposalUndoInfo(unavailableReason: "结束计时已把这段投入记下；不删除记录，需要继续可以再开始")
             }
             return ProposalExecutionOutcome(note: note, undo: undo)
+
+        case let .moveBlocks(moves, isUndo):
+            let result = try await planMover().moveGroup(moves, restoring: isUndo)
+            let back = result.changes.map { ProposalBlockMove(id: $0.before.id, start: $0.before.start, end: $0.before.end,
+                                                              expectedRevision: ProposalRevision.block($0.after)) }
+            return ProposalExecutionOutcome(note: result.note,
+                                            undo: isUndo ? ProposalUndoInfo(unavailableReason: "已整组挪回原来的时间")
+                                                         : ProposalUndoInfo(action: .moveBlocks(moves: back, isUndo: true)))
 
         case let .moveBlock(id, start, end, expected):
             guard let expected else { throw ProposalExecutionError.invalid("缺少计划块的基线版本，未执行") }
@@ -325,6 +386,31 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
             throw ProposalExecutionError.conflict("「\(task.title)」在提案之后被改过")
         }
         return task
+    }
+
+    /// 回溯起点校验：不在未来、不早于 maxBackdate（enforceLimit）、在今天（逻辑日）之内、这台设备此刻没在计时、
+    /// 不与已记下的实际 / 正在跑的计时重叠。返回规范化后的起点（离此刻不到 1 分钟 = nil，按「从此刻起」）。
+    private static func checkBackdate(_ startAt: Date, now: Date, state: ProposalTimerState, control: any ProposalTimerControlling,
+                                      enforceLimit: Bool = true) async throws -> Date? {
+        let hm = PlanMoveRules.hm(startAt)
+        guard startAt <= now.addingTimeInterval(ProposalTimerRules.nowTolerance) else {
+            throw ProposalExecutionError.invalid("回溯起点 \(hm) 在未来；开始计时只能从过去或此刻算起")
+        }
+        if now.timeIntervalSince(startAt) < ProposalTimerRules.nowTolerance { return nil }
+        if enforceLimit, now.timeIntervalSince(startAt) > ProposalTimerRules.maxBackdate {
+            throw ProposalExecutionError.invalid("回溯起点 \(hm) 太早了：最多从 \(Int(ProposalTimerRules.maxBackdate / 3600)) 小时前算起")
+        }
+        guard DayContext.isSameLogicalDay(startAt, now) else {
+            throw ProposalExecutionError.invalid("回溯起点 \(hm) 不在今天（逻辑日从凌晨 4:00 起）")
+        }
+        guard state.phase == .idle else {
+            throw ProposalExecutionError.invalid("这台设备现在正在计时「\(state.title ?? "")」，从 \(hm) 算起会和它重叠；先结束它，或不带回溯起点")
+        }
+        if let hit = await control.proposalBusySpans().sorted(by: { $0.start < $1.start })
+            .first(where: { $0.start < now && startAt < $0.end }) {
+            throw ProposalExecutionError.invalid("从 \(hm) 算起会和已记下的「\(hit.title)」(\(PlanMoveRules.span(hit.start, hit.end))) 重叠；起点请放在它之后")
+        }
+        return startAt
     }
 
     /// 基线版本：发起者带了版本就必须与此刻一致（它看到的是旧状态 → 拒绝）；没带就用此刻的。

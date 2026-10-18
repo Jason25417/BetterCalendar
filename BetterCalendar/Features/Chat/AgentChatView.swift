@@ -219,7 +219,7 @@ struct AgentChatView: View {
 
 /// 对话设置：F1 晚间复盘（默认关）。设置随 iCloud 同步，由接着 bridge 的 Mac 到点触发。
 struct AgentChatSettingsView: View {
-    @AppStorage(EveningReviewSettings.enabledKey) private var reviewOn = false
+    @AppStorage(EveningReviewSettings.enabledKey) private var reviewOn = EveningReviewSettings.defaultEnabled   // W8：从没设过 = 开
     @AppStorage(EveningReviewSettings.minuteKey) private var reviewMinute = EveningReviewSettings.defaultMinute
     @Environment(\.dismiss) private var dismiss
 

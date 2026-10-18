@@ -3,17 +3,24 @@
 //  BetterCalendar
 //
 //  SPEC §19 C3：智能体主动通知的打扰规则——由 App 强制执行，不依赖智能体自觉。
-//  智能体自己判断「要不要通知」（C2）；这里只判断「此刻允不允许打扰」：总开关、静音、安静时段、频率上限。
+//  智能体自己判断「要不要通知」（C2）；这里只判断「此刻允不允许打扰」：总开关、静音、安静时段、频率上限（W8 起默认关）。
 //  被拦下的消息照样保存（面板里可见），只是不弹通知；拦下原因写清楚（失败可见）。
 //
 
 import Foundation
 
 nonisolated struct AttentionSettings: Codable, Equatable, Sendable {
-    /// 总开关：允许智能体主动通知你（实验，默认关）。
-    var enabled = false
+    /// 总开关：允许智能体主动通知你（实验）。W8（Jason 2026-10-18）：默认开——整份设置从没存过时才生效，存过的保留。
+    var enabled = true
     var maxPerHour = 2
     var maxPerDay = 8
+    /// 频率上限开关（W8）：nil = 从没设过（含旧版本存的设置）= **关**（测试期 Jason 定：先不设每小时/每天上限，
+    /// 具体数字待重新讨论，见 SPEC §19.11）；true = 按上面两个数字限。安静时段与一键静音不受影响、始终有效。
+    var capsEnabled: Bool? = nil
+    var capsOn: Bool {
+        get { capsEnabled ?? false }
+        set { capsEnabled = newValue }
+    }
     /// 安静时段 [quietStartHour, quietEndHour)，跨午夜（如 23→8）。两者相等 = 不设安静时段。
     var quietStartHour = 23
     var quietEndHour = 8
@@ -47,6 +54,7 @@ nonisolated enum AttentionPolicy {
         if inQuietHours(s, at: now, calendar: calendar) {
             return .suppress("安静时段（\(s.quietStartHour):00–\(s.quietEndHour):00）")
         }
+        guard s.capsOn else { return .allow }   // W8：测试期默认不设频率上限
         let lastHour = recentDeliveries.filter { now.timeIntervalSince($0) < 3600 && $0 <= now }.count
         if lastHour >= s.maxPerHour { return .suppress("已达每小时上限（\(s.maxPerHour) 条）") }
         let startOfDay = DayContext.logicalStartOfDay(now)

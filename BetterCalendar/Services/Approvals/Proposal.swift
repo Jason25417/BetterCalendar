@@ -75,6 +75,14 @@ nonisolated enum ProposalTimerCommand: String, Codable, Sendable, CaseIterable {
     }
 }
 
+/// 多块挪动里的一块（end=nil 则保持原时长）。
+nonisolated struct ProposalBlockMove: Codable, Equatable, Sendable {
+    var id: UUID
+    var start: Date
+    var end: Date?
+    var expectedRevision: String?
+}
+
 /// 机器执行的内容。新增种类时在这里加 case，并在 ProposalExecuting 实现里处理；
 /// 未识别的种类一律执行失败，绝不猜测。
 /// expectedRevision = 提案时目标的版本（ProposalRevision）；执行时目标版本已变 → 失败并说明，不覆盖用户事实。
@@ -92,9 +100,15 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     case itemDiscard(id: UUID, expectedRevision: String?)
     /// 计时：开始（今天某计划块 blockId，或一件计划外的事 title）/ 暂停 / 继续 / 结束。
     /// expectedRevision = 执行设备上的计时状态版本（计时是设备本地状态）。
-    case timer(command: ProposalTimerCommand, blockId: UUID?, title: String?, expectedRevision: String?)
+    /// startAt（只用于开始，W8 Jason 2026-10-18）：回溯起点——像 Apple Watch 检测到运动，智能体判断你大概从这一刻起就在做；
+    /// 批准前不写任何东西，批准后（有效期内何时批准都一样）从 startAt 起算；拒绝/过期 = 什么都没发生。nil = 从批准执行那刻起算。
+    case timer(command: ProposalTimerCommand, blockId: UUID?, title: String?, expectedRevision: String?, startAt: Date? = nil)
     /// 时间线：挪动今天某个计划块（end=nil 则保持原时长）。必须过本地排布规则校验。
     case moveBlock(id: UUID, start: Date, end: Date?, expectedRevision: String?)
+    /// 时间线：一次挪动今天的多个计划块（W8，Jason 2026-10-18：撞到别的块时连带挪，参照 reflow 顺延）。
+    /// App 对**最终整体布局**校验（固定块不动、正在做/做完的不动、不进过去、不出今天、不越截止、最终互不重叠）；
+    /// 撤销 = 整组挪回（isUndo=true：只作逆操作，智能体不能提；放宽「不进过去」与组内原有重叠，见 PlanMoveRules）。
+    case moveBlocks(moves: [ProposalBlockMove], isUndo: Bool)
 
     var kindLabel: String {
         switch self {
@@ -103,8 +117,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemEdit: "事项：改标题/备注"
         case let .itemSetDone(_, done, _): done ? "事项：标完成" : "事项：取消完成"
         case .itemDiscard: "事项：移入回收站"
-        case let .timer(command, _, _, _): "计时：" + command.label
+        case let .timer(command, _, _, _, _): "计时：" + command.label
         case .moveBlock: "时间线：挪动计划块"
+        case let .moveBlocks(moves, isUndo): isUndo ? "时间线：整组挪回" : "时间线：一起挪动 \(moves.count) 个计划块"
         }
     }
 
@@ -118,6 +133,7 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemDiscard: "itemDiscard"
         case .timer: "timer"
         case .moveBlock: "moveBlock"
+        case .moveBlocks: "moveBlocks"
         }
     }
 
@@ -161,6 +177,19 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var undoneAt: Date? = nil
     var undoneByDeviceId: String? = nil
     var undoNote: String? = nil
+
+    /// 撤销会做什么（面板、桥接结果文件给人看）；nil = 没有可撤销的内容。
+    var undoHint: String? {
+        switch undoAction {
+        case let .moveBlocks(moves, _)?: "撤销 = 这 \(moves.count) 块整组挪回原来的时间（任一块之后被改过就整组不撤）"
+        case .moveBlock?: "撤销 = 挪回原来的时间"
+        case .itemDiscard?: "撤销 = 把这条待办移入回收站（30 天内可恢复）"
+        case .itemEdit?: "撤销 = 改回原来的标题/备注"
+        case .itemSetDone?: "撤销 = 恢复原来的完成状态"
+        case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
+        default: nil
+        }
+    }
 
     /// 以此刻判断的有效状态：未决定且已过截止时间 = 已过期（不复活，不执行）。
     func effectiveState(at now: Date) -> ProposalState {
