@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.66.1", date: "2026-10", changes: [
+            "iPhone：设置页顶部新增「多端审批」入口（之前 iPhone 上找不到这个面板）"
+        ]),
         ChangelogEntry(version: "0.66.0", date: "2026-10", changes: [
             "新增「多端审批」（工具栏入口）：需要你同意的改动会同时推到 iPhone 和 Mac，在通知上直接批准或拒绝；任一端决定后其他端自动收起，迟到的点击不会重复执行",
             "审批改走你自己的 iCloud，不再依赖外部服务；面板里能看到待确认、最近结果、每一步的来源记录和本机延迟",
