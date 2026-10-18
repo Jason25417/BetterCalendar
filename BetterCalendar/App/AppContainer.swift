@@ -52,7 +52,9 @@ final class AppContainer {
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验，默认关；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
     let nativeActions: NativeActionsViewModel
-    let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录
+    let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录（W5：开关开时改记在 iCloud）
+    let sharedTimerControl: SharedTimerBackendControl   // W5 共享计时后端开关（默认旧通道；下次启动生效）
+    private let sharedTimerStore: CloudKitSharedTimerStore?   // 仅 iCloud 后端时非 nil
     let execution: ExecutionViewModel          // menu bar 单键导航（App 级常驻，共享一份）
     let bench: BenchRunner                     // 算法试验台（开发期，macOS 窗口；不碰真日历/真相源）
     let learning: LearningStore                // 学习层采集端（E4：快照 save-once + 残差兜底折算）
@@ -107,9 +109,30 @@ final class AppContainer {
         #else
         nativeAlarms = UnsupportedNativeAlarms()
         #endif
-        self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
-                                              persistence: TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence(),
-                                              enabled: { StateBridgeClient.shared.configured })
+        // W5（SPEC §19.5 D1）：共享计时后端启动时决定一次。开关关（默认）= 旧通道，与改动前逐字一致；
+        // 开关开且旧通道无进行中计时/待发命令时才切到 iCloud。设计见 docs/bc-shared-timer-icloud.md。
+        let legacyTimerPersistence: any BridgeTaskPersisting = TestHost.isActive ? BridgeTaskMemoryPersistence() : BridgeTaskFilePersistence()
+        let timerLaunch = TestHost.isActive ? (backend: SharedTimerBackend.stateBridge, note: String?.none)
+            : SharedTimerSettings.launchDecision(requested: SharedTimerSettings.requested(), legacy: { try legacyTimerPersistence.load() })
+        if let note = timerLaunch.note { DevLog.shared.warn("共享计时", note) }
+        self.sharedTimerControl = SharedTimerBackendControl(active: timerLaunch.backend, launchNote: timerLaunch.note)
+        switch timerLaunch.backend {
+        case .stateBridge:
+            self.sharedTimerStore = nil
+            self.bridgeTasks = BridgeTaskViewModel(service: StateBridgeClient.shared,
+                                                  persistence: legacyTimerPersistence,
+                                                  enabled: { StateBridgeClient.shared.configured })
+        case .icloud:
+            let store = CloudKitSharedTimerStore(), persistence = BridgeTaskFilePersistence(relativePath: "SharedTimer/icloud-timer-v1.json")
+            self.sharedTimerStore = store
+            self.bridgeTasks = BridgeTaskViewModel(service: ICloudSharedTimerService(store: store, deviceId: FocusFollow.deviceID,
+                                                                                     readFloor: (try? persistence.load())?.state?.readAt),
+                                                  persistence: persistence, enabled: { true },
+                                                  backend: .icloud, activePoll: 10, idlePoll: 30)
+            DevLog.shared.info("共享计时", "本次运行计时记在 iCloud（zone BCSharedTimer）")
+        }
+        sharedTimerControl.tasks = bridgeTasks
+        SharedTimerBackendControl.current = sharedTimerControl
         let reminders: NativeReminderScheduler? = TestHost.isActive ? nil : NativeReminderScheduler(system: UNNativeReminderSystem(), persistence: NativeReminderFilePersistence())
         let remote = NativeRemoteExecutor(service: StateBridgeClient.shared,
                                           persistence: TestHost.isActive ? NativeRemoteMemoryPersistence() : NativeRemoteFilePersistence(),
@@ -250,6 +273,13 @@ final class AppContainer {
         self.agentBridge = nil
         #endif
         FocusFollow.personalTaskRefresh = { [weak bridgeTasks] in await bridgeTasks?.refresh(allowCommands: false) }
+        if let sharedTimerStore {
+            SharedTimerWake.onPush = { [weak bridgeTasks] in await bridgeTasks?.refresh(allowCommands: false) }
+            Task {
+                do { try await sharedTimerStore.ensureSubscription() }
+                catch { DevLog.shared.warn("共享计时", "iCloud 计时订阅未建立（靠轮询兜底）：\(error.localizedDescription)") }
+            }
+        }
         bridgeTasks.startPolling()
         self.longTaskRefiner = ClaudeLongTaskRefiner(client: anthropic)
         self.bench = BenchRunner(client: anthropic)

@@ -14,7 +14,7 @@ struct BridgeTaskPanel: View {
                 Spacer()
                 Button("刷新") { Task { await model.refresh() } }.disabled(model.busy)
             }
-            Text("与 Dots 共用 BC 计时；结束计时不代表事项完成。")
+            Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
                 .font(.caption).foregroundStyle(.secondary)
             if model.sessions.isEmpty { Text(model.isStale ? "等待读取计时状态" : "目前没有正在计时的事项").foregroundStyle(.secondary) }
             ForEach(model.sessions) { session in
@@ -65,6 +65,7 @@ struct BridgeTaskPanel: View {
             Text(model.message).font(.caption).foregroundStyle(model.lastError == nil ? Color.secondary : Color.orange)
             if model.reviewCount > 0 { Text("\(model.reviewCount) 条冲突或未接受的请求已保留；不会自动覆盖新状态。")
                     .font(.caption).foregroundStyle(.orange) }
+            if let control = SharedTimerBackendControl.current { SharedTimerBackendPanel(control: control) }
         }
         .task { await model.refresh() }
     }

@@ -8,6 +8,10 @@ import Observation
     private let persistence: any BridgeTaskPersisting
     private let enabled: () -> Bool
     private let now: () -> Date
+    /// W5：计时真相在哪（启动时决定）。默认旧通道，行为与改动前一致。
+    let backend: SharedTimerBackend
+    private let activePoll: TimeInterval
+    private let idlePoll: TimeInterval
     private var file = BridgeTaskLocalFile()
     private var healthy = true
     private(set) var busy = false
@@ -18,8 +22,10 @@ import Observation
     @ObservationIgnored var onChange: (() -> Void)?
 
     init(service: any BridgeTaskServing, persistence: any BridgeTaskPersisting,
-         enabled: @escaping () -> Bool, now: @escaping () -> Date = { Date() }) {
+         enabled: @escaping () -> Bool, now: @escaping () -> Date = { Date() },
+         backend: SharedTimerBackend = .stateBridge, activePoll: TimeInterval = 5, idlePoll: TimeInterval = 15) {
         self.service = service; self.persistence = persistence; self.enabled = enabled; self.now = now
+        self.backend = backend; self.activePoll = activePoll; self.idlePoll = idlePoll
         do { file = try persistence.load(); try file.validate() }
         catch { healthy = false; report("计时队列读取失败，原文件已保留；修复后再操作") }
     }
@@ -91,7 +97,7 @@ import Observation
         guard isEnabled, !busy else { return }
         busy = true; defer {
             busy = false
-            nextPoll = now().addingTimeInterval(sessions.isEmpty && pendingCount == 0 ? 15 : 5)
+            nextPoll = now().addingTimeInterval(sessions.isEmpty && pendingCount == 0 ? idlePoll : activePoll)
             onChange?()
         }
         var hadConflict = false
@@ -105,7 +111,7 @@ import Observation
                     message = "操作已保存；正在更新显示"
                 } catch {
                     let e = error as NSError
-                    guard e.domain == "StateBridge.HTTP", [400,401,403,404,409,422].contains(e.code) else { throw error }
+                    guard Self.isPermanentRejection(e) else { throw error }
                     var next = file
                     if let i = next.pending.firstIndex(where: { $0.command.commandId == queued.command.commandId }) { next.pending[i].needsReview = true }
                     try persistence.save(next); file = next; hadConflict = true
@@ -137,7 +143,7 @@ import Observation
             file = next
             if !hadConflict {
                 if reviewCount == 0 && healthy { lastError = nil }
-                message = !healthy ? "已读取云端状态；本地操作队列需修复" : pendingCount > 0 ? "状态已更新；还有 \(pendingCount) 条操作待同步" : "已同步；与 Dots 共用 BC 计时"
+                message = !healthy ? "已读取云端状态；本地操作队列需修复" : pendingCount > 0 ? "状态已更新；还有 \(pendingCount) 条操作待同步" : syncedMessage
             }
             if healthy {
                 // The state and pending receipt are saved atomically before
@@ -198,6 +204,12 @@ import Observation
                         "superseded": .bool(savedRevision > revision), "readAt": NativeRemoteJSON.timestamp(state.readAt),
                         "screenPresentation": .string("unknown"), "userSeen": .string("unknown")])
     }
+    /// 永久拒绝（标需复核、不重放、不覆盖）：旧通道的 HTTP 4xx，或 iCloud 状态机的拒绝。其余都按暂时错误保留重试。
+    nonisolated static func isPermanentRejection(_ e: NSError) -> Bool {
+        [stateBridgeRejectionDomain, SharedTimerRejection.domain].contains(e.domain) && [400,401,403,404,409,422].contains(e.code)
+    }
+    private nonisolated static let stateBridgeRejectionDomain = "StateBridge.HTTP"
+    var syncedMessage: String { backend == .icloud ? "已同步；两端共用 iCloud 计时" : "已同步；与 Dots 共用 BC 计时" }
     private func report(_ text: String) {
         if lastError != text, !TestHost.isActive { DevLog.shared.warn("BC计时", text) }
         lastError = text; message = text

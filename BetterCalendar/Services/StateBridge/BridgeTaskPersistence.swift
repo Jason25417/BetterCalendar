@@ -29,9 +29,12 @@ nonisolated struct BridgeTaskLocalFile: Codable {
 }
 
 @MainActor final class BridgeTaskFilePersistence: BridgeTaskPersisting {
+    /// 默认=旧通道文件；W5 iCloud 后端用独立文件（SharedTimer/icloud-timer-v1.json），两者互不触碰。
+    private let relativePath: String
+    init(relativePath: String = "DotStateBridge/task-commands-v1.json") { self.relativePath = relativePath }
     private var location: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("DotStateBridge/task-commands-v1.json")
+            .appendingPathComponent(relativePath)
     }
     func load() throws -> BridgeTaskLocalFile {
         guard FileManager.default.fileExists(atPath: location.path) else { return BridgeTaskLocalFile() }
