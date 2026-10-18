@@ -14,8 +14,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleReminderViewed: ((String) async -> Void)?
     var handleApprovalViewed: ((String) async -> Void)?
     var handleApprovalDecision: ((NativeApprovalNotificationBinding, String) async -> Void)?
-    /// SPEC §19 多端审批：decision 为 nil = 只打开详情（点通知本身绝不当作批准）。
-    var handleProposal: ((UUID, ProposalDecision?) async -> Void)?
+    /// SPEC §19 多端审批：.open = 只打开详情（点通知本身绝不当作批准）；W10 起还有回一句 / 选方案 / 撤销（规则自动做完的结果）。
+    var handleProposal: ((UUID, LocalProposalNotifier.Response) async -> Void)?
     /// SPEC §19 C4：智能体消息的反应；reaction 为 nil = 只打开面板。
     var handleAgentMessage: ((UUID, AgentMessage.Reaction?) async -> Void)?
     /// SPEC §19 A1：智能体对话通知；text 非 nil = 在通知上直接回复了一句，nil = 只打开对话。
@@ -51,15 +51,16 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             await handleAgentMessage?(route.id, route.reaction)
             return
         }
-        if let route = LocalProposalNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
-            if route.decision == nil {
+        if let route = LocalProposalNotifier.response(userInfo: info, actionIdentifier: response.actionIdentifier,
+                                                      typedText: (response as? UNTextInputNotificationResponse)?.userText) {
+            if route.response == .open {
                 router.proposalFocusId = route.id
                 router.openProposals = true
                 #if os(macOS)
                 if !TestHost.isActive { AppLifecycle.shared?.showMainWindow() }
                 #endif
             }
-            await handleProposal?(route.id, route.decision)
+            await handleProposal?(route.id, route.response)
             return
         }
         if case let .decision(binding, decision) = NativeApprovalNotificationRoute.parse(userInfo: info, actionIdentifier: response.actionIdentifier) {

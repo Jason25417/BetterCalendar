@@ -35,11 +35,20 @@ nonisolated struct ConflictCheckedProposalTransport: ProposalTransport {
         try await store.all().sorted { $0.createdAt > $1.createdAt }
     }
 
-    func decide(id: UUID, decision: ProposalDecision, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+        try await firstResponse(id: id, at: at) { try $0.applyDecision(decision, choice: choice, deviceId: deviceId, at: at) }
+    }
+
+    /// W10：你回了一句——与决定同一套「首个有效回应生效」（条件保存，冲突重读）。
+    func respond(id: UUID, reply: ProposalUserReply, at: Date) async throws -> ProposalDecisionOutcome {
+        try await firstResponse(id: id, at: at) { $0.applyReply(reply) }
+    }
+
+    private func firstResponse(id: UUID, at: Date, _ change: (inout Proposal) throws -> Void) async throws -> ProposalDecisionOutcome {
         for _ in 0..<maxAttempts {
             guard var p = try await store.latest(id) else { throw ProposalTransportError.notFound(id) }
             guard p.effectiveState(at: at) == .pending else { return .alreadyClosed(p) }
-            p.state = decision.resultingState; p.decidedAt = at; p.decidedByDeviceId = deviceId
+            try change(&p)
             switch try await store.update(p) {
             case let .saved(saved): return .won(saved)
             case let .conflict(server):

@@ -3,7 +3,8 @@
 //  BetterCalendar
 //
 //  SPEC §19 B 组的协调者：发起 → 闸门 → 各端通知 → 首个决定生效 → 指定设备执行 → 各端收起通知。
-//  通知、App 内列表、（将来）对话卡片都指向这里的同一份提案状态（B3）。
+//  通知、App 内列表、对话卡片都指向这里的同一份提案状态（B3）。
+//  W10：三种回应（批准 / 拒绝 / 回一句话）、备选方案（你选哪个执行哪个）、分层预授权（规则代你决定，留底来源 = 规则 id）。
 //  只依赖协议；CloudKit / 内存中转、真实 / 假通知在组装点注入。
 //
 
@@ -33,6 +34,10 @@ import UIKit
     let deviceLabel: String
     private let transport: any ProposalTransport
     private let gate: any ProposalGate
+    /// W10：预授权规则（面板查看/删除；审批时「以后同类…」写进来）。nil = 没接规则存储（测试 / 旧环境）。
+    let rules: PreauthRuleStore?
+    /// W10：你对提案回的一句话 → 转给智能体（组装点接到对话 AgentChatCenter）。返回这句话是否已存进 iCloud。
+    var forwardReply: ((Proposal, String) async -> Bool)?
     private let executor: any ProposalExecuting
     private let notifier: any ProposalNotifying
     let ledger: any OperationLedger
@@ -40,12 +45,21 @@ import UIKit
     /// 正在执行的提案，防止同一台设备并发重复执行。
     private var executing: Set<UUID> = []
 
-    init(transport: any ProposalTransport, gate: any ProposalGate = AskAlwaysGate(),
+    /// 「做完告诉你」已在本机通知过的提案（持久化防重启重弹；nil defaults = 只在内存）。
+    private let informDefaults: UserDefaults?
+    private var informedHere: Set<UUID>
+    static let informedKey = "approvals.informedHere"
+    /// 只为最近这么久内自动执行的提案补发结果通知（新装 / 久未打开时不翻旧账刷屏）。
+    static let informWindow: TimeInterval = 6 * 3600
+
+    init(transport: any ProposalTransport, gate: any ProposalGate = AskAlwaysGate(), rules: PreauthRuleStore? = nil,
          executor: any ProposalExecuting, notifier: any ProposalNotifying, ledger: any OperationLedger,
-         deviceId: String, deviceLabel: String, now: @escaping () -> Date = Date.init) {
-        self.transport = transport; self.gate = gate; self.executor = executor
+         deviceId: String, deviceLabel: String, informDefaults: UserDefaults? = nil, now: @escaping () -> Date = Date.init) {
+        self.transport = transport; self.gate = gate; self.rules = rules; self.executor = executor
         self.notifier = notifier; self.ledger = ledger
         self.deviceId = deviceId; self.deviceLabel = deviceLabel; self.now = now
+        self.informDefaults = informDefaults
+        informedHere = Set((informDefaults?.stringArray(forKey: Self.informedKey) ?? []).compactMap(UUID.init))
     }
 
     /// App 在前台时为 true：前台每 20 秒兜底刷新一次（推送丢失也能收敛）。
@@ -88,14 +102,47 @@ import UIKit
     /// 提交前准备（严格校验 + 补全基线版本 + 由 App 依据真实数据算「改动前 → 改动后」）。
     /// 抛错 = 这份提案不能提交，错误里带给人看的原因（桥接据此把文件移进 rejected/）。
     /// 对同一份已准备好的草稿再调一次结果不变（幂等），submit 内部也会调。
+    /// W10：备选方案逐个同样 prepare（严格校验 + App 算改动前后）；越级理由必须写明；各方案须能在同一台设备执行。
     func prepare(_ draft: ProposalDraft) async throws -> ProposalDraft {
         var draft = draft
         if draft.id == nil { draft.id = UUID() }
-        let prepared = try await executor.prepare(draft.action)
+        if let raw = draft.escalation {
+            let reason = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reason.isEmpty else { throw ProposalExecutionError.invalid("越级提案必须写明理由（为什么确有必要动你的东西或你亲手放的位置）") }
+            draft.escalation = reason
+        }
+        if let raw = draft.primaryLabel {
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard label.count <= ProposalDraft.optionLabelLimit else { throw ProposalExecutionError.invalid("方案名字不超过 \(ProposalDraft.optionLabelLimit) 字") }
+            draft.primaryLabel = label.isEmpty ? nil : label
+        }
+        guard draft.alternatives.count <= Proposal.maxAlternatives else {
+            throw ProposalExecutionError.invalid("备选方案最多 \(Proposal.maxAlternatives) 个（这次 \(draft.alternatives.count) 个）")
+        }
+        let prepared = try await executor.prepare(draft.action, escalation: draft.escalation)
         draft.action = prepared.action
         if let changes = prepared.changes { draft.changes = changes }
-        if draft.action.touchesRealData { draft.experiment = false }
-        if let required = prepared.requiredDeviceId {
+        var required = prepared.requiredDeviceId
+        var seen = [draft.action]
+        for (i, alt) in draft.alternatives.enumerated() {
+            let label = alt.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty, label.count <= ProposalDraft.optionLabelLimit else {
+                throw ProposalExecutionError.invalid("备选方案 \(i + 1) 要有名字（不超过 \(ProposalDraft.optionLabelLimit) 字）")
+            }
+            let p: PreparedProposalAction
+            do { p = try await executor.prepare(alt.action, escalation: draft.escalation) } catch {
+                throw ProposalExecutionError.invalid("备选方案 \(i + 1)「\(label)」：\(error.localizedDescription)")
+            }
+            guard !seen.contains(p.action) else { throw ProposalExecutionError.invalid("备选方案 \(i + 1)「\(label)」和前面的方案完全一样") }
+            seen.append(p.action)
+            if let r = p.requiredDeviceId {
+                if let req = required, req != r { throw ProposalExecutionError.invalid("各个方案必须能在同一台设备上执行（备选方案 \(i + 1) 要求的设备不同）") }
+                required = r
+            }
+            draft.alternatives[i] = ProposalAlternative(label: label, action: p.action, changes: p.changes ?? alt.changes)
+        }
+        if seen.contains(where: \.touchesRealData) { draft.experiment = false }
+        if let required {
             if let target = draft.targetDeviceId, target != required {
                 throw ProposalExecutionError.invalid("这项改动只能在读取状态的那台设备执行（指定设备与之不符）")
             }
@@ -117,18 +164,30 @@ import UIKit
                                           parentRef: draftInput.parentRef, detail: "\(draftInput.title)：\(error.localizedDescription)"))
             return nil
         }
-        let proposal = Proposal(id: draft.id ?? UUID(), createdAt: at, expiresAt: at.addingTimeInterval(draft.lifetime),
+        var proposal = Proposal(id: draft.id ?? UUID(), createdAt: at, expiresAt: at.addingTimeInterval(draft.lifetime),
                                 origin: draft.origin, originLabel: draft.originLabel, originDeviceId: deviceId,
                                 parentId: draft.parentId, targetDeviceId: draft.targetDeviceId,
                                 title: draft.title, changes: draft.changes, reason: draft.reason,
                                 action: draft.action, experiment: draft.experiment, state: .pending, parentRef: draft.parentRef)
+        proposal.escalation = draft.escalation
+        proposal.primaryLabel = draft.primaryLabel
+        proposal.alternatives = draft.alternatives.isEmpty ? nil : draft.alternatives
+        // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
+        // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
+        let verdict = gate.verdict(for: proposal)
+        if verdict.route != .ask, let rule = verdict.rule {
+            proposal.preauth = ProposalPreauthStamp(ruleId: rule.id, effect: rule.effect, ruleLabel: rule.label)
+            proposal.state = verdict.route == .decline ? .declined : .approved
+            proposal.decidedAt = at; proposal.decidedByDeviceId = deviceId
+        }
         do {
             try await transport.submit(proposal)
             record(proposal.origin, proposal.originLabel, "submitted", proposal, "发起：\(proposal.title)")
-            let route = gate.route(proposal)
-            if route != .ask {
-                // 预授权范围内：由系统代为同意（首版闸门恒为 ask，此分支只为接口完整）。
-                _ = await decide(proposal.id, .approve, actor: .system, actorLabel: "预授权闸门（\(route.rawValue)）")
+            if let stamp = proposal.preauth {
+                record(.system, "预授权规则", "decided", proposal, "\(verdict.note)（规则 \(stamp.ruleId.uuidString.prefix(8))，在 \(deviceLabel)）")
+                DevLog.shared.info("预授权规则", "「\(proposal.title)」\(verdict.note)")
+            } else if verdict.rule != nil {
+                record(.system, "预授权闸门", "gate.ask", proposal, verdict.note)   // 有规则命中但仍先问你（如保护类）：留底讲得出为什么
             }
             await refresh()
             return proposals.first { $0.id == proposal.id } ?? proposal
@@ -155,14 +214,18 @@ import UIKit
 
     // MARK: 决定（通知按钮 / App 内按钮）
 
+    /// choice = 选第几个方案（0 = 主方案；nil = 主方案）。remember = 审批时顺手「以后同类…」：本次决定生效后写一条预授权规则。
     @discardableResult
-    func decide(_ id: UUID, _ decision: ProposalDecision,
+    func decide(_ id: UUID, _ decision: ProposalDecision, choice: Int? = nil,
+                remember: (scope: PreauthScope, effect: PreauthEffect)? = nil,
                 actor: ProposalOrigin = .user, actorLabel: String = "你") async -> ProposalDecisionOutcome? {
         do {
-            let outcome = try await transport.decide(id: id, decision: decision, deviceId: deviceId, at: now())
+            let outcome = try await transport.decide(id: id, decision: decision, choice: choice, deviceId: deviceId, at: now())
             switch outcome {
             case let .won(p):
-                record(actor, actorLabel, "decided", p, "\(decision == .approve ? "同意" : "拒绝")（在 \(deviceLabel)）")
+                let picked = p.hasAlternatives && decision == .approve ? "，选了【\(p.chosen.index + 1). \(p.chosen.label)】" : ""
+                record(actor, actorLabel, "decided", p, "\(decision == .approve ? "同意" : "拒绝")\(picked)（在 \(deviceLabel)）")
+                if let remember { self.remember(p, scope: remember.scope, effect: remember.effect) }
             case let .alreadyClosed(p):
                 record(actor, actorLabel, "lost", p, "已被处理：\(p.effectiveState(at: now()).label)；本次点击不重复执行")
             }
@@ -172,6 +235,86 @@ import UIKit
             fail("提交决定失败", error, proposals.first { $0.id == id })
             return nil
         }
+    }
+
+    // MARK: 预授权规则（W10，SPEC §19 A3a）
+
+    /// 这份提案能不能「以后同类…」（nil = 可以）。
+    func cannotRemember(_ p: Proposal, effect: PreauthEffect) -> String? {
+        guard rules != nil else { return "这台设备没有接入预授权规则" }
+        return PreauthPolicy.cannotRemember(p, effect: effect)
+    }
+
+    /// 从一份提案生成（或改写）一条规则：匹配它的发起者 + 你选中方案的那一类改动 + 范围。保护类（越级/动你的东西/删除）不能放行。
+    @discardableResult
+    func remember(_ p: Proposal, scope: PreauthScope, effect: PreauthEffect) -> PreauthRule? {
+        if let why = cannotRemember(p, effect: effect) {
+            lastError = "没有记成规则：\(why)"
+            DevLog.shared.warn("预授权规则", lastError!)
+            record(.user, "你", "rule.refused", p, lastError!)
+            return nil
+        }
+        guard let rules else { return nil }
+        let rule = rules.upsert(origin: p.origin, action: p.executedAction, scope: scope, effect: effect,
+                                deviceId: deviceId, sourceProposalId: p.id)
+        ledger.append(OperationRecord(at: now(), actor: .user, actorLabel: "你", deviceId: deviceId, event: "rule.added",
+                                      proposalId: p.id, parentId: p.parentId, parentRef: p.parentRef,
+                                      detail: "以后同类：\(rule.label)", ruleId: rule.id))
+        return rule
+    }
+
+    func removeRule(_ id: UUID) {
+        guard let rules, let rule = rules.rules.first(where: { $0.id == id }) else { return }
+        rules.remove(id)
+        ledger.append(OperationRecord(at: now(), actor: .user, actorLabel: "你", deviceId: deviceId, event: "rule.removed",
+                                      proposalId: rule.sourceProposalId, parentId: nil, detail: "删除规则：\(rule.label)", ruleId: id))
+    }
+
+    func setRuleEffect(_ id: UUID, _ effect: PreauthEffect) {
+        guard let rules, let rule = rules.rules.first(where: { $0.id == id }), rule.effect != effect else { return }
+        rules.setEffect(id, effect)
+        ledger.append(OperationRecord(at: now(), actor: .user, actorLabel: "你", deviceId: deviceId, event: "rule.changed",
+                                      proposalId: rule.sourceProposalId, parentId: nil,
+                                      detail: "规则改为「\(effect.label)」：\(rule.label)", ruleId: id))
+    }
+
+    // MARK: 第三种回应：回一句话（W10）
+
+    /// 你对某个提案用自然语言回了一句（如「改成 9 点吧」）：提案停止等待（不执行、不算拒绝，首个回应生效），
+    /// 这句话作为对话消息转给智能体（关联提案 id），由它撤回并重新提案。提案已被别的端处理时，这句话照样转交。
+    /// 返回这句话是否已发出（存进 iCloud）；失败原因可见（lastError + 留底 + DevLog）。
+    @discardableResult
+    func reply(_ id: UUID, text raw: String) async -> Bool {
+        let text = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2000))
+        guard !text.isEmpty else { return false }
+        let reply = ProposalUserReply(text: text, at: now(), deviceId: deviceId)
+        let target: Proposal
+        do {
+            switch try await transport.respond(id: id, reply: reply, at: now()) {
+            case let .won(p):
+                target = p
+                record(.user, "你", "replied", p, "回了一句（在 \(deviceLabel)）：\(text.prefix(60))；提案停止等待，转给智能体")
+            case let .alreadyClosed(p):
+                target = p
+                record(.user, "你", "lost", p, "回一句时提案已被处理（\(p.effectiveState(at: now()).label)）；你的话照常转给智能体")
+            }
+        } catch {
+            fail("回复提案失败", error, proposals.first { $0.id == id })
+            return false
+        }
+        await refresh()
+        guard let forwardReply else {
+            lastError = "提案已停止等待，但这台设备没有接入对话，你的话没转给智能体"
+            DevLog.shared.error("多端审批", lastError!)
+            return false
+        }
+        guard await forwardReply(target, text) else {
+            lastError = "提案已停止等待，但你的话没发出去：到对话页重试（已留在本机）"
+            DevLog.shared.error("多端审批", lastError!)
+            record(.system, "BetterCalendar（\(deviceLabel)）", "reply.forward.failed", target, lastError!)
+            return false
+        }
+        return true
     }
 
     // MARK: 撤销（SPEC §19 A3 后半）
@@ -226,7 +369,7 @@ import UIKit
         do {
             let outcome = try await executor.execute(p)
             let done = try await transport.report(id: p.id, state: .applied, note: outcome.note, undo: outcome.undo, at: now())
-            record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, "[\(p.action.kind)] " + outcome.note)
+            record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, "[\(p.executedAction.kind)] " + outcome.note)
         } catch {
             let note = "执行失败：\(error.localizedDescription)"
             if let failed = try? await transport.report(id: p.id, state: .failed, note: note, at: now()) {
@@ -252,11 +395,33 @@ import UIKit
                 record(.system, "BetterCalendar（\(deviceLabel)）", "withdrawn", p, "已收起：\(p.effectiveState(at: now()).label)")
             }
         }
+        // W10：预授权规则自动执行的结果——「做完告诉你」的发一条结果通知（可撤销）；自动执行失败的不论哪种规则都告诉你
+        //（失败必须可见）。每台设备各一次；撤销后收起。
+        let cutoff = now().addingTimeInterval(-Self.informWindow)
+        var informedChanged = false
+        for p in proposals where Self.shouldInform(p) && !informedHere.contains(p.id) && (p.appliedAt ?? p.createdAt) > cutoff {
+            await notifier.showResult(p)
+            informedHere.insert(p.id); informedChanged = true
+            record(.system, "BetterCalendar（\(deviceLabel)）", "informed", p,
+                   p.state == .failed ? "按规则自动执行没成功，已通知你：\(p.resultNote ?? "")" : "按规则自动完成，已通知你（可撤销）")
+        }
+        if informedChanged { informDefaults?.set(Array(informedHere.map(\.uuidString).suffix(300)), forKey: Self.informedKey) }
+        for id in await notifier.shownResultIds() {
+            if proposals.first(where: { $0.id == id })?.undoneAt != nil { await notifier.withdrawResult(id) }
+        }
+    }
+
+    /// 要不要发结果通知：规则代你放行的提案，「做完告诉你」完成时 / 任何放行规则执行失败时。
+    nonisolated static func shouldInform(_ p: Proposal) -> Bool {
+        guard let stamp = p.preauth, stamp.effect.autoApplies else { return false }
+        if p.state == .failed { return true }
+        return p.state == .applied && stamp.effect == .allowAndInform && p.undoneAt == nil
     }
 
     private func record(_ actor: ProposalOrigin, _ label: String, _ event: String, _ p: Proposal?, _ detail: String) {
         ledger.append(OperationRecord(at: now(), actor: actor, actorLabel: label, deviceId: deviceId, event: event,
-                                      proposalId: p?.id, parentId: p?.parentId, parentRef: p?.parentRef, detail: detail))
+                                      proposalId: p?.id, parentId: p?.parentId, parentRef: p?.parentRef, detail: detail,
+                                      ruleId: p?.preauth?.ruleId))
     }
 
     private func fail(_ what: String, _ error: Error, _ p: Proposal?) {

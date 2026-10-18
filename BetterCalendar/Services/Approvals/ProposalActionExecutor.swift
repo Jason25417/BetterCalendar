@@ -97,11 +97,19 @@ nonisolated struct ProposalBusySpan: Equatable, Sendable {
 }
 
 /// 开始计时回溯起点的规则（W8，Jason 2026-10-18）。
+/// W10（Jason 2026-10-18：判断类数字没有实验数据支撑、也不一定适合所有人）：取消「最多回溯 2 小时」——回溯多久由智能体
+/// 按上下文判断、在理由里写依据（越久越要说明，见智能体 CLAUDE.md）；代码只守物理一致性：不在未来、在今天（逻辑日）之内、
+/// 执行设备此刻没在计时、不与已记下的实际 / 正在跑的计时重叠。审批卡写明回溯了多久，让你一眼看到。
 enum ProposalTimerRules {
-    /// 最多回溯多久（提交时查）。
-    nonisolated static let maxBackdate: TimeInterval = 2 * 3600
-    /// 早于此刻不到这么久的视为「从此刻起」，不算回溯（时钟抖动 / 智能体写的就是当下）。
+    /// 早于此刻不到这么久的视为「从此刻起」，不算回溯（时钟抖动 / 智能体写的就是当下）。有效性容差，不是判断类数字。
     nonisolated static let nowTolerance: TimeInterval = 60
+
+    /// 「回溯 1 小时 20 分钟」。
+    nonisolated static func backdateText(_ seconds: TimeInterval) -> String {
+        let minutes = max(1, Int((seconds / 60).rounded()))
+        let h = minutes / 60, m = minutes % 60
+        return "回溯 " + (h > 0 ? "\(h) 小时" + (m > 0 ? " \(m) 分钟" : "") : "\(m) 分钟")
+    }
 }
 
 // MARK: - 执行器
@@ -204,6 +212,7 @@ enum ProposalTimerRules {
                                               after: "正在计时「\(resolvedTitle ?? "")」" + (resolvedStart.map { "（从 \(PlanMoveRules.hm($0)) 开始计）" } ?? "")))
                 if let s = resolvedStart {
                     changes.append(ProposalChange(field: "从 \(PlanMoveRules.hm(s)) 开始计：什么时候批准都从这个时刻算；拒绝或过期 = 什么都不记", before: nil, after: nil))
+                    changes.append(ProposalChange(field: ProposalTimerRules.backdateText(now().timeIntervalSince(s)) + "（智能体的依据见理由）", before: nil, after: nil))
                 }
 
             case .pause:
@@ -346,9 +355,8 @@ enum ProposalTimerRules {
                 throw ProposalExecutionError.conflict("这台设备的计时状态在提案之后变了（现在：\(before.label)）")
             }
             if let startAt, command == .start {
-                // 批准时再查一遍：审批期间你可能已经记下了别的实际，回溯起点不能和它重叠。
-                // 回溯上限只在提交时查（有效期内什么时候批准都从 startAt 算，这是约定）。
-                _ = try await Self.checkBackdate(startAt, now: now(), state: before, control: control, enforceLimit: false)
+                // 批准时再查一遍：审批期间你可能已经记下了别的实际，回溯起点不能和它重叠（有效期内什么时候批准都从 startAt 算）。
+                _ = try await Self.checkBackdate(startAt, now: now(), state: before, control: control)
             }
             switch command {
             case .start: try await control.proposalStartTimer(blockId: blockId, title: title, at: startAt)
@@ -446,12 +454,10 @@ enum ProposalTimerRules {
         return t
     }
 
+    /// W10：只守有效性边界（至少 1 分钟以后：来得及审批 + 排程）；「30 天以内」的上限已取消——多远合适由智能体按上下文判断。
     private static func checkFireAt(_ fireAt: Date, now: Date) throws {
         guard fireAt >= now.addingTimeInterval(ProposalReminderRules.minLead) else {
             throw ProposalExecutionError.invalid("时刻 \(ProposalReminderRules.when(fireAt)) 已经过了或太近（至少 1 分钟以后）")
-        }
-        guard fireAt <= now.addingTimeInterval(ProposalReminderRules.maxAhead) else {
-            throw ProposalExecutionError.invalid("时刻 \(ProposalReminderRules.when(fireAt)) 太远（30 天以内）；更远的事请放进日历或提醒事项")
         }
     }
 
@@ -477,18 +483,14 @@ enum ProposalTimerRules {
         return task
     }
 
-    /// 回溯起点校验：不在未来、不早于 maxBackdate（enforceLimit）、在今天（逻辑日）之内、这台设备此刻没在计时、
+    /// 回溯起点校验（只守物理一致性，W10 起不设回溯时长上限）：不在未来、在今天（逻辑日）之内、这台设备此刻没在计时、
     /// 不与已记下的实际 / 正在跑的计时重叠。返回规范化后的起点（离此刻不到 1 分钟 = nil，按「从此刻起」）。
-    private static func checkBackdate(_ startAt: Date, now: Date, state: ProposalTimerState, control: any ProposalTimerControlling,
-                                      enforceLimit: Bool = true) async throws -> Date? {
+    private static func checkBackdate(_ startAt: Date, now: Date, state: ProposalTimerState, control: any ProposalTimerControlling) async throws -> Date? {
         let hm = PlanMoveRules.hm(startAt)
         guard startAt <= now.addingTimeInterval(ProposalTimerRules.nowTolerance) else {
             throw ProposalExecutionError.invalid("回溯起点 \(hm) 在未来；开始计时只能从过去或此刻算起")
         }
         if now.timeIntervalSince(startAt) < ProposalTimerRules.nowTolerance { return nil }
-        if enforceLimit, now.timeIntervalSince(startAt) > ProposalTimerRules.maxBackdate {
-            throw ProposalExecutionError.invalid("回溯起点 \(hm) 太早了：最多从 \(Int(ProposalTimerRules.maxBackdate / 3600)) 小时前算起")
-        }
         guard DayContext.isSameLogicalDay(startAt, now) else {
             throw ProposalExecutionError.invalid("回溯起点 \(hm) 不在今天（逻辑日从凌晨 4:00 起）")
         }

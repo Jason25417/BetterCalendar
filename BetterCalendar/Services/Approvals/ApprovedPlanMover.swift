@@ -43,8 +43,10 @@ enum PlanMoveRules {
         var end: Date
     }
 
-    /// 一个提案最多一起挪几块（卡片要列得下、Jason 看得过来）。
-    nonisolated static let maxGroup = 10
+    /// 纯技术防失控上限（W10）：**不是产品规则**。Jason 2026-10-18：「一次最多挪 10 块」这类判断类数字没有数据支撑，
+    /// 取消；一次挪多少块以最终整体布局合法为准、由智能体按上下文判断。这里只防桥接文件出错时一次塞进成百上千块
+    ///（一天的计划块远少于此）。
+    nonisolated static let maxGroup = 200
 
     static func hm(_ d: Date) -> String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"
@@ -62,7 +64,7 @@ enum PlanMoveRules {
     /// 组内块之间不查重叠（恢复的就是它们原来的相对位置）；与组外块重叠仍拒绝（不硬塞）。
     static func validateGroup(_ moves: [Move], in c: Context, restoring: Bool = false) throws -> [Checked] {
         guard !moves.isEmpty else { throw ProposalExecutionError.invalid("没有要挪的块") }
-        guard moves.count <= maxGroup else { throw ProposalExecutionError.invalid("一次最多一起挪 \(maxGroup) 块（这次 \(moves.count) 块）") }
+        guard moves.count <= maxGroup else { throw ProposalExecutionError.invalid("这次要挪 \(moves.count) 块，超过技术防失控上限 \(maxGroup)，疑似提案文件出错") }
         guard Set(moves.map(\.id)).count == moves.count else { throw ProposalExecutionError.invalid("同一块在提案里出现了不止一次") }
         let single = moves.count == 1
         var checked: [Checked] = []

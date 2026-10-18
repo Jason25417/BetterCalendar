@@ -101,17 +101,35 @@ nonisolated struct AgentBridgeIO: Sendable {
                                  parentRef: o["parentEventId"] as? String, title: title, body: body, reason: reason)
     }
 
+    static func changesJSON(_ changes: [ProposalChange]) -> [[String: Any]] {
+        changes.map { c in ["field": c.field, "before": c.before ?? NSNull(), "after": c.after ?? NSNull()] }
+    }
+
     /// 只在内容变化时重写，避免无谓的文件抖动。
+    /// W10：kind/changes = 你选中（或默认主）方案的；另附全部方案、你回的一句话（state = replied）、越级理由、代你决定的规则。
     func writeResult(_ p: Proposal, at now: Date) throws {
         let iso = ISO8601DateFormatter()
-        let object: [String: Any] = ["id": p.id.uuidString, "title": p.title, "state": p.effectiveState(at: now).rawValue,
-                                     "kind": p.action.kind, "changes": p.changes.map { c -> [String: Any] in ["field": c.field, "before": c.before ?? NSNull(), "after": c.after ?? NSNull()] },
+        var object: [String: Any] = ["id": p.id.uuidString, "title": p.title, "state": p.effectiveState(at: now).rawValue,
+                                     "kind": p.executedAction.kind, "changes": Self.changesJSON(p.chosen.changes),
                                      "decidedByDeviceId": p.decidedByDeviceId ?? NSNull(), "resultNote": p.resultNote ?? NSNull(),
                                      "undoAvailable": p.state == .applied && p.undoAction != nil && p.undoneAt == nil,
                                      "undoUnavailableReason": p.undoUnavailableReason ?? NSNull(),
                                      "undoHint": p.undoHint ?? NSNull(),
                                      "undoneAt": p.undoneAt.map { iso.string(from: $0) } ?? NSNull(), "undoNote": p.undoNote ?? NSNull(),
                                      "updatedAt": iso.string(from: p.undoneAt ?? p.appliedAt ?? p.decidedAt ?? p.createdAt)]
+        if p.hasAlternatives {
+            object["options"] = p.options.map { o -> [String: Any] in
+                ["index": o.index, "label": o.label, "kind": o.action.kind, "changes": Self.changesJSON(o.changes)]
+            }
+            object["chosenOption"] = p.chosenOption ?? NSNull()
+        }
+        if let reply = p.userReply {
+            object["userReply"] = ["text": reply.text, "at": iso.string(from: reply.at), "deviceId": reply.deviceId]
+        }
+        if let escalation = p.escalation { object["escalation"] = escalation }
+        if let stamp = p.preauth {
+            object["preauth"] = ["ruleId": stamp.ruleId.uuidString, "effect": stamp.effect.rawValue, "rule": stamp.ruleLabel]
+        }
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         let relative = "results/\(p.id.uuidString).json"
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
@@ -144,10 +162,51 @@ nonisolated struct AgentBridgeIO: Sendable {
             throw AgentBridgeError.invalid("changes 格式错误")
         }
         let lifetime = min(max(Double(o["lifetimeSeconds"] as? Int ?? 3600), 300), 86_400)
+        // W10：越级理由（可选；有就必须是非空字符串）。
+        var escalation: String?
+        if let raw = o["escalation"], !(raw is NSNull) {
+            guard let e = (raw as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !e.isEmpty, e.count <= 300 else {
+                throw AgentBridgeError.invalid("escalation 必须是 1–300 字的越级理由")
+            }
+            escalation = e
+        }
+        var primaryLabel: String?
+        if let raw = o["primaryLabel"], !(raw is NSNull) {
+            guard let l = raw as? String, l.count <= ProposalDraft.optionLabelLimit else {
+                throw AgentBridgeError.invalid("primaryLabel 必须是不超过 \(ProposalDraft.optionLabelLimit) 字的字符串")
+            }
+            primaryLabel = l
+        }
+        // W10：备选方案（最多 3 个）：每个 {label, action}，action 与主方案同一套严格规则；改动前后由 App 计算。
+        var alternatives: [ProposalAlternative] = []
+        if let raw = o["alternatives"], !(raw is NSNull) {
+            guard let list = raw as? [[String: Any]] else { throw AgentBridgeError.invalid("alternatives 必须是数组，每项 {label, action}") }
+            guard list.count <= Proposal.maxAlternatives else { throw AgentBridgeError.invalid("alternatives 最多 \(Proposal.maxAlternatives) 个") }
+            alternatives = try list.enumerated().map { i, item in
+                let unknown = Set(item.keys).subtracting(["label", "action", "changes"])
+                guard unknown.isEmpty else { throw AgentBridgeError.invalid("alternatives[\(i)] 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
+                guard let label = (item["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty,
+                      label.count <= ProposalDraft.optionLabelLimit else {
+                    throw AgentBridgeError.invalid("alternatives[\(i)].label 必填，且不超过 \(ProposalDraft.optionLabelLimit) 字")
+                }
+                guard let rawAlt = item["action"] as? [String: Any] else { throw AgentBridgeError.invalid("alternatives[\(i)] 缺少 action") }
+                let altAction: ProposalAction
+                do { altAction = try Self.action(from: rawAlt, proposalId: id, targetDevice: o["targetDevice"] as? String) }
+                catch let AgentBridgeError.invalid(why) { throw AgentBridgeError.invalid("alternatives[\(i)]：" + why) }
+                var altChanges: [ProposalChange] = []
+                if let rc = item["changes"] as? [[String: Any]] {
+                    altChanges = rc.compactMap { c in (c["field"] as? String).map { ProposalChange(field: $0, before: c["before"] as? String, after: c["after"] as? String) } }
+                }
+                if !altAction.touchesRealData, altChanges.isEmpty { throw AgentBridgeError.invalid("alternatives[\(i)] 是测试改动，需要 changes") }
+                return ProposalAlternative(label: label, action: altAction, changes: altChanges)
+            }
+        }
+        let anyReal = action.touchesRealData || alternatives.contains { $0.action.touchesRealData }
         return ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
                              originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
                              targetDeviceId: o["targetDevice"] as? String, title: title, changes: changes, reason: reason,
-                             action: action, experiment: !action.touchesRealData, lifetime: lifetime)
+                             action: action, experiment: !anyReal, lifetime: lifetime,
+                             escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives)
     }
 
     /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard / timerDiscard / 整组挪回只用于撤销，不接受）。
@@ -230,7 +289,8 @@ nonisolated struct AgentBridgeIO: Sendable {
             guard let raw = a["moves"] as? [[String: Any]], !raw.isEmpty else {
                 throw AgentBridgeError.invalid("moveBlocks.moves 必须是非空数组，每项 {blockId, start, end?, expectedRevision?}")
             }
-            guard raw.count <= PlanMoveRules.maxGroup else { throw AgentBridgeError.invalid("moveBlocks 一次最多 \(PlanMoveRules.maxGroup) 块") }
+            // W10：只有技术防失控上限（不是产品规则）；一次挪多少块以最终整体布局合法为准。
+            guard raw.count <= PlanMoveRules.maxGroup else { throw AgentBridgeError.invalid("moveBlocks 超过技术防失控上限 \(PlanMoveRules.maxGroup) 块，疑似文件出错") }
             let moves = try raw.enumerated().map { i, m -> ProposalBlockMove in
                 guard m["kind"] == nil else { throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 不认识的字段：kind") }
                 var item = m
@@ -459,6 +519,8 @@ nonisolated struct AgentBridgeIO: Sendable {
         let now = Date.now
         for p in center.proposals where p.origin == .agent && !done.contains(p.id.uuidString) {
             let state = p.effectiveState(at: now)
+            // W10：你回了一句的提案不另发 proposal_resolved——那句话本身会作为 user_message（带 inReplyToProposal）唤醒智能体。
+            if state == .replied { done.insert(p.id.uuidString); continue }
             guard state.isClosed, now.timeIntervalSince(p.appliedAt ?? p.decidedAt ?? p.expiresAt) < 7200 else { continue }
             try io.writeEvent(kind: "proposal_resolved", summary: "提案「\(p.title)」：\(state.label)",
                               payload: ["proposalId": p.id.uuidString, "state": state.rawValue], at: now)

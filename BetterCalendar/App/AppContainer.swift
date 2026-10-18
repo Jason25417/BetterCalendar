@@ -169,7 +169,7 @@ final class AppContainer {
                                              defaults: UserDefaults(suiteName: "bc-test-chat")!)
             self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
                                             notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
-                                            deviceId: "test-host", deviceLabel: "测试")
+                                            deviceId: "test-host", deviceLabel: "测试")   // 测试 host：一律先问你（不接规则）
         } else {
             let store = CloudKitProposalStore()
             self.proposalStore = store
@@ -178,9 +178,15 @@ final class AppContainer {
                                                     ledger: FileOperationLedger(), deviceId: ProposalDevice.id)
             self.agentChat = AgentChatCenter(transport: CloudKitAgentChatStore(), notifier: LocalAgentChatNotifier(),
                                              ledger: FileOperationLedger(), deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
-            self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: actionExecutor ?? ExperimentOnlyExecutor(),
+            // W10 分层预授权（A3a）：规则随设置同步（SettingsSync 白名单含 PreauthRuleStore.key）；没有规则 = 一律先问你。
+            let rules = PreauthRuleStore()
+            self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), gate: PreauthRuleGate(store: rules), rules: rules,
+                                            executor: actionExecutor ?? ExperimentOnlyExecutor(),
                                             notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
-                                            deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
+                                            deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label, informDefaults: .standard)
+            _ = NotificationCenter.default.addObserver(forName: SettingsSync.didSyncRemotely, object: nil, queue: .main) { [weak rules] _ in
+                MainActor.assumeIsolated { rules?.reload() }   // 另一台设备改了规则
+            }
         }
         notificationDelegate.handleAgentMessage = { [weak messages = agentMessages] id, reaction in
             if let reaction { await messages?.react(id, reaction) } else { await messages?.refresh() }
@@ -197,8 +203,17 @@ final class AppContainer {
         notificationDelegate.handleAgentChat = { [weak chat = agentChat] _, text in
             if let text { await chat?.send(text) } else { await chat?.refresh() }
         }
-        notificationDelegate.handleProposal = { [weak center = proposals] id, decision in
-            if let decision { await center?.decide(id, decision) } else { await center?.refresh() }
+        notificationDelegate.handleProposal = { [weak center = proposals] id, response in
+            switch response {
+            case .open: await center?.refresh()
+            case let .decide(decision, choice): await center?.decide(id, decision, choice: choice)
+            case let .reply(text): await center?.reply(id, text: text)   // W10：回一句 → 提案停止等待，转给智能体
+            case .undo: await center?.undo(id)                           // W10：规则「做完告诉你」的结果通知上撤销
+            }
+        }
+        // W10：你对提案回的一句话 → 对话消息（关联提案 id），Mac 桥接写成 user_message 事件（带 inReplyToProposal）。
+        proposals.forwardReply = { [weak chat = agentChat] p, text in
+            await chat?.send(text, inReplyToProposal: p.id) != nil
         }
         if !TestHost.isActive, let store = proposalStore {
             ProposalWake.onPush = { [weak center = proposals, weak messages = agentMessages, weak chat = agentChat] in

@@ -34,6 +34,8 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     var proposalIds: [UUID] = []
     /// 引出它的事件 id（智能体侧上下级关系）。
     var parentRef: String?
+    /// W10：你这句话是在回某个提案（审批的第三种回应）；Mac 桥接写 user_message 时带上 inReplyToProposal。
+    var inReplyToProposal: UUID? = nil
     // —— 你的消息：Mac 桥接转交给智能体的回执 ——
     var forwardedAt: Date?
     var forwardedByDeviceId: String?
@@ -278,15 +280,18 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
 
     // MARK: 你说一句
 
+    /// inReplyToProposal（W10）= 这句话是在回某个提案（从通知 / 面板 / 对话卡片上「回一句」）。
     @discardableResult
-    func send(_ raw: String) async -> AgentChatMessage? {
+    func send(_ raw: String, inReplyToProposal proposalId: UUID? = nil) async -> AgentChatMessage? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
         let at = now()
-        // 接着最近一条智能体消息说（如复盘后补一句）：6 小时内才算接话。
-        let lastAgent = messages.last { $0.author == .agent && at.timeIntervalSince($0.createdAt) < Self.forwardWindow }
-        let m = AgentChatMessage(id: UUID(), createdAt: at, author: .user, deviceId: deviceId, deviceLabel: deviceLabel,
+        // 回提案：接着带这张卡片的那条智能体消息说；否则接着最近一条智能体消息说（如复盘后补一句）：6 小时内才算接话。
+        let carrier = proposalId.flatMap { id in messages.last { $0.author == .agent && $0.proposalIds.contains(id) } }
+        let lastAgent = carrier ?? messages.last { $0.author == .agent && at.timeIntervalSince($0.createdAt) < Self.forwardWindow }
+        var m = AgentChatMessage(id: UUID(), createdAt: at, author: .user, deviceId: deviceId, deviceLabel: deviceLabel,
                                  text: String(text.prefix(2000)), kind: .chat, replyTo: lastAgent?.id)
+        m.inReplyToProposal = proposalId
         outbox.append(m); persistOutbox()
         return await post(m)
     }

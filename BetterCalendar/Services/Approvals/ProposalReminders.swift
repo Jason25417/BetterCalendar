@@ -13,10 +13,9 @@ import Foundation
 
 /// 提醒 / 闹钟的规则（纯数据）。
 nonisolated enum ProposalReminderRules {
-    /// 至少提前多久（太近的时刻来不及审批 + 排程）。
+    /// 至少提前多久（太近的时刻来不及审批 + 排程）。有效性边界（Jason 认可：为了干净防 bug）。
     static let minLead: TimeInterval = 60
-    /// 最远多久之后（再远的事交给日历 / 提醒事项）。
-    static let maxAhead: TimeInterval = 30 * 86_400
+    // W10：「最远 30 天以内」已取消（判断类数字，由智能体按上下文判断）。
     static let titleLimit = 150
     static let bodyLimit = 500
 

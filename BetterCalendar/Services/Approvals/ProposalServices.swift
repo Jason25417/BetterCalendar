@@ -30,7 +30,10 @@ nonisolated enum ProposalTransportError: Error, LocalizedError {
 nonisolated protocol ProposalTransport: Sendable {
     func submit(_ proposal: Proposal) async throws
     func fetchRecent() async throws -> [Proposal]
-    func decide(id: UUID, decision: ProposalDecision, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome
+    /// choice = 选了第几个方案（0 = 主方案；nil = 没有备选方案时等同 0）。超出范围抛错。
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome
+    /// W10 第三种回应：你回了一句话。与 decide 同样「首个有效回应生效」（pending → replied）；已被别的端处理 → alreadyClosed。
+    func respond(id: UUID, reply: ProposalUserReply, at: Date) async throws -> ProposalDecisionOutcome
     /// 执行设备回报结果（applied / failed）。只允许从 approved 转出；applied 时一并存下撤销信息。
     func report(id: UUID, state: ProposalState, note: String, undo: ProposalUndoInfo?, at: Date) async throws -> Proposal
     /// 记下「已撤销」（SPEC §19 A3 后半）。只允许 applied 且尚未撤销；首个撤销生效，迟到的抛错。
@@ -40,6 +43,29 @@ nonisolated protocol ProposalTransport: Sendable {
 extension ProposalTransport {
     func report(id: UUID, state: ProposalState, note: String, at: Date) async throws -> Proposal {
         try await report(id: id, state: state, note: note, undo: nil, at: at)
+    }
+    func decide(id: UUID, decision: ProposalDecision, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+        try await decide(id: id, decision: decision, choice: nil, deviceId: deviceId, at: at)
+    }
+}
+
+extension Proposal {
+    /// 首个有效决定：写入状态与所选方案（各中转实现共用，语义一致）。
+    nonisolated mutating func applyDecision(_ decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) throws {
+        if let choice {
+            guard options.indices.contains(choice) else {
+                throw ProposalTransportError.invalidTransition("没有第 \(choice + 1) 个方案（共 \(options.count) 个）")
+            }
+            if decision == .approve, hasAlternatives { chosenOption = choice }
+        } else if decision == .approve, hasAlternatives {
+            chosenOption = 0
+        }
+        state = decision.resultingState; decidedAt = at; decidedByDeviceId = deviceId
+    }
+
+    /// 你回了一句：停止等待（不执行、不算拒绝）。
+    nonisolated mutating func applyReply(_ reply: ProposalUserReply) {
+        state = .replied; decidedAt = reply.at; decidedByDeviceId = reply.deviceId; userReply = reply
     }
 }
 
@@ -72,15 +98,18 @@ nonisolated enum ProposalRoute: String, Sendable {
     case applyThenInform
     /// 直接做
     case apply
+    /// 按规则自动拒绝（deny 规则）
+    case decline
 }
 
-nonisolated protocol ProposalGate: Sendable {
-    func route(_ proposal: Proposal) -> ProposalRoute
+/// 预授权闸门（W10 起有真实现 PreauthRuleGate，见 PreauthRules.swift）。
+@MainActor protocol ProposalGate {
+    func verdict(for proposal: Proposal) -> ProposalGateVerdict
 }
 
-/// 首版空实现：一律先问你（方便测试；与「无感」的冲突已登记在 SPEC §19.9 欠账②）。
+/// 一律先问你（测试与没有规则存储的环境用；默认行为与 W10 之前完全一致）。
 nonisolated struct AskAlwaysGate: ProposalGate {
-    func route(_ proposal: Proposal) -> ProposalRoute { .ask }
+    func verdict(for proposal: Proposal) -> ProposalGateVerdict { .ask("一律先问你") }
 }
 
 // MARK: - 执行器
@@ -120,12 +149,16 @@ nonisolated enum ProposalExecutionError: Error, LocalizedError, Equatable {
 @MainActor protocol ProposalExecuting {
     /// 提交前：严格校验 + 补全基线版本 + 计算改动前后；抛错 = 这份提案不能提交（附原因）。
     func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction
+    /// W10 合并缝：带上提案的越级理由再校验（如 W9：动图钉的挪块必须带越级理由）。默认忽略越级、等同 prepare(_:)。
+    func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction
     /// 执行动作（已同意的提案，或撤销用的逆操作）；抛错 = 执行失败（不自动重试）。
     func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome
 }
 
 extension ProposalExecuting {
-    func execute(_ proposal: Proposal) async throws -> ProposalExecutionOutcome { try await perform(proposal.action) }
+    func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction { try await prepare(action) }
+    /// 执行你选中的方案（没有备选 = 主方案）。
+    func execute(_ proposal: Proposal) async throws -> ProposalExecutionOutcome { try await perform(proposal.executedAction) }
 }
 
 /// 联调用的空改动执行器：不碰任何真实数据（测试环境 / 未接入真实能力时）。真改动一律拒绝。
@@ -155,6 +188,10 @@ extension ProposalExecuting {
     func withdraw(_ id: UUID) async
     /// 本机当前还挂着通知的提案。
     func shownIds() async -> Set<UUID>
+    /// W10「做完告诉你」：预授权规则自动执行后的结果通知（可撤销）；自动执行失败也用它说明（失败必须可见）。
+    func showResult(_ proposal: Proposal) async
+    func withdrawResult(_ id: UUID) async
+    func shownResultIds() async -> Set<UUID>
     /// 系统通知是否允许（nil = 尚未询问）。
     func permission() async -> Bool?
     /// 只由用户点击按钮触发。
@@ -164,6 +201,9 @@ extension ProposalExecuting {
 extension ProposalNotifying {
     func permission() async -> Bool? { true }
     func requestPermission() async -> Bool { true }
+    func showResult(_ proposal: Proposal) async {}
+    func withdrawResult(_ id: UUID) async {}
+    func shownResultIds() async -> Set<UUID> { [] }
 }
 
 // MARK: - 操作留底（SPEC §19 A5）
@@ -182,6 +222,8 @@ nonisolated struct OperationRecord: Codable, Equatable, Sendable, Identifiable {
     var parentId: UUID?
     var parentRef: String? = nil
     var detail: String
+    /// W10：由哪条预授权规则代你决定（「来源 = 规则 id」）；nil = 不是规则做的。
+    var ruleId: UUID? = nil
 }
 
 @MainActor protocol OperationLedger {
@@ -235,10 +277,18 @@ actor InMemoryProposalTransport: ProposalTransport {
         store.values.sorted { $0.createdAt > $1.createdAt }
     }
 
-    func decide(id: UUID, decision: ProposalDecision, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
         guard var p = store[id] else { throw ProposalTransportError.notFound(id) }
         guard p.effectiveState(at: at) == .pending else { return .alreadyClosed(p) }
-        p.state = decision.resultingState; p.decidedAt = at; p.decidedByDeviceId = deviceId
+        try p.applyDecision(decision, choice: choice, deviceId: deviceId, at: at)
+        store[id] = p
+        return .won(p)
+    }
+
+    func respond(id: UUID, reply: ProposalUserReply, at: Date) async throws -> ProposalDecisionOutcome {
+        guard var p = store[id] else { throw ProposalTransportError.notFound(id) }
+        guard p.effectiveState(at: at) == .pending else { return .alreadyClosed(p) }
+        p.applyReply(reply)
         store[id] = p
         return .won(p)
     }
@@ -265,7 +315,11 @@ actor InMemoryProposalTransport: ProposalTransport {
 /// 测试 host 用：不碰系统通知中心。
 @MainActor final class SilentProposalNotifier: ProposalNotifying {
     private var shown: Set<UUID> = []
+    private(set) var results: Set<UUID> = []
     func show(_ proposal: Proposal) async { shown.insert(proposal.id) }
     func withdraw(_ id: UUID) async { shown.remove(id) }
     func shownIds() async -> Set<UUID> { shown }
+    func showResult(_ proposal: Proposal) async { results.insert(proposal.id) }
+    func withdrawResult(_ id: UUID) async { results.remove(id) }
+    func shownResultIds() async -> Set<UUID> { results }
 }

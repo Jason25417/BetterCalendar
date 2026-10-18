@@ -130,7 +130,7 @@ extension ProposalActionTests {
             ["kind": "moveBlocks", "moves": [["kind": "moveBlock", "blockId": a.uuidString, "start": "2026-10-18T18:00:00+08:00"]]],
             ["kind": "moveBlocks", "moves": [["blockId": a.uuidString, "start": "18:00"]]],
             ["kind": "moveBlocks", "moves": [["blockId": a.uuidString, "start": "2026-10-18T18:00:00+08:00"]], "isUndo": true],
-            ["kind": "moveBlocks", "moves": Array(repeating: ["blockId": a.uuidString, "start": "2026-10-18T18:00:00+08:00"], count: 11)],
+            ["kind": "moveBlocks", "moves": Array(repeating: ["blockId": a.uuidString, "start": "2026-10-18T18:00:00+08:00"], count: PlanMoveRules.maxGroup + 1)],   // W10：只剩技术防失控上限
         ]
         for action in bad { #expect(throws: (any Error).self) { try AgentBridgeIO.draft(from: file(action)) } }
         do { _ = try AgentBridgeIO.draft(from: file(bad[2])); Issue.record("应拒收") } catch {
@@ -174,7 +174,7 @@ extension ProposalActionTests {
             return r.mac.lastError
         }
         #expect(await reason(at(10, 5, c))?.contains("在未来") == true)
-        #expect(await reason(at(7, 50, c))?.contains("太早了") == true)        // 超过 2 小时
+        #expect(await reason(at(3, 50, c))?.contains("不在今天") == true)      // W10：不再限回溯时长，只守「在今天（逻辑日）」
         r.timer.busy = [ProposalBusySpan(title: "开会", start: at(9, 30, c), end: at(9, 50, c))]
         #expect(await reason(at(9, 40, c))?.contains("和已记下的「开会」") == true)
         r.timer.state = ProposalTimerState(phase: .running, title: "别的事", startedAt: at(9, 55, c))

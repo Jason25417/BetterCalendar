@@ -24,7 +24,10 @@ nonisolated enum ProposalRecordCodec {
         let data = try JSONEncoder().encode(p)
         record["payload"] = String(decoding: data, as: UTF8.self) as CKRecordValue
         record["state"] = p.state.rawValue as CKRecordValue
-        record["title"] = p.title as CKRecordValue
+        // W10：B5 可见推送在「记录新建」时由 iCloud 代发，文案取这两个镜像字段。预授权规则代你决定的提案
+        // 建出来就不是待确认——文案写明「已按规则处理」，免得像在等你批准（本机刷新后也会收起它）。
+        let auto = p.preauth.map { "已按预授权规则\($0.effect.label) · " } ?? ""
+        record["title"] = (auto + p.title) as CKRecordValue
         record["body"] = p.notificationBody as CKRecordValue
         record["expiresAt"] = p.expiresAt as CKRecordValue
         record["createdAtLocal"] = p.createdAt as CKRecordValue

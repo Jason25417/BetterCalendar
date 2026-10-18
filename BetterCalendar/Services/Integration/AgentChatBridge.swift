@@ -59,6 +59,7 @@ extension AgentBridgeIO {
                                       "kind": m.kind.rawValue, "text": m.text, "device": m.deviceLabel,
                                       "replyTo": m.replyTo?.uuidString ?? NSNull()]
             if m.author == .user { row["status"] = status(m).label }
+            if let pid = m.inReplyToProposal { row["inReplyToProposal"] = pid.uuidString }   // W10：回的是哪个提案
             if !m.proposalIds.isEmpty {
                 row["proposals"] = m.proposalIds.map { id -> [String: Any] in
                     guard let p = proposals.first(where: { $0.id == id }) else { return ["id": id.uuidString, "state": "unknown"] }
@@ -97,7 +98,14 @@ extension AgentBridgeIO {
             if let rid = m.replyTo, let prior = chat.messages.first(where: { $0.id == rid }) {
                 payload["inReplyTo"] = ["id": rid.uuidString, "kind": prior.kind.rawValue, "text": String(prior.text.prefix(200))]
             }
-            try io.writeEvent(kind: "user_message", summary: "Jason 在对话里说：\(m.text.prefix(80))", payload: payload, at: now)
+            var summary = "Jason 在对话里说：\(m.text.prefix(80))"
+            // W10：审批的第三种回应——Jason 没点批准/拒绝，而是对这个提案回了一句。
+            if let pid = m.inReplyToProposal {
+                payload["inReplyToProposal"] = proposalReplyContext(pid, proposals: proposals, now: now)
+                let title = proposals.first { $0.id == pid }?.title ?? pid.uuidString.prefix(8).description
+                summary = "Jason 对提案「\(title)」回了一句：\(m.text.prefix(80))"
+            }
+            try io.writeEvent(kind: "user_message", summary: summary, payload: payload, at: now)
             await chat.markForwarded(m.id)
             DevLog.shared.info("智能体对话", "已转交智能体：\(m.text.prefix(40))")
         }
@@ -114,6 +122,17 @@ extension AgentBridgeIO {
         }
         // ④ 对话历史给 read_chat
         try io.writeChatHistory(chat.messages, proposals: proposals, status: { chat.status(of: $0) }, at: now)
+    }
+
+    /// user_message 里「回的是哪个提案」：给智能体足够的上下文去撤回/重提（不必再翻 results/）。
+    static func proposalReplyContext(_ id: UUID, proposals: [Proposal], now: Date) -> [String: Any] {
+        guard let p = proposals.first(where: { $0.id == id }) else { return ["id": id.uuidString, "state": "unknown"] }
+        var o: [String: Any] = ["id": id.uuidString, "title": p.title, "state": p.effectiveState(at: now).rawValue,
+                                "kind": p.executedAction.kind, "reason": p.reason,
+                                "changes": AgentBridgeIO.changesJSON(p.chosen.changes)]
+        if p.hasAlternatives { o["options"] = p.options.map { ["index": $0.index, "label": $0.label, "kind": $0.action.kind] } }
+        if let e = p.escalation { o["escalation"] = e }
+        return o
     }
 
     /// 晚间复盘的事实素材（做成了什么）：执行陪伴今天记下的「实际」。只给事实，措辞交给智能体按正反馈原则写。

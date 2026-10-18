@@ -34,6 +34,8 @@ enum SettingsSync {
         "sharedTimer.icloud.enabled",          // iCloud 共享计时：两端同一后端才看得到彼此的计时；每台设备下次启动各自过闸门
         "execution.runRestorePolicy",          // 退出时有任务在进行 → 怎么恢复（偏好，两端一致）
         "push.muted",                          // 「别再提」的长期事项 id（事项随 iCloud 同步，id 两端相同）
+        // —— W10（2026-10-18）——
+        "approvals.preauthRules.v1",           // 预授权规则（A3a）：iPhone 上「以后同类都允许」，Mac 导入智能体提案时按它判定
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

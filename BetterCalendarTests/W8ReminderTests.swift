@@ -111,7 +111,6 @@ import Testing
         }
         #expect(await reason(.reminder(id: UUID(), title: "t", body: nil, fireAt: c.now.addingTimeInterval(30), deviceId: nil))?.contains("太近") == true)
         #expect(await reason(.reminder(id: UUID(), title: "t", body: nil, fireAt: c.now.addingTimeInterval(-60), deviceId: nil))?.contains("已经过了") == true)
-        #expect(await reason(.alarm(id: UUID(), title: "t", fireAt: c.now.addingTimeInterval(40 * 86_400), deviceId: "phone"))?.contains("太远") == true)
         #expect(await reason(.reminder(id: UUID(), title: "  ", body: nil, fireAt: tomorrow8, deviceId: nil))?.contains("标题不能为空") == true)
         #expect(await reason(.reminderCancel(id: UUID(), expectedRevision: nil))?.contains("只用于撤销") == true)
         #expect(await reason(.alarmCancel(id: UUID()))?.contains("只用于撤销") == true)
