@@ -106,6 +106,7 @@ import UIKit
     func prepare(_ draft: ProposalDraft) async throws -> ProposalDraft {
         var draft = draft
         if draft.id == nil { draft.id = UUID() }
+        try ProposalLifetime.check(draft.lifetime)   // W11：只守技术稳定窗口（1 分钟–7 天），多久合适由发起者判断
         if let raw = draft.escalation {
             let reason = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !reason.isEmpty else { throw ProposalExecutionError.invalid("越级提案必须写明理由（为什么确有必要动你的东西或你亲手放的位置）") }
@@ -122,6 +123,8 @@ import UIKit
         let prepared = try await executor.prepare(draft.action, escalation: draft.escalation)
         draft.action = prepared.action
         if let changes = prepared.changes { draft.changes = changes }
+        // W11：可调参数——绑定必须是这种动作有的字段，默认值 = 准备好的动作里写的那个。
+        draft.parameters = try ProposalParameterRules.normalize(draft.parameters, for: draft.action)
         var required = prepared.requiredDeviceId
         var seen = [draft.action]
         for (i, alt) in draft.alternatives.enumerated() {
@@ -135,11 +138,13 @@ import UIKit
             }
             guard !seen.contains(p.action) else { throw ProposalExecutionError.invalid("备选方案 \(i + 1)「\(label)」和前面的方案完全一样") }
             seen.append(p.action)
+            let params = try ProposalParameterRules.normalize(alt.parameters ?? [], for: p.action, where: "备选方案 \(i + 1) 的参数")
             if let r = p.requiredDeviceId {
                 if let req = required, req != r { throw ProposalExecutionError.invalid("各个方案必须能在同一台设备上执行（备选方案 \(i + 1) 要求的设备不同）") }
                 required = r
             }
-            draft.alternatives[i] = ProposalAlternative(label: label, action: p.action, changes: p.changes ?? alt.changes)
+            draft.alternatives[i] = ProposalAlternative(label: label, action: p.action, changes: p.changes ?? alt.changes,
+                                                        parameters: params.isEmpty ? nil : params)
         }
         if seen.contains(where: \.touchesRealData) { draft.experiment = false }
         if let required {
@@ -172,6 +177,7 @@ import UIKit
         proposal.escalation = draft.escalation
         proposal.primaryLabel = draft.primaryLabel
         proposal.alternatives = draft.alternatives.isEmpty ? nil : draft.alternatives
+        proposal.parameters = draft.parameters.isEmpty ? nil : draft.parameters
         // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
         // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
         let verdict = gate.verdict(for: proposal)
@@ -215,16 +221,42 @@ import UIKit
     // MARK: 决定（通知按钮 / App 内按钮）
 
     /// choice = 选第几个方案（0 = 主方案；nil = 主方案）。remember = 审批时顺手「以后同类…」：本次决定生效后写一条预授权规则。
+    /// values（W11）= 你在卡片上调好的参数值：批准前对套回新值的动作**再完整校验一次**（不只信卡片上的预览），
+    /// 不合法就不批准、原因可见；nil = 按默认（通知上的「按默认批准」）。
     @discardableResult
     func decide(_ id: UUID, _ decision: ProposalDecision, choice: Int? = nil,
+                values: [String: ProposalParameterValue]? = nil,
                 remember: (scope: PreauthScope, effect: PreauthEffect)? = nil,
                 actor: ProposalOrigin = .user, actorLabel: String = "你") async -> ProposalDecisionOutcome? {
+        var tuning: ProposalTuning?
+        if decision == .approve, let values {
+            // 你调过的值绝不悄悄降级成默认值：本机列表里找不到这份提案就先刷新，仍找不到 = 不批准、原因可见。
+            if !proposals.contains(where: { $0.id == id }) { await refresh() }
+            guard let p = proposals.first(where: { $0.id == id }) else {
+                lastError = "没有批准：找不到这份提案（可能还没同步过来），你调的数值没有提交"
+                DevLog.shared.warn("多端审批", lastError!)
+                return nil
+            }
+            let index = choice ?? 0
+            if p.options.indices.contains(index), !p.options[index].parameters.isEmpty {
+                do {
+                    let checked = try await checkTuning(p, option: index, values: values)
+                    tuning = ProposalTuning(values: values, action: checked.action, changes: checked.changes ?? p.options[index].changes)
+                } catch {
+                    lastError = "没有批准：\(error.localizedDescription)"
+                    DevLog.shared.warn("多端审批", lastError!)
+                    record(actor, actorLabel, "tune.invalid", p, "你调的数值不合法，未批准：\(error.localizedDescription)")
+                    return nil
+                }
+            }
+        }
         do {
-            let outcome = try await transport.decide(id: id, decision: decision, choice: choice, deviceId: deviceId, at: now())
+            let outcome = try await transport.decide(id: id, decision: decision, choice: choice, tuning: tuning, deviceId: deviceId, at: now())
             switch outcome {
             case let .won(p):
                 let picked = p.hasAlternatives && decision == .approve ? "，选了【\(p.chosen.index + 1). \(p.chosen.label)】" : ""
-                record(actor, actorLabel, "decided", p, "\(decision == .approve ? "同意" : "拒绝")\(picked)（在 \(deviceLabel)）")
+                let tuned = p.tuningSummary.isEmpty ? "" : "；" + p.tuningSummary.joined(separator: "，")   // W11：记下最终值、改没改默认
+                record(actor, actorLabel, "decided", p, "\(decision == .approve ? "同意" : "拒绝")\(picked)（在 \(deviceLabel)）\(tuned)")
                 if let remember { self.remember(p, scope: remember.scope, effect: remember.effect) }
             case let .alreadyClosed(p):
                 record(actor, actorLabel, "lost", p, "已被处理：\(p.effectiveState(at: now()).label)；本次点击不重复执行")
@@ -235,6 +267,19 @@ import UIKit
             fail("提交决定失败", error, proposals.first { $0.id == id })
             return nil
         }
+    }
+
+    // MARK: 可调参数（W11）
+
+    /// 你在卡片上调的值 → 套回选中方案的动作 → 重新走同一套校验；返回将要执行的动作与依据真实数据重算的「改动前 → 改动后」。
+    /// 抛错 = 这个值不合法（错误里是给人看的原因）。卡片实时预览和批准前都调它。不夹范围、不悄悄改值。
+    func checkTuning(_ p: Proposal, option index: Int, values: [String: ProposalParameterValue]) async throws -> PreparedProposalAction {
+        let options = p.options
+        guard options.indices.contains(index) else { throw ProposalExecutionError.invalid("没有第 \(index + 1) 个方案") }
+        let o = options[index]
+        guard !o.parameters.isEmpty else { throw ProposalExecutionError.invalid("这个方案没有可调的数值") }
+        let action = try ProposalParameterRules.apply(values, o.parameters, to: o.action)
+        return try await executor.recheck(action, escalation: p.escalation, executingDeviceId: p.targetDeviceId)
     }
 
     // MARK: 预授权规则（W10，SPEC §19 A3a）

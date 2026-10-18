@@ -127,6 +127,20 @@ nonisolated struct AgentBridgeIO: Sendable {
             object["userReply"] = ["text": reply.text, "at": iso.string(from: reply.at), "deviceId": reply.deviceId]
         }
         if let escalation = p.escalation { object["escalation"] = escalation }
+        // W11：可调参数——已批准：选中方案每个参数的默认值、最终值、你改没改；未决定：主方案的声明与默认值。
+        let shownParams = p.chosenValues != nil ? p.chosen.parameters : (p.parameters ?? [])
+        if !shownParams.isEmpty {
+            object["parameters"] = shownParams.map { q -> [String: Any] in
+                var row: [String: Any] = ["id": q.id, "label": q.label, "type": q.kind.rawValue, "bind": q.bind.rawValue]
+                if let d = q.defaultValue { row["default"] = ProposalParameterRules.format(d, q) }
+                if let v = p.chosenValues?[q.id] {
+                    row["value"] = ProposalParameterRules.format(v, q)
+                    row["changedByJason"] = ProposalParameterRules.isChanged(q, v)
+                }
+                return row
+            }
+            if !p.tuningSummary.isEmpty { object["tuningSummary"] = p.tuningSummary }
+        }
         if let stamp = p.preauth {
             object["preauth"] = ["ruleId": stamp.ruleId.uuidString, "effect": stamp.effect.rawValue, "rule": stamp.ruleLabel]
         }
@@ -161,7 +175,16 @@ nonisolated struct AgentBridgeIO: Sendable {
         } else {
             throw AgentBridgeError.invalid("changes 格式错误")
         }
-        let lifetime = min(max(Double(o["lifetimeSeconds"] as? Int ?? 3600), 300), 86_400)
+        // W11：有效期多久由智能体按上下文判断；这里只守技术稳定窗口（1 分钟–7 天，7 天防僵尸提案，不是产品规则）。
+        // 超出不再悄悄夹到范围里，而是拒收并写明原因（失败可见）。省略 = 1 小时。
+        let lifetime: TimeInterval
+        if let raw = o["lifetimeSeconds"], !(raw is NSNull) {
+            guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { throw AgentBridgeError.invalid("lifetimeSeconds 必须是秒数") }
+            lifetime = n.doubleValue
+            do { try ProposalLifetime.check(lifetime) } catch { throw AgentBridgeError.invalid("lifetimeSeconds：" + error.localizedDescription) }
+        } else {
+            lifetime = 3600
+        }
         // W10：越级理由（可选；有就必须是非空字符串）。
         var escalation: String?
         if let raw = o["escalation"], !(raw is NSNull) {
@@ -183,7 +206,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             guard let list = raw as? [[String: Any]] else { throw AgentBridgeError.invalid("alternatives 必须是数组，每项 {label, action}") }
             guard list.count <= Proposal.maxAlternatives else { throw AgentBridgeError.invalid("alternatives 最多 \(Proposal.maxAlternatives) 个") }
             alternatives = try list.enumerated().map { i, item in
-                let unknown = Set(item.keys).subtracting(["label", "action", "changes"])
+                let unknown = Set(item.keys).subtracting(["label", "action", "changes", "parameters"])
                 guard unknown.isEmpty else { throw AgentBridgeError.invalid("alternatives[\(i)] 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
                 guard let label = (item["label"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty,
                       label.count <= ProposalDraft.optionLabelLimit else {
@@ -198,15 +221,74 @@ nonisolated struct AgentBridgeIO: Sendable {
                     altChanges = rc.compactMap { c in (c["field"] as? String).map { ProposalChange(field: $0, before: c["before"] as? String, after: c["after"] as? String) } }
                 }
                 if !altAction.touchesRealData, altChanges.isEmpty { throw AgentBridgeError.invalid("alternatives[\(i)] 是测试改动，需要 changes") }
-                return ProposalAlternative(label: label, action: altAction, changes: altChanges)
+                let altParams = try Self.parameters(from: item["parameters"], action: altAction, path: "alternatives[\(i)].parameters")
+                return ProposalAlternative(label: label, action: altAction, changes: altChanges, parameters: altParams.isEmpty ? nil : altParams)
             }
         }
+        // W11：主方案的可调参数（备选方案的挂在各自身上）。
+        let parameters = try Self.parameters(from: o["parameters"], action: action, path: "parameters")
         let anyReal = action.touchesRealData || alternatives.contains { $0.action.touchesRealData }
         return ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
                              originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
                              targetDeviceId: o["targetDevice"] as? String, title: title, changes: changes, reason: reason,
                              action: action, experiment: !anyReal, lifetime: lifetime,
-                             escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives)
+                             escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives, parameters: parameters)
+    }
+
+    /// W11：可调参数声明（严格：每项只认这些键；类型 / 绑定字段 / 单位 / 范围都校验；绑到这种改动没有的字段 → 拒收）。
+    /// 默认值可省略（= action 里写的那个）；写了就必须一致——由 ProposalCenter.prepare 依据准备好的动作核对。
+    static func parameters(from raw: Any?, action: ProposalAction, path: String) throws -> [ProposalParameter] {
+        guard let raw, !(raw is NSNull) else { return [] }
+        guard let list = raw as? [[String: Any]] else { throw AgentBridgeError.invalid("\(path) 必须是数组，每项 {id, label, type, bind, default?, min?, max?, step?, unit?, anchor?}") }
+        guard list.count <= ProposalParameterRules.maxPerOption else {
+            throw AgentBridgeError.invalid("\(path) 最多 \(ProposalParameterRules.maxPerOption) 个（技术上限；卡片上建议不超过 2 个）")
+        }
+        let params = try list.enumerated().map { i, item -> ProposalParameter in
+            let at = "\(path)[\(i)]"
+            let unknown = Set(item.keys.filter { !(item[$0] is NSNull) }).subtracting(["id", "label", "type", "bind", "default", "min", "max", "step", "unit", "anchor"])
+            guard unknown.isEmpty else { throw AgentBridgeError.invalid("\(at) 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
+            guard let id = item["id"] as? String else { throw AgentBridgeError.invalid("\(at).id 必填") }
+            guard let label = item["label"] as? String else { throw AgentBridgeError.invalid("\(at).label 必填") }
+            guard let rawType = item["type"] as? String, let kind = ProposalParameterKind(rawValue: rawType) else {
+                throw AgentBridgeError.invalid("\(at).type 必须是 " + ProposalParameterKind.allCases.map(\.rawValue).joined(separator: " / "))
+            }
+            guard let rawBind = item["bind"] as? String, let bind = ProposalParameterBinding(rawValue: rawBind) else {
+                throw AgentBridgeError.invalid("\(at).bind 必须是 " + ProposalParameterBinding.allCases.map(\.rawValue).joined(separator: " / "))
+            }
+            func value(_ key: String) throws -> ProposalParameterValue? {
+                guard let v = item[key], !(v is NSNull) else { return nil }
+                if kind.isDate {
+                    guard let s = v as? String, let d = isoFractional.date(from: s) ?? isoPlain.date(from: s) else {
+                        throw AgentBridgeError.invalid("\(at).\(key) 必须是带时区的 ISO 8601 时间")
+                    }
+                    return .date(d)
+                }
+                guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { throw AgentBridgeError.invalid("\(at).\(key) 必须是数字") }
+                return .number(n.doubleValue)
+            }
+            var unit: ProposalParameterUnit?
+            if let u = item["unit"], !(u is NSNull) {
+                guard let s = u as? String, let parsed = ProposalParameterUnit(rawValue: s) else { throw AgentBridgeError.invalid("\(at).unit 必须是 minute / hour") }
+                unit = parsed
+            }
+            var step: Double?
+            if let v = item["step"], !(v is NSNull) {
+                guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { throw AgentBridgeError.invalid("\(at).step 必须是数字") }
+                step = n.doubleValue
+            }
+            var anchor: Date?
+            if let v = item["anchor"], !(v is NSNull) {
+                guard let s = v as? String, let d = isoFractional.date(from: s) ?? isoPlain.date(from: s) else {
+                    throw AgentBridgeError.invalid("\(at).anchor 必须是带时区的 ISO 8601 时间")
+                }
+                anchor = d
+            }
+            return ProposalParameter(id: id, label: label, kind: kind, bind: bind, unit: unit, defaultValue: try value("default"),
+                                     min: try value("min"), max: try value("max"), step: step, anchor: anchor)
+        }
+        do { try ProposalParameterRules.validateDeclarations(params, for: action, where: path) }
+        catch { throw AgentBridgeError.invalid(error.localizedDescription) }
+        return params
     }
 
     /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard / timerDiscard / 整组挪回只用于撤销，不接受）。

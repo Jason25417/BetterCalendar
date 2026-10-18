@@ -31,7 +31,8 @@ nonisolated protocol ProposalTransport: Sendable {
     func submit(_ proposal: Proposal) async throws
     func fetchRecent() async throws -> [Proposal]
     /// choice = 选了第几个方案（0 = 主方案；nil = 没有备选方案时等同 0）。超出范围抛错。
-    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome
+    /// tuning（W11）= 你在卡片上调好的参数值 + 重新校验过的动作；nil = 按默认（通知上的「按默认批准」、没有参数）。
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, tuning: ProposalTuning?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome
     /// W10 第三种回应：你回了一句话。与 decide 同样「首个有效回应生效」（pending → replied）；已被别的端处理 → alreadyClosed。
     func respond(id: UUID, reply: ProposalUserReply, at: Date) async throws -> ProposalDecisionOutcome
     /// 执行设备回报结果（applied / failed）。只允许从 approved 转出；applied 时一并存下撤销信息。
@@ -45,13 +46,18 @@ extension ProposalTransport {
         try await report(id: id, state: state, note: note, undo: nil, at: at)
     }
     func decide(id: UUID, decision: ProposalDecision, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
-        try await decide(id: id, decision: decision, choice: nil, deviceId: deviceId, at: at)
+        try await decide(id: id, decision: decision, choice: nil, tuning: nil, deviceId: deviceId, at: at)
+    }
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+        try await decide(id: id, decision: decision, choice: choice, tuning: nil, deviceId: deviceId, at: at)
     }
 }
 
 extension Proposal {
     /// 首个有效决定：写入状态与所选方案（各中转实现共用，语义一致）。
-    nonisolated mutating func applyDecision(_ decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) throws {
+    /// W11：批准一个带参数的方案时记下每个参数的最终值（没调 = 默认值）；调过的（与默认不同）连同重新校验过的动作一起存下。
+    nonisolated mutating func applyDecision(_ decision: ProposalDecision, choice: Int?, tuning: ProposalTuning? = nil,
+                                            deviceId: String, at: Date) throws {
         if let choice {
             guard options.indices.contains(choice) else {
                 throw ProposalTransportError.invalidTransition("没有第 \(choice + 1) 个方案（共 \(options.count) 个）")
@@ -59,6 +65,22 @@ extension Proposal {
             if decision == .approve, hasAlternatives { chosenOption = choice }
         } else if decision == .approve, hasAlternatives {
             chosenOption = 0
+        }
+        if decision == .approve {
+            let params = options[chosenOption ?? 0].parameters
+            if let tuning {
+                guard !params.isEmpty else { throw ProposalTransportError.invalidTransition("选中的方案没有可调参数") }
+                let known = Set(params.map(\.id))
+                guard tuning.values.keys.allSatisfy(known.contains) else { throw ProposalTransportError.invalidTransition("调的参数不属于选中的方案") }
+            }
+            if !params.isEmpty {
+                var values: [String: ProposalParameterValue] = [:]
+                for p in params { values[p.id] = tuning?.values[p.id] ?? p.defaultValue }
+                chosenValues = values
+                if let tuning, params.contains(where: { ProposalParameterRules.isChanged($0, values[$0.id]) }) {
+                    tunedAction = tuning.action; tunedChanges = tuning.changes
+                }
+            }
         }
         state = decision.resultingState; decidedAt = at; decidedByDeviceId = deviceId
     }
@@ -151,12 +173,19 @@ nonisolated enum ProposalExecutionError: Error, LocalizedError, Equatable {
     func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction
     /// W10 合并缝：带上提案的越级理由再校验（如 W9：动图钉的挪块必须带越级理由）。默认忽略越级、等同 prepare(_:)。
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction
+    /// W11：你在审批卡上调了数值后，对套回新值的动作重新校验（卡片实时预览 + 批准前再查一次）。
+    /// executingDeviceId = 提案指定的执行设备：设备本地状态（计时）只有那台能完整核对，其他设备做能做的检查并写明。
+    /// 默认等同 prepare(_:escalation:)。
+    func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction
     /// 执行动作（已同意的提案，或撤销用的逆操作）；抛错 = 执行失败（不自动重试）。
     func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome
 }
 
 extension ProposalExecuting {
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction { try await prepare(action) }
+    func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction {
+        try await prepare(action, escalation: escalation)
+    }
     /// 执行你选中的方案（没有备选 = 主方案）。
     func execute(_ proposal: Proposal) async throws -> ProposalExecutionOutcome { try await perform(proposal.executedAction) }
 }
@@ -277,10 +306,10 @@ actor InMemoryProposalTransport: ProposalTransport {
         store.values.sorted { $0.createdAt > $1.createdAt }
     }
 
-    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, tuning: ProposalTuning?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
         guard var p = store[id] else { throw ProposalTransportError.notFound(id) }
         guard p.effectiveState(at: at) == .pending else { return .alreadyClosed(p) }
-        try p.applyDecision(decision, choice: choice, deviceId: deviceId, at: at)
+        try p.applyDecision(decision, choice: choice, tuning: tuning, deviceId: deviceId, at: at)
         store[id] = p
         return .won(p)
     }

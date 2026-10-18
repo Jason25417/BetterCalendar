@@ -8,6 +8,9 @@
 //  - 「以后同类…」：同意并生成预授权规则（做完告诉你 / 直接做）或拒绝并生成 deny 规则，可选范围；
 //    越级 / 动你的东西 / 删除类不提供放行（PreauthPolicy 也会拦）；
 //  - 越级提案顶部醒目横条：「越级：这会动你亲手放的位置或你的东西」+ 理由。
+//  W11：方案带可调参数时，卡片上出滑块 / 时间选择器（ProposalTuner）：你调的值套回动作、经 App 同一套校验，
+//  「改动前 → 改动后」实时重算；不合法当场写明原因、不能批准（不悄悄夹到范围里）。带参数的提案不出「以后同类…」
+//  （预授权规则本来就不放行带参数的提案；要设规则，在同类不带参数的提案上设）。
 //
 
 import SwiftUI
@@ -46,9 +49,16 @@ struct ProposalCardControls: View {
 
     // MARK: 没有备选：同意 / 拒绝 / 回一句 / 以后同类
 
-    private var decisionRow: some View {
+    @ViewBuilder private var decisionRow: some View {
+        let primary = proposal.options[0]
+        if !primary.parameters.isEmpty {
+            // W11：先调数值（实时预览），批准按钮在调节区里（不合法时不能点）。
+            ProposalTuner(center: center, proposal: proposal, option: primary, approveTitle: "同意")
+        }
         HStack(spacing: 8) {
-            Button("同意") { Task { await center.decide(proposal.id, .approve) } }.buttonStyle(.borderedProminent)
+            if primary.parameters.isEmpty {
+                Button("同意") { Task { await center.decide(proposal.id, .approve) } }.buttonStyle(.borderedProminent)
+            }
             Button("拒绝", role: .destructive) { Task { await center.decide(proposal.id, .decline) } }.buttonStyle(.bordered)
             Button("回一句") { replying.toggle() }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
             rememberMenu
@@ -57,7 +67,7 @@ struct ProposalCardControls: View {
     }
 
     @ViewBuilder private var rememberMenu: some View {
-        if proposal.escalation == nil, center.rules != nil {
+        if proposal.escalation == nil, !proposal.hasParameters, center.rules != nil {
             Menu("以后同类…") {
                 Picker("范围", selection: $scope) {
                     ForEach(PreauthScope.allCases) { Text($0.label).tag($0) }
@@ -89,9 +99,13 @@ struct ProposalCardControls: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("\(o.index + 1). \(o.label)").font(.subheadline.bold())
                     ForEach(Array(o.changes.enumerated()), id: \.offset) { _, c in Text(Proposal.line(c)).font(.caption) }
-                    Button("选这个") { Task { await center.decide(proposal.id, .approve, choice: o.index) } }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                        .accessibilityIdentifier("bc.proposal.pick.\(o.index)")
+                    if o.parameters.isEmpty {
+                        Button("选这个") { Task { await center.decide(proposal.id, .approve, choice: o.index) } }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                            .accessibilityIdentifier("bc.proposal.pick.\(o.index)")
+                    } else {
+                        ProposalTuner(center: center, proposal: proposal, option: o, approveTitle: "选这个")   // W11：参数作用于这个方案
+                    }
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,6 +143,111 @@ struct ProposalCardControls: View {
             if await center.reply(proposal.id, text: text) { replyText = ""; replying = false }
             sending = false
         }
+    }
+}
+
+/// W11：一个方案上的可调参数——滑块 / 时间选择器 + 依据真实数据实时重算的「改动前 → 改动后」+ 批准按钮。
+/// 智能体给的范围只是滑块/选择器的边界提示；合法性由 ProposalCenter.checkTuning（同一套 prepare）判定，批准时再查一次。
+struct ProposalTuner: View {
+    @Bindable var center: ProposalCenter
+    let proposal: Proposal
+    let option: ProposalOption
+    let approveTitle: String
+    @State private var values: [String: ProposalParameterValue] = [:]
+    @State private var check: Check = .checking
+
+    enum Check: Equatable {
+        case checking
+        case ok([ProposalChange])
+        case invalid(String)
+    }
+
+    private var current: [String: ProposalParameterValue] {
+        var all: [String: ProposalParameterValue] = [:]
+        for p in option.parameters { all[p.id] = values[p.id] ?? p.defaultValue }
+        return all
+    }
+    private var changed: Bool { option.parameters.contains { ProposalParameterRules.isChanged($0, values[$0.id]) } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(option.parameters) { p in row(p) }
+            switch check {
+            case .checking: EmptyView()
+            case let .ok(changes) where changed:
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("按你调的，会这样改：").font(.caption.bold())
+                    ForEach(Array(changes.enumerated()), id: \.offset) { _, c in Text(Proposal.line(c)).font(.caption) }
+                }
+                .accessibilityIdentifier("bc.proposal.tuned.preview")
+            case .ok: EmptyView()
+            case let .invalid(reason):
+                Label("这个数值不行：\(reason)", systemImage: "exclamationmark.circle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .accessibilityIdentifier("bc.proposal.tuned.invalid")
+            }
+            Button(approveTitle) {
+                let picked = current
+                Task { await center.decide(proposal.id, .approve, choice: proposal.hasAlternatives ? option.index : nil, values: picked) }
+            }
+            .buttonStyle(.borderedProminent).controlSize(.small)
+            .disabled({ if case .invalid = check { true } else { false } }())
+            .accessibilityIdentifier("bc.proposal.tuned.approve.\(option.index)")
+        }
+        .padding(8)
+        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .task(id: values) {
+            // 拖滑块时稍等一下再算（被下一次改动取消 = 只算最后那个值）。
+            if !values.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            guard !Task.isCancelled else { return }
+            do {
+                let checked = try await center.checkTuning(proposal, option: option.index, values: current)
+                guard !Task.isCancelled else { return }
+                check = .ok(checked.changes ?? option.changes)
+            } catch {
+                guard !Task.isCancelled else { return }
+                check = .invalid(error.localizedDescription)
+            }
+        }
+    }
+
+    @ViewBuilder private func row(_ p: ProposalParameter) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            switch p.kind {
+            case .number, .duration:
+                let lo = p.min?.number ?? 0, hi = p.max?.number ?? 1
+                HStack {
+                    Text(p.label).font(.subheadline)
+                    Slider(value: Binding(get: { (values[p.id] ?? p.defaultValue)?.number ?? lo },
+                                          set: { values[p.id] = .number($0) }),
+                           in: lo...max(hi, lo + 1e-9), step: p.step ?? 1)
+                    Text((values[p.id] ?? p.defaultValue).map { ProposalParameterRules.format($0, p) } ?? "")
+                        .font(.subheadline.monospacedDigit())
+                }
+            case .timeOfDay, .dateTime:
+                let binding = Binding(get: { (values[p.id] ?? p.defaultValue)?.date ?? .now },
+                                      set: { values[p.id] = .date($0) })
+                let parts: DatePickerComponents = p.kind == .timeOfDay ? [.hourAndMinute] : [.date, .hourAndMinute]
+                if let lo = p.min?.date, let hi = p.max?.date {
+                    DatePicker(p.label, selection: binding, in: lo...hi, displayedComponents: parts)
+                } else if let lo = p.min?.date {
+                    DatePicker(p.label, selection: binding, in: lo..., displayedComponents: parts)
+                } else if let hi = p.max?.date {
+                    DatePicker(p.label, selection: binding, in: ...hi, displayedComponents: parts)
+                } else {
+                    DatePicker(p.label, selection: binding, displayedComponents: parts)
+                }
+            }
+            if let d = p.defaultValue {
+                HStack(spacing: 6) {
+                    Text("智能体给的：\(ProposalParameterRules.format(d, p))").font(.caption2).foregroundStyle(.secondary)
+                    if ProposalParameterRules.isChanged(p, values[p.id]) {
+                        Button("用回这个") { values[p.id] = nil }.font(.caption2).buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("bc.proposal.param.\(p.id)")
     }
 }
 

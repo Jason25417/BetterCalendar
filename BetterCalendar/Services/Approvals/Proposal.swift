@@ -206,6 +206,8 @@ nonisolated struct ProposalAlternative: Codable, Equatable, Sendable {
     var label: String
     var action: ProposalAction
     var changes: [ProposalChange] = []
+    /// W11：这个方案上的可调参数（可选；旧记录没有这个键照常解码）。
+    var parameters: [ProposalParameter]? = nil
 }
 
 /// 审批卡 / 通知上的一个可选方案（index 0 = 主方案）。
@@ -214,6 +216,8 @@ nonisolated struct ProposalOption: Equatable, Sendable, Identifiable {
     var label: String
     var action: ProposalAction
     var changes: [ProposalChange]
+    /// W11：这个方案上的可调参数（空 = 没有）。
+    var parameters: [ProposalParameter] = []
     var id: Int { index }
 }
 
@@ -282,20 +286,44 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var userReply: ProposalUserReply? = nil
     /// 预授权规则代你做的决定（nil = 你亲自决定 / 还没决定）。
     var preauth: ProposalPreauthStamp? = nil
+    // —— W11 可调参数（全部 Optional：旧版本写的记录照常解码；只存在 JSON 载荷里，不改 CloudKit schema）——
+    /// 主方案上的可调参数（默认值 = 主方案动作里写的那个）。备选方案的参数在 ProposalAlternative.parameters。
+    var parameters: [ProposalParameter]? = nil
+    /// 批准时选方案上每个参数的最终值（没动 = 默认值）；nil = 选中的方案没有参数 / 还没批准。
+    var chosenValues: [String: ProposalParameterValue]? = nil
+    /// 你调过数值时：套回你选的值、重新校验过的动作与「改动前 → 改动后」（执行的就是它）。没调 = nil，执行原方案。
+    var tunedAction: ProposalAction? = nil
+    var tunedChanges: [ProposalChange]? = nil
 
     /// 备选方案上限（卡片列得下、你看得过来；通知按钮另有系统限制）。
     static let maxAlternatives = 3
 
     /// 全部可选方案（主方案在前）。
     var options: [ProposalOption] {
-        [ProposalOption(index: 0, label: primaryLabel ?? "方案 1", action: action, changes: changes)]
-            + (alternatives ?? []).enumerated().map { i, a in ProposalOption(index: i + 1, label: a.label, action: a.action, changes: a.changes) }
+        [ProposalOption(index: 0, label: primaryLabel ?? "方案 1", action: action, changes: changes, parameters: parameters ?? [])]
+            + (alternatives ?? []).enumerated().map { i, a in
+                ProposalOption(index: i + 1, label: a.label, action: a.action, changes: a.changes, parameters: a.parameters ?? [])
+            }
     }
     var hasAlternatives: Bool { !(alternatives ?? []).isEmpty }
-    /// 选中的（或默认的主）方案。
+    /// W11：任一方案带可调参数（预授权规则一律先问你；通知上的批准 = 按默认批准）。
+    var hasParameters: Bool { options.contains { !$0.parameters.isEmpty } }
+    /// 选中的（或默认的主）方案；你调过数值时，动作与改动前后换成调好、重新校验过的那份（W11）。
     var chosen: ProposalOption {
         let all = options
-        return all.indices.contains(chosenOption ?? 0) ? all[chosenOption ?? 0] : all[0]
+        var o = all.indices.contains(chosenOption ?? 0) ? all[chosenOption ?? 0] : all[0]
+        if let tunedAction { o.action = tunedAction; o.changes = tunedChanges ?? o.changes }
+        return o
+    }
+    /// W11：选中方案上你批准时的参数说明（「提醒时间：08:00 → 你改成 07:45」）；没有参数 = 空。
+    var tuningSummary: [String] {
+        guard let chosenValues else { return [] }
+        return ProposalParameterRules.summary(chosen.parameters, values: chosenValues)
+    }
+    /// W11：批准时改了至少一个参数的默认值（转译偏差信号：智能体给的数不合你意）。
+    var tunedByUser: Bool {
+        guard let chosenValues else { return false }
+        return chosen.parameters.contains { ProposalParameterRules.isChanged($0, chosenValues[$0.id]) }
     }
     /// 批准后真正执行的动作。
     var executedAction: ProposalAction { chosen.action }
@@ -330,14 +358,18 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var notificationBody: String {
         var lines: [String] = []
         if let escalation { lines.append(Self.escalationHeadline + "：" + escalation) }
+        let undecided = state == .pending || state == .expired
         if hasAlternatives && chosenOption == nil {
             for o in options {
                 lines.append("【\(o.index + 1). \(o.label)】")
                 lines += o.changes.map(Self.line)
+                if undecided { lines += Self.adjustableLines(o.parameters) }
             }
         } else {
             if hasAlternatives { lines.append("选了【\(chosen.index + 1). \(chosen.label)】") }
             lines += chosen.changes.map(Self.line)
+            if chosenValues != nil { lines += tuningSummary }
+            else if undecided { lines += Self.adjustableLines(chosen.parameters) }
         }
         if !reason.isEmpty { lines.append("理由：" + reason) }
         lines.append("发起：" + originLabel)
@@ -345,6 +377,15 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     }
 
     static let escalationHeadline = "【越级】这会动你亲手放的位置或你的东西"
+
+    /// W11：通知里放不下滑块/选择器——写明默认值，并说明打开卡片可以调。
+    static func adjustableLines(_ params: [ProposalParameter]) -> [String] {
+        params.compactMap { p in
+            p.defaultValue.map { adjustablePrefix + "\(p.label) 默认 \(ProposalParameterRules.format($0, p))（打开卡片可以调）" }
+        }
+    }
+    /// 卡片上已有滑块/选择器时，过滤掉通知正文里的这几行。
+    static let adjustablePrefix = "可调："
 
     static func line(_ c: ProposalChange) -> String {
         switch (c.before, c.after) {
@@ -370,13 +411,32 @@ nonisolated struct ProposalDraft: Sendable {
     var reason: String
     var action: ProposalAction
     var experiment: Bool
+    /// 有效期（W11：多久合适由发起者按上下文判断——智能体见 CLAUDE.md；代码只守 ProposalLifetime 的技术稳定窗口）。
+    /// 24 小时只是 App 内部发起（面板测试按钮等）没写时的缺省。
     var lifetime: TimeInterval = 24 * 3600
     /// W10：越级理由（见 Proposal.escalation）。
     var escalation: String? = nil
     var primaryLabel: String? = nil
     /// W10：备选方案（changes 由 prepare 依据真实数据重算）。
     var alternatives: [ProposalAlternative] = []
+    /// W11：主方案上的可调参数（默认值由 prepare 依据主方案动作算出）。备选方案的参数挂在各自的 ProposalAlternative 上。
+    var parameters: [ProposalParameter] = []
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40
+}
+
+/// W11（Jason 2026-10-18）：提案有效期的**技术稳定窗口，不是产品规则**。
+/// 多久合适是判断（开始计时的猜测要快过期；「要不要下周一提醒你」可以活久一点），交给智能体按上下文定（CLAUDE.md）。
+/// 代码只守两头：至少 1 分钟（来得及看到、审批）；最多 7 天（防「僵尸提案」一直挂着待确认；Jason 2026-10-18 定：
+/// 一周已覆盖「下周一要不要提醒你」这类情形，更久只是过时的提案挂着）。
+nonisolated enum ProposalLifetime {
+    static let minimum: TimeInterval = 60
+    /// 防僵尸提案的稳定上限，不是产品规则。
+    static let maximum: TimeInterval = 7 * 86_400
+    static func check(_ lifetime: TimeInterval) throws {
+        guard lifetime.isFinite, lifetime >= minimum, lifetime <= maximum else {
+            throw ProposalExecutionError.invalid("有效期要在 1 分钟到 7 天之间（7 天是防止提案一直挂着的技术上限，不是产品规则）")
+        }
+    }
 }
