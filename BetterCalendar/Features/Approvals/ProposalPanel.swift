@@ -98,6 +98,11 @@ struct ProposalPanel: View {
                 Button("静音 2 小时") { m.settings.mutedUntil = .now.addingTimeInterval(2 * 3600) }
             }
             if let e = m.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
+            #if DEBUG
+            Button("发一条测试智能体消息（开发版）") {
+                Task { await m.receive(AgentMessageDraft(title: "测试消息", body: "开发联调：这是一条测试消息，不需要任何操作。", reason: "建立云端数据结构 / 联调")) }
+            }
+            #endif
             ForEach(Array(m.messages.prefix(10))) { msg in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(msg.title).font(.subheadline)
