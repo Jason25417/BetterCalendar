@@ -19,6 +19,8 @@ final class DataSyncMonitor {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var refresh: (() -> Void)?
+    /// B10：防抖窗口内收到的信号（本机保存回声 vs CloudKit 导入），决定刷新时 planChangedExternally 标什么来源。
+    @ObservationIgnored private var routing = PlanChangeRouting()
 
     func storageOpened(cloud: Bool, error: Error? = nil) {
         transportEvidence.opened(cloud: cloud)
@@ -46,16 +48,17 @@ final class DataSyncMonitor {
                 if let error = event.error { self.report("CloudKit \(event.type)：\(error.localizedDescription)") }
                 if event.succeeded {
                     switch event.type {
-                    case .import: self.lastImport = event.endDate; self.scheduleRefresh()
+                    case .import: self.lastImport = event.endDate; self.scheduleRefresh(.cloudImportSucceeded)
                     case .export: self.lastExport = event.endDate
                     default: break
                     }
                 }
             }
         })
+        // ⚠️ 本机保存也会发 NSPersistentStoreRemoteChange：这里只重读界面数据，**不当外部变更**（B10 自激循环）
         observers.append(NotificationCenter.default.addObserver(
             forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
-        ) { [weak self] _ in Task { @MainActor [weak self] in self?.scheduleRefresh() } })
+        ) { [weak self] _ in Task { @MainActor [weak self] in self?.scheduleRefresh(.storeRemoteChange) } })
         Task { await checkAccount() }
     }
 
@@ -78,20 +81,30 @@ final class DataSyncMonitor {
         } catch { account = "账号检查失败"; report(error.localizedDescription) }
     }
 
-    func scheduleRefresh() {
+    func scheduleRefresh(_ signal: PlanChangeRouting.Signal) {
+        routing.note(signal)
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            self?.refreshNow()
+            self?.flushRefresh()
         }
     }
 
     /// Re-read already imported local data. Does not promise to force Apple's transport scheduler.
+    /// 显式调用（回到前台、开发数据修改、回收站恢复）= 一次性外部变更。
     func refreshNow() {
+        routing.note(.manualRefresh)
+        flushRefresh()
+    }
+
+    private func flushRefresh() {
+        let source = routing.drain()
         refresh?()
         lastRefresh = .now
         NotificationCenter.default.post(name: Self.dataChanged, object: nil)
-        NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil)
+        // 界面照常刷新；时间线协调器按 source 分流——本机保存回声（localStoreSave）不触发重算（B10）
+        NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
+                                        userInfo: [PlanChangeSource.key: source])
     }
 }
