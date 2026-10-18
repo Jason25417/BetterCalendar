@@ -4,7 +4,7 @@
 //
 //  SPEC §19 P2：App ⇄ BetterCalendar 智能体（Claude Code 专用会话）的桥接目录（协议见智能体工作区 bridge/README.md）。
 //  App 在沙盒里，靠用户选一次目录（安全书签）获得读写权：
-//    - 写 context.json（今天的安排 + 正在做的事），供智能体 read_context；
+//    - 写 context.json（今天的安排、计时、待办池与长期事项、系统日历、最近实际、可选日记；见 AgentContext.swift），供智能体 read_context；
 //    - 导入 proposals/*.json → 交给 ProposalCenter 走多端审批（来源=智能体），导入后移入 proposals/imported/；
 //    - 回写 results/<id>.json（提案最新状态），供智能体 read_proposals。
 //  不认识的改动种类一律拒绝导入（移入 proposals/rejected/）并记错误，绝不猜测。
@@ -147,12 +147,12 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     private let center: ProposalCenter
     private let messages: AgentMessageCenter?
-    private let contextProvider: () -> [String: Any]
+    private let contextProvider: () async -> [String: Any]
     private let defaults: UserDefaults
     private var loop: Task<Void, Never>?
 
     init(center: ProposalCenter, messages: AgentMessageCenter? = nil, defaults: UserDefaults = .standard,
-         contextProvider: @escaping () -> [String: Any]) {
+         contextProvider: @escaping () async -> [String: Any]) {
         self.center = center; self.messages = messages; self.defaults = defaults; self.contextProvider = contextProvider
         folderPath = resolveFolder()?.path
     }
@@ -203,7 +203,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     func sync(io: AgentBridgeIO) async {
         do {
             try io.prepare()
-            try io.writeContext(contextProvider())
+            try io.writeContext(await contextProvider())
             let files = try io.pendingProposalFiles()
             if !files.isEmpty { await center.refresh() }
             for file in files {
@@ -243,14 +243,22 @@ nonisolated struct AgentBridgeIO: Sendable {
     // MARK: 事件（SPEC §19 C1，默认关）
 
     /// 做完一件事等关键时刻：写事件唤醒智能体。未开启或未连接时什么都不做。
+    /// 上下文收集要读 EventKit（async），所以写事件放进一个任务里跑；调用方保持同步签名。
     func emit(kind: String, summary: String, payload: [String: Any] = [:]) {
+        guard eventsEnabled(), connected else { return }
+        nonisolated(unsafe) let payload = payload
+        Task { await emitNow(kind: kind, summary: summary, payload: payload) }
+    }
+
+    /// emit 的异步本体：先刷新快照再写事件（调度器被事件唤醒时，智能体读到的就是此刻的上下文）。
+    func emitNow(kind: String, summary: String, payload: [String: Any] = [:]) async {
         guard eventsEnabled(), let url = resolveFolder() else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
             let io = AgentBridgeIO(root: url)
             try io.prepare()
-            try io.writeContext(contextProvider())   // 先刷新快照，智能体读到的就是此刻
+            try io.writeContext(await contextProvider())   // 先刷新快照，智能体读到的就是此刻
             try io.writeEvent(kind: kind, summary: summary, payload: payload, at: .now)
             DevLog.shared.info("智能体桥接", "已写事件 \(kind)：\(summary)")
         } catch { report("写事件失败", error) }
@@ -299,20 +307,4 @@ nonisolated struct AgentBridgeIO: Sendable {
     }
 }
 
-/// 写给智能体的「今天」快照（只读副本；真相仍在 BetterCalendar）。
-@MainActor enum AgentBridgeContext {
-    static func snapshot(planStore: (any PlanReading)?, active: (title: String, start: Date)?, now: Date = .now) -> [String: Any] {
-        let iso = ISO8601DateFormatter()
-        let hm = DateFormatter(); hm.dateFormat = "HH:mm"
-        let day = DayContext.logicalStartOfDay(now)
-        let blocks = ((try? planStore?.plannedBlocks(on: day)) ?? []).sorted { $0.start < $1.start }.map { b -> [String: Any] in
-            ["title": b.title, "start": hm.string(from: b.start), "end": hm.string(from: b.end),
-             "fixed": b.isFixed, "important": b.priority == .important]
-        }
-        var context: [String: Any] = ["schemaVersion": 1, "writtenAt": iso.string(from: now), "synthetic": false,
-                                      "device": ProposalDevice.label, "deviceId": ProposalDevice.id,
-                                      "today": ["logicalDayStart": iso.string(from: day), "blocks": blocks]]
-        context["running"] = active.map { ["title": $0.title, "startedAt": iso.string(from: $0.start)] as [String: Any] } ?? NSNull()
-        return context
-    }
-}
+// 写给智能体的上下文快照（AgentBridgeContext / AgentContextGatherer）见 AgentContext.swift（SPEC §19 A2）。

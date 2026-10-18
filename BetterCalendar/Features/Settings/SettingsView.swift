@@ -49,6 +49,7 @@ struct SettingsView: View {
     @State private var testing = false
     @State private var testResult: String?
     @State private var showAdvanced = false
+    @State private var showFrozenDots = false   // 「已冻结：Dots 时代功能」默认折叠
     @State private var showFeedback = false
     @State private var focusFollowOn = FocusFollowSettings.enabled
     #if os(macOS)
@@ -68,14 +69,6 @@ struct SettingsView: View {
                 }
             }
             #endif
-            if let approvals = nativeActions?.approvals {
-                Section("BC 内审批（内测）") { NativeApprovalPanel(model: approvals) }
-            }
-            if let nativeActions, let remote = nativeActions.remote {
-                Section("Dots 对话权限（内测）") { NativeConversationPermissionsPanel(actions: nativeActions, model: remote) }
-            }
-            Section("个人状态与 Dot（内测）") { StateBridgeSettingsPanel() }
-            if let nativeActions { Section("原生操作（内测）") { NativeActionsPanel(model: nativeActions) } }
             Section("数据与同步（开发期）") {
                 DataMaintenancePanel()
                 if let trash { RetainedTrashPanel(service: trash) }
@@ -403,6 +396,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            frozenDotsSections
         }
         .formStyle(.grouped)   // System-Settings 风格分组卡片（修「排版不好看」）
         // #35：另一台设备改了设置 → iCloud 同步到本地后重读 @State，面板即时反映（面板通常没开着，主要保开着时不显示旧值）
@@ -414,6 +408,36 @@ struct SettingsView: View {
         // 别再改成 min/ideal/max 弹性尺寸追「可缩放」：那会让窗口撑到内容高、超屏后无法滚被截断（0.18.22 踩过、0.18.38 回退）。
         .frame(width: 520, height: 600)
         #endif
+    }
+
+    /// Dots 时代功能（SPEC §19.8 冻结清单，2026-10-18 批次 8）：代码与行为原样保留、不再推进，
+    /// 收进默认折叠的分组（手动折叠：DisclosureGroup 在 macOS Form 里收不回，同「进阶设置」）。
+    /// 注意只是收起入口：StateBridge 计时与个人状态采集照常运行（计时迁移归 W5，采集去留待 Jason 决定）。
+    @ViewBuilder private var frozenDotsSections: some View {
+        Section("已冻结：Dots 时代功能") {
+            Button { withAnimation(Motion.standard) { showFrozenDots.toggle() } } label: {
+                HStack {
+                    Text(showFrozenDots ? "收起" : "展开已冻结的 Dots 时代功能")
+                    Spacer()
+                    Image(systemName: showFrozenDots ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Text("这些是 Dots 时代的内测功能，已冻结：保留不删、不再推进，由「多端审批」和 BetterCalendar 智能体接替。收起只是藏起入口，后台行为不变（共享计时与个人状态上传照常）。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if showFrozenDots {
+            if let approvals = nativeActions?.approvals {
+                Section("BC 内审批（内测·已冻结）") { NativeApprovalPanel(model: approvals) }
+            }
+            if let nativeActions, let remote = nativeActions.remote {
+                Section("Dots 对话权限（内测·已冻结）") { NativeConversationPermissionsPanel(actions: nativeActions, model: remote) }
+            }
+            Section("个人状态与 Dot（内测·已冻结）") { StateBridgeSettingsPanel() }
+            if let nativeActions { Section("原生操作（内测·已冻结）") { NativeActionsPanel(model: nativeActions) } }
+        }
     }
 
     /// 测试当前服务商的 key：输入框有内容测输入框的（未保存也能测），否则测已保存的。

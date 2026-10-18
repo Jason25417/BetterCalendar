@@ -55,6 +55,13 @@ final class JournalStore {
         return !e.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || e.mood != nil
     }
 
+    /// 某时刻之后的条目（按日期倒序，排除回收站）。只读；读失败抛错——给智能体上下文用（SPEC §19 A2，需 Jason 允许才调用）。
+    func entries(since: Date) throws -> [JournalEntry] {
+        try context.fetch(FetchDescriptor<JournalEntry>(predicate: #Predicate { $0.date >= since },
+                                                        sortBy: [SortDescriptor(\.date, order: .reverse)]))
+            .filter { !$0.isInTrash }
+    }
+
     func save() { try? context.save() }
 
     func delete(_ entry: JournalEntry) {

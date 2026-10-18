@@ -23,8 +23,22 @@ protocol CalendarStore: AnyObject {
     /// 某日历日**系统里已有**的安排（排除本 App 自建日历），给排程当"已占用"上下文。
     /// 默认空（假日历/开发期不看系统）。
     func existingEvents(on day: Date) async -> [BusySlot]
+
+    /// 只读（SPEC §19 A2，给智能体上下文）：时间窗内系统日历里的事件（排除本 App 自建日历），**含全天事件**。
+    /// 与 existingEvents 的区别：不弹权限、失败**抛错**（开发期失败必须可见），并带日历名。默认空（测试替身）。
+    func systemEvents(in window: DateInterval) async throws -> [SystemCalendarEvent]
 }
 
 extension CalendarStore {
     func existingEvents(on day: Date) async -> [BusySlot] { [] }
+    func systemEvents(in window: DateInterval) async throws -> [SystemCalendarEvent] { [] }
+}
+
+/// 系统日历里的一条事件（只读副本，来源=系统日历；BetterCalendar 自建的绿/蓝/橙日历不在内）。
+nonisolated struct SystemCalendarEvent: Sendable, Equatable {
+    var title: String
+    var start: Date
+    var end: Date
+    var isAllDay: Bool
+    var calendarTitle: String
 }

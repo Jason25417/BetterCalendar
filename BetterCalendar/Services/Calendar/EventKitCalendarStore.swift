@@ -184,6 +184,22 @@ actor EventKitCalendarStore: CalendarStore {
             .map { BusySlot(title: $0.title ?? "（无标题）", start: $0.startDate, end: $0.endDate) }
     }
 
+    /// 只读：时间窗内系统日历事件（排除本 App 自建日历，含全天）。不主动请求权限——
+    /// 后台每 20 秒刷新的上下文不该弹授权框；没权限直接抛错，由调用方显式标进上下文 + DevLog。
+    func systemEvents(in window: DateInterval) async throws -> [SystemCalendarEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
+            throw CalendarError(message: "无日历 full access，读不到系统日历")
+        }
+        let ours = Set(titles.values)
+        let others = store.calendars(for: .event).filter { !ours.contains($0.title) }
+        guard !others.isEmpty else { return [] }
+        let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: others)
+        return store.events(matching: pred)
+            .map { SystemCalendarEvent(title: $0.title ?? "（无标题）", start: $0.startDate, end: $0.endDate,
+                                       isAllDay: $0.isAllDay, calendarTitle: $0.calendar?.title ?? "") }
+            .sorted { $0.start < $1.start }
+    }
+
     // MARK: - 权限 / 日历
 
     private func ensureAccess() async throws {
