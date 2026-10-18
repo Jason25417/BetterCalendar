@@ -107,9 +107,15 @@ actor EventKitCalendarStore: CalendarStore {
                 try store.save(ev, span: .thisEvent, commit: false); changed += 1
             }
         }
-        // 删除只针对**归属本范围**（start ∈ [lo, hi)）的未匹配事件；同 ID 重复事件也在此收敛
+        // 删除只针对**归属本范围**（start ∈ [lo, hi)）的未匹配事件；同 ID 重复事件也在此收敛。
+        // 2026-10-18 止血（P4.0-1）：只删带 BetterCalendar 章的事件——无章事件不是我们写的（例如用户在日历 App
+        // 里误存进本日历的课程），永远不删。此前会误删这类事件（真机：一个重复课程系列被删掉 12 次）。
         for ev in existing where !keep.contains(ObjectIdentifier(ev))
             && ev.startDate >= lo && ev.startDate < hi {
+            guard Self.blockID(from: ev.url) != nil else {
+                DevLog.shared.warn("日历", "本日历里有一个不是 BetterCalendar 写的事件「\(ev.title ?? "")」，已保留不删（建议挪到你自己的日历）")
+                continue
+            }
             try? store.remove(ev, span: .thisEvent, commit: false); changed += 1
         }
         return changed
@@ -162,7 +168,10 @@ actor EventKitCalendarStore: CalendarStore {
         let lo = cal0.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let hi = cal0.date(byAdding: .day, value: 7, to: Date()) ?? Date()
         let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: [cal])
-        for ev in store.events(matching: pred) { try? store.remove(ev, span: .thisEvent, commit: false) }
+        // P4.0-1：只清带 BetterCalendar 章的事件；无章事件（用户误存进本日历的）永远不删。
+        for ev in store.events(matching: pred) where Self.blockID(from: ev.url) != nil {
+            try? store.remove(ev, span: .thisEvent, commit: false)
+        }
         try store.commit()
     }
 

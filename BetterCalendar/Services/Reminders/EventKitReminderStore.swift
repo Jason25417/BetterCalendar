@@ -20,7 +20,9 @@ actor EventKitReminderStore: ReminderStore {
         guard !drafts.isEmpty else { return }
         let list = try reminderList()   // 专用列表，可明确找到、可整本删
         // 覆盖：先清掉本列表里旧的未完成提醒，避免多次确认重复累积
+        // P4.0-1 止血（2026-10-18）：只清带 BetterCalendar 章的；用户自己加进本列表的提醒永远不删。
         for r in await existingReminders(in: list) where !r.isCompleted {
+            guard EventKitCalendarStore.blockID(from: r.url) != nil else { continue }
             try? store.remove(r, commit: false)
         }
         for d in drafts {
