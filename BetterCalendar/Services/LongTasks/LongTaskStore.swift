@@ -345,4 +345,38 @@ final class LongTaskStore {
         }
         return parts.isEmpty ? nil : "长线推进：" + parts.joined(separator: " · ")
     }
+
+    // MARK: 最近推进批量摘要（SPEC §19 A2：给智能体上下文，只读）
+
+    /// 某任务自 since 起的投入与最近一次投入时刻（正向口径：只陈述做了多少）。
+    struct RecentProgress: Sendable, Equatable {
+        var minutes: Int = 0
+        var lastWorkedAt: Date?
+    }
+
+    /// 批量算多件任务的近期投入：一次取会话 + 一次取相关块，**不逐项 fetch**（逐项 SwiftData 读写在循环里会吞结果，见记忆）。
+    /// 归属口径同 investedMinutes：块显式归属优先，未归属的退回标题相似。读失败抛错（调用方显式标进上下文）。
+    func recentProgress(for tasks: [LongTask], since: Date) throws -> [UUID: RecentProgress] {
+        let recent = try context.fetch(FetchDescriptor<ExecutionSession>(predicate: #Predicate { $0.start >= since }))
+        let blockIDs = Array(Set(recent.compactMap(\.blockID)))
+        var linkMap: [UUID: UUID] = [:]
+        if !blockIDs.isEmpty {
+            let blocks = try context.fetch(FetchDescriptor<PlanBlock>(predicate: #Predicate { blockIDs.contains($0.id) }))
+            for b in blocks where b.kind == .planned { if let linked = b.linkedTaskID { linkMap[b.id] = linked } }
+        }
+        var out: [UUID: RecentProgress] = [:]
+        for s in recent {
+            guard let end = s.end else { continue }
+            let owners: [UUID]
+            if let bid = s.blockID, let linked = linkMap[bid] { owners = [linked] }
+            else { owners = tasks.filter { TitleMatch.similarity(s.title, $0.title) >= 0.6 }.map(\.id) }
+            for id in owners where tasks.contains(where: { $0.id == id }) {
+                var p = out[id] ?? RecentProgress()
+                p.minutes += max(0, Int(end.timeIntervalSince(s.start) / 60))
+                p.lastWorkedAt = max(p.lastWorkedAt ?? end, end)
+                out[id] = p
+            }
+        }
+        return out
+    }
 }

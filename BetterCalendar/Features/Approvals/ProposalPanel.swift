@@ -15,6 +15,7 @@ struct ProposalPanel: View {
     var alertPush: ProposalAlertPushControl? = nil
     var messages: AgentMessageCenter? = nil
     @State private var eventsOn = AgentEventSettings.enabled
+    @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var notificationAllowed: Bool?
 
     var body: some View {
@@ -49,6 +50,13 @@ struct ProposalPanel: View {
                 }
             }
             #endif
+            Section("智能体能看到什么（A2）") {
+                Text("只读：今天的计划、正在计时的事、待办池与长期事项、系统日历（今天及未来 3 天）、最近 3 天的实际。智能体不能借此改动任何数据。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("允许智能体读最近日记", isOn: Binding(get: { journalOn }, set: { journalOn = $0; AgentContextSettings.allowRecentJournal = $0 }))
+                Text("默认关。打开后附最近 3 天日记的摘要（每篇最多前 500 字，不含照片）；随设置同步到你的所有设备，随时可关。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let messages { attentionSection(messages) }
             if let alertPush {
                 Section("App 关闭时也推送（实验，B5）") {
@@ -77,6 +85,9 @@ struct ProposalPanel: View {
         .task {
             notificationAllowed = await center.notificationPermission()
             await center.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
+            journalOn = AgentContextSettings.allowRecentJournal   // 另一台设备改了开关
         }
     }
 

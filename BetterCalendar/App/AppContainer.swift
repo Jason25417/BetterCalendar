@@ -227,9 +227,18 @@ final class AppContainer {
         if TestHost.isActive {
             self.agentBridge = nil
         } else {
-            let bridge = AgentBridge(center: proposals, messages: agentMessages) { [weak planStore, weak execution] in
-                AgentBridgeContext.snapshot(planStore: planStore, active: execution?.active.map { ($0.title, $0.start) })
-            }
+            // SPEC §19 A2：智能体看到的一天（全部只读；日记默认不给，面板开关允许后才附）。
+            let context = AgentContextGatherer(
+                planStore: planStore, actualStore: planStore, longTasks: longTasks, calendarStore: calendarStore,
+                journalStore: journalStore,
+                running: { [weak execution] in
+                    guard let execution else { return .init() }
+                    return .init(foreground: execution.active.map { .init(title: $0.title, start: $0.start, pausedSeconds: $0.pausedTotal,
+                                                                          timingStyle: $0.timingStyle.rawValue) },
+                                 background: execution.background.map { .init(title: $0.title, start: $0.start, pausedSeconds: $0.pausedTotal) },
+                                 onBreak: execution.isOnBreak)
+                })
+            let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
             bridge.start()
             execution.onBlockFinished = { [weak bridge] title, seconds in

@@ -23,6 +23,7 @@ enum SettingsSync {
         "reconcile.additionPolicy", "reconcile.deletionPolicy",
         "distraction.enabled", "distraction.keywords",
         "integration.focusFollow",
+        "agentContext.allowRecentJournal",   // SPEC §19 A2：允许智能体读最近日记（隐私偏好，两端一致；默认关）
     ]
 
     /// 远程设置到达通知（设置页据此重读 @State 刷新）。
