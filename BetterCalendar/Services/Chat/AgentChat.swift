@@ -1,0 +1,449 @@
+//
+//  AgentChat.swift
+//  BetterCalendar
+//
+//  SPEC §19 A1：在 iPhone / Mac 上随口跟 BetterCalendar 智能体说话。
+//  一条对话 = iCloud 私有库（与提案同分区 BCApprovals）里的一条 BCChatMessage 记录，各端看到同一份：
+//    你说一句（任一端）→ 存 iCloud → Mac 端桥接取走、写成 user_message 事件唤醒智能体（标记「已转交」）
+//    → 智能体用 reply_jason 回复 → Mac 导入回复存 iCloud → 各端显示（按打扰规则决定是否弹通知）。
+//  智能体在对话里提出的改动以卡片呈现，卡片只存提案 id、状态一律读 ProposalCenter（B3：同一件事的第三个入口）。
+//  F1 晚间复盘也走这里（kind = eveningReview）。
+//
+
+import CloudKit
+import Foundation
+import Observation
+
+nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable {
+    enum Author: String, Codable, Sendable { case user, agent }
+    /// chat = 普通对话；eveningReview = F1 晚间复盘（智能体写「今天做成了什么」）。
+    enum Kind: String, Codable, Sendable, CaseIterable { case chat, eveningReview }
+    enum Delivery: String, Codable, Sendable { case delivered, suppressed }
+
+    var id: UUID
+    var createdAt: Date
+    var author: Author
+    /// 你说话的那台设备 / 导入智能体回复的那台 Mac。
+    var deviceId: String
+    var deviceLabel: String
+    var text: String
+    var kind: Kind = .chat
+    /// 智能体回复的是哪一条你的消息；你的消息则指向你接着说的那条智能体消息（如复盘后补一句）。
+    var replyTo: UUID?
+    /// 对话里的提案卡片：只存 id，状态读 ProposalCenter（与通知、面板同一份）。
+    var proposalIds: [UUID] = []
+    /// 引出它的事件 id（智能体侧上下级关系）。
+    var parentRef: String?
+    // —— 你的消息：Mac 桥接转交给智能体的回执 ——
+    var forwardedAt: Date?
+    var forwardedByDeviceId: String?
+    // —— 智能体的消息：是否弹通知（Mac 导入时按打扰规则决定一次，各端照办）——
+    var delivery: Delivery?
+    var suppressReason: String?
+}
+
+/// 智能体回复（桥接文件 chat/<uuid>.json 解析后）。
+nonisolated struct AgentChatReplyDraft: Sendable, Equatable {
+    var id: UUID
+    var text: String
+    var kind: AgentChatMessage.Kind = .chat
+    var replyTo: UUID?
+    var proposalIds: [UUID] = []
+    var parentRef: String?
+}
+
+nonisolated protocol AgentChatTransport: Sendable {
+    func post(_ message: AgentChatMessage) async throws
+    func fetchRecent() async throws -> [AgentChatMessage]
+    func save(_ message: AgentChatMessage) async throws
+}
+
+/// 测试与 test host 用：两个 AgentChatCenter 共用一个实例 = 模拟两台设备经 iCloud 中转。
+actor InMemoryAgentChatTransport: AgentChatTransport {
+    private var store: [UUID: AgentChatMessage] = [:]
+    var failNextPosts = 0
+    func setFailNextPosts(_ n: Int) { failNextPosts = n }
+    func post(_ message: AgentChatMessage) async throws {
+        if failNextPosts > 0 { failNextPosts -= 1; throw URLError(.notConnectedToInternet) }
+        store[message.id] = message
+    }
+    func fetchRecent() async throws -> [AgentChatMessage] { store.values.sorted { $0.createdAt < $1.createdAt } }
+    func save(_ message: AgentChatMessage) async throws { store[message.id] = message }
+}
+
+/// 与提案同一个 iCloud 私有分区（BCApprovals），记录类型 BCChatMessage。整条消息以 JSON 存 payload（唯一真相），
+/// author/text/kind/createdAtLocal 镜像成独立字段便于排查。读取走分区增量变更（不依赖查询索引）。
+actor CloudKitAgentChatStore: AgentChatTransport {
+    static let recordType = "BCChatMessage"
+    private let db: CKDatabase
+    private var known: [CKRecord.ID: CKRecord] = [:]
+    private var changeToken: CKServerChangeToken?
+    private var zoneReady = false
+
+    init(containerIdentifier: String = "iCloud.com.jason.BetterCalendar") {
+        db = CKContainer(identifier: containerIdentifier).privateCloudDatabase
+    }
+
+    private func recordID(_ id: UUID) -> CKRecord.ID { CKRecord.ID(recordName: "chat-" + id.uuidString, zoneID: CloudKitProposalStore.zoneID) }
+
+    private func encode(_ m: AgentChatMessage, into r: CKRecord) throws {
+        r["payload"] = String(decoding: try JSONEncoder().encode(m), as: UTF8.self) as CKRecordValue
+        r["author"] = m.author.rawValue as CKRecordValue
+        r["text"] = m.text as CKRecordValue
+        r["kind"] = m.kind.rawValue as CKRecordValue
+        r["createdAtLocal"] = m.createdAt as CKRecordValue
+    }
+
+    private func decode(_ r: CKRecord) -> AgentChatMessage? {
+        guard r.recordType == Self.recordType, let raw = r["payload"] as? String,
+              let m = try? JSONDecoder().decode(AgentChatMessage.self, from: Data(raw.utf8)) else { return nil }
+        return m
+    }
+
+    /// iPhone 可能比任何提案更早发第一句话：分区不存在就先建（幂等）。
+    private func ensureZone() async throws {
+        guard !zoneReady else { return }
+        _ = try await db.modifyRecordZones(saving: [CKRecordZone(zoneID: CloudKitProposalStore.zoneID)], deleting: [])
+        zoneReady = true
+    }
+
+    func post(_ message: AgentChatMessage) async throws {
+        try await ensureZone()
+        let r = CKRecord(recordType: Self.recordType, recordID: recordID(message.id))
+        try encode(message, into: r)
+        known[r.recordID] = try await db.save(r)
+    }
+
+    func fetchRecent() async throws -> [AgentChatMessage] {
+        var more = true
+        while more {
+            let changes: (modificationResultsByID: [CKRecord.ID: Result<CKDatabase.RecordZoneChange.Modification, Error>],
+                          deletions: [CKDatabase.RecordZoneChange.Deletion], changeToken: CKServerChangeToken, moreComing: Bool)
+            do {
+                changes = try await db.recordZoneChanges(inZoneWith: CloudKitProposalStore.zoneID, since: changeToken)
+            } catch let error as CKError where error.code == .changeTokenExpired {
+                changeToken = nil; known = [:]; continue
+            } catch let error as CKError where error.code == .zoneNotFound {
+                return []   // 还没有任何人说过话 / 提过案
+            }
+            for (id, result) in changes.modificationResultsByID {
+                // 同分区还有提案（BCProposal）与主动消息（BCAgentMessage）：只收对话记录。
+                if case let .success(m) = result, m.record.recordType == Self.recordType { known[id] = m.record }
+            }
+            for d in changes.deletions { known[d.recordID] = nil }
+            changeToken = changes.changeToken; more = changes.moreComing
+        }
+        return known.values.compactMap(decode).sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 只有两种更新：Mac 写「已转交」回执、（将来）撤回。都是单写者字段，按改动键保存即可。
+    func save(_ message: AgentChatMessage) async throws {
+        let id = recordID(message.id)
+        let base: CKRecord
+        if let cached = known[id]?.copy() as? CKRecord { base = cached } else { base = try await db.record(for: id) }
+        try encode(message, into: base)
+        let (results, _) = try await db.modifyRecords(saving: [base], deleting: [], savePolicy: .changedKeys, atomically: true)
+        switch results[id] {
+        case let .success(saved)?: known[id] = saved
+        case let .failure(error)?: throw error
+        case nil: break
+        }
+    }
+}
+
+// MARK: - 通知规则
+
+/// 智能体对话消息要不要弹通知。
+/// - 回应型（回复你刚说的话 / 你自己定了时刻的晚间复盘）：是你要的，不计入频率上限、不受「主动通知总开关」与安静时段限制；
+///   但「一键静音」始终有效（通知铁则：一键静音始终都在）。
+/// - 主动型（智能体自己开口）：完全按 AttentionPolicy（C3）走，与 notify_jason 共用同一份设置与频率额度。
+nonisolated enum AgentChatNotifyPolicy {
+    static func isSolicited(_ draft: AgentChatReplyDraft) -> Bool { draft.replyTo != nil || draft.kind == .eveningReview }
+
+    static func evaluate(_ draft: AgentChatReplyDraft, settings: AttentionSettings, at now: Date,
+                         recentProactive: [Date]) -> AttentionVerdict {
+        guard isSolicited(draft) else { return AttentionPolicy.evaluate(settings, at: now, recentDeliveries: recentProactive) }
+        if let until = settings.mutedUntil, now < until {
+            return .suppress("静音中（到 \(until.formatted(date: .omitted, time: .shortened))）")
+        }
+        return .allow
+    }
+}
+
+/// 晚间复盘的措辞自检（只告警、不拦截）：正反馈原则禁止出现的词一旦出现，开发期必须可见。
+nonisolated enum AgentChatToneLint {
+    static let forbidden = ["失败", "落后", "拖延", "又没", "没做到", "没完成", "完成率", "缺口"]
+    static func flags(_ text: String) -> [String] { forbidden.filter { text.contains($0) } }
+}
+
+// MARK: - 你的消息在路上走到哪了（失败 / 离线必须可见）
+
+nonisolated enum AgentChatUserStatus: Equatable, Sendable {
+    case sending
+    case failed(String)
+    /// 已存进 iCloud，等 Mac 取走（overdue = 超过 2 分钟还没取走，提示检查 Mac）。
+    case waitingForMac(overdue: Bool)
+    /// 超过转交时限（6 小时）仍没被取走：Mac 不会再转交，免得智能体回一句过时的话。
+    case expired
+    /// 已转交智能体（overdue = 超过 10 分钟没回复，提示检查调度器）。
+    case withAgent(overdue: Bool)
+    case replied
+
+    var label: String {
+        switch self {
+        case .sending: "发送中…"
+        case let .failed(why): "没发出去：\(why)"
+        case .waitingForMac(false): "已存到 iCloud，等 Mac 转交给智能体"
+        case .waitingForMac(true): "Mac 还没取走：需要 Mac 开着 BetterCalendar 并连接智能体 bridge 文件夹"
+        case .expired: "没送到：超过 6 小时 Mac 都没取走，不再转交（可以重新说一次）"
+        case .withAgent(false): "智能体已收到，正在想"
+        case .withAgent(true): "智能体超过 10 分钟没回复：检查 Mac 上的调度器是否在运行"
+        case .replied: "已回复"
+        }
+    }
+    var isProblem: Bool {
+        switch self {
+        case .failed, .expired, .waitingForMac(true), .withAgent(true): true
+        default: false
+        }
+    }
+}
+
+@MainActor protocol AgentChatNotifying {
+    func show(_ message: AgentChatMessage) async
+    func withdraw(_ ids: [UUID]) async
+}
+
+/// 测试 host 用：不碰系统通知中心。
+@MainActor final class SilentAgentChatNotifier: AgentChatNotifying {
+    func show(_ message: AgentChatMessage) async {}
+    func withdraw(_ ids: [UUID]) async {}
+}
+
+// MARK: - 协调者
+
+@MainActor @Observable final class AgentChatCenter {
+    /// 已存进 iCloud 的对话（按时间升序）。
+    private(set) var messages: [AgentChatMessage] = []
+    /// 还没存进 iCloud 的你的消息（发送中 / 失败待重试）；本机持久化，重启不丢。
+    private(set) var outbox: [AgentChatMessage] = []
+    private(set) var outboxErrors: [UUID: String] = [:]
+    private(set) var lastError: String?
+    private(set) var lastRefresh: Date?
+    private(set) var unreadCount = 0
+
+    /// 对话页正在前台显示：新回复不弹通知、直接算已读。
+    private(set) var isViewing = false
+
+    static let forwardWindow: TimeInterval = 6 * 3600
+    static let macPickupGrace: TimeInterval = 120
+    static let replyGrace: TimeInterval = 600
+    static let historyLimit = 300
+
+    let deviceId: String
+    let deviceLabel: String
+    private let transport: any AgentChatTransport
+    private let notifier: any AgentChatNotifying
+    let ledger: any OperationLedger
+    private let defaults: UserDefaults
+    private let now: () -> Date
+    /// 打扰规则设置与主动通知额度：与 AgentMessageCenter 共用（组装点注入）。
+    var attention: () -> AttentionSettings = { AttentionSettings.load() }
+    var recentProactiveDeliveries: () -> [Date] = { [] }
+    private var shownHere: Set<UUID>
+    /// 本机已写过 user_message 事件的消息（回执写 iCloud 失败时也不重复唤醒智能体）。
+    private var forwardedHere: Set<UUID>
+
+    private static let outboxKey = "agentChat.outbox.v1"
+    private static let shownKey = "agentChat.shownHere"
+    private static let forwardedKey = "agentChat.forwardedHere"
+    private static let lastReadKey = "agentChat.lastReadAt"
+
+    init(transport: any AgentChatTransport, notifier: any AgentChatNotifying, ledger: any OperationLedger,
+         deviceId: String, deviceLabel: String, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+        self.transport = transport; self.notifier = notifier; self.ledger = ledger
+        self.deviceId = deviceId; self.deviceLabel = deviceLabel; self.defaults = defaults; self.now = now
+        shownHere = Set((defaults.stringArray(forKey: Self.shownKey) ?? []).compactMap(UUID.init))
+        forwardedHere = Set((defaults.stringArray(forKey: Self.forwardedKey) ?? []).compactMap(UUID.init))
+        if let data = defaults.data(forKey: Self.outboxKey), let saved = try? JSONDecoder().decode([AgentChatMessage].self, from: data) {
+            outbox = saved
+            for m in saved { outboxErrors[m.id] = "上次没发出去" }
+        }
+    }
+
+    /// 对话页显示用：已存的 + 还没发出去的，按时间排。
+    var timeline: [AgentChatMessage] {
+        (messages + outbox.filter { o in !messages.contains { $0.id == o.id } }).sorted { $0.createdAt < $1.createdAt }
+    }
+
+    // MARK: 你说一句
+
+    @discardableResult
+    func send(_ raw: String) async -> AgentChatMessage? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let at = now()
+        // 接着最近一条智能体消息说（如复盘后补一句）：6 小时内才算接话。
+        let lastAgent = messages.last { $0.author == .agent && at.timeIntervalSince($0.createdAt) < Self.forwardWindow }
+        let m = AgentChatMessage(id: UUID(), createdAt: at, author: .user, deviceId: deviceId, deviceLabel: deviceLabel,
+                                 text: String(text.prefix(2000)), kind: .chat, replyTo: lastAgent?.id)
+        outbox.append(m); persistOutbox()
+        return await post(m)
+    }
+
+    /// 失败的消息重发（同一个 id，iCloud 侧幂等）。
+    @discardableResult
+    func retry(_ id: UUID) async -> AgentChatMessage? {
+        guard let m = outbox.first(where: { $0.id == id }) else { return nil }
+        return await post(m)
+    }
+
+    /// 放弃一条没发出去的消息（只删本机草稿，从没进过 iCloud）。
+    func discard(_ id: UUID) {
+        outbox.removeAll { $0.id == id }; outboxErrors[id] = nil; persistOutbox()
+    }
+
+    private func post(_ m: AgentChatMessage) async -> AgentChatMessage? {
+        outboxErrors[m.id] = nil
+        do {
+            try await transport.post(m)
+            outbox.removeAll { $0.id == m.id }; persistOutbox()
+            record(.user, "你", "chat.sent", m, "在 \(deviceLabel) 说：\(m.text.prefix(40))")
+            await refresh()
+            return m
+        } catch {
+            outboxErrors[m.id] = error.localizedDescription
+            fail("消息没发出去（已留在本机，可重试）", error)
+            return nil
+        }
+    }
+
+    // MARK: 同步（推送唤醒 / 回前台 / 轮询 / Mac 桥接每轮）
+
+    func refresh() async {
+        do { messages = Array(try await transport.fetchRecent().suffix(Self.historyLimit)) }
+        catch { fail("读取对话失败", error); return }
+        lastRefresh = now()
+        // 别的设备已经发出去的同 id 消息不再留在本机发件箱。
+        let stored = Set(messages.map(\.id))
+        if outbox.contains(where: { stored.contains($0.id) }) { outbox.removeAll { stored.contains($0.id) }; persistOutbox() }
+        let cutoff = now().addingTimeInterval(-Self.forwardWindow)
+        for m in messages where m.author == .agent && m.delivery == .delivered && m.createdAt > cutoff && !shownHere.contains(m.id) {
+            shownHere.insert(m.id)
+            if isViewing { continue }   // 正看着对话页：不弹
+            await notifier.show(m)
+            record(.system, "BetterCalendar", "chat.notified", m, "已在本机弹出")
+        }
+        defaults.set(Array(shownHere.map(\.uuidString).suffix(300)), forKey: Self.shownKey)
+        if isViewing { await markAllRead() } else { recomputeUnread() }
+    }
+
+    /// 对话页出现 / 消失（含回后台）时调用。
+    func setViewing(_ on: Bool) async {
+        isViewing = on
+        if on { await markAllRead() }
+    }
+
+    func markAllRead() async {
+        let agentIds = messages.filter { $0.author == .agent }.map(\.id)
+        if let last = messages.last(where: { $0.author == .agent })?.createdAt {
+            defaults.set(max(last.timeIntervalSince1970, defaults.double(forKey: Self.lastReadKey)), forKey: Self.lastReadKey)
+        }
+        recomputeUnread()
+        await notifier.withdraw(Array(agentIds.suffix(50)))
+    }
+
+    private func recomputeUnread() {
+        let lastRead = defaults.double(forKey: Self.lastReadKey)
+        unreadCount = messages.filter { $0.author == .agent && $0.createdAt.timeIntervalSince1970 > lastRead }.count
+    }
+
+    // MARK: Mac 桥接用
+
+    /// 等着转交给智能体的你的消息：还没有回执、本机也没转交过、且在转交时限内。
+    func pendingForwards() -> [AgentChatMessage] {
+        let cutoff = now().addingTimeInterval(-Self.forwardWindow)
+        return messages.filter { $0.author == .user && $0.forwardedAt == nil && !forwardedHere.contains($0.id) && $0.createdAt > cutoff }
+    }
+
+    /// 已写好 user_message 事件：先本机记下（防重复唤醒），再把回执写回 iCloud 让各端显示「智能体已收到」。
+    func markForwarded(_ id: UUID) async {
+        forwardedHere.insert(id)
+        defaults.set(Array(forwardedHere.map(\.uuidString).suffix(300)), forKey: Self.forwardedKey)
+        guard var m = messages.first(where: { $0.id == id }) else { return }
+        m.forwardedAt = now(); m.forwardedByDeviceId = deviceId
+        do {
+            try await transport.save(m)
+            if let i = messages.firstIndex(where: { $0.id == id }) { messages[i] = m }
+            record(.system, "BetterCalendar（\(deviceLabel)）", "chat.forwarded", m, "已转交智能体")
+        } catch { fail("写「已转交」回执失败（智能体已收到，只是别的设备暂时看不到）", error) }
+    }
+
+    /// 智能体回复（Mac 桥接导入）：先按通知规则定一次弹不弹，再存 iCloud 同步各端。幂等（同 id 只收一次）。
+    @discardableResult
+    func receiveAgent(_ draft: AgentChatReplyDraft) async -> AgentChatMessage? {
+        await refresh()
+        if let existing = messages.first(where: { $0.id == draft.id }) { return existing }
+        var at = now()
+        // 两台设备时钟有差：回复永远排在它回应的那句话之后。
+        if let asked = draft.replyTo.flatMap({ id in messages.first { $0.id == id } }), asked.createdAt >= at {
+            at = asked.createdAt.addingTimeInterval(1)
+        }
+        let proactive = recentProactiveDeliveries() + messages
+            .filter { $0.author == .agent && $0.delivery == .delivered && $0.replyTo == nil && $0.kind == .chat }.map(\.createdAt)
+        var m = AgentChatMessage(id: draft.id, createdAt: at, author: .agent, deviceId: deviceId, deviceLabel: deviceLabel,
+                                 text: draft.text, kind: draft.kind, replyTo: draft.replyTo, proposalIds: draft.proposalIds,
+                                 parentRef: draft.parentRef, delivery: .delivered)
+        if case let .suppress(why) = AgentChatNotifyPolicy.evaluate(draft, settings: attention(), at: at, recentProactive: proactive) {
+            m.delivery = .suppressed; m.suppressReason = why
+        }
+        if draft.kind == .eveningReview {
+            let hits = AgentChatToneLint.flags(draft.text)
+            if !hits.isEmpty { DevLog.shared.warn("智能体对话", "晚间复盘出现了正反馈原则禁用的词：\(hits.joined(separator: "、"))") }
+        }
+        do {
+            try await transport.post(m)
+            record(.agent, "BetterCalendar 智能体", draft.kind == .eveningReview ? "chat.review" : "chat.reply", m,
+                   (m.delivery == .delivered ? "" : "（不弹通知：\(m.suppressReason ?? "")）") + m.text.prefix(40))
+            await refresh()
+            return messages.first { $0.id == m.id } ?? m
+        } catch {
+            fail("保存智能体回复失败", error); return nil
+        }
+    }
+
+    // MARK: 给界面
+
+    func status(of given: AgentChatMessage) -> AgentChatUserStatus {
+        let m = messages.first { $0.id == given.id } ?? given   // 以最新同步到的版本为准（回执可能刚到）
+        if let why = outboxErrors[m.id] { return .failed(why) }
+        if outbox.contains(where: { $0.id == m.id }) { return .sending }
+        if messages.contains(where: { $0.author == .agent && $0.replyTo == m.id }) { return .replied }
+        let at = now()
+        if let f = m.forwardedAt {
+            // 智能体可能一次回复了连续几句：之后有任何智能体消息都算已回应。
+            if messages.contains(where: { $0.author == .agent && $0.createdAt > f }) { return .replied }
+            return .withAgent(overdue: at.timeIntervalSince(f) > Self.replyGrace)
+        }
+        let age = at.timeIntervalSince(m.createdAt)
+        if age > Self.forwardWindow { return .expired }
+        return .waitingForMac(overdue: age > Self.macPickupGrace)
+    }
+
+    func clearError() { lastError = nil }
+
+    private func persistOutbox() {
+        if outbox.isEmpty { defaults.removeObject(forKey: Self.outboxKey) }
+        else if let data = try? JSONEncoder().encode(outbox) { defaults.set(data, forKey: Self.outboxKey) }
+    }
+
+    private func record(_ actor: ProposalOrigin, _ label: String, _ event: String, _ m: AgentChatMessage, _ detail: String) {
+        ledger.append(OperationRecord(at: now(), actor: actor, actorLabel: label, deviceId: deviceId, event: event,
+                                      proposalId: m.id, parentId: m.replyTo, parentRef: m.parentRef, detail: detail))
+    }
+
+    private func fail(_ what: String, _ error: Error) {
+        lastError = "\(what)：\(error.localizedDescription)"
+        DevLog.shared.error("智能体对话", lastError!)
+    }
+}

@@ -23,6 +23,7 @@ enum SettingsSync {
         "reconcile.additionPolicy", "reconcile.deletionPolicy",
         "distraction.enabled", "distraction.keywords",
         "integration.focusFollow",
+        "agentChat.eveningReview.enabled", "agentChat.eveningReview.minute",   // SPEC §19 F1：iPhone 上设、Mac 触发
     ]
 
     /// 远程设置到达通知（设置页据此重读 @State 刷新）。
