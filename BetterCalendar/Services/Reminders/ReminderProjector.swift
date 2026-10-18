@@ -162,7 +162,7 @@ actor ReminderProjector: ReminderStore, AskReminderProjecting {
 
     // MARK: AskReminderProjecting（「几点提醒我」）
 
-    static func askRevision(title: String, fireAt: Date?) -> String {
+    nonisolated static func askRevision(title: String, fireAt: Date?) -> String {
         ProposalRevision.hash(["ask", title, ReminderProjection.wallKey(fireAt) ?? "-"])
     }
 
