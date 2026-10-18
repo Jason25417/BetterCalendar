@@ -229,29 +229,72 @@ struct W13ActivityTests {
     @Test func shortcutIntentWritesEventAndQueuesUpload() async throws {
         let d = suite(), cloud = MemoryActivityCloud()
         let sink = ActivityPhoneSink(log: FileActivityLog(root: tempDir()), outbox: ActivityOutbox(url: nil), transport: cloud)
-        let r = try await ActivityShortcutRecorder.record(opened: true, appName: "  微信 ", at: at(20, 8), deviceId: "phone-1",
-                                                          platform: "iOS", sink: sink, defaults: d, extra: ["batteryPercent": "55"])
-        guard case let .recorded(o) = r else { Issue.record("应记下"); return }
-        #expect(o.written == 1 && o.uploaded == 1 && o.pendingUpload == 0)
+        let r = try await ActivityShortcutRecorder.recordOpened(appName: "  微信 ", at: at(20, 8), deviceId: "phone-1",
+                                                                platform: "iOS", sink: sink, defaults: d, extra: ["batteryPercent": "55"])
+        guard case let .recorded(events, o) = r else { Issue.record("应记下"); return }
+        #expect(events.count == 1 && o.written == 1 && o.uploaded == 1 && o.pendingUpload == 0)
         let e = try await sink.log.events(in: DateInterval(start: at(20, 0), end: at(21, 0)))
         #expect(e.count == 1 && e[0].kind == .appOpened && e[0].source == .shortcut && e[0].appName == "微信")
         #expect(e[0].detail?["batteryPercent"] == "55")
         #expect(await cloud.stored[e[0].id] != nil)
-        // 「所有 App」自动化：不知道是哪个 App → appName 空 + 标记
-        let unknown = ActivityShortcutRecorder.event(opened: false, appName: nil, at: at(20, 9), deviceId: "p", platform: "iOS")
-        #expect(unknown.kind == .appClosed && unknown.appName == nil && unknown.detail?["appUnknown"] == "true")
+        #expect(PhoneAppSession.load(d).current == "微信")   // 记住打开的是哪个 App（给关闭时比较）
         // 传不上：本机照记，留在队列里
         await cloud.setFailUpload(true)
-        let r2 = try await ActivityShortcutRecorder.record(opened: false, appName: nil, at: at(20, 9), deviceId: "phone-1",
-                                                           platform: "iOS", sink: sink, defaults: d)
-        guard case let .recorded(o2) = r2 else { Issue.record("应记下"); return }
+        let r2 = try await ActivityShortcutRecorder.recordClosed(frontApp: "", at: at(20, 9), deviceId: "phone-1",
+                                                                 platform: "iOS", sink: sink, defaults: d)
+        guard case let .recorded(closed, o2) = r2 else { Issue.record("应记下"); return }
+        #expect(closed.first?.kind == .appClosed && closed.first?.appName == "微信")
         #expect(o2.written == 1 && o2.pendingUpload == 1 && o2.uploadError != nil)
         // 暂停时什么都不记
         ActivitySettings.pause(until: at(20, 11), d)
-        #expect(try await ActivityShortcutRecorder.record(opened: true, appName: "X", at: at(20, 10), deviceId: "p",
-                                                          platform: "iOS", sink: sink, defaults: d) == .notRecording)
+        #expect(try await ActivityShortcutRecorder.recordOpened(appName: "X", at: at(20, 10), deviceId: "p",
+                                                                platform: "iOS", sink: sink, defaults: d) == .notRecording)
         // 意图本身：后台运行、不打开 App
-        #expect(RecordAppActivityIntent.openAppWhenRun == false)
+        #expect(!RecordAppOpenedIntent.openAppWhenRun && !RecordAppClosedIntent.openAppWhenRun)
+    }
+
+    @Test func phoneAppSessionTellsOverlayFromRealClose() {
+        let f = PhoneAppSession.Factory(deviceId: "p", platform: "iOS")
+        var s = PhoneAppSession()
+        // 打开微信 → 拉下控制中心（关闭触发，2 秒后前台仍是微信）→ 只是盖了一层
+        #expect(s.opened("微信", at: at(20, 8), f).map(\.kind) == [.appOpened])
+        let overlay = s.closed(front: "微信", at: at(20, 8, 5), f)
+        #expect(overlay.count == 1 && overlay[0].kind == .other && overlay[0].detail?["signal"] == "overlay" && overlay[0].detail?["state"] == "started")
+        #expect(overlay[0].at == at(20, 8, 5).addingTimeInterval(-2))   // 事件时刻 = 关闭触发那一刻（减去等待的 2 秒）
+        // 控制中心收起、iOS 又报一次「打开微信」：不是新的打开
+        let back = s.opened("微信", at: at(20, 8, 6), f)
+        #expect(back.count == 1 && back[0].detail?["signal"] == "overlay" && back[0].detail?["state"] == "ended")
+        #expect(s.opened("微信", at: at(20, 8, 7), f).isEmpty)   // 同一个 App 重复触发：不重复记
+        // 回到主屏幕（获取当前 App 为空 / SpringBoard）→ 真关闭
+        let home = s.closed(front: "SpringBoard", at: at(20, 9), f)
+        #expect(home.map(\.kind) == [.appClosed] && home[0].appName == "微信" && home[0].detail?["reason"] == "home")
+        #expect(s.current == nil)
+
+        // 切换：关闭先到（2 秒后前台已是 Safari）→ 记微信关闭、不替 Safari 记打开；Safari 的打开由它自己的触发记
+        _ = s.opened("微信", at: at(20, 10), f)
+        let sw = s.closed(front: "Safari", at: at(20, 10, 5), f)
+        #expect(sw.map(\.kind) == [.appClosed] && sw[0].appName == "微信" && sw[0].detail?["switchedTo"] == "Safari")
+        #expect(s.opened("Safari", at: at(20, 10, 3), f).map(\.kind) == [.appOpened])
+        // 切换：打开先到（Safari → 备忘录，备忘录的打开先触发，Safari 的关闭 2 秒后到、前台已是备忘录）→ 记 Safari 关闭，不当盖层
+        _ = s.opened("备忘录", at: at(20, 11), f)
+        let late = s.closed(front: "备忘录", at: at(20, 11, 0, 2), f)
+        #expect(late.map(\.kind) == [.appClosed] && late[0].appName == "Safari" && late[0].detail?["reason"] == "switch")
+        // 之后再拉控制中心：盖层
+        #expect(s.closed(front: "备忘录", at: at(20, 11, 30), f).first?.detail?["signal"] == "overlay")
+        // 老式自动化没传名字：照记打开，标「不知道是哪个 App」
+        var bare = PhoneAppSession()
+        #expect(bare.opened(nil, at: at(20, 12), f).first?.detail?["appUnknown"] == "true")
+        // 状态存取（Data，plist 类型）
+        let d = suite(); s.save(d)
+        #expect(PhoneAppSession.load(d) == s)
+    }
+
+    @Test func frozenStateBridgeNeverReadsBrowserURLs() throws {
+        // W13 加了 temporary-exception.apple-events；冻结的 Dots 采集必须继续不读 / 不上传浏览器网址。
+        #expect(StateBridgeCollector.emitsBrowserURLs == false)
+        // W13 能读的浏览器 = 沙盒例外列出的那些（不在列表里的会被拦成 -600）
+        #expect(ActivityBrowsers.safariFamily.union(ActivityBrowsers.chromiumFamily) ==
+                ["com.apple.Safari", "com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser", "com.brave.Browser", "com.vivaldi.Vivaldi"])
     }
 
     // MARK: iCloud 导入映射

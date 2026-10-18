@@ -42,9 +42,9 @@ nonisolated protocol ActivityBrowserReading: Sendable {
 
 nonisolated enum ActivityBrowsers {
     /// AppleScript 能问当前页的浏览器（Safari 系用 current tab/name，Chromium 系用 active tab/title）。
-    static let safariFamily: Set<String> = ["com.apple.Safari", "com.apple.SafariTechnologyPreview"]
-    static let chromiumFamily: Set<String> = ["com.google.Chrome", "com.google.Chrome.canary", "com.microsoft.edgemac",
-                                              "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "company.thebrowser.Browser",
+    /// 与 BetterCalendar.entitlements 的 temporary-exception.apple-events 列表保持一致（不在列表里的会被沙盒拦成 -600）。
+    static let safariFamily: Set<String> = ["com.apple.Safari"]
+    static let chromiumFamily: Set<String> = ["com.google.Chrome", "com.microsoft.edgemac", "company.thebrowser.Browser",
                                               "com.brave.Browser", "com.vivaldi.Vivaldi"]
     static func supports(_ bundleID: String?) -> Bool {
         guard let bundleID else { return false }

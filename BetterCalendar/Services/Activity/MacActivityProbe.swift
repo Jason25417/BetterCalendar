@@ -14,8 +14,8 @@
 //    ⚠️ 2026-10-18 实测证据：Jason 机器上旧 StateBridge 用同样方式读浏览器 103 次全部 -600（procNotFound）——
 //    浏览器明明在前台，这是 App 沙盒拦截 Apple 事件的典型表现：现有的 com.apple.security.automation.apple-events
 //    只管 hardened runtime 的授权弹窗，沙盒还需要 com.apple.security.temporary-exception.apple-events（列出浏览器 bundle id）。
-//    加不加这条 entitlement 交 Jason 决定（会顺带让已冻结、仍开着的 StateBridge 采集开始读到真实网址，见 W13 报告）；
-//    没加之前，状态行明确显示「沙盒拦截」，窗口标题（辅助功能）与智能体侧的浏览历史回填兜底。
+//    2026-10-18 Jason 批准：例外已加进 BetterCalendar.entitlements（列表与 ActivityBrowsers 一致）；
+//    冻结的 StateBridge 不会因此读到网址——它的浏览器读取已无条件关掉（StateBridgeCollector.emitsBrowserURLs）。
 //
 
 #if os(macOS)
@@ -123,7 +123,7 @@ actor AppleScriptActivityBrowserReader: ActivityBrowserReading {
     nonisolated static func reason(_ code: Int?) -> String {
         switch code {
         case -1743: "没有「自动化」授权：系统设置 → 隐私与安全性 → 自动化 → BetterCalendar 里打开对应浏览器"
-        case -600: "沙盒拦截（-600）：App 沙盒不允许向浏览器发 Apple 事件，需要加 temporary-exception.apple-events 授权（待 Jason 决定）"
+        case -600: "浏览器进程不可达（-600）：一直这样说明当前装的版本还没带上 W13 的 apple-events 沙盒例外"
         case -1712: "浏览器 2 秒内没回应（超时）"
         case -1728: "浏览器没有可读的窗口/标签页"
         case let c?: "浏览器读取失败（错误 \(c)）"

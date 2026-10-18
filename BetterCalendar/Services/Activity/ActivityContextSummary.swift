@@ -139,10 +139,16 @@ nonisolated enum ActivityContextSummary {
         let kept = phone.suffix(iphoneEvents).map { e -> [String: Any] in
             var r: [String: Any] = ["at": t(e.at), "kind": e.kind.rawValue]
             if let a = e.appName { r["app"] = a }
-            if let s = e.detail?["signal"] { r["signal"] = s; if let a = e.detail?["activity"] { r["activity"] = a } }
+            if let s = e.detail?["signal"] {
+                r["signal"] = s
+                if let a = e.detail?["activity"] { r["activity"] = a }
+                if let st = e.detail?["state"] { r["state"] = st }
+            }
+            if e.kind == .appClosed, let to = e.detail?["switchedTo"] { r["switchedTo"] = to }
             return r
         }
         var iphone: [String: Any] = ["source": "iPhone 快捷指令自动化 / 运动与健康回填（经 iCloud 汇到 Mac；可能晚到几分钟）",
+                                     "note": "signal=overlay（started/ended）= 控制中心 / 通知盖了一层，不是关闭；appClosed 才是真关闭（回主屏幕或切换）",
                                      "windowHours": iphoneHours, "items": Array(kept), "total": phone.count, "truncated": phone.count > kept.count]
         if phone.count > kept.count { iphone["truncatedNote"] = "只列最近 \(kept.count) 条（共 \(phone.count) 条）" }
         o["iphone"] = iphone
