@@ -259,7 +259,8 @@ extension ProposalActionTests {
         let r = try rig()
         let now0 = Date()
         let label = DayContext.logicalStartOfDay(now0)
-        let start = max(label.addingTimeInterval(60), now0.addingTimeInterval(-600))
+        // 起点不早于今天的日界线（label 是日历日零点，不是 4 点日界线；4 点后 10 分钟内跑也不会落到前一个逻辑日）
+        let start = max(PinSchedule.dayBoundary(atOrBefore: now0).addingTimeInterval(60), now0.addingTimeInterval(-600))
         let block = ScheduledBlock(title: "写报告", start: start, end: start.addingTimeInterval(3600))
         try r.plans.replacePlanned([block], on: label)
         let execution = ExecutionViewModel(calendarStore: FakeCalendarStore(),

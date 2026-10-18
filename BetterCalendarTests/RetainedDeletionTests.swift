@@ -173,7 +173,9 @@ import Testing
         let c = try container(), context = c.mainContext
         let plan = PlanStore(context: context)
         let now = Date.now, id = UUID()
-        try plan.upsertActuals([ActualBlock(id: id, title: "已做", start: now.addingTimeInterval(-600), end: now)])
+        // 起点不早于今天的日界线（4 点后 10 分钟内跑也不会落到前一个逻辑日）
+        let start = max(PinSchedule.dayBoundary(atOrBefore: now), now.addingTimeInterval(-600))
+        try plan.upsertActuals([ActualBlock(id: id, title: "已做", start: start, end: max(now, start.addingTimeInterval(60)))])
         let vm = ExecutionViewModel(calendarStore: FailingRestoreCalendar(),
             reschedule: RescheduleService(planStore: plan, planner: NaivePlanningEngine()),
             planStore: plan, reminderStore: FakeReminderStore(), liveActivity: NoLiveActivity(), persistsRunState: false)
