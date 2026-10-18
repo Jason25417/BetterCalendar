@@ -433,6 +433,29 @@ final class HomeViewModel {
             TerrainSummary.freeMinutes(spans: spans, from: now(), until: workEnd))
     }
 
+    /// W12（SPEC §19.13 Q5 投影最小集）：确认时投进提醒事项的只有**截止时间**——带 DDL 的计划块 + 带 DDL 的待办池条目。
+    /// 计划块本身（日历里已有，再投会重复响）、没截止的块/待办都不投。纯函数、可单测。
+    /// 返回：要同步的提醒草稿 + 已过「最迟该开始」时刻的（不写 VTODO，改发一条前向通知）。
+    static func reminderProjection(blocks: [EditableBlock], pending: [ParsedLongTask], leadMinutes leadN: Int,
+                                   now: Date) -> (drafts: [ReminderDraft], pastDue: [(title: String, ddl: Date, minutes: Int)]) {
+        var reminders: [ReminderDraft] = []
+        var pastDueNudges: [(title: String, ddl: Date, minutes: Int)] = []
+        for b in blocks {
+            guard let ddl = b.deadline else { continue }   // 没截止 = 不投（计划块本身在日历里）
+            let m = max(1, Int(b.end.timeIntervalSince(b.start) / 60))       // 时长(分)
+            let fire = ddl.addingTimeInterval(TimeInterval(-(m + leadN) * 60))   // p−m−N
+            if fire > now {
+                reminders.append(ReminderDraft(title: b.title, due: ddl, priority: 1, notes: nil,
+                                               leadMinutes: m + leadN, blockID: b.id))   // 到期前 m+N 分响 = p−m−N
+            } else {
+                pastDueNudges.append((b.title, ddl, m))   // 已过 p−m−N（加得太晚）→ 不写 VTODO、直接发消息（clamp）
+            }
+        }
+        // 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL、响在 p−m−N)；已排成今天块的跳过、不重复
+        reminders += poolReminderDrafts(pending: pending, blockTitles: blocks.map(\.title), leadMinutes: leadN)
+        return (reminders, pastDueNudges)
+    }
+
     /// 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL)。纯函数、可单测。
     /// 去重：已被排成今天块的（块已自带 DDL 提醒）跳过，避免两条重复提醒。priority 5=中，同带 DDL 块口径。
     static func poolReminderDrafts(pending: [ParsedLongTask], blockTitles: [String],
@@ -510,23 +533,8 @@ final class HomeViewModel {
         // 提醒重设计（2026-07-09）：只给**有具体 DDL** 的块写提醒事项——「尽早」不再发时钟提醒
         // （交给晨间/menu bar/nudge，因为它的开始时间是 reflow 的动态猜测、钉钟点=假精确+施压）。
         // 提醒响在 **p−m−N**（截止 − 时长 − 提前量）=「最迟该开始」的前向提醒（"现在做还来得及"）。
-        let leadN = ReminderSettings.leadMinutes
-        var reminders: [ReminderDraft] = []
-        var pastDueNudges: [(title: String, ddl: Date, minutes: Int)] = []
-        for b in blocks where b.deadline != nil {
-            let ddl = b.deadline!
-            let m = max(1, Int(b.end.timeIntervalSince(b.start) / 60))       // 时长(分)
-            let fire = ddl.addingTimeInterval(TimeInterval(-(m + leadN) * 60))   // p−m−N
-            if fire > .now {
-                reminders.append(ReminderDraft(title: b.title, due: ddl, priority: 1, notes: nil,
-                                               leadMinutes: m + leadN, blockID: b.id))   // 到期前 m+N 分响 = p−m−N
-            } else {
-                pastDueNudges.append((b.title, ddl, m))   // 已过 p−m−N（加得太晚）→ 不写 VTODO、直接发消息（clamp）
-            }
-        }
-        // 带 DDL 的未来任务入池 → 系统提醒事项(due=DDL、响在 p−m−N)；已排成今天块的跳过、不重复
-        reminders += Self.poolReminderDrafts(pending: pendingLongTasks, blockTitles: blocks.map(\.title),
-                                             leadMinutes: leadN)
+        let (reminders, pastDueNudges) = Self.reminderProjection(blocks: blocks, pending: pendingLongTasks,
+                                                                 leadMinutes: ReminderSettings.leadMinutes, now: .now)   // 过点守卫按真实墙钟（通知按墙钟响）
         let sorted = blocks.sorted { $0.start < $1.start }
         isWorking = true; errorText = nil; arrangedCount = nil; refinedChangeCount = nil
         do {
@@ -569,7 +577,11 @@ final class HomeViewModel {
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
                 try await projection.project(label: label)
             }
-            try await reminderStore.sync(reminders, scope: reminderScope, now: now())  // 有 DDL 的事项 → 提醒事项（响在 p−m−N）
+            // 有 DDL 的事项 → 提醒事项（响在 p−m−N）。W12：提醒事项只是展示面——没同步成不拦计划保存，但要可见
+            do { try await reminderStore.sync(reminders, scope: reminderScope, now: now()) } catch {
+                errorText = "计划已保存；提醒事项这次没同步：\(error.localizedDescription)"
+                DevLog.shared.error("提醒", "计划已保存，提醒事项这次没同步：\(error.localizedDescription)")
+            }
             // 过点 clamp：p−m−N 已过去的（加得太晚），不写过期 VTODO（不会响），直接立刻发一条前向通知
             for n in pastDueNudges {
                 await notifier.notifyNow(title: "「\(n.title)」该开始了",
