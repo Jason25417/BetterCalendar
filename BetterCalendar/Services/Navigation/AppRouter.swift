@@ -11,12 +11,22 @@ import Observation
 @Observable
 final class AppRouter {
     // today 仅 iOS（macOS 走 menu bar）；longterm=#40 周期态（2026-07-15 S1 修订四 tab 终局）
-    enum Tab: String, Hashable { case schedule, today, longterm, journal }
+    // chat=SPEC §19 A1 跟智能体说话（iOS 标签页；macOS 是独立窗口，见 openChatRequest）
+    enum Tab: String, Hashable { case schedule, today, longterm, journal, chat }
     var selectedTab: Tab = .schedule
     var openNativeApprovals = false
     /// SPEC §19 多端审批（新，CloudKit）面板；proposalFocusId = 从通知「查看详情」进来时要定位的提案。
     var openProposals = false
     var proposalFocusId: UUID?
+    /// SPEC §19 A1：打开对话（iOS 切到「智能体」标签页；macOS 打开对话窗口，主窗口里的观察者消费后清空）。
+    var openChatRequest = false
+    func openChat() {
+        #if os(iOS)
+        selectedTab = .chat
+        #else
+        openChatRequest = true
+        #endif
+    }
     var nativeApprovalCommandId: String?
     var nativeApprovalPreviewRequest: UUID?
     /// 复盘「写下今天」请求打开某天的日记；JournalView 消费后清空。

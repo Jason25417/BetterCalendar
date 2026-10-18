@@ -49,6 +49,7 @@ final class AppContainer {
     let proposals: ProposalCenter              // SPEC §19 多端审批（CloudKit 中转；旧 nativeApprovals 冻结）
     let proposalStore: CloudKitProposalStore?  // 测试环境为 nil（内存中转）
     let agentMessages: AgentMessageCenter      // SPEC §19 C2–C4 智能体主动消息（打扰规则由 App 强制；默认关）
+    let agentChat: AgentChatCenter             // SPEC §19 A1/F1 跟智能体说话（iCloud BCChatMessage；Mac 桥接转交）
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验，默认关；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
     let nativeActions: NativeActionsViewModel
@@ -131,6 +132,9 @@ final class AppContainer {
             self.agentMessages = AgentMessageCenter(transport: InMemoryAgentMessageTransport(), notifier: SilentAgentMessageNotifier(),
                                                     ledger: MemoryOperationLedger(), deviceId: "test-host",
                                                     defaults: UserDefaults(suiteName: "bc-test-attention")!)
+            self.agentChat = AgentChatCenter(transport: InMemoryAgentChatTransport(), notifier: SilentAgentChatNotifier(),
+                                             ledger: MemoryOperationLedger(), deviceId: "test-host", deviceLabel: "测试",
+                                             defaults: UserDefaults(suiteName: "bc-test-chat")!)
             self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
                                             notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
                                             deviceId: "test-host", deviceLabel: "测试")
@@ -140,6 +144,8 @@ final class AppContainer {
             self.alertPush = ProposalAlertPushControl(store: store)
             self.agentMessages = AgentMessageCenter(transport: CloudKitAgentMessageStore(), notifier: LocalAgentMessageNotifier(),
                                                     ledger: FileOperationLedger(), deviceId: ProposalDevice.id)
+            self.agentChat = AgentChatCenter(transport: CloudKitAgentChatStore(), notifier: LocalAgentChatNotifier(),
+                                             ledger: FileOperationLedger(), deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
             self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: ExperimentOnlyExecutor(),
                                             notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
                                             deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
@@ -147,16 +153,25 @@ final class AppContainer {
         notificationDelegate.handleAgentMessage = { [weak messages = agentMessages] id, reaction in
             if let reaction { await messages?.react(id, reaction) } else { await messages?.refresh() }
         }
+        // 对话与主动消息共用同一份打扰设置（静音一处生效）与主动通知额度。
+        agentChat.attention = { [weak messages = agentMessages] in messages?.settings ?? AttentionSettings.load() }
+        agentChat.recentProactiveDeliveries = { [weak messages = agentMessages] in
+            messages?.messages.filter { $0.delivery == .delivered }.map(\.createdAt) ?? []
+        }
+        notificationDelegate.handleAgentChat = { [weak chat = agentChat] _, text in
+            if let text { await chat?.send(text) } else { await chat?.refresh() }
+        }
         notificationDelegate.handleProposal = { [weak center = proposals] id, decision in
             if let decision { await center?.decide(id, decision) } else { await center?.refresh() }
         }
         if !TestHost.isActive, let store = proposalStore {
-            ProposalWake.onPush = { [weak center = proposals, weak messages = agentMessages] in
-                await center?.refresh(); await messages?.refresh()
+            ProposalWake.onPush = { [weak center = proposals, weak messages = agentMessages, weak chat = agentChat] in
+                await center?.refresh(); await messages?.refresh(); await chat?.refresh()
             }
             Task { [weak center = proposals] in
                 await LocalProposalNotifier.registerCategories()
                 await LocalAgentMessageNotifier.registerCategories()
+                await LocalAgentChatNotifier.registerCategories()
                 do { try await store.ensureSubscription() } catch {
                     DevLog.shared.error("多端审批", "订阅审批推送失败（将靠前台轮询兜底）：\(error.localizedDescription)")
                 }
@@ -172,6 +187,15 @@ final class AppContainer {
                     try? await Task.sleep(for: .seconds(3))
                     await alertPush.set(true)
                     print("BC_DEV_SEED alertSub enabled=\(alertPush.enabled) error=\(alertPush.lastError ?? "none")")
+                }
+            }
+            // 开发期：带 BC_DEV_SEED_CHAT=1 启动 → 存一条智能体对话消息（主动型，按打扰规则通常不弹），
+            // 用于在 CloudKit Development 建出 BCChatMessage 记录类型（字段 payload/author/text/kind/createdAtLocal），再部署到 Production。
+            if ProcessInfo.processInfo.environment["BC_DEV_SEED_CHAT"] == "1" {
+                Task { [weak chat = agentChat] in
+                    try? await Task.sleep(for: .seconds(3))
+                    let m = await chat?.receiveAgent(AgentChatReplyDraft(id: UUID(), text: "开发：建立云端数据结构（BCChatMessage），可忽略。"))
+                    print("BC_DEV_SEED chat=\(m?.id.uuidString ?? "FAIL \(chat?.lastError ?? "")")")
                 }
             }
             if ProcessInfo.processInfo.environment["BC_DEV_SEED_CLOUDKIT"] == "1" {
@@ -231,6 +255,13 @@ final class AppContainer {
                 AgentBridgeContext.snapshot(planStore: planStore, active: execution?.active.map { ($0.title, $0.start) })
             }
             self.agentBridge = bridge
+            // SPEC §19 A1/F1：桥接对话（转交你的消息、导入智能体回复、晚间复盘事件）；推送到达时立即同步一轮，压低转交延迟。
+            bridge.chat = agentChat
+            bridge.eveningFacts = { [weak execution] in
+                AgentChatBridgeStep.eveningFacts(done: execution?.done.map { ($0.title, $0.start, $0.end) } ?? [])
+            }
+            let wake = ProposalWake.onPush
+            ProposalWake.onPush = { [weak bridge] in await wake?(); await bridge?.sync() }
             bridge.start()
             execution.onBlockFinished = { [weak bridge] title, seconds in
                 bridge?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
