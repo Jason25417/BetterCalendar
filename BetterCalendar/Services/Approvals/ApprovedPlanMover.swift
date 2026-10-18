@@ -219,12 +219,12 @@ enum PlanMoveRules {
         var written: [ScheduledBlock] = []
         do {
             for (k, original) in zip(checked, originals) {
-                try planStore.updatePlanned(id: original.id, start: k.start, end: k.end, title: original.title)
+                try planStore.updatePlanned(id: original.id, start: k.start, end: k.end, title: original.title, reason: .agentApproval)
                 written.append(original)
             }
         } catch {
             for o in written {
-                do { try planStore.updatePlanned(id: o.id, start: o.start, end: o.end, title: o.title) } catch {
+                do { try planStore.updatePlanned(id: o.id, start: o.start, end: o.end, title: o.title, reason: .agentApproval) } catch {
                     DevLog.shared.error("多端审批", "整组挪动中途失败后，「\(o.title)」没能挪回原位：\(error.localizedDescription)")
                 }
             }
