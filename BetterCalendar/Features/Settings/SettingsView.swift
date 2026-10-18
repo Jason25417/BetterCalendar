@@ -19,6 +19,9 @@ import FamilyControls   // 番茄钟绝对专注：FamilyActivitySelection / fam
 struct SettingsView: View {
     var trash: (any TrashManaging)? = nil
     var nativeActions: NativeActionsViewModel? = nil
+    var proposals: ProposalCenter? = nil
+    var agentMessages: AgentMessageCenter? = nil
+    var alertPush: ProposalAlertPushControl? = nil
     @State private var apiKey: String = ""
     @State private var distractionOn: Bool = DistractionSettings.enabled   // 0.32.1：静态属性不触发视图重算，输入框曾打开开关也不出现
     @State private var model: String = CloudSettings.model
@@ -54,6 +57,17 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            #if os(iOS)
+            if let proposals {
+                Section("多端审批") {
+                    NavigationLink {
+                        ProposalPanel(center: proposals, alertPush: alertPush, messages: agentMessages).navigationTitle("多端审批")
+                    } label: {
+                        Label("打开多端审批（待确认 \(proposals.pending.count)）", systemImage: "checkmark.seal")
+                    }
+                }
+            }
+            #endif
             if let approvals = nativeActions?.approvals {
                 Section("BC 内审批（内测）") { NativeApprovalPanel(model: approvals) }
             }

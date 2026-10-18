@@ -163,6 +163,21 @@ final class AppContainer {
                 await center?.refresh()
             }
             proposals.startPolling()
+            #if DEBUG
+            // 开发期：带 BC_DEV_SEED_CLOUDKIT=1 启动 → 发一条测试提案 + 一条测试消息（空改动、不碰真实数据），
+            // 用于在 CloudKit Development 环境建出 BCProposal / BCAgentMessage 记录类型，再部署到 Production。
+            if ProcessInfo.processInfo.environment["BC_DEV_SEED_CLOUDKIT"] == "1" {
+                Task { [weak center = proposals, weak messages = agentMessages] in
+                    try? await Task.sleep(for: .seconds(3))
+                    let p = await center?.submit(ProposalDraft(origin: .user, originLabel: "Claude（开发：建立云端数据结构）",
+                        title: "测试改动（建立数据结构）", changes: [ProposalChange(field: "测试字段", before: "旧值", after: "新值")],
+                        reason: "开发：在 CloudKit Development 建出记录类型", action: .experimentNoop(note: "seed"), experiment: true))
+                    let m = await messages?.receive(AgentMessageDraft(title: "测试消息", body: "开发：建立云端数据结构，无需操作。", reason: "seed"))
+                    DevLog.shared.info("多端审批·种子", "提案=\(p.map { $0.id.uuidString } ?? "失败：\(center?.lastError ?? "?")") 消息=\(m.map { $0.id.uuidString } ?? "失败：\(messages?.lastError ?? "?")")")
+                    print("BC_DEV_SEED proposal=\(p?.id.uuidString ?? "FAIL \(center?.lastError ?? "")") message=\(m?.id.uuidString ?? "FAIL \(messages?.lastError ?? "")")")
+                }
+            }
+            #endif
             #if DEBUG && os(macOS)
             DevProposalHooks.install(center: proposals)
             #endif
@@ -276,7 +291,8 @@ final class AppContainer {
                  liveDraft: liveDraft, journalStore: journalStore, router: router,
                  reconcile: reconcile, trash: trash, nativeActions: nativeActions,
                  timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
-                 routines: RoutineTemplateStore.shared)  // K1：例行模板物化
+                 routines: RoutineTemplateStore.shared,  // K1：例行模板物化
+                 proposals: proposals, agentMessages: agentMessages, alertPush: alertPush)
     }
 
     var journalDeps: JournalDeps {
