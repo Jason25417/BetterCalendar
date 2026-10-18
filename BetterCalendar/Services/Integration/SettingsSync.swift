@@ -38,6 +38,8 @@ enum SettingsSync {
         "approvals.preauthRules.v1",           // 预授权规则（A3a）：iPhone 上「以后同类都允许」，Mac 导入智能体提案时按它判定
         // —— W12（2026-10-18）——
         "reminder.projection.v1",              // 提醒投影账本（SPEC §19.13 Q5）：你在提醒事项里删掉 / 改过时间的，两端都认、都不重建不改回
+        // —— W13（2026-10-18）——
+        "activity.recording.enabled", "activity.recording.pausedUntil",   // 设备活动记录总开关 / 暂停到几点：在 iPhone 上暂停，Mac 也停（对人不对设备）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

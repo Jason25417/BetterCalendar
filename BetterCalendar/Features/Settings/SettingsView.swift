@@ -73,6 +73,7 @@ struct SettingsView: View {
                 }
             }
             #endif
+            ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
             Section("数据与同步（开发期）") {
                 DataMaintenancePanel()
                 if let trash { RetainedTrashPanel(service: trash) }

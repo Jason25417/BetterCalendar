@@ -52,6 +52,7 @@ final class AppContainer {
     let agentChat: AgentChatCenter             // SPEC §19 A1/F1 跟智能体说话（iCloud BCChatMessage；Mac 桥接转交）
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验；W8 起没手动关过就默认开；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
+    let activity: ActivityRecording            // SPEC §19 W13：设备活动记录（实验，默认开；W14 哨兵读 activity.log）
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录（W5：开关开时改记在 iCloud）
     let sharedTimerControl: SharedTimerBackendControl   // W5 共享计时后端开关（默认旧通道；下次启动生效）
@@ -325,6 +326,13 @@ final class AppContainer {
             mover.progress = execution
             actionExecutor.mover = mover
         }
+        // W13 设备活动记录：测试环境用临时目录、不启动任何采集（各组件单测各自注入假实现）。
+        let activityRoot = TestHost.isActive
+            ? FileManager.default.temporaryDirectory.appendingPathComponent("bc-test-activity-\(UUID().uuidString)", isDirectory: true)
+            : FileActivityLog.defaultRoot
+        let activity = ActivityRecording(log: FileActivityLog(root: activityRoot), deviceId: FocusFollow.deviceID)
+        self.activity = activity
+        ActivityRecording.current = activity
         #if os(macOS)
         if TestHost.isActive {
             self.agentBridge = nil
@@ -343,8 +351,12 @@ final class AppContainer {
                 actionTargets: { [weak longTasks, weak execution] in
                     AgentBridgeContext.actionTargets(longTasks: longTasks, timer: execution?.proposalTimerState)
                 })
+            // W13：最近设备活动摘要进 context.json；日文件每轮同步镜像到 bridge/activity/。
+            context.activitySummary = { [weak activity] now in await activity?.contextSummary(now: now) }
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
+            bridge.activityMirror = { [weak activity] io in await activity?.mirror(to: io) }
+            activity.startMac()   // 常驻记录（App 运行即记，含只剩菜单栏时）；开机自启实验期默认开
             // SPEC §19 A1/F1：桥接对话（转交你的消息、导入智能体回复、晚间复盘事件）；推送到达时立即同步一轮，压低转交延迟。
             bridge.chat = agentChat
             bridge.eveningFacts = { [weak execution] in
@@ -366,6 +378,20 @@ final class AppContainer {
         }
         #else
         self.agentBridge = nil
+        if !TestHost.isActive { activity.startPhone() }   // iPhone：回前台传队列 + 回填运动/健康
+        #endif
+        #if DEBUG
+        // 开发期：带 BC_DEV_SEED_ACTIVITY=1 启动 → 往 iCloud zone BCActivity 传一条测试活动记录，
+        // 用于在 CloudKit Development 建出 BCActivityEvent（字段 payload/at/kind/deviceId/platform/appName），再部署到 Production。
+        if !TestHost.isActive, ProcessInfo.processInfo.environment["BC_DEV_SEED_ACTIVITY"] == "1" {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                let probe = ActivityEvent(at: .now, kind: .other, source: .live, deviceId: FocusFollow.deviceID, platform: ActivityShortcutRecorder.platform,
+                                          appName: "开发：建立云端数据结构", detail: ["signal": "devSeed"])
+                do { try await CloudKitActivityStore().upload([probe]); print("BC_DEV_SEED activity=ok \(probe.id.uuidString)") }
+                catch { print("BC_DEV_SEED activity=FAIL \(error.localizedDescription)") }
+            }
+        }
         #endif
         FocusFollow.personalTaskRefresh = { [weak bridgeTasks] in await bridgeTasks?.refresh(allowCommands: false) }
         if let sharedTimerStore {

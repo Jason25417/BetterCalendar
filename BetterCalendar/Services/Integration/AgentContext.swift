@@ -91,6 +91,8 @@ struct AgentContextInput {
     var actuals = Read<Actual>()
     var journalAllowed = false
     var journal = Read<JournalDigest>()
+    /// W13：设备活动摘要（已截断、带来源与时刻；nil = 没接活动记录）。构造见 ActivityContextSummary。
+    var activity: [String: Any]? = nil
 
     init(now: Date) { self.now = now }
 
@@ -237,6 +239,8 @@ enum AgentBridgeContext {
             context["journal"] = ["included": false, "source": "BetterCalendar 日记", "asOf": asOf,
                                   "note": "Jason 未允许智能体读日记（多端审批面板开关，默认关）"] as [String: Any]
         }
+        // W13：最近的设备活动（只用来理解情境与时机；App/网站名永不进复盘、留底、反馈）。全量走 MCP read_activity。
+        if let activity = input.activity { context["recentActivity"] = activity }
         return context
     }
 
@@ -272,6 +276,8 @@ enum AgentBridgeContext {
     private let actionTargets: () -> [String: Any]?
     /// 同一来源同一错误只记一次日志（每 20 秒刷新，别刷屏）；错误本身每次都写进上下文。
     private var loggedErrors: [String: String] = [:]
+    /// W13：设备活动摘要（组装点设置；nil = 不附）。
+    var activitySummary: ((Date) async -> [String: Any]?)?
 
     init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarStore)?,
          journalStore: JournalStore?, reminderStore: (any ReminderStore)? = nil,
@@ -362,6 +368,7 @@ enum AgentBridgeContext {
                 }
             } catch { input.journal.error = fail("日记", error) }
         }
+        if let activitySummary { input.activity = await activitySummary(now) }
         clearRecovered(input)
         return input
     }

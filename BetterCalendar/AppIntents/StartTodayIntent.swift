@@ -136,6 +136,22 @@ struct BetterCalendarShortcuts: AppShortcutsProvider {
             systemImageName: "cup.and.saucer.fill"
         )
 
+        // W13 设备活动记录（实验）：给「App 打开 / 关闭」自动化用的两枚，零配置出现在快捷指令 App 里。
+        // ⚠️ 系统上限：一个 App 最多 10 个 App Shortcut（加上这两枚共 9 个）。
+        AppShortcut(
+            intent: RecordAppActivityIntent(event: .opened),
+            phrases: ["用 \(.applicationName) 记录 App 打开"],
+            shortTitle: "记录 App 打开",
+            systemImageName: "app.badge.checkmark"
+        )
+
+        AppShortcut(
+            intent: RecordAppActivityIntent(event: .closed),
+            phrases: ["用 \(.applicationName) 记录 App 关闭"],
+            shortTitle: "记录 App 关闭",
+            systemImageName: "app.dashed"
+        )
+
         AppShortcut(
             intent: ArrangeTodayIntent(),
             phrases: [

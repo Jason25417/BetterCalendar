@@ -22,7 +22,10 @@ nonisolated struct ActivityEvent: Codable, Equatable, Sendable, Identifiable {
         case idleStart, idleEnd
         case screenLocked, screenUnlocked
         case systemSleep, systemWake
-        /// 其他信号的扩展口（detail 里写清楚是什么）。
+        /// W13 新增：同一个 App 里前台窗口标题变了（windowTitle 有值；需要 Mac「辅助功能」权限）。
+        case windowChanged
+        /// 其他信号的扩展口（detail 里写清楚是什么）。W13 用到的 detail["signal"]：
+        /// recorder（started/paused/resumed/stopped，标出记录覆盖的起止，空白≠没做事）、power、network、motion、sleep、workout、session。
         case other
     }
 
