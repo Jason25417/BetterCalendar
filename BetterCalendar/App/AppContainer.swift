@@ -125,6 +125,10 @@ final class AppContainer {
         }
         if !TestHost.isActive { Task { await NativeApprovalNotification.registerCategories() } }
         // SPEC §19 多端审批：CloudKit 私有库独立 zone；测试环境走内存中转、不碰网络与通知中心。
+        // W1 真改动执行器：事项现在就能接；计时 / 挪动计划块在执行层与时间线建好后挂上（见下方）。
+        // 测试 host 不接真执行器（只做空改动），单测各自注入内存数据。
+        let actionExecutor: ProposalActionExecutor? = TestHost.isActive ? nil
+            : ProposalActionExecutor(items: longTasks, deviceId: ProposalDevice.id)
         if TestHost.isActive {
             self.proposalStore = nil
             self.alertPush = nil
@@ -140,7 +144,8 @@ final class AppContainer {
             self.alertPush = ProposalAlertPushControl(store: store)
             self.agentMessages = AgentMessageCenter(transport: CloudKitAgentMessageStore(), notifier: LocalAgentMessageNotifier(),
                                                     ledger: FileOperationLedger(), deviceId: ProposalDevice.id)
-            self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), executor: ExperimentOnlyExecutor(),
+            self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store),
+                                            executor: actionExecutor ?? ExperimentOnlyExecutor(),
                                             notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
                                             deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
         }
@@ -223,12 +228,19 @@ final class AppContainer {
                                             startedDays: startedDays, projection: projection,
                                             canonicalTasks: bridgeTasks)
         bridgeTasks.onChange = { [weak execution] in execution?.syncCanonicalPresentation() }
+        if let actionExecutor {
+            actionExecutor.timer = execution
+            let mover = ApprovedPlanMover(planStore: planStore, projection: projection, startedDays: startedDays)
+            mover.progress = execution
+            actionExecutor.mover = mover
+        }
         #if os(macOS)
         if TestHost.isActive {
             self.agentBridge = nil
         } else {
-            let bridge = AgentBridge(center: proposals, messages: agentMessages) { [weak planStore, weak execution] in
-                AgentBridgeContext.snapshot(planStore: planStore, active: execution?.active.map { ($0.title, $0.start) })
+            let bridge = AgentBridge(center: proposals, messages: agentMessages) { [weak planStore, weak execution, weak longTasks] in
+                AgentBridgeContext.snapshot(planStore: planStore, active: execution?.active.map { ($0.title, $0.start) },
+                                            longTasks: longTasks, timer: execution?.proposalTimerState)
             }
             self.agentBridge = bridge
             bridge.start()

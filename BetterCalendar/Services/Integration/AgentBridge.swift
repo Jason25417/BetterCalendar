@@ -105,14 +105,19 @@ nonisolated struct AgentBridgeIO: Sendable {
     func writeResult(_ p: Proposal, at now: Date) throws {
         let iso = ISO8601DateFormatter()
         let object: [String: Any] = ["id": p.id.uuidString, "title": p.title, "state": p.effectiveState(at: now).rawValue,
+                                     "kind": p.action.kind, "changes": p.changes.map { c -> [String: Any] in ["field": c.field, "before": c.before ?? NSNull(), "after": c.after ?? NSNull()] },
                                      "decidedByDeviceId": p.decidedByDeviceId ?? NSNull(), "resultNote": p.resultNote ?? NSNull(),
-                                     "updatedAt": iso.string(from: p.appliedAt ?? p.decidedAt ?? p.createdAt)]
+                                     "undoAvailable": p.state == .applied && p.undoAction != nil && p.undoneAt == nil,
+                                     "undoUnavailableReason": p.undoUnavailableReason ?? NSNull(),
+                                     "undoneAt": p.undoneAt.map { iso.string(from: $0) } ?? NSNull(), "undoNote": p.undoNote ?? NSNull(),
+                                     "updatedAt": iso.string(from: p.undoneAt ?? p.appliedAt ?? p.decidedAt ?? p.createdAt)]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         let relative = "results/\(p.id.uuidString).json"
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
     }
 
-    /// 智能体提案文件 → 草稿。严格校验；当前只接受测试改动（experimentNoop）。
+    /// 智能体提案文件 → 草稿。严格校验：种类与字段都必须认识，多一个不认识的键也拒绝；不认识的种类一律拒绝。
+    /// 这里只校验格式；目标存在与否、规则是否允许、版本是否一致，由 ProposalCenter.prepare 依据真实数据再查一遍。
     static func draft(from data: Data) throws -> ProposalDraft {
         guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               o["schemaVersion"] as? Int == 1 else { throw AgentBridgeError.invalid("不是 v1 提案文件") }
@@ -121,21 +126,105 @@ nonisolated struct AgentBridgeIO: Sendable {
         else { throw AgentBridgeError.invalid("标题缺失或过长") }
         guard let reason = (o["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty
         else { throw AgentBridgeError.invalid("缺少理由（每个改动都必须讲得出依据）") }
-        guard let rawChanges = o["changes"] as? [[String: Any]], rawChanges.count <= 10 else { throw AgentBridgeError.invalid("changes 格式错误") }
-        let changes = try rawChanges.map { c -> ProposalChange in
-            guard let field = c["field"] as? String, !field.isEmpty else { throw AgentBridgeError.invalid("改动缺少字段名") }
-            return ProposalChange(field: field, before: c["before"] as? String, after: c["after"] as? String)
-        }
-        guard let action = o["action"] as? [String: Any], action["kind"] as? String == "experimentNoop" else {
-            throw AgentBridgeError.invalid("不支持的改动种类（当前只接受测试改动 experimentNoop）")
+        guard let rawAction = o["action"] as? [String: Any] else { throw AgentBridgeError.invalid("缺少 action") }
+        let action = try Self.action(from: rawAction, proposalId: id)
+        // 真改动的「改动前 → 改动后」由 App 依据真实数据计算（智能体写的 changes 可省略，写了也会被替换）；
+        // 测试改动沿用智能体写的 changes（必填）。
+        let changes: [ProposalChange]
+        if let rawChanges = o["changes"] as? [[String: Any]] {
+            guard rawChanges.count <= 10 else { throw AgentBridgeError.invalid("changes 最多 10 条") }
+            changes = try rawChanges.map { c -> ProposalChange in
+                guard let field = c["field"] as? String, !field.isEmpty else { throw AgentBridgeError.invalid("改动缺少字段名") }
+                return ProposalChange(field: field, before: c["before"] as? String, after: c["after"] as? String)
+            }
+        } else if action.touchesRealData, o["changes"] == nil || o["changes"] is NSNull {
+            changes = []
+        } else {
+            throw AgentBridgeError.invalid("changes 格式错误")
         }
         let lifetime = min(max(Double(o["lifetimeSeconds"] as? Int ?? 3600), 300), 86_400)
         return ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
                              originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
                              targetDeviceId: o["targetDevice"] as? String, title: title, changes: changes, reason: reason,
-                             action: .experimentNoop(note: (action["note"] as? String) ?? "智能体测试提案"),
-                             experiment: true, lifetime: lifetime)
+                             action: action, experiment: !action.touchesRealData, lifetime: lifetime)
     }
+
+    /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard 只用于撤销，不接受）。
+    static func action(from a: [String: Any], proposalId: UUID) throws -> ProposalAction {
+        guard let kind = a["kind"] as? String else { throw AgentBridgeError.invalid("action.kind 缺失") }
+        let allowed: [String: Set<String>] = [
+            "experimentNoop": ["note"],
+            "itemCreate": ["title", "note"],
+            "itemEdit": ["itemId", "title", "note", "expectedRevision"],
+            "itemSetDone": ["itemId", "done", "expectedRevision"],
+            "timer": ["command", "blockId", "title", "expectedRevision"],
+            "moveBlock": ["blockId", "start", "end", "expectedRevision"],
+        ]
+        guard let keys = allowed[kind] else {
+            throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
+        }
+        let present = Set(a.keys.filter { $0 != "kind" && !(a[$0] is NSNull) })
+        let unknown = present.subtracting(keys)
+        guard unknown.isEmpty else { throw AgentBridgeError.invalid("\(kind) 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
+        func string(_ key: String, max: Int) throws -> String? {
+            guard let v = a[key], !(v is NSNull) else { return nil }
+            guard let s = v as? String, s.count <= max else { throw AgentBridgeError.invalid("\(kind).\(key) 必须是不超过 \(max) 字的字符串") }
+            return s
+        }
+        func uuid(_ key: String) throws -> UUID? {
+            guard let s = try string(key, max: 64) else { return nil }
+            guard let id = UUID(uuidString: s) else { throw AgentBridgeError.invalid("\(kind).\(key) 不是 UUID") }
+            return id
+        }
+        func required<T>(_ value: T?, _ key: String) throws -> T {
+            guard let value else { throw AgentBridgeError.invalid("\(kind) 缺少 \(key)") }
+            return value
+        }
+        func date(_ key: String) throws -> Date? {
+            guard let s = try string(key, max: 40) else { return nil }
+            guard let d = Self.isoFractional.date(from: s) ?? Self.isoPlain.date(from: s) else {
+                throw AgentBridgeError.invalid("\(kind).\(key) 必须是带时区的 ISO 8601 时间（如 2026-10-18T15:00:00+08:00）")
+            }
+            return d
+        }
+        let revision = try string("expectedRevision", max: 64)
+        switch kind {
+        case "experimentNoop":
+            return .experimentNoop(note: try string("note", max: 200) ?? "智能体测试提案")
+        case "itemCreate":
+            return .itemCreate(id: proposalId, title: try required(string("title", max: 200), "title"), note: try string("note", max: 2000))
+        case "itemEdit":
+            let title = try string("title", max: 200), note = try string("note", max: 2000)
+            guard title != nil || note != nil else { throw AgentBridgeError.invalid("itemEdit 至少要改 title 或 note 之一") }
+            return .itemEdit(id: try required(uuid("itemId"), "itemId"), title: title, note: note, expectedRevision: revision)
+        case "itemSetDone":
+            guard let flag = a["done"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+                throw AgentBridgeError.invalid("itemSetDone.done 必须是 true / false")
+            }
+            return .itemSetDone(id: try required(uuid("itemId"), "itemId"), done: flag.boolValue, expectedRevision: revision)
+        case "timer":
+            guard let raw = try string("command", max: 10), let command = ProposalTimerCommand(rawValue: raw) else {
+                throw AgentBridgeError.invalid("timer.command 必须是 start / pause / resume / stop")
+            }
+            let blockId = try uuid("blockId"), title = try string("title", max: 200)
+            if command == .start {
+                guard (blockId == nil) != (title == nil) else { throw AgentBridgeError.invalid("timer start 需要二选一：blockId 或 title") }
+            } else {
+                guard blockId == nil, title == nil else { throw AgentBridgeError.invalid("timer \(raw) 不带 blockId / title（作用于执行设备上正在计的那件）") }
+            }
+            return .timer(command: command, blockId: blockId, title: title, expectedRevision: revision)
+        case "moveBlock":
+            return .moveBlock(id: try required(uuid("blockId"), "blockId"), start: try required(date("start"), "start"),
+                              end: try date("end"), expectedRevision: revision)
+        default:
+            throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
+        }
+    }
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
 }
 
 @MainActor @Observable final class AgentBridge {
@@ -208,11 +297,13 @@ nonisolated struct AgentBridgeIO: Sendable {
             if !files.isEmpty { await center.refresh() }
             for file in files {
                 do {
-                    let draft = try AgentBridgeIO.draft(from: Data(contentsOf: file))
-                    if let id = draft.id, center.proposals.contains(where: { $0.id == id }) {
+                    let parsed = try AgentBridgeIO.draft(from: Data(contentsOf: file))
+                    if let id = parsed.id, center.proposals.contains(where: { $0.id == id }) {
                         try io.move(file, to: "imported")   // 已导入过（上次崩在移动前）：幂等
                         continue
                     }
+                    // 依据真实数据校验（目标存在、规则允许、版本一致）并算出改动前后；不通过 → 移入 rejected/ 并写明原因。
+                    let draft = try await center.prepare(parsed)
                     guard await center.submit(draft) != nil else { continue }   // 失败留在原处，下轮重试；错误已在 center 里可见
                     try io.move(file, to: "imported")
                     importedCount += 1
@@ -301,18 +392,37 @@ nonisolated struct AgentBridgeIO: Sendable {
 
 /// 写给智能体的「今天」快照（只读副本；真相仍在 BetterCalendar）。
 @MainActor enum AgentBridgeContext {
-    static func snapshot(planStore: (any PlanReading)?, active: (title: String, start: Date)?, now: Date = .now) -> [String: Any] {
+    /// propose_change 真改动要用的目标身份与版本（W1）：事项 id/版本、本机计时状态版本。
+    /// 计划块的 id/版本直接在 today.blocks 里。只读副本；版本过时的提案会被 App 拒绝。
+    static func actionTargets(longTasks: LongTaskStore?, timer: ProposalTimerState?) -> [String: Any] {
+        let items = (longTasks.map { $0.todoItems() + $0.active() + $0.doneItems().prefix(20) } ?? []).map { t -> [String: Any] in
+            ["id": t.id.uuidString, "revision": ProposalRevision.item(t), "title": t.title,
+             "zone": t.poolZone.rawValue, "status": t.status.rawValue, "hasNote": !t.note.isEmpty]
+        }
+        var targets: [String: Any] = ["items": items, "deviceId": ProposalDevice.id]
+        targets["timer"] = timer.map { t -> [String: Any] in
+            ["phase": t.phase.rawValue, "title": t.title ?? NSNull(), "blockId": t.blockId?.uuidString ?? NSNull(), "revision": t.revision]
+        } ?? NSNull()
+        return targets
+    }
+
+    static func snapshot(planStore: (any PlanReading)?, active: (title: String, start: Date)?,
+                         longTasks: LongTaskStore? = nil, timer: ProposalTimerState? = nil, now: Date = .now) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         let hm = DateFormatter(); hm.dateFormat = "HH:mm"
         let day = DayContext.logicalStartOfDay(now)
         let blocks = ((try? planStore?.plannedBlocks(on: day)) ?? []).sorted { $0.start < $1.start }.map { b -> [String: Any] in
-            ["title": b.title, "start": hm.string(from: b.start), "end": hm.string(from: b.end),
-             "fixed": b.isFixed, "important": b.priority == .important]
+            ["id": b.id.uuidString, "revision": ProposalRevision.block(b),
+             "title": b.title, "start": hm.string(from: b.start), "end": hm.string(from: b.end),
+             "startISO": iso.string(from: b.start), "endISO": iso.string(from: b.end),
+             "fixed": b.isFixed, "important": b.priority == .important,
+             "deadline": b.deadline.map { iso.string(from: $0) } ?? NSNull()]
         }
         var context: [String: Any] = ["schemaVersion": 1, "writtenAt": iso.string(from: now), "synthetic": false,
                                       "device": ProposalDevice.label, "deviceId": ProposalDevice.id,
                                       "today": ["logicalDayStart": iso.string(from: day), "blocks": blocks]]
         context["running"] = active.map { ["title": $0.title, "startedAt": iso.string(from: $0.start)] as [String: Any] } ?? NSNull()
+        context["actionTargets"] = actionTargets(longTasks: longTasks, timer: timer)
         return context
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import BetterCalendar
 
@@ -103,5 +104,96 @@ import Testing
         await bridge.sync(io: io); await bridge.sync(io: io)
         let written = try events()
         #expect(written.count == 1 && written[0].contains("proposal_resolved"))   // 只写一次
+    }
+
+    // MARK: W1 真改动种类的桥接契约
+
+    func file(_ action: [String: Any], changes: Any? = nil, id: String = UUID().uuidString) throws -> Data {
+        var o: [String: Any] = ["schemaVersion": 1, "id": id, "title": "测试", "reason": "Jason 说的", "action": action]
+        if let changes { o["changes"] = changes }
+        return try JSONSerialization.data(withJSONObject: o)
+    }
+
+    @Test func parsesEveryRealKindStrictly() throws {
+        let item = UUID(), block = UUID(), pid = UUID()
+        let create = try AgentBridgeIO.draft(from: file(["kind": "itemCreate", "title": "买牛奶", "note": "低脂"], id: pid.uuidString))
+        #expect(create.action == .itemCreate(id: pid, title: "买牛奶", note: "低脂") && !create.experiment && create.changes.isEmpty)
+        let edit = try AgentBridgeIO.draft(from: file(["kind": "itemEdit", "itemId": item.uuidString, "title": "新标题", "expectedRevision": "r1"]))
+        #expect(edit.action == .itemEdit(id: item, title: "新标题", note: nil, expectedRevision: "r1"))
+        let done = try AgentBridgeIO.draft(from: file(["kind": "itemSetDone", "itemId": item.uuidString, "done": true]))
+        #expect(done.action == .itemSetDone(id: item, done: true, expectedRevision: nil))
+        let start = try AgentBridgeIO.draft(from: file(["kind": "timer", "command": "start", "blockId": block.uuidString]))
+        #expect(start.action == .timer(command: .start, blockId: block, title: nil, expectedRevision: nil))
+        let stop = try AgentBridgeIO.draft(from: file(["kind": "timer", "command": "stop", "blockId": NSNull()]))
+        #expect(stop.action == .timer(command: .stop, blockId: nil, title: nil, expectedRevision: nil))
+        let move = try AgentBridgeIO.draft(from: file(["kind": "moveBlock", "blockId": block.uuidString, "start": "2026-10-18T15:00:00+08:00"]))
+        guard case let .moveBlock(id, s, e, rev) = move.action else { Issue.record("应解析为 moveBlock"); return }
+        #expect(id == block && s == Date(timeIntervalSince1970: 1792306800) && e == nil && rev == nil)
+        let frac = try AgentBridgeIO.draft(from: file(["kind": "moveBlock", "blockId": block.uuidString, "start": "2026-10-18T07:00:00.000Z", "end": "2026-10-18T08:00:00Z"]))
+        guard case let .moveBlock(_, s2, e2?, _) = frac.action else { Issue.record("应带结束时间"); return }
+        #expect(s2 == s && e2.timeIntervalSince(s2) == 3600)
+    }
+
+    @Test func rejectsMalformedRealKinds() throws {
+        let item = UUID().uuidString, block = UUID().uuidString
+        let bad: [[String: Any]] = [
+            ["kind": "itemDiscard", "itemId": item],                                   // 只用于撤销
+            ["kind": "itemDelete", "itemId": item],                                    // 不认识的种类
+            ["kind": "itemCreate"],                                                    // 缺标题
+            ["kind": "itemCreate", "title": "x", "deadline": "明天"],                  // 不认识的字段
+            ["kind": "itemEdit", "itemId": item],                                      // 什么都不改
+            ["kind": "itemEdit", "itemId": "not-a-uuid", "title": "x"],
+            ["kind": "itemSetDone", "itemId": item, "done": 1],                        // 不是布尔
+            ["kind": "timer", "command": "start"],                                     // 二选一缺失
+            ["kind": "timer", "command": "start", "blockId": block, "title": "x"],     // 二选一都给
+            ["kind": "timer", "command": "pause", "title": "x"],
+            ["kind": "timer", "command": "skip"],
+            ["kind": "moveBlock", "blockId": block, "start": "15:00"],                 // 没有时区的时间
+            ["kind": "moveBlock", "start": "2026-10-18T15:00:00Z"],                    // 缺 blockId
+        ]
+        for action in bad {
+            #expect(throws: AgentBridgeError.self, "应拒绝：\(action)") { _ = try AgentBridgeIO.draft(from: file(action)) }
+        }
+        // 测试改动仍要求 changes
+        #expect(throws: AgentBridgeError.self) { _ = try AgentBridgeIO.draft(from: file(["kind": "experimentNoop"])) }
+    }
+
+    @Test func syncPreparesRealProposalAndRejectsStaleOneWithReason() async throws {
+        let root = try tempRoot(), io = AgentBridgeIO(root: root)
+        try io.prepare()
+        let container = try ModelContainer(for: DataArchiveStore.schema,
+                                           configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
+        let items = LongTaskStore(context: container.mainContext)
+        let itemId = UUID()
+        try items.createTodo(id: itemId, title: "读论文", note: "", at: Date(timeIntervalSince1970: 1_792_000_000))
+        let center = ProposalCenter(transport: InMemoryProposalTransport(),
+                                    executor: ProposalActionExecutor(items: items, deviceId: "mac"),
+                                    notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(), deviceId: "mac", deviceLabel: "Mac")
+        let bridge = AgentBridge(center: center, defaults: UserDefaults(suiteName: "bc-bridge-" + UUID().uuidString)!) {
+            AgentBridgeContext.snapshot(planStore: nil, active: nil, longTasks: items, timer: .idle)
+        }
+        bridge.eventsEnabled = { false }
+        try io.writeAtomic(file(["kind": "itemSetDone", "itemId": itemId.uuidString, "done": true]), to: "proposals/good.json")
+        try io.writeAtomic(file(["kind": "itemEdit", "itemId": itemId.uuidString, "title": "x", "expectedRevision": "stale"]), to: "proposals/stale.json")
+        await bridge.sync(io: io)
+        #expect(center.proposals.count == 1)
+        #expect(center.proposals[0].changes == [ProposalChange(field: "「读论文」", before: "在途", after: "做成了")])
+        let reason = try String(contentsOf: root.appendingPathComponent("proposals/rejected/stale.reason.txt"), encoding: .utf8)
+        #expect(reason.contains("版本不一致"))
+        // context.json 里给出事项 id 与版本，智能体据此提案
+        let context = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("context.json"))) as! [String: Any]
+        let targets = try #require(context["actionTargets"] as? [String: Any])
+        let listed = try #require((targets["items"] as? [[String: Any]])?.first)
+        let task = try #require(try items.task(id: itemId))
+        #expect(listed["id"] as? String == itemId.uuidString && listed["revision"] as? String == ProposalRevision.item(task))
+        // 批准 → 执行 → 结果文件带种类与撤销信息
+        await center.decide(center.proposals[0].id, .approve)
+        await bridge.sync(io: io)
+        let result = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("results/\(center.proposals[0].id.uuidString).json"))) as! [String: Any]
+        #expect(result["state"] as? String == "applied" && result["kind"] as? String == "itemSetDone" && result["undoAvailable"] as? Bool == true)
+        #expect(await center.undo(center.proposals[0].id))
+        await bridge.sync(io: io)
+        let undone = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("results/\(center.proposals[0].id.uuidString).json"))) as! [String: Any]
+        #expect(undone["undoneAt"] is String && undone["undoAvailable"] as? Bool == false)
     }
 }
