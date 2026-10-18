@@ -88,7 +88,6 @@ final class AppContainer {
         // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
         self.calendarStore = EventKitCalendarStore()
-        self.reminderStore = EventKitReminderStore()
         self.exporter = ICSExporter()
         self.comparer = OverlapTitleComparer()
         self.notificationDelegate = NotificationDelegate(router: router)
@@ -100,6 +99,13 @@ final class AppContainer {
         self.reflectionContext = ReflectionContextProvider(planStore: planStore, comparer: comparer,
                                                            learning: learning)
         self.longTasks = LongTaskStore()
+        // W12（SPEC §19.13 Q5）：提醒事项 = BetterCalendar 自己东西的原生展示面（不是第二个真相源）。决定在 ReminderProjector，
+        // EventKit 只是薄读写层；你在提醒事项里的操作（打勾 / 改时间 / 删除）记进操作留底，待办池截止被勾掉 = 做成了。
+        let reminderOps = ReminderOpsRecorder(ledger: TestHost.isActive ? MemoryOperationLedger() : FileOperationLedger(),
+                                              deviceId: ProposalDevice.id, pool: longTasks)
+        let reminderProjector = ReminderProjector(access: EventKitReminderStore(), deviceId: ProposalDevice.id,
+                                                  opsSink: { ops in await reminderOps.record(ops) })
+        self.reminderStore = reminderProjector
         let actionJournal: any NativeActionJournaling = TestHost.isActive ? NativeActionMemoryJournal() : NativeActionFileJournal()
         self.nativeJournal = SwiftDataNativeJournal(context: SharedModelContainer.shared.mainContext, journal: actionJournal)
         let nativeItems = SwiftDataNativeItemWriter(context: SharedModelContainer.shared.mainContext, journal: actionJournal,
@@ -153,7 +159,8 @@ final class AppContainer {
         // 测试 host 不接真执行器（只做空改动），单测各自注入内存数据。
         let actionExecutor: ProposalActionExecutor? = TestHost.isActive ? nil
             : ProposalActionExecutor(items: longTasks, deviceId: ProposalDevice.id)
-        // W8 D3：提醒（普通通知，复用 NativeReminderScheduler）与闹钟（iPhone 系统闹钟，复用 AlarmKitNativeAlarms）。
+        // W8 D3：闹钟（iPhone 系统闹钟，复用 AlarmKitNativeAlarms）；提醒的本机通知兜底（复用 NativeReminderScheduler，W12 起提醒先写提醒事项）。
+        actionExecutor?.askReminders = reminderProjector   // W12：「几点提醒我」写进提醒事项，两台设备都响
         if let actionExecutor, let reminders {
             actionExecutor.notifications = NativeProposalNotificationScheduler(reminders: reminders, alarms: nativeAlarms)
             actionExecutor.knownDevices = { KnownDevices.all() }
@@ -325,7 +332,7 @@ final class AppContainer {
             // SPEC §19 A2：智能体看到的一天（全部只读；日记默认不给，面板开关允许后才附）。
             let context = AgentContextGatherer(
                 planStore: planStore, actualStore: planStore, longTasks: longTasks, calendarStore: calendarStore,
-                journalStore: journalStore,
+                journalStore: journalStore, reminderStore: reminderStore,
                 running: { [weak execution] in
                     guard let execution else { return .init() }
                     return .init(foreground: execution.active.map { .init(title: $0.title, start: $0.start, pausedSeconds: $0.pausedTotal,

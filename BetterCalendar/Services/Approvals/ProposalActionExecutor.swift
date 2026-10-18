@@ -121,12 +121,16 @@ enum ProposalTimerRules {
     var mover: (any PlanBlockMoving)?
     /// W8 D3：提醒 / 闹钟的排程能力（生产 = NativeProposalNotificationScheduler）。
     var notifications: (any ProposalNotificationScheduling)?
+    /// W12（SPEC §19.13 Q5）：「几点提醒我」写成提醒事项里的原生提醒（两台设备都响）。nil = 这台设备没接 → 改用本机通知并写明。
+    var askReminders: (any AskReminderProjecting)?
     /// W8 D3：最近见过的设备名册（含本机），给闹钟 / 提醒校验目标设备、在审批卡上写设备名。
     var knownDevices: () -> [KnownDevice] = { [] }
     let deviceId: String
     private let now: () -> Date
 
     static let titleLimit = 200
+    /// W12：撤销信息里「这条提醒在提醒事项里」的版本前缀（没有前缀 = 旧的本机通知）。不加新的动作种类，旧提案照常撤销。
+    nonisolated static let nativeRevisionPrefix = "ek:"
     static let noteLimit = 2000
 
     init(items: (any ProposalItemStore)?, timer: (any ProposalTimerControlling)? = nil, mover: (any PlanBlockMoving)? = nil,
@@ -303,18 +307,18 @@ enum ProposalTimerRules {
                                           changes: changes, requiredDeviceId: deviceId)
 
         case let .reminder(id, title, body, fireAt, deviceId):
+            // W12（SPEC §19.13 Q5，Jason 2026-10-18）：提醒 = 提醒事项里的一条原生提醒，iPhone 和 Mac 都会响；
+            // device 参数只为兼容旧提案保留、不再决定在哪台设备执行（任一台批准的设备写进提醒事项即可）。
             let title = try Self.cleanReminderTitle(title)
             let body = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard body.count <= ProposalReminderRules.bodyLimit else { throw ProposalExecutionError.invalid("提醒正文不超过 \(ProposalReminderRules.bodyLimit) 字") }
             try Self.checkFireAt(fireAt, now: now())
-            let device = try deviceId.map { try knownDevice($0, what: "提醒") }
-            let place = device.map { "在「\($0.label)」上" } ?? "在批准的那台设备上"
             var changes = [ProposalChange(field: "提醒", before: nil, after: title),
-                           ProposalChange(field: "\(place) \(ProposalReminderRules.when(fireAt)) 弹一条通知", before: nil, after: nil),
-                           ProposalChange(field: "普通通知：静音或专注模式下可能不响，不保证叫醒（要叫醒请用闹钟）", before: nil, after: nil)]
+                           ProposalChange(field: "\(ProposalReminderRules.when(fireAt)) 会出现在提醒事项里，iPhone 和 Mac 都会响", before: nil, after: nil),
+                           ProposalChange(field: "要像闹钟那样叫醒你，请改用闹钟", before: nil, after: nil)]
             if !body.isEmpty { changes.insert(ProposalChange(field: "提醒正文", before: nil, after: body), at: 1) }
             return PreparedProposalAction(action: .reminder(id: id, title: title, body: body.isEmpty ? nil : body, fireAt: fireAt, deviceId: deviceId),
-                                          changes: changes, requiredDeviceId: deviceId)
+                                          changes: changes, requiredDeviceId: nil)
 
         case let .alarm(id, title, fireAt, deviceId):
             let title = try Self.cleanReminderTitle(title)
@@ -446,11 +450,24 @@ enum ProposalTimerRules {
             }
             return ProposalExecutionOutcome(note: note, undo: undo)
 
-        case let .reminder(id, title, body, fireAt, deviceId):
-            if let deviceId, deviceId != self.deviceId { throw ProposalExecutionError.invalid("这条提醒指定在另一台设备上设，本机不执行") }
+        case let .reminder(id, title, body, fireAt, _):
             guard fireAt > now() else { throw ProposalExecutionError.invalid("提醒时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补发") }
+            // W12：先写进提醒事项（两台设备都响）；列表只在本机 / 没有提醒事项权限 → 改用本机通知，结果里写明只有这台会响
+            var fallbackWhy = "这台设备没有接入提醒事项"
+            if let askReminders {
+                do {
+                    let receipt = try await askReminders.addAskReminder(id: id, title: title, body: body, fireAt: fireAt)
+                    return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，iPhone 和 Mac 都会响",
+                                                    undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: Self.nativeRevisionPrefix + receipt.revision)))
+                } catch let error as AskReminderError where error.allowsLocalFallback {
+                    fallbackWhy = error.localizedDescription
+                } catch {
+                    throw ProposalExecutionError.unavailable("提醒没写进提醒事项：\(error.localizedDescription)")
+                }
+            }
+            DevLog.shared.warn("提醒", "「\(title)」没写进提醒事项（\(fallbackWhy)），改用这台设备的本机通知，只有这台会响")
             let revision = try await notificationScheduler().scheduleReminder(id: id, title: title, body: body ?? "", fireAt: fireAt)
-            return ProposalExecutionOutcome(note: "已在本机排好 \(ProposalReminderRules.when(fireAt)) 的提醒「\(title)」（普通通知，不保证叫醒）",
+            return ProposalExecutionOutcome(note: "没写进提醒事项（\(fallbackWhy)），改为只在这台设备上 \(ProposalReminderRules.when(fireAt)) 弹通知「\(title)」（普通通知，不保证叫醒）",
                                             undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: revision), deviceId: self.deviceId))
 
         case let .alarm(id, title, fireAt, deviceId):
@@ -463,6 +480,18 @@ enum ProposalTimerRules {
             try await scheduler.scheduleAlarm(id: id, title: title, fireAt: fireAt)
             return ProposalExecutionOutcome(note: "已在本机设好 \(ProposalReminderRules.when(fireAt)) 的闹钟「\(title)」",
                                             undo: ProposalUndoInfo(action: .alarmCancel(id: id), deviceId: self.deviceId))
+
+        case let .reminderCancel(id, expected) where expected?.hasPrefix(Self.nativeRevisionPrefix) == true:
+            // W12：撤销提醒事项里的那条（任一台有提醒事项权限的设备都能撤；你在提醒事项里改过 / 勾掉了 → 不删）
+            guard let askReminders else { throw ProposalExecutionError.unavailable("这台设备没有接入提醒事项，没法撤销这条提醒") }
+            do {
+                let note = try await askReminders.removeAskReminder(id: id, expectedRevision: String(expected!.dropFirst(Self.nativeRevisionPrefix.count)))
+                return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "提醒已删掉；需要可以重新设"))
+            } catch let AskReminderError.conflict(why) {
+                throw ProposalExecutionError.conflict(why)
+            } catch {
+                throw ProposalExecutionError.unavailable(error.localizedDescription)
+            }
 
         case let .reminderCancel(id, expected):
             try await notificationScheduler().cancelReminder(id: id, expectedRevision: expected)

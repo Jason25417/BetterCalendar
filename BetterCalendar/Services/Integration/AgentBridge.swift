@@ -388,7 +388,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             }
             return .moveBlocks(moves: moves, isUndo: false)
         case "reminder":
-            // W8 D3：普通提醒（不保证叫醒）。device 省略 = 提案的 targetDevice，再省略 = 批准的那台。
+            // W8 D3 / W12：提醒 = 写进提醒事项，iPhone 和 Mac 都会响（不保证叫醒）。device 只为兼容保留，不再决定执行设备。
             let device = try string("device", max: 80) ?? targetDevice
             if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("reminder.device 与 targetDevice 不一致") }
             return .reminder(id: proposalId, title: try required(string("title", max: 150), "title"), body: try string("body", max: 500),

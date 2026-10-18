@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BetterCalendar
 
-/// SPEC §19.5 D3（W8）：智能体经审批设「提醒」（普通通知，不保证叫醒）和「闹钟」（iPhone 系统闹钟）。
+/// SPEC §19.5 D3（W8）：智能体经审批设「提醒」和「闹钟」（iPhone 系统闹钟）。W12 起提醒走提醒事项（两台设备都响），没接时改用本机通知。
 /// 两台「设备」（mac / phone）共用内存中转；排程能力用内存假实现；时钟注入。
 @MainActor @Suite struct W8ReminderTests {
     final class Clock { var now = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 22))! }
@@ -85,21 +85,23 @@ import Testing
         #expect(r.macScheduler.calls.isEmpty && r.mac.proposals.isEmpty)
     }
 
+    /// W12（SPEC §19.13 Q5）起：提醒 = 提醒事项里的原生提醒，两台设备都响；device 只为兼容保留、不再固定执行设备。
+    /// 这里的设备没接提醒事项（askReminders = nil）→ 改用本机通知，结果里写明只有这台会响（原生路径见 W12ReminderProjectionTests）。
     @Test func reminderSaysNotGuaranteedToWakeAndRunsOnChosenDevice() async throws {
         let r = rig()
         let p = try #require(await r.mac.submit(draft(.reminder(id: UUID(), title: "交表", body: "N1 的表", fireAt: tomorrow8, deviceId: "mac"))))
-        #expect(p.targetDeviceId == "mac")
-        #expect(p.notificationBody.contains("在「Jason 的 Mac」上 10月19日 08:00 弹一条通知"))
-        #expect(p.notificationBody.contains("不保证叫醒"))
-        await r.phone.decide(p.id, .approve); await r.mac.refresh()
+        #expect(p.targetDeviceId == nil)   // device 不再固定执行设备
+        #expect(p.notificationBody.contains("10月19日 08:00 会出现在提醒事项里，iPhone 和 Mac 都会响"))
+        await r.mac.decide(p.id, .approve); await r.mac.refresh()
         let done = try #require(r.mac.proposals.first { $0.id == p.id })
         #expect(done.state == .applied && r.macScheduler.reminders.count == 1 && r.phoneScheduler.calls.isEmpty)
+        #expect(done.resultNote?.contains("没写进提醒事项") == true && done.resultNote?.contains("只在这台设备上") == true)
         #expect(done.resultNote?.contains("不保证叫醒") == true)
         #expect(await r.mac.undo(p.id))
         #expect(r.macScheduler.reminders.isEmpty)
         // 不指定设备 = 批准的那台执行
         let any = try #require(await r.mac.submit(draft(.reminder(id: UUID(), title: "喝水", body: nil, fireAt: tomorrow8, deviceId: nil))))
-        #expect(any.targetDeviceId == nil && any.notificationBody.contains("在批准的那台设备上"))
+        #expect(any.targetDeviceId == nil)
         await r.phone.decide(any.id, .approve); await r.phone.refresh()
         #expect(r.phoneScheduler.reminders.count == 1)
     }

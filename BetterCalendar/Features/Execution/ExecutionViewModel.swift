@@ -407,6 +407,8 @@ final class ExecutionViewModel {
             // 被动信号（M6b）：会议到点(过去的固定块=按计划发生) + 提醒今天打勾 → 自动并入实际
             // 0.25.4 根治：提醒打勾**按 blockID 精确匹配**（不再按标题相似——同名任务被往日旧提醒误标完成的 bug）
             let completedIDs = await reminderStore.completedBlockIDs()
+            // W12（SPEC §19.13 Q5）：顺带跟上你在提醒事项里的其它操作（改时间 / 删除 / 待办截止打勾）——只记账、不改回
+            _ = await reminderStore.followUserChanges(now: .now)
             let now = Date.now
             for item in planned where !merged.contains(where: {
                 $0.plannedID == item.id

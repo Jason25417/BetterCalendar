@@ -4,7 +4,8 @@
 //
 //  SPEC §19.5 D3（W8，2026-10-18）：智能体经审批设「提醒」和「闹钟」。起因：真实对话里 Jason 说「明早 8 点叫我赶大巴」，
 //  智能体只能回答做不到。
-//  - 提醒 = 普通本地通知（UNUserNotificationCenter，复用 NativeReminderScheduler 的排程与核验）：**不保证叫醒**。
+//  - 提醒（W12 起，SPEC §19.13 Q5）= 写进 BetterCalendar 的提醒事项列表（ReminderProjector），iPhone 和 Mac 都会响；
+//    列表只在本机 / 没有提醒事项权限时才用这里的普通本地通知兜底（复用 NativeReminderScheduler 的排程与核验），结果写明只有这台会响。**都不保证叫醒**。
 //  - 闹钟 = iPhone 系统闹钟（AlarmKit，复用 AlarmKitNativeAlarms）：会像闹钟一样响铃；只 iOS，Mac 上拒收、不降级成普通通知。
 //  执行在目标设备上（审批卡写清设备与时刻）；撤销 = 取消排程 / 取消闹钟（只能在设好的那台设备上撤销）。
 //

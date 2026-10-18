@@ -113,8 +113,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// App 对**最终整体布局**校验（固定块不动、正在做/做完的不动、不进过去、不出今天、不越截止、最终互不重叠）；
     /// 撤销 = 整组挪回（isUndo=true：只作逆操作，智能体不能提；放宽「不进过去」与组内原有重叠，见 PlanMoveRules）。
     case moveBlocks(moves: [ProposalBlockMove], isUndo: Bool)
-    /// 提醒（SPEC §19.5 D3，W8）：在 deviceId 那台设备（nil = 批准的那台）上排一条普通本地通知。
-    /// **普通通知不保证叫醒**（静音 / 专注模式下可能不响）——要叫醒用 alarm。撤销 = 取消排程。
+    /// 提醒（SPEC §19.5 D3，W8；W12 起 = SPEC §19.13 Q5）：写进 BetterCalendar 的提醒事项列表，iPhone 和 Mac 都会响；
+    /// 列表只在本机 / 没有提醒事项权限时改用本机通知（结果里写明）。deviceId 只为兼容旧提案保留，不再决定执行设备。
+    /// 要叫醒用 alarm。撤销 = 删掉那条提醒（你在提醒事项里改过 / 勾掉了就不删）。
     case reminder(id: UUID, title: String, body: String?, fireAt: Date, deviceId: String?)
     /// 闹钟（D3，W8）：在 iPhone（deviceId 必填）上设系统闹钟（AlarmKit），会像闹钟一样响铃。Mac 上拒收。撤销 = 取消闹钟。
     case alarm(id: UUID, title: String, fireAt: Date, deviceId: String)
@@ -131,7 +132,7 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemDiscard: "事项：移入回收站"
         case let .timer(command, _, _, _, _): "计时：" + command.label
         case .moveBlock: "时间线：挪动计划块"
-        case .reminder: "提醒：普通通知（不保证叫醒）"
+        case .reminder: "提醒：提醒事项（iPhone 和 Mac 都会响）"
         case .alarm: "闹钟：iPhone 系统闹钟"
         case .reminderCancel: "提醒：取消"
         case .alarmCancel: "闹钟：取消"
@@ -336,7 +337,9 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
         case .itemDiscard?: "撤销 = 把这条待办移入回收站（30 天内可恢复）"
         case .itemEdit?: "撤销 = 改回原来的标题/备注"
         case .itemSetDone?: "撤销 = 恢复原来的完成状态"
-        case .reminderCancel?: "撤销 = 取消这条提醒"
+        case let .reminderCancel(_, rev)?:
+            rev?.hasPrefix(ProposalActionExecutor.nativeRevisionPrefix) == true
+                ? "撤销 = 从提醒事项里删掉这条提醒（你在提醒事项里改过或勾掉了就不删）" : "撤销 = 取消这条提醒"
         case .alarmCancel?: "撤销 = 取消这个闹钟"
         case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
         default: nil

@@ -28,6 +28,10 @@ enum AgentContextLimits {
     static let todos = 30
     static let longterm = 20
     static let calendarEvents = 40
+    /// W12：你自己列表里没完成的提醒（只读）。
+    static let ownReminders = 30
+    /// W12：BetterCalendar 投影账本里「你删掉的 / 你改过时间的」各列几条。
+    static let projectionNotes = 20
     static let actuals = 40
     static let journalEntries = 3
     static let journalChars = 500
@@ -63,6 +67,8 @@ struct AgentContextInput {
         var lastWorkedAt: Date?
     }
     struct CalendarEvent { var title: String; var start: Date; var end: Date; var isAllDay = false; var calendar = "" }
+    /// W12：你自己列表里一条没完成的提醒（只读）。
+    struct OwnReminderItem { var title: String; var due: Date?; var hasTime = true; var list = "" }
     struct Actual { var title: String; var start: Date; var end: Date }
     struct JournalDigest { var day: Date; var body: String; var mood: String?; var tags: [String] = []; var modifiedAt: Date }
 
@@ -77,6 +83,11 @@ struct AgentContextInput {
     var todos = Read<PoolEntry>()
     var longterm = Read<PoolEntry>()
     var calendar = Read<CalendarEvent>()
+    /// W12：系统提醒事项（你自己的列表，只读）。
+    var ownReminders = Read<OwnReminderItem>()
+    /// W12：BetterCalendar 投进提醒事项的东西里，你删掉 / 改过时间的（账本；nil = 没接或读不出）。
+    var reminderLedger: ReminderProjectionLedger? = nil
+    var reminderLedgerError: String? = nil
     var actuals = Read<Actual>()
     var journalAllowed = false
     var journal = Read<JournalDigest>()
@@ -175,6 +186,31 @@ enum AgentBridgeContext {
         calendar["window"] = window(input.calendarWindow)
         context["calendar"] = calendar
 
+        // W12：系统提醒事项（Jason 自己的列表，只读、从不修改；不含 BetterCalendar 自己那本）。
+        var reminders = section(source: "系统提醒事项（只读）", asOf: asOf, read: input.ownReminders,
+                                limit: AgentContextLimits.ownReminders, key: "items") { r in
+            ["title": clip(r.title), "due": opt(r.due), "hasTime": r.hasTime, "list": clip(r.list)] as [String: Any]
+        }
+        reminders["note"] = "Jason 自己提醒列表里没完成的提醒：当作现实与上下文，只读、从不修改（有截止的在前）"
+        context["reminders"] = reminders
+        // W12：BetterCalendar 投进提醒事项的东西，Jason 在提醒事项里删掉 / 改过时间的——他的决定。
+        var projected: [String: Any] = [
+            "source": "BetterCalendar 投进提醒事项的提醒（投影账本）", "asOf": asOf,
+            "note": "dismissed = Jason 在提醒事项里删掉了 =「不用提醒我了」：别再提议同一个提醒，除非他开口；retimed = 他改了提醒时间：按他的，不要改回",
+        ]
+        if let ledger = input.reminderLedger {
+            let dismissed = ledger.dismissed, retimed = ledger.retimed
+            projected["dismissed"] = dismissed.prefix(AgentContextLimits.projectionNotes).map { e -> [String: Any] in
+                ["title": clip(e.title), "kind": e.kind.rawValue, "dismissedAt": opt(e.dismissedAt)]
+            }
+            projected["retimed"] = retimed.prefix(AgentContextLimits.projectionNotes).map { e -> [String: Any] in
+                ["title": clip(e.title), "kind": e.kind.rawValue, "yourTime": opt(e.userDueAt)]
+            }
+            projected["truncated"] = dismissed.count > AgentContextLimits.projectionNotes || retimed.count > AgentContextLimits.projectionNotes
+        }
+        if let error = input.reminderLedgerError { projected["error"] = error }
+        context["bcReminders"] = projected
+
         // 最近 3 天实际做了什么（蓝色实际真相源 = 计时完成 + 复盘补记 + 日历对账回流）。截断时保留最近的。
         var actuals = section(source: "BetterCalendar 实际（PlanStore 蓝色实际，最近 3 个逻辑日）", asOf: asOf, read: input.actuals,
                               limit: AgentContextLimits.actuals, keepLast: true) { a in
@@ -228,6 +264,9 @@ enum AgentBridgeContext {
     private let longTasks: LongTaskStore?
     private let calendarStore: (any CalendarStore)?
     private let journalStore: JournalStore?
+    /// W12：系统提醒事项（只读：你自己的列表）+ BetterCalendar 投影账本（你删掉 / 改过时间的）。
+    private let reminderStore: (any ReminderStore)?
+    private let reminderLedger: () throws -> ReminderProjectionLedger?
     private let running: () -> AgentContextInput.Running
     private let journalAllowed: () -> Bool
     private let actionTargets: () -> [String: Any]?
@@ -235,12 +274,15 @@ enum AgentBridgeContext {
     private var loggedErrors: [String: String] = [:]
 
     init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarStore)?,
-         journalStore: JournalStore?, running: @escaping () -> AgentContextInput.Running,
+         journalStore: JournalStore?, reminderStore: (any ReminderStore)? = nil,
+         reminderLedger: @escaping () throws -> ReminderProjectionLedger? = { try ReminderProjectionLedgerStore().load() },
+         running: @escaping () -> AgentContextInput.Running,
          journalAllowed: @escaping () -> Bool = { AgentContextSettings.allowRecentJournal },
          actionTargets: @escaping () -> [String: Any]? = { nil }) {
         self.actionTargets = actionTargets
         self.planStore = planStore; self.actualStore = actualStore; self.longTasks = longTasks; self.calendarStore = calendarStore
         self.journalStore = journalStore; self.running = running; self.journalAllowed = journalAllowed
+        self.reminderStore = reminderStore; self.reminderLedger = reminderLedger
     }
 
     func snapshot(now: Date = .now) async -> [String: Any] {
@@ -303,6 +345,14 @@ enum AgentBridgeContext {
                 }
             } catch { input.calendar.error = fail("系统日历", error) }
         }
+        // W12：系统提醒事项（你自己的列表；不弹权限框，没授权 = 显式错误）+ BetterCalendar 投影账本
+        if let reminderStore {
+            do { input.ownReminders.items = try await reminderStore.ownOpenReminders().map {
+                    .init(title: $0.title, due: $0.due, hasTime: $0.hasTime, list: $0.list)
+                }
+            } catch { input.ownReminders.error = fail("系统提醒事项", error) }
+            do { input.reminderLedger = try reminderLedger() } catch { input.reminderLedgerError = fail("提醒投影账本", error) }
+        }
         // 日记：只有 Jason 允许时才读（关着时连读都不读）
         input.journalAllowed = journalAllowed()
         if input.journalAllowed, let journalStore {
@@ -328,7 +378,8 @@ enum AgentBridgeContext {
     /// 恢复后清掉记录，下次再失败会重新记一条。
     private func clearRecovered(_ input: AgentContextInput) {
         let failing: [String: String?] = ["今天的计划": input.today.error, "最近推进": input.todos.error,
-                                          "系统日历": input.calendar.error, "最近实际": input.actuals.error, "日记": input.journal.error]
+                                          "系统日历": input.calendar.error, "最近实际": input.actuals.error, "日记": input.journal.error,
+                                          "系统提醒事项": input.ownReminders.error, "提醒投影账本": input.reminderLedgerError]
         for (what, error) in failing where error == nil { loggedErrors[what] = nil }
     }
 }
