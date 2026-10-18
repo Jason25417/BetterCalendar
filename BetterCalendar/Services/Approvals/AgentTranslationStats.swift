@@ -59,6 +59,10 @@ nonisolated struct AgentTranslationStats: Equatable, Sendable {
     var replied = 0
     /// W10：由预授权规则代你决定的（含自动放行与自动拒绝；也计入同意/拒绝）
     var preauthorized = 0
+    /// W11：你批准的、带可调参数的提案
+    var approvedWithParameters = 0
+    /// W11：其中批准时改了参数默认值的（转译偏差信号：智能体给的数不合你意）
+    var tuned = 0
     /// 执行设备报告已应用
     var applied = 0
     /// 执行设备报告失败
@@ -84,6 +88,8 @@ nonisolated struct AgentTranslationStats: Equatable, Sendable {
     var approvalRate: StatRatio { StatRatio(count: approved, of: resolved) }
     var declineRate: StatRatio { StatRatio(count: declined, of: resolved) }
     var expiryRate: StatRatio { StatRatio(count: expired, of: resolved) }
+    /// W11：改了数值 / 批准的带参数提案
+    var tuneRate: StatRatio { StatRatio(count: tuned, of: approvedWithParameters) }
     /// 执行失败 / 已同意
     var failureRate: StatRatio { StatRatio(count: failed, of: approved) }
     /// 撤销 / 已应用
@@ -135,6 +141,10 @@ nonisolated enum AgentTranslationStatsCalculator {
             case .replied: s.replied += 1
             }
             if p.preauth != nil { s.preauthorized += 1 }
+            if p.chosenValues != nil, !p.chosen.parameters.isEmpty {
+                s.approvedWithParameters += 1
+                if p.tunedByUser { s.tuned += 1 }
+            }
         }
         // 撤销 / 手改只可能发生在已应用之后；按留底集合计数。
         // ⚠️ 上面的 switch 刻意穷举：W1 若给 ProposalState 新增状态（如 undone），合并时编译器会逼着在这里归类。

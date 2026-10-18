@@ -148,7 +148,7 @@ struct ProposalPanel: View {
                 Text("智能体给了 \(p.options.count) 个方案，挑一个：").font(.callout)
                 Text("理由：\(p.reason)\n发起：\(p.originLabel)").font(.caption)
             } else {
-                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) }
+                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix) }
                     .joined(separator: "\n")).font(.callout)
             }
             Text("\(p.action.kindLabel) · 截止 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened))")

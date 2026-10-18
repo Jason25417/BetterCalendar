@@ -6,6 +6,8 @@
 //  本机按提案内容生成通知（推送只负责唤醒），所以各端内容一致；决定后由 ProposalCenter 统一收起（B2）。
 //  W10：第三种回应「回一句」（系统文本输入动作，iOS / macOS 都支持）；智能体填了备选方案时，每个方案一个按钮
 //  （按本提案动态注册一个通知类别）——放不下时只留「查看全部方案」引导打开详情；预授权规则「做完告诉你」的结果通知（可撤销）。
+//  W11：滑块和时间选择器放不进通知——带可调参数的提案用「按默认批准」+ 回一句 + 拒绝 +「打开调整」，正文写明默认值；
+//  点通知本身打开卡片去调。备选方案的动态类别照旧，带参数的方案按钮写「（按默认）」。
 //
 
 import Foundation
@@ -26,6 +28,8 @@ import Observation
     /// 有备选方案的提案各自一个类别（按钮名字就是方案名）。
     static let optionsCategoryPrefix = "BC_PROPOSAL_OPTS."
     static let resultCategory = "BC_PROPOSAL_RESULT"
+    /// W11：带可调参数（没有备选）的提案类别：批准按钮写明「按默认批准」。
+    static let parametersCategory = "BC_PROPOSAL_PARAMS"
     static let undoAction = "BC_PROPOSAL_UNDO"
     static let resultIdPrefix = "bc.proposal.result."
     static let resultUserInfoKey = "bcProposalResultId"
@@ -51,7 +55,15 @@ import Observation
                                                intentIdentifiers: [], options: [])
         let undo = UNNotificationAction(identifier: undoAction, title: "撤销", options: [.authenticationRequired, .destructive])
         let result = UNNotificationCategory(identifier: resultCategory, actions: [undo], intentIdentifiers: [], options: [])
-        await merge([proposals, result], center: center)
+        await merge([proposals, result, parametersCategoryDefinition], center: center)
+    }
+
+    /// W11：按默认批准（同一个批准动作 id：解析出来就是不带数值的批准 = 默认值）+ 回一句 + 拒绝 + 打开调整。
+    static var parametersCategoryDefinition: UNNotificationCategory {
+        let approve = UNNotificationAction(identifier: approveAction, title: "按默认批准", options: [.authenticationRequired])
+        let adjust = UNNotificationAction(identifier: openAction, title: "打开调整", options: [.foreground])
+        return UNNotificationCategory(identifier: parametersCategory, actions: [approve, replyButton, declineButton, adjust],
+                                      intentIdentifiers: [], options: [])
     }
 
     private static var replyButton: UNTextInputNotificationAction {
@@ -68,7 +80,8 @@ import Observation
 
     static func optionsCategory(for p: Proposal) -> UNNotificationCategory {
         let picks: [UNNotificationAction] = optionsFit(p)
-            ? p.options.map { UNNotificationAction(identifier: pickPrefix + String($0.index), title: "\($0.index + 1). \($0.label)",
+            ? p.options.map { UNNotificationAction(identifier: pickPrefix + String($0.index),
+                                                   title: "\($0.index + 1). \($0.label)" + ($0.parameters.isEmpty ? "" : "（按默认）"),
                                                    options: [.authenticationRequired]) }
             : [UNNotificationAction(identifier: openAction, title: "查看全部 \(p.options.count) 个方案", options: [.foreground])]
         return UNNotificationCategory(identifier: categoryId(for: p), actions: picks + [replyButton, declineButton],
@@ -76,7 +89,8 @@ import Observation
     }
 
     static func categoryId(for p: Proposal) -> String {
-        p.hasAlternatives ? optionsCategoryPrefix + p.id.uuidString : category
+        if p.hasAlternatives { return optionsCategoryPrefix + p.id.uuidString }
+        return p.hasParameters ? parametersCategory : category
     }
 
     /// 与已有类别合并注册（整体替换语义：先读后写，不能覆盖旧审批/提醒的类别）。

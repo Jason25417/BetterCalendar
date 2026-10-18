@@ -154,6 +154,39 @@ enum ProposalTimerRules {
         return prepared
     }
 
+    /// W11：审批卡上调了数值后重新校验。计时是设备本地状态——不在执行设备上时，没法核对那台设备此刻在不在计时、
+    /// 和已记下的实际重不重叠：这里只查能查的（不在未来、在今天），并在改动清单里写明「执行设备会再核对一次」；
+    /// 执行时 perform 照常完整核对（失败可见）。其余种类走同一套 prepare（含 W9 图钉 / 越级校验）。
+    func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction {
+        guard case let .timer(.start, blockId, title, expected, startAt) = action, let target = executingDeviceId, target != deviceId else {
+            return try await prepare(action, escalation: escalation)
+        }
+        var name = title
+        if let blockId, name == nil { name = await timer?.proposalPlanItemTitle(blockId) }
+        var changes: [ProposalChange] = []
+        var resolved: Date? = nil
+        if let startAt {
+            let hm = PlanMoveRules.hm(startAt)
+            guard startAt <= now().addingTimeInterval(ProposalTimerRules.nowTolerance) else {
+                throw ProposalExecutionError.invalid("回溯起点 \(hm) 在未来；开始计时只能从过去或此刻算起")
+            }
+            if now().timeIntervalSince(startAt) >= ProposalTimerRules.nowTolerance {
+                guard DayContext.isSameLogicalDay(startAt, now()) else {
+                    throw ProposalExecutionError.invalid("回溯起点 \(hm) 不在今天（逻辑日从凌晨 4:00 起）")
+                }
+                resolved = startAt
+            }
+        }
+        changes.append(ProposalChange(field: "计时", before: "以执行设备上的计时状态为准",
+                                      after: "正在计时「\(name ?? "这件事")」" + (resolved.map { "（从 \(PlanMoveRules.hm($0)) 开始计）" } ?? "")))
+        if let s = resolved {
+            changes.append(ProposalChange(field: ProposalTimerRules.backdateText(now().timeIntervalSince(s)) + "（智能体的依据见理由）", before: nil, after: nil))
+        }
+        changes.append(ProposalChange(field: "执行它的那台设备会再核对一次：那台设备此刻没在计时、不和已记下的实际重叠；不满足就不执行并告诉你", before: nil, after: nil))
+        return PreparedProposalAction(action: .timer(command: .start, blockId: blockId, title: title, expectedRevision: expected, startAt: resolved),
+                                      changes: changes, requiredDeviceId: target)
+    }
+
     /// 这项挪动会动到哪些图钉（标题）。只看挪块类；撤销用的整组挪回不算。
     private func pinnedTargets(_ action: ProposalAction) throws -> [String] {
         let ids: [UUID]

@@ -177,7 +177,7 @@ struct AgentChatView: View {
                 Text(p.title).font(.subheadline.bold())
                 if state == .pending {
                     if p.hasAlternatives { Text("理由：\(p.reason)").font(.caption) }
-                    else { Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) }.joined(separator: "\n")).font(.caption) }
+                    else { Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix) }.joined(separator: "\n")).font(.caption) }
                     ProposalCardControls(center: proposals, proposal: p)   // W10：与面板、通知同一套回应
                 } else {
                     Text(p.notificationBody).font(.caption)

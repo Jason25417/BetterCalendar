@@ -119,12 +119,14 @@ nonisolated enum PreauthPolicy {
 
     /// 判定顺序（同 Claude Code）：deny ＞ ask ＞ allow；没有匹配 = 先问你。
     /// 越级提案一律先问你（连 deny 也不自动拒绝：越级是智能体审慎判断「确有必要」，要你亲眼看到）；
-    /// 有备选方案的一律先问你（智能体在等你挑）。
+    /// 有备选方案的一律先问你（智能体在等你挑）；W11：带可调参数的一律先问你（等你确认或调整数值）。
     static func evaluate(_ p: Proposal, rules: [PreauthRule]) -> ProposalGateVerdict {
         let hits = rules.filter { $0.matches(p) }
         // 有规则命中但仍先问你时，判定里带上那条规则（留底讲得出「为什么规则没生效」）。
         if p.escalation != nil { return .ask("越级提案永远先问你", rule: hits.first) }
         if p.hasAlternatives { return .ask("有 \(p.options.count) 个方案，等你挑", rule: hits.first) }
+        // W11：带可调参数的一律先问你（数值是智能体的判断、等你确认或调整），规则不代你按默认放行，也不自动拒绝。
+        if p.hasParameters { return .ask("有可调的数值，等你确认或调整", rule: hits.first) }
         if let deny = hits.first(where: { $0.effect == .deny }) {
             return ProposalGateVerdict(route: .decline, rule: deny, note: "按规则自动拒绝：\(deny.label)")
         }

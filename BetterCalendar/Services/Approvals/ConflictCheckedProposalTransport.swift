@@ -35,8 +35,8 @@ nonisolated struct ConflictCheckedProposalTransport: ProposalTransport {
         try await store.all().sorted { $0.createdAt > $1.createdAt }
     }
 
-    func decide(id: UUID, decision: ProposalDecision, choice: Int?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
-        try await firstResponse(id: id, at: at) { try $0.applyDecision(decision, choice: choice, deviceId: deviceId, at: at) }
+    func decide(id: UUID, decision: ProposalDecision, choice: Int?, tuning: ProposalTuning?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+        try await firstResponse(id: id, at: at) { try $0.applyDecision(decision, choice: choice, tuning: tuning, deviceId: deviceId, at: at) }
     }
 
     /// W10：你回了一句——与决定同一套「首个有效回应生效」（条件保存，冲突重读）。

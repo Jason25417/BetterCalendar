@@ -79,9 +79,10 @@ enum PlanMoveRules {
             guard !c.settledIDs.contains(m.id) else { throw ProposalExecutionError.invalid("\(name)已经做完或正在同时做，不挪") }
             let start = m.start
             let end = m.end ?? start.addingTimeInterval(block.end.timeIntervalSince(block.start))
-            let duration = end.timeIntervalSince(start)
-            guard duration >= 60, duration <= 16 * 3600 else {
-                throw ProposalExecutionError.invalid("\(name)的新时间段无效（结束须晚于开始，且不超过 16 小时）")
+            // W11（Jason 2026-10-18）：「单块不超过 16 小时」是判断类数字，取消；只守有效性：结束晚于开始（分钟精度，至少 1 分钟）。
+            // 多长合适由智能体按上下文判断；「不出今天、不重叠、固定不动、不越截止」等排布规则照旧。
+            guard end.timeIntervalSince(start) >= 60 else {
+                throw ProposalExecutionError.invalid("\(name)的新时间段无效（结束须晚于开始，至少 1 分钟）")
             }
             if !restoring {
                 guard start != block.start || end != block.end else {
