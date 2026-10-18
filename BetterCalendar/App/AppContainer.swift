@@ -166,6 +166,14 @@ final class AppContainer {
             #if DEBUG
             // 开发期：带 BC_DEV_SEED_CLOUDKIT=1 启动 → 发一条测试提案 + 一条测试消息（空改动、不碰真实数据），
             // 用于在 CloudKit Development 环境建出 BCProposal / BCAgentMessage 记录类型，再部署到 Production。
+            // 开发期：带 BC_DEV_SEED_ALERT_SUB=1 启动 → 在 Development 建出 B5 的查询订阅（订阅类型属于 schema，须部署后正式环境才能开）。
+            if ProcessInfo.processInfo.environment["BC_DEV_SEED_ALERT_SUB"] == "1", let alertPush {
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    await alertPush.set(true)
+                    print("BC_DEV_SEED alertSub enabled=\(alertPush.enabled) error=\(alertPush.lastError ?? "none")")
+                }
+            }
             if ProcessInfo.processInfo.environment["BC_DEV_SEED_CLOUDKIT"] == "1" {
                 Task { [weak center = proposals, weak messages = agentMessages] in
                     try? await Task.sleep(for: .seconds(3))
