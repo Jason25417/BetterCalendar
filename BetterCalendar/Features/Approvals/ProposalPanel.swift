@@ -2,8 +2,8 @@
 //  ProposalPanel.swift
 //  BetterCalendar
 //
-//  SPEC §19 B3：App 内的多端审批入口——与系统通知、（将来）对话卡片指向同一份提案状态。
-//  开发期面板：待确认列表 + 最近结果 + 操作留底 + 发一条测试改动（空改动，不碰真实数据）。
+//  SPEC §19 B3：App 内的多端审批入口——与系统通知、对话卡片指向同一份提案状态。
+//  开发期面板：待确认列表 + 最近结果 + 预授权规则（W10）+ 操作留底 + 发一条测试改动（空改动，不碰真实数据）。
 //
 
 import SwiftUI
@@ -37,6 +37,7 @@ struct ProposalPanel: View {
                 if closed.isEmpty { Text("还没有").foregroundStyle(.secondary) }
                 ForEach(Array(closed)) { p in historyRow(p) }
             }
+            PreauthRulesSection(center: center)   // W10 A3a：预授权规则（查看 / 改效果 / 删除，随设置同步）
             AgentTranslationStatsSection(center: center, messages: messages)   // SPEC §19 批次 6：转译偏差统计（只统计）
             #if os(macOS)
             if let bridge {
@@ -141,14 +142,18 @@ struct ProposalPanel: View {
 
     private func pendingCard(_ p: Proposal) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let e = p.escalation { ProposalEscalationBanner(reason: e) }
             Text(p.title).font(.headline)
-            Text(p.notificationBody).font(.callout)
+            if p.hasAlternatives {
+                Text("智能体给了 \(p.options.count) 个方案，挑一个：").font(.callout)
+                Text("理由：\(p.reason)\n发起：\(p.originLabel)").font(.caption)
+            } else {
+                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) }
+                    .joined(separator: "\n")).font(.callout)
+            }
             Text("\(p.action.kindLabel) · 截止 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("同意") { Task { await center.decide(p.id, .approve) } }.buttonStyle(.borderedProminent)
-                Button("拒绝", role: .destructive) { Task { await center.decide(p.id, .decline) } }.buttonStyle(.bordered)
-            }
+            ProposalCardControls(center: center, proposal: p)   // W10：同意 / 拒绝 / 回一句 / 选方案 / 以后同类
         }
         .padding(.vertical, 4)
     }
@@ -164,6 +169,7 @@ struct ProposalPanel: View {
             }
             Text([state.label, who.map { "决定于\($0)" }, p.resultNote].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
+            ProposalOutcomeNotes(proposal: p)   // W10：你回的话 / 选了哪个方案 / 代你决定的规则 / 越级理由
             undoRow(p)
             let l = center.latency(for: p.id)
             if l.notify != nil || l.withdraw != nil {

@@ -29,6 +29,8 @@ struct AgentTranslationStatsSection: View {
                 if s.proposals > 0 {
                     LabeledContent("提案", value: s.pending > 0 ? "\(s.proposals) 份（\(s.pending) 份待决定）" : "\(s.proposals) 份")
                     LabeledContent("同意 / 拒绝 / 过期", value: "\(s.approvalRate.percentText) / \(s.declineRate.percentText) / \(s.expiryRate.percentText)")
+                    LabeledContent("回了一句（没批准也没拒绝）", value: s.replyRate.text)   // W10
+                    if s.preauthorized > 0 { LabeledContent("由预授权规则代你决定", value: "\(s.preauthorized) 份") }
                     LabeledContent("执行失败", value: s.failureRate.text)
                     LabeledContent("撤销", value: s.undoRate.text + (s.undoFailed > 0 ? " · 撤销没成功 \(s.undoFailed)" : ""))
                     LabeledContent("批准后被手动改掉", value: s.overrideRate.text)

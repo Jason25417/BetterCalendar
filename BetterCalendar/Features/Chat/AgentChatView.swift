@@ -125,6 +125,10 @@ struct AgentChatView: View {
     @ViewBuilder private func bubble(_ m: AgentChatMessage) -> some View {
         if m.author == .user {
             VStack(alignment: .trailing, spacing: 4) {
+                if let pid = m.inReplyToProposal {   // W10：这句话是在回某个提案
+                    Label("回提案「\(proposals.proposals.first { $0.id == pid }?.title ?? "…")」", systemImage: "arrowshape.turn.up.left")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 Text(m.text)
                     .textSelection(.enabled)
                     .padding(10).background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
@@ -169,17 +173,17 @@ struct AgentChatView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let p = card.proposal {
                 let state = p.effectiveState(at: .now)
+                if let e = p.escalation, state == .pending { ProposalEscalationBanner(reason: e) }
                 Text(p.title).font(.subheadline.bold())
-                Text(p.notificationBody).font(.caption)
                 if state == .pending {
-                    HStack {
-                        Button("同意") { Task { await proposals.decide(p.id, .approve) } }.buttonStyle(.borderedProminent)
-                        Button("拒绝", role: .destructive) { Task { await proposals.decide(p.id, .decline) } }.buttonStyle(.bordered)
-                    }
-                    .controlSize(.small)
+                    if p.hasAlternatives { Text("理由：\(p.reason)").font(.caption) }
+                    else { Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) }.joined(separator: "\n")).font(.caption) }
+                    ProposalCardControls(center: proposals, proposal: p)   // W10：与面板、通知同一套回应
                 } else {
+                    Text(p.notificationBody).font(.caption)
                     Text([state.label, p.resultNote].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
+                    ProposalOutcomeNotes(proposal: p)
                 }
             } else {
                 Label("提案同步中…（如果一直不出现，到「多端审批」里刷新）", systemImage: "arrow.triangle.2.circlepath")
