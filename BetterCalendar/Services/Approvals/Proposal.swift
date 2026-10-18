@@ -109,6 +109,14 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// App 对**最终整体布局**校验（固定块不动、正在做/做完的不动、不进过去、不出今天、不越截止、最终互不重叠）；
     /// 撤销 = 整组挪回（isUndo=true：只作逆操作，智能体不能提；放宽「不进过去」与组内原有重叠，见 PlanMoveRules）。
     case moveBlocks(moves: [ProposalBlockMove], isUndo: Bool)
+    /// 提醒（SPEC §19.5 D3，W8）：在 deviceId 那台设备（nil = 批准的那台）上排一条普通本地通知。
+    /// **普通通知不保证叫醒**（静音 / 专注模式下可能不响）——要叫醒用 alarm。撤销 = 取消排程。
+    case reminder(id: UUID, title: String, body: String?, fireAt: Date, deviceId: String?)
+    /// 闹钟（D3，W8）：在 iPhone（deviceId 必填）上设系统闹钟（AlarmKit），会像闹钟一样响铃。Mac 上拒收。撤销 = 取消闹钟。
+    case alarm(id: UUID, title: String, fireAt: Date, deviceId: String)
+    /// 逆操作：取消提醒（expectedRevision = 设好时的版本）/ 取消闹钟。只用于撤销，智能体不能直接提。
+    case reminderCancel(id: UUID, expectedRevision: String?)
+    case alarmCancel(id: UUID)
 
     var kindLabel: String {
         switch self {
@@ -119,6 +127,10 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemDiscard: "事项：移入回收站"
         case let .timer(command, _, _, _, _): "计时：" + command.label
         case .moveBlock: "时间线：挪动计划块"
+        case .reminder: "提醒：普通通知（不保证叫醒）"
+        case .alarm: "闹钟：iPhone 系统闹钟"
+        case .reminderCancel: "提醒：取消"
+        case .alarmCancel: "闹钟：取消"
         case let .moveBlocks(moves, isUndo): isUndo ? "时间线：整组挪回" : "时间线：一起挪动 \(moves.count) 个计划块"
         }
     }
@@ -134,6 +146,10 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .timer: "timer"
         case .moveBlock: "moveBlock"
         case .moveBlocks: "moveBlocks"
+        case .reminder: "reminder"
+        case .alarm: "alarm"
+        case .reminderCancel: "reminderCancel"
+        case .alarmCancel: "alarmCancel"
         }
     }
 
@@ -186,6 +202,8 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
         case .itemDiscard?: "撤销 = 把这条待办移入回收站（30 天内可恢复）"
         case .itemEdit?: "撤销 = 改回原来的标题/备注"
         case .itemSetDone?: "撤销 = 恢复原来的完成状态"
+        case .reminderCancel?: "撤销 = 取消这条提醒"
+        case .alarmCancel?: "撤销 = 取消这个闹钟"
         case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
         default: nil
         }

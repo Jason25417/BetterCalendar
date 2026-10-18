@@ -153,6 +153,11 @@ final class AppContainer {
         // 测试 host 不接真执行器（只做空改动），单测各自注入内存数据。
         let actionExecutor: ProposalActionExecutor? = TestHost.isActive ? nil
             : ProposalActionExecutor(items: longTasks, deviceId: ProposalDevice.id)
+        // W8 D3：提醒（普通通知，复用 NativeReminderScheduler）与闹钟（iPhone 系统闹钟，复用 AlarmKitNativeAlarms）。
+        if let actionExecutor, let reminders {
+            actionExecutor.notifications = NativeProposalNotificationScheduler(reminders: reminders, alarms: nativeAlarms)
+            actionExecutor.knownDevices = { KnownDevices.all() }
+        }
         if TestHost.isActive {
             self.proposalStore = nil
             self.alertPush = nil
@@ -200,6 +205,7 @@ final class AppContainer {
                 await center?.refresh(); await messages?.refresh(); await chat?.refresh()
             }
             Task { [weak center = proposals, weak push = alertPush] in
+                KnownDevices.announce()   // W8 D3：登记本机，智能体才知道 iPhone 的设备 id
                 await LocalProposalNotifier.registerCategories()
                 await LocalAgentMessageNotifier.registerCategories()
                 await LocalAgentChatNotifier.registerCategories()

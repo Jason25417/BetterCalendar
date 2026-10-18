@@ -111,6 +111,10 @@ enum ProposalTimerRules {
     /// 计时与挪动依赖执行层/时间线，组装点在它们建好后挂上（weak：不延长执行层寿命）。
     weak var timer: (any ProposalTimerControlling)?
     var mover: (any PlanBlockMoving)?
+    /// W8 D3：提醒 / 闹钟的排程能力（生产 = NativeProposalNotificationScheduler）。
+    var notifications: (any ProposalNotificationScheduling)?
+    /// W8 D3：最近见过的设备名册（含本机），给闹钟 / 提醒校验目标设备、在审批卡上写设备名。
+    var knownDevices: () -> [KnownDevice] = { [] }
     let deviceId: String
     private let now: () -> Date
 
@@ -222,6 +226,35 @@ enum ProposalTimerRules {
                                                          title: command == .start && blockId == nil ? resolvedTitle : nil,
                                                          expectedRevision: revision, startAt: resolvedStart),
                                           changes: changes, requiredDeviceId: deviceId)
+
+        case let .reminder(id, title, body, fireAt, deviceId):
+            let title = try Self.cleanReminderTitle(title)
+            let body = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard body.count <= ProposalReminderRules.bodyLimit else { throw ProposalExecutionError.invalid("提醒正文不超过 \(ProposalReminderRules.bodyLimit) 字") }
+            try Self.checkFireAt(fireAt, now: now())
+            let device = try deviceId.map { try knownDevice($0, what: "提醒") }
+            let place = device.map { "在「\($0.label)」上" } ?? "在批准的那台设备上"
+            var changes = [ProposalChange(field: "提醒", before: nil, after: title),
+                           ProposalChange(field: "\(place) \(ProposalReminderRules.when(fireAt)) 弹一条通知", before: nil, after: nil),
+                           ProposalChange(field: "普通通知：静音或专注模式下可能不响，不保证叫醒（要叫醒请用闹钟）", before: nil, after: nil)]
+            if !body.isEmpty { changes.insert(ProposalChange(field: "提醒正文", before: nil, after: body), at: 1) }
+            return PreparedProposalAction(action: .reminder(id: id, title: title, body: body.isEmpty ? nil : body, fireAt: fireAt, deviceId: deviceId),
+                                          changes: changes, requiredDeviceId: deviceId)
+
+        case let .alarm(id, title, fireAt, deviceId):
+            let title = try Self.cleanReminderTitle(title)
+            try Self.checkFireAt(fireAt, now: now())
+            let device = try knownDevice(deviceId, what: "闹钟")
+            guard device.isPhone else {
+                throw ProposalExecutionError.invalid("闹钟只能设在 iPhone 上（「\(device.label)」是 \(device.platform)）；Mac 上不设闹钟，也不改成普通通知")
+            }
+            return PreparedProposalAction(action: .alarm(id: id, title: title, fireAt: fireAt, deviceId: deviceId),
+                                          changes: [ProposalChange(field: "闹钟", before: nil, after: title),
+                                                    ProposalChange(field: "在「\(device.label)」上 \(ProposalReminderRules.when(fireAt)) 响铃（iPhone 系统闹钟）", before: nil, after: nil)],
+                                          requiredDeviceId: deviceId)
+
+        case .reminderCancel, .alarmCancel:
+            throw ProposalExecutionError.invalid("取消提醒/闹钟只用于撤销，不能单独提出")
 
         case let .moveBlocks(moves, isUndo):
             guard !isUndo else { throw ProposalExecutionError.invalid("「整组挪回」只用于撤销，不能单独提出") }
@@ -339,6 +372,32 @@ enum ProposalTimerRules {
             }
             return ProposalExecutionOutcome(note: note, undo: undo)
 
+        case let .reminder(id, title, body, fireAt, deviceId):
+            if let deviceId, deviceId != self.deviceId { throw ProposalExecutionError.invalid("这条提醒指定在另一台设备上设，本机不执行") }
+            guard fireAt > now() else { throw ProposalExecutionError.invalid("提醒时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补发") }
+            let revision = try await notificationScheduler().scheduleReminder(id: id, title: title, body: body ?? "", fireAt: fireAt)
+            return ProposalExecutionOutcome(note: "已在本机排好 \(ProposalReminderRules.when(fireAt)) 的提醒「\(title)」（普通通知，不保证叫醒）",
+                                            undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: revision), deviceId: self.deviceId))
+
+        case let .alarm(id, title, fireAt, deviceId):
+            guard deviceId == self.deviceId else { throw ProposalExecutionError.invalid("这个闹钟指定在另一台设备上设，本机不执行") }
+            guard fireAt > now() else { throw ProposalExecutionError.invalid("闹钟时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补响") }
+            let scheduler = try notificationScheduler()
+            guard scheduler.alarmsSupported else {
+                throw ProposalExecutionError.unavailable("这台设备不能设系统闹钟（只有 iPhone 可以）；没有改用普通通知")
+            }
+            try await scheduler.scheduleAlarm(id: id, title: title, fireAt: fireAt)
+            return ProposalExecutionOutcome(note: "已在本机设好 \(ProposalReminderRules.when(fireAt)) 的闹钟「\(title)」",
+                                            undo: ProposalUndoInfo(action: .alarmCancel(id: id), deviceId: self.deviceId))
+
+        case let .reminderCancel(id, expected):
+            try await notificationScheduler().cancelReminder(id: id, expectedRevision: expected)
+            return ProposalExecutionOutcome(note: "已取消这条提醒", undo: ProposalUndoInfo(unavailableReason: "提醒已取消；需要可以重新设"))
+
+        case let .alarmCancel(id):
+            try await notificationScheduler().cancelAlarm(id: id)
+            return ProposalExecutionOutcome(note: "已取消这个闹钟", undo: ProposalUndoInfo(unavailableReason: "闹钟已取消；需要可以重新设"))
+
         case let .moveBlocks(moves, isUndo):
             let result = try await planMover().moveGroup(moves, restoring: isUndo)
             let back = result.changes.map { ProposalBlockMove(id: $0.before.id, start: $0.before.start, end: $0.before.end,
@@ -366,6 +425,36 @@ enum ProposalTimerRules {
         guard let timer else { throw ProposalExecutionError.unavailable("这台设备没有接入计时") }
         return timer
     }
+    private func notificationScheduler() throws -> any ProposalNotificationScheduling {
+        guard let notifications else { throw ProposalExecutionError.unavailable("这台设备没有接入提醒/闹钟") }
+        return notifications
+    }
+
+    /// 目标设备必须在名册里（最近见过）；不认识的 id 不猜。
+    private func knownDevice(_ id: String, what: String) throws -> KnownDevice {
+        guard let device = knownDevices().first(where: { $0.id == id }) else {
+            throw ProposalExecutionError.invalid("不认识要设\(what)的设备「\(id.prefix(12))」：请用 context.json 里 actionTargets.devices 的 id")
+        }
+        return device
+    }
+
+    private static func cleanReminderTitle(_ raw: String) throws -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t.count <= ProposalReminderRules.titleLimit else {
+            throw ProposalExecutionError.invalid("标题不能为空，且不超过 \(ProposalReminderRules.titleLimit) 字")
+        }
+        return t
+    }
+
+    private static func checkFireAt(_ fireAt: Date, now: Date) throws {
+        guard fireAt >= now.addingTimeInterval(ProposalReminderRules.minLead) else {
+            throw ProposalExecutionError.invalid("时刻 \(ProposalReminderRules.when(fireAt)) 已经过了或太近（至少 1 分钟以后）")
+        }
+        guard fireAt <= now.addingTimeInterval(ProposalReminderRules.maxAhead) else {
+            throw ProposalExecutionError.invalid("时刻 \(ProposalReminderRules.when(fireAt)) 太远（30 天以内）；更远的事请放进日历或提醒事项")
+        }
+    }
+
     private func planMover() throws -> any PlanBlockMoving {
         guard let mover else { throw ProposalExecutionError.unavailable("这台设备没有接入时间线") }
         return mover

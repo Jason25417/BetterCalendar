@@ -128,7 +128,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         guard let reason = (o["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty
         else { throw AgentBridgeError.invalid("缺少理由（每个改动都必须讲得出依据）") }
         guard let rawAction = o["action"] as? [String: Any] else { throw AgentBridgeError.invalid("缺少 action") }
-        let action = try Self.action(from: rawAction, proposalId: id)
+        let action = try Self.action(from: rawAction, proposalId: id, targetDevice: o["targetDevice"] as? String)
         // 真改动的「改动前 → 改动后」由 App 依据真实数据计算（智能体写的 changes 可省略，写了也会被替换）；
         // 测试改动沿用智能体写的 changes（必填）。
         let changes: [ProposalChange]
@@ -151,7 +151,8 @@ nonisolated struct AgentBridgeIO: Sendable {
     }
 
     /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard / timerDiscard / 整组挪回只用于撤销，不接受）。
-    static func action(from a: [String: Any], proposalId: UUID) throws -> ProposalAction {
+    /// targetDevice = 提案级的执行设备（提醒/闹钟没在 action.device 里写设备时沿用它）。
+    static func action(from a: [String: Any], proposalId: UUID, targetDevice: String? = nil) throws -> ProposalAction {
         guard let kind = a["kind"] as? String else { throw AgentBridgeError.invalid("action.kind 缺失") }
         let allowed: [String: Set<String>] = [
             "experimentNoop": ["note"],
@@ -161,6 +162,8 @@ nonisolated struct AgentBridgeIO: Sendable {
             "timer": ["command", "blockId", "title", "expectedRevision", "startedAt"],
             "moveBlock": ["blockId", "start", "end", "expectedRevision"],
             "moveBlocks": ["moves"],
+            "reminder": ["title", "body", "fireAt", "device"],
+            "alarm": ["title", "fireAt", "device"],
         ]
         guard let keys = allowed[kind] else {
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
@@ -242,6 +245,19 @@ nonisolated struct AgentBridgeIO: Sendable {
                 }
             }
             return .moveBlocks(moves: moves, isUndo: false)
+        case "reminder":
+            // W8 D3：普通提醒（不保证叫醒）。device 省略 = 提案的 targetDevice，再省略 = 批准的那台。
+            let device = try string("device", max: 80) ?? targetDevice
+            if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("reminder.device 与 targetDevice 不一致") }
+            return .reminder(id: proposalId, title: try required(string("title", max: 150), "title"), body: try string("body", max: 500),
+                             fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
+        case "alarm":
+            // W8 D3：iPhone 系统闹钟（会响铃）。必须指定 iPhone：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
+            let device = try string("device", max: 80) ?? targetDevice
+            if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("alarm.device 与 targetDevice 不一致") }
+            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定 iPhone：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
+            return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
+                          fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         default:
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
         }
