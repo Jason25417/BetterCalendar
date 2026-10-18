@@ -14,13 +14,16 @@ import Testing
         var state = ProposalTimerState.idle
         var calls: [String] = []
         var plan: [UUID: String] = [:]
+        var busy: [ProposalBusySpan] = []
+        var startedAts: [Date?] = []
         var proposalTimerState: ProposalTimerState { state }
         func proposalPlanItemTitle(_ id: UUID) async -> String? { plan[id] }
-        func proposalStartTimer(blockId: UUID?, title: String?) async throws {
-            calls.append("start")
+        func proposalStartTimer(blockId: UUID?, title: String?, at: Date?) async throws {
+            calls.append("start"); startedAts.append(at)
             state = ProposalTimerState(phase: .running, title: blockId.flatMap { plan[$0] } ?? title, blockId: blockId,
-                                       startedAt: Date(timeIntervalSince1970: 1_000 + Double(calls.count)))
+                                       startedAt: at ?? Date(timeIntervalSince1970: 1_000 + Double(calls.count)))
         }
+        func proposalBusySpans() async -> [ProposalBusySpan] { busy }
         func proposalPauseTimer() async throws { calls.append("pause"); state.phase = .paused }
         func proposalResumeTimer() async throws { calls.append("resume"); state.phase = .running }
         func proposalStopTimer() async throws { calls.append("stop"); state = .idle }
@@ -208,11 +211,16 @@ import Testing
         #expect(await r.mac.submit(draft(.timer(command: .start, blockId: UUID(), title: nil, expectedRevision: nil))) == nil)
     }
 
-    @Test func undoOfStartStopsTimer() async throws {
+    /// W8（Jason 2026-10-18）：开始计时批准执行后不提供撤销；结束计时要另提「结束计时」。
+    @Test func startHasNoUndoEndIsSeparateProposal() async throws {
         let r = try rig()
         let p = try await approve(r, .timer(command: .start, blockId: nil, title: "临时回邮件", expectedRevision: nil))
         #expect(r.timer.state.title == "临时回邮件")
-        #expect(await r.mac.undo(p.id))
+        #expect(p.undoAction == nil && !r.mac.canUndo(p))
+        #expect(r.mac.undoBlockedReason(p) == "要结束计时请另提「结束计时」")
+        #expect(await r.mac.undo(p.id) == false)
+        #expect(r.timer.state.phase == .running && r.timer.calls == ["start"])   // 撤销没有动计时
+        _ = try await approve(r, .timer(command: .stop, blockId: nil, title: nil, expectedRevision: nil))
         #expect(r.timer.state.phase == .idle && r.timer.calls == ["start", "stop"])
     }
 

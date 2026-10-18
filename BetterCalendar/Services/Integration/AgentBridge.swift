@@ -109,6 +109,7 @@ nonisolated struct AgentBridgeIO: Sendable {
                                      "decidedByDeviceId": p.decidedByDeviceId ?? NSNull(), "resultNote": p.resultNote ?? NSNull(),
                                      "undoAvailable": p.state == .applied && p.undoAction != nil && p.undoneAt == nil,
                                      "undoUnavailableReason": p.undoUnavailableReason ?? NSNull(),
+                                     "undoHint": p.undoHint ?? NSNull(),
                                      "undoneAt": p.undoneAt.map { iso.string(from: $0) } ?? NSNull(), "undoNote": p.undoNote ?? NSNull(),
                                      "updatedAt": iso.string(from: p.undoneAt ?? p.appliedAt ?? p.decidedAt ?? p.createdAt)]
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
@@ -127,7 +128,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         guard let reason = (o["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty
         else { throw AgentBridgeError.invalid("缺少理由（每个改动都必须讲得出依据）") }
         guard let rawAction = o["action"] as? [String: Any] else { throw AgentBridgeError.invalid("缺少 action") }
-        let action = try Self.action(from: rawAction, proposalId: id)
+        let action = try Self.action(from: rawAction, proposalId: id, targetDevice: o["targetDevice"] as? String)
         // 真改动的「改动前 → 改动后」由 App 依据真实数据计算（智能体写的 changes 可省略，写了也会被替换）；
         // 测试改动沿用智能体写的 changes（必填）。
         let changes: [ProposalChange]
@@ -149,16 +150,20 @@ nonisolated struct AgentBridgeIO: Sendable {
                              action: action, experiment: !action.touchesRealData, lifetime: lifetime)
     }
 
-    /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard 只用于撤销，不接受）。
-    static func action(from a: [String: Any], proposalId: UUID) throws -> ProposalAction {
+    /// 桥接协议 action → ProposalAction（严格：每种只认自己的键；itemDiscard / timerDiscard / 整组挪回只用于撤销，不接受）。
+    /// targetDevice = 提案级的执行设备（提醒/闹钟没在 action.device 里写设备时沿用它）。
+    static func action(from a: [String: Any], proposalId: UUID, targetDevice: String? = nil) throws -> ProposalAction {
         guard let kind = a["kind"] as? String else { throw AgentBridgeError.invalid("action.kind 缺失") }
         let allowed: [String: Set<String>] = [
             "experimentNoop": ["note"],
             "itemCreate": ["title", "note"],
             "itemEdit": ["itemId", "title", "note", "expectedRevision"],
             "itemSetDone": ["itemId", "done", "expectedRevision"],
-            "timer": ["command", "blockId", "title", "expectedRevision"],
+            "timer": ["command", "blockId", "title", "expectedRevision", "startedAt"],
             "moveBlock": ["blockId", "start", "end", "expectedRevision"],
+            "moveBlocks": ["moves"],
+            "reminder": ["title", "body", "fireAt", "device"],
+            "alarm": ["title", "fireAt", "device"],
         ]
         guard let keys = allowed[kind] else {
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
@@ -207,15 +212,52 @@ nonisolated struct AgentBridgeIO: Sendable {
                 throw AgentBridgeError.invalid("timer.command 必须是 start / pause / resume / stop")
             }
             let blockId = try uuid("blockId"), title = try string("title", max: 200)
+            // W8：startedAt = 回溯起点（智能体推断你大概从这一刻起就在做），只用于 start；合法性（不在未来、≤2 小时前、
+            // 不与已记下的实际/计时重叠）由 App 依据真实数据再查。
+            let startedAt = try date("startedAt")
             if command == .start {
                 guard (blockId == nil) != (title == nil) else { throw AgentBridgeError.invalid("timer start 需要二选一：blockId 或 title") }
             } else {
                 guard blockId == nil, title == nil else { throw AgentBridgeError.invalid("timer \(raw) 不带 blockId / title（作用于执行设备上正在计的那件）") }
+                guard startedAt == nil else { throw AgentBridgeError.invalid("只有 timer start 能带 startedAt（回溯起点）") }
             }
-            return .timer(command: command, blockId: blockId, title: title, expectedRevision: revision)
+            return .timer(command: command, blockId: blockId, title: title, expectedRevision: revision, startAt: startedAt)
         case "moveBlock":
             return .moveBlock(id: try required(uuid("blockId"), "blockId"), start: try required(date("start"), "start"),
                               end: try date("end"), expectedRevision: revision)
+        case "moveBlocks":
+            // W8：一次挪多块（撞到别的块时连带挪）。每项只认 blockId / start / end / expectedRevision；最终布局由 App 整体校验。
+            guard let raw = a["moves"] as? [[String: Any]], !raw.isEmpty else {
+                throw AgentBridgeError.invalid("moveBlocks.moves 必须是非空数组，每项 {blockId, start, end?, expectedRevision?}")
+            }
+            guard raw.count <= PlanMoveRules.maxGroup else { throw AgentBridgeError.invalid("moveBlocks 一次最多 \(PlanMoveRules.maxGroup) 块") }
+            let moves = try raw.enumerated().map { i, m -> ProposalBlockMove in
+                guard m["kind"] == nil else { throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 不认识的字段：kind") }
+                var item = m
+                item["kind"] = "moveBlock"
+                do {
+                    guard case let .moveBlock(id, start, end, rev) = try Self.action(from: item, proposalId: proposalId) else {
+                        throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 格式错误")
+                    }
+                    return ProposalBlockMove(id: id, start: start, end: end, expectedRevision: rev)
+                } catch let AgentBridgeError.invalid(why) {
+                    throw AgentBridgeError.invalid("moveBlocks.moves[\(i)]：" + why)
+                }
+            }
+            return .moveBlocks(moves: moves, isUndo: false)
+        case "reminder":
+            // W8 D3：普通提醒（不保证叫醒）。device 省略 = 提案的 targetDevice，再省略 = 批准的那台。
+            let device = try string("device", max: 80) ?? targetDevice
+            if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("reminder.device 与 targetDevice 不一致") }
+            return .reminder(id: proposalId, title: try required(string("title", max: 150), "title"), body: try string("body", max: 500),
+                             fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
+        case "alarm":
+            // W8 D3：iPhone 系统闹钟（会响铃）。必须指定 iPhone：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
+            let device = try string("device", max: 80) ?? targetDevice
+            if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("alarm.device 与 targetDevice 不一致") }
+            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定 iPhone：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
+            return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
+                          fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         default:
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
         }

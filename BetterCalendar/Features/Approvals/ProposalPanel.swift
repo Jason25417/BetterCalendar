@@ -63,7 +63,7 @@ struct ProposalPanel: View {
             if let alertPush {
                 Section("App 关闭时也推送（实验，B5）") {
                     Toggle("新提案由 iCloud 直接推送", isOn: Binding(get: { alertPush.enabled }, set: { on in Task { await alertPush.set(on) } }))
-                    Text("打开后，App 没运行也能弹出带批准/拒绝的通知；作用于你所有设备。和本机通知重复时只保留一条。").font(.caption).foregroundStyle(.secondary)
+                    Text("打开后，App 没运行也能弹出带批准/拒绝的通知；作用于你所有设备。和本机通知重复时只保留一条。默认开：你没手动关过时，App 启动会自动打开。").font(.caption).foregroundStyle(.secondary)
                     if let e = alertPush.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
                 }
                 .task { await alertPush.reload() }
@@ -98,8 +98,12 @@ struct ProposalPanel: View {
             Toggle("关键时刻唤醒智能体（做完一件事、提案有结论）", isOn: Binding(get: { eventsOn }, set: { eventsOn = $0; AgentEventSettings.enabled = $0 }))
             Text("每次唤醒都会消耗 Claude 订阅额度（实测每次约 20 秒）。需要 Mac 上已连接 bridge 文件夹。").font(.caption).foregroundStyle(.secondary)
             Toggle("允许智能体主动通知你", isOn: Binding(get: { m.settings.enabled }, set: { m.settings.enabled = $0 }))
-            Stepper("每小时最多 \(m.settings.maxPerHour) 条", value: Binding(get: { m.settings.maxPerHour }, set: { m.settings.maxPerHour = $0 }), in: 1...6)
-            Stepper("每天最多 \(m.settings.maxPerDay) 条", value: Binding(get: { m.settings.maxPerDay }, set: { m.settings.maxPerDay = $0 }), in: 1...20)
+            Toggle("频率上限", isOn: Binding(get: { m.settings.capsOn }, set: { m.settings.capsOn = $0 }))
+            Text("测试期默认关（不限每小时/每天条数，具体数字待重新讨论）；安静时段与一键静音始终有效。").font(.caption).foregroundStyle(.secondary)
+            if m.settings.capsOn {
+                Stepper("每小时最多 \(m.settings.maxPerHour) 条", value: Binding(get: { m.settings.maxPerHour }, set: { m.settings.maxPerHour = $0 }), in: 1...6)
+                Stepper("每天最多 \(m.settings.maxPerDay) 条", value: Binding(get: { m.settings.maxPerDay }, set: { m.settings.maxPerDay = $0 }), in: 1...20)
+            }
             Stepper("安静时段从 \(m.settings.quietStartHour):00", value: Binding(get: { m.settings.quietStartHour }, set: { m.settings.quietStartHour = $0 }), in: 0...23)
             Stepper("安静时段到 \(m.settings.quietEndHour):00", value: Binding(get: { m.settings.quietEndHour }, set: { m.settings.quietEndHour = $0 }), in: 0...23)
             if let until = m.settings.mutedUntil, until > .now {
@@ -178,6 +182,7 @@ struct ProposalPanel: View {
         } else if p.state == .applied, p.action.touchesRealData {
             if center.canUndo(p) {
                 Button("撤销") { Task { await center.undo(p.id) } }.font(.caption).buttonStyle(.bordered)
+                if let hint = p.undoHint { Text(hint).font(.caption2).foregroundStyle(.secondary) }
             } else if let reason = center.undoBlockedReason(p) {
                 Text("不能撤销：\(reason)").font(.caption2).foregroundStyle(.secondary)
             }

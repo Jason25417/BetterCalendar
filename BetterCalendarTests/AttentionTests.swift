@@ -9,6 +9,8 @@ import Testing
 
     @Test func policyGatesByMasterSwitchMuteQuietHoursAndCaps() {
         var s = AttentionSettings()
+        #expect(s.enabled && !s.capsOn)   // W8：从没设过 = 总开关开、频率上限关
+        s.enabled = false
         #expect(AttentionPolicy.evaluate(s, at: at(14), recentDeliveries: []) == .suppress("智能体主动通知未开启"))
         s.enabled = true
         #expect(AttentionPolicy.evaluate(s, at: at(14), recentDeliveries: []) == .allow)
@@ -16,6 +18,8 @@ import Testing
         #expect(AttentionPolicy.evaluate(s, at: at(7, 59), recentDeliveries: []) != .allow)
         #expect(AttentionPolicy.evaluate(s, at: at(8), recentDeliveries: []) == .allow)
         let two = [at(13, 20), at(13, 40)]
+        #expect(AttentionPolicy.evaluate(s, at: at(14), recentDeliveries: two) == .allow)    // W8：上限默认关
+        s.capsOn = true
         #expect(AttentionPolicy.evaluate(s, at: at(14), recentDeliveries: two) != .allow)    // 每小时上限 2
         #expect(AttentionPolicy.evaluate(s, at: at(14, 21), recentDeliveries: two) == .allow)
         s.mutedUntil = at(15)
@@ -33,6 +37,7 @@ import Testing
         let d = UserDefaults(suiteName: "bc-attention-" + UUID().uuidString)!
         let c = AgentMessageCenter(transport: transport, notifier: bell, ledger: MemoryOperationLedger(), deviceId: "mac", defaults: d, now: clock)
         c.settings.enabled = enabled
+        c.settings.capsOn = true   // 这组测试验证上限本身（W8 起默认关）
         return c
     }
 

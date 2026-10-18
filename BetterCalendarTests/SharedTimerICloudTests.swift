@@ -210,7 +210,9 @@ import SwiftData
         let suite = "bc-test-shared-timer-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(SharedTimerSettings.requested(defaults) == false)
+        #expect(SharedTimerSettings.requested(defaults) == true)    // W8：从没设过 = 开（启动闸门照旧）
+        SharedTimerSettings.setRequested(false, defaults)
+        #expect(SharedTimerSettings.requested(defaults) == false)   // 手动关过的保留
         var legacyRead = false
         let decision = SharedTimerSettings.launchDecision(requested: false, legacy: { legacyRead = true; return BridgeTaskLocalFile() })
         #expect(decision.backend == .stateBridge && decision.note == nil && !legacyRead)

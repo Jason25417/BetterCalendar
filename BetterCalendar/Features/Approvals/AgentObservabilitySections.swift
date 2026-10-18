@@ -84,6 +84,10 @@ struct AgentRuntimeSection: View {
             let updated = st.updatedAt.map { " · 更新于 \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
             Text(st.state == "running" ? "调度器：运行中\(st.currentEvent.map { "（\($0)）" } ?? "")\(updated)" : "调度器：空闲\(updated)")
                 .font(.footnote)
+            // W8 额度监控：Jason 100 美元/月套餐，标准是智能体占周额度 ≤10% 就无所谓；名义成本与套餐百分比没有精确换算，只给成本与次数。
+            Text(AgentDispatcherStatus.usageLine(st.usage)).font(.footnote)
+            Text("名义成本 = Claude Code 报的 total_cost_usd 合计；订阅套餐按额度计，和它没有精确换算，这里不估算占套餐的百分比。")
+                .font(.caption2).foregroundStyle(.secondary)
             if let s = st.session {
                 Text(sessionLine(s, st.thresholds)).font(.caption.monospaced()).foregroundStyle(.secondary)
             } else {

@@ -78,9 +78,10 @@ import Testing
                                           defaults: UserDefaults(suiteName: "bc-msg-" + UUID().uuidString)!)
         let bridge = AgentBridge(center: center, messages: messages, defaults: UserDefaults(suiteName: "bc-bridge-" + UUID().uuidString)!) { [:] }
         bridge.eventsEnabled = { false }
+        messages.settings.enabled = false   // 总开关关（W8 起出厂默认开，这里显式关）
         await bridge.sync(io: io)
         #expect(messages.messages.count == 1 && messages.messages[0].parentRef == "evt-1")
-        #expect(messages.messages[0].delivery == .suppressed)   // 总开关默认关：拦下但保存
+        #expect(messages.messages[0].delivery == .suppressed)   // 总开关关：拦下但保存
         let result = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("results/messages/\(id).json"))) as! [String: Any]
         #expect(result["delivery"] as? String == "suppressed" && (result["suppressReason"] as? String)?.contains("未开启") == true)
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("messages/rejected/noreason.json").path))

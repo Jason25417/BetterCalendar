@@ -86,6 +86,10 @@ final class ExecutionViewModel {
         /// 并行接替（点子 #20）：true=完成前台后从「同时做」自动顶上来的——被「换一件/开始别件」时
         /// 回同时做队首（计时保留）而不是被结束（原则7：自动接替只是显示提升、随时可逆）。
         var cameFromBackground: Bool = false
+        /// 开始那一刻的计划时长（W8 修「活动预报被暂停反复拉长」，Jason 2026-10-18 批准）：
+        /// 预测结束 = 现在 +（计划时长 − 已投入）；计划时长若每次都从 planned 现读，读到的是时间线协调器
+        /// 按上一次预测写回、已被拉长的那一行——暂停/休息越久越长、后面的块被一路推后。故开始时定格。nil=计划外/无对应。
+        var plannedDuration: TimeInterval? = nil
     }
     /// 后台并行块：只记起点，按墙钟计时。休息时也一起冻结（0.17：rest=从所有正在做的事休息）。
     struct BackgroundRun: Identifiable, Sendable {
@@ -104,6 +108,7 @@ final class ExecutionViewModel {
             var plannedID: UUID?; var title: String; var start: Date
             var pausedTotal: TimeInterval; var timingStyleRaw: String
             var cameFromBackground: Bool?   // 并行接替标记（Optional：老快照缺此键照常解码）
+            var plannedSec: TimeInterval?   // W8：开始时定格的计划时长（Optional：老快照缺此键照常解码）
         }
         struct RunSnap: Codable {
             var plannedID: UUID?; var title: String; var start: Date; var pausedTotal: TimeInterval
@@ -143,7 +148,7 @@ final class ExecutionViewModel {
         if let a = active {
             snap.active = .init(plannedID: a.plannedID, title: a.title, start: a.start,
                                 pausedTotal: a.pausedTotal, timingStyleRaw: a.timingStyle.rawValue,
-                                cameFromBackground: a.cameFromBackground)
+                                cameFromBackground: a.cameFromBackground, plannedSec: a.plannedDuration)
         }
         snap.background = background.map { .init(plannedID: $0.plannedID, title: $0.title,
                                                  start: $0.start, pausedTotal: $0.pausedTotal) }
@@ -230,7 +235,7 @@ final class ExecutionViewModel {
             active = ActiveBlock(plannedID: a.plannedID, title: a.title, start: a.start,
                                  pausedTotal: a.pausedTotal,
                                  timingStyle: TimingStyle(rawValue: a.timingStyleRaw) ?? .light,
-                                 cameFromBackground: a.cameFromBackground ?? false)
+                                 cameFromBackground: a.cameFromBackground ?? false, plannedDuration: a.plannedSec)
         }
         background = snap.background.map { BackgroundRun(plannedID: $0.plannedID, title: $0.title,
                                                          start: $0.start, pausedTotal: $0.pausedTotal) }
@@ -532,6 +537,7 @@ final class ExecutionViewModel {
     /// 当前块的**计划时长**（轻计时的预算参照；从对应计划块的起止算）。nil=计划外 bonus / 无对应。
     var activePlannedDuration: TimeInterval? {
         guard let a = active else { return nil }
+        if let fixed = a.plannedDuration { return fixed }   // W8：开始时定格（不读协调器写回、被预测拉长的那一行）
         return planned.first { $0.id == a.plannedID }.map { $0.end.timeIntervalSince($0.start) }
     }
 
@@ -844,7 +850,8 @@ final class ExecutionViewModel {
         active = ActiveBlock(plannedID: run.plannedID, title: run.title, start: run.start,
                              pausedTotal: run.pausedTotal,
                              timingStyle: style == .pomodoro ? .light : style,
-                             cameFromBackground: true)
+                             cameFromBackground: true,
+                             plannedDuration: planned.first { $0.id == run.plannedID }.map { $0.end.timeIntervalSince($0.start) })
         pomoRestAccumulated = 0   // 上一件的番茄残留不带给接替块
         pomoTargetSegments = nil
         DevLog.shared.info("执行", "并行接替：「\(run.title)」顶上前台续走（同时做剩 \(background.count) 件）")
@@ -863,19 +870,24 @@ final class ExecutionViewModel {
     }
 
     /// 真正开始某块（计时从现在起）。空档的「开始：下一件」/「开始任务」走这里。
-    func startBlock(_ item: PlannedItem) async {
+    /// startAt（SPEC §19 W8）：审批通过的回溯起点（「你大概从 13:00 起就在做」）；nil = 从现在起。校验在审批执行器里做。
+    func startBlock(_ item: PlannedItem, at startAt: Date? = nil) async {
         if usesCanonicalTiming, let tasks = canonicalTasks {
-            await tasks.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString, mode: item.timingStyle == .pomodoro ? .pomodoro : .light, focusMinutes: item.timingStyle == .pomodoro ? Int(PomodoroTimer.work / 60) : nil)
+            await tasks.start(title: item.title, relatedRecordId: "PlanBlock:" + item.id.uuidString, mode: item.timingStyle == .pomodoro ? .pomodoro : .light, focusMinutes: item.timingStyle == .pomodoro ? Int(PomodoroTimer.work / 60) : nil, startedAt: startAt)
             selected = nil
             return
         }
         if !demoteAutoPromotedActive() { await recordActiveIfAny() }
-        active = ActiveBlock(plannedID: item.id, title: item.title, start: .now,
-                             timingStyle: item.timingStyle)
+        let begin = min(startAt ?? .now, .now)
+        // 计划内的块：定格开始那一刻的计划时长（item 可能来自 selected/旧缓存，以 planned 里的当前行为准）。
+        let plannedNow = planned.first { $0.id == item.id }
+        active = ActiveBlock(plannedID: item.id, title: item.title, start: begin,
+                             timingStyle: item.timingStyle,
+                             plannedDuration: plannedNow.map { $0.end.timeIntervalSince($0.start) })
         selected = nil
         isOnBreak = false
         breakStart = nil
-        pomoSegStart = (item.timingStyle == .pomodoro) ? .now : nil   // 番茄钟从工作段起
+        pomoSegStart = (item.timingStyle == .pomodoro) ? begin : nil   // 番茄钟从工作段起
         pomoIsRest = false
         pomoWorkSegmentsDone = 0
         pomoRestAccumulated = 0
@@ -900,12 +912,13 @@ final class ExecutionViewModel {
     /// **不写 PlanStore**（写计划只有 确认写入 + 对账回流 两个入口，menu bar 不当第三写者）——
     /// 它是 §3.5 的 bonus：计划外块 id 不在 planned 里，完成即记蓝色实际，复盘里无匹配计划 = 计划外高亮（算赢）。
     /// 默认轻计时；开始即进实时模式（同 startBlock）。
-    func startAdHoc(title: String, timingStyle: TimingStyle = .light) async {
+    func startAdHoc(title: String, timingStyle: TimingStyle = .light, at startAt: Date? = nil) async {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        let item = PlannedItem(id: UUID(), title: name, start: .now,
-                               end: Date.now.addingTimeInterval(3600), timingStyle: timingStyle)
-        await startBlock(item)   // 复用前台开始：id 是新 UUID、不在 planned → 天然 bonus
+        let begin = min(startAt ?? .now, .now)
+        let item = PlannedItem(id: UUID(), title: name, start: begin,
+                               end: begin.addingTimeInterval(3600), timingStyle: timingStyle)
+        await startBlock(item, at: startAt)   // 复用前台开始：id 是新 UUID、不在 planned → 天然 bonus
     }
 
     /// 同时做一件计划外的事（后台并行 bonus）。
@@ -1245,7 +1258,7 @@ final class ExecutionViewModel {
             var preview: [ScheduledBlock] = []
             // ① 正在做的：从现在起 → 预测结束（计划时长 − 已投入），让橙色「当前时刻」就是这件事
             if let a = active, let p = planned.first(where: { $0.id == a.plannedID }) {
-                let remain = max(60, p.end.timeIntervalSince(p.start) - currentElapsed)
+                let remain = max(60, (activePlannedDuration ?? p.end.timeIntervalSince(p.start)) - currentElapsed)
                 preview.append(ScheduledBlock(id: p.id, title: a.title, start: now0,
                                               end: now0.addingTimeInterval(remain)))
             }
@@ -1356,7 +1369,7 @@ extension ExecutionViewModel: ExecutionProgressReading {
     var activePrediction: ActivePrediction? {
         guard let a = active, let pid = a.plannedID,
               let p = planned.first(where: { $0.id == pid }) else { return nil }
-        let remain = max(60, p.end.timeIntervalSince(p.start) - currentElapsed)
+        let remain = max(60, (activePlannedDuration ?? p.end.timeIntervalSince(p.start)) - currentElapsed)
         return ActivePrediction(id: pid, start: a.start,
                                 end: Date.now.addingTimeInterval(remain))
     }

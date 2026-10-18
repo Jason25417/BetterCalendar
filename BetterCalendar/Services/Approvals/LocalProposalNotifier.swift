@@ -118,31 +118,59 @@ import Observation
     static var onPush: (() async -> Void)?
 }
 
-/// B5 可见推送开关（实验，默认关）。订阅存在 iCloud 账户里：一端打开，所有设备生效；状态以云端为准。
+/// B5 可见推送订阅的读写缝（生产 = CloudKitProposalStore；测试 = 内存假实现）。
+nonisolated protocol ProposalAlertPushing: Sendable {
+    func isAlertPushEnabled() async throws -> Bool
+    func setAlertPush(enabled: Bool) async throws
+}
+extension CloudKitProposalStore: ProposalAlertPushing {}
+
+/// B5 可见推送开关（实验；W8 起你没手动关过就默认开）。订阅存在 iCloud 账户里：一端打开，所有设备生效；状态以云端为准。
 @MainActor @Observable final class ProposalAlertPushControl {
     static let key = "approvals.alertPush.enabled"
+    /// W8：用户**手动关过**的记号（只有面板上亲手关掉才写；亲手打开时清掉）。随设置同步——订阅属于 iCloud 账户、
+    /// 全设备生效，iPhone 上关了，Mac 启动时不能又自动打开。
+    static let userDisabledKey = "approvals.alertPush.userDisabled"
     private(set) var enabled: Bool
     private(set) var lastError: String?
-    private let store: CloudKitProposalStore
-    init(store: CloudKitProposalStore) {
-        self.store = store
-        enabled = UserDefaults.standard.bool(forKey: Self.key)
+    private let store: any ProposalAlertPushing
+    private let defaults: UserDefaults
+    init(store: any ProposalAlertPushing, defaults: UserDefaults = .standard) {
+        self.store = store; self.defaults = defaults
+        enabled = defaults.bool(forKey: Self.key)
     }
     /// 从云端读真实状态（其他设备可能已切换过）。
     func reload() async {
-        do { enabled = try await store.isAlertPushEnabled(); UserDefaults.standard.set(enabled, forKey: Self.key) }
+        do { enabled = try await store.isAlertPushEnabled(); defaults.set(enabled, forKey: Self.key); lastError = nil }
         catch { lastError = "读取推送状态失败：\(error.localizedDescription)" }
     }
 
-    func set(_ on: Bool) async {
+    /// byUser=false 只用于启动时的默认打开（不改「手动关过」记号）。
+    func set(_ on: Bool, byUser: Bool = true) async {
         do {
             try await store.setAlertPush(enabled: on)
             enabled = on; lastError = nil
-            UserDefaults.standard.set(on, forKey: Self.key)
-            DevLog.shared.info("多端审批", "App 关闭时推送（实验）已\(on ? "开启" : "关闭")")
+            defaults.set(on, forKey: Self.key)
+            if byUser {
+                if on { defaults.removeObject(forKey: Self.userDisabledKey) } else { defaults.set(true, forKey: Self.userDisabledKey) }
+            }
+            DevLog.shared.info("多端审批", "App 关闭时推送（实验）已\(on ? "开启" : "关闭")" + (byUser ? "" : "（默认打开）"))
         } catch {
             lastError = "切换失败：\(error.localizedDescription)"
             DevLog.shared.error("多端审批", lastError!)
         }
+    }
+
+    /// W8（Jason 2026-10-18）：B5 默认开——App 启动时，若你从没手动关过，就自动打开订阅。
+    /// 先读云端真实状态（已开 = 什么都不做）；读失败或打开失败照常可见（lastError + DevLog），下次启动再试。
+    func autoEnableIfNeverDisabled() async {
+        guard ExperimentDefaults.neverSet(Self.userDisabledKey, in: defaults) else { return }
+        await reload()
+        if let lastError {
+            DevLog.shared.error("多端审批", "默认打开 iCloud 直接推送前读取状态失败：\(lastError)")
+            return
+        }
+        guard !enabled else { return }
+        await set(true, byUser: false)
     }
 }

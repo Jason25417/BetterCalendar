@@ -50,7 +50,7 @@ final class AppContainer {
     let proposalStore: CloudKitProposalStore?  // 测试环境为 nil（内存中转）
     let agentMessages: AgentMessageCenter      // SPEC §19 C2–C4 智能体主动消息（打扰规则由 App 强制；默认关）
     let agentChat: AgentChatCenter             // SPEC §19 A1/F1 跟智能体说话（iCloud BCChatMessage；Mac 桥接转交）
-    let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验，默认关；测试环境为 nil）
+    let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验；W8 起没手动关过就默认开；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录（W5：开关开时改记在 iCloud）
@@ -153,6 +153,11 @@ final class AppContainer {
         // 测试 host 不接真执行器（只做空改动），单测各自注入内存数据。
         let actionExecutor: ProposalActionExecutor? = TestHost.isActive ? nil
             : ProposalActionExecutor(items: longTasks, deviceId: ProposalDevice.id)
+        // W8 D3：提醒（普通通知，复用 NativeReminderScheduler）与闹钟（iPhone 系统闹钟，复用 AlarmKitNativeAlarms）。
+        if let actionExecutor, let reminders {
+            actionExecutor.notifications = NativeProposalNotificationScheduler(reminders: reminders, alarms: nativeAlarms)
+            actionExecutor.knownDevices = { KnownDevices.all() }
+        }
         if TestHost.isActive {
             self.proposalStore = nil
             self.alertPush = nil
@@ -180,6 +185,10 @@ final class AppContainer {
         notificationDelegate.handleAgentMessage = { [weak messages = agentMessages] id, reaction in
             if let reaction { await messages?.react(id, reaction) } else { await messages?.refresh() }
         }
+        // W8：打扰设置随 iCloud 设置同步——另一台设备改了（如静音）就重读。
+        _ = NotificationCenter.default.addObserver(forName: SettingsSync.didSyncRemotely, object: nil, queue: .main) { [weak messages = agentMessages] _ in
+            MainActor.assumeIsolated { messages?.reloadSettings() }
+        }
         // 对话与主动消息共用同一份打扰设置（静音一处生效）与主动通知额度。
         agentChat.attention = { [weak messages = agentMessages] in messages?.settings ?? AttentionSettings.load() }
         agentChat.recentProactiveDeliveries = { [weak messages = agentMessages] in
@@ -195,13 +204,15 @@ final class AppContainer {
             ProposalWake.onPush = { [weak center = proposals, weak messages = agentMessages, weak chat = agentChat] in
                 await center?.refresh(); await messages?.refresh(); await chat?.refresh()
             }
-            Task { [weak center = proposals] in
+            Task { [weak center = proposals, weak push = alertPush] in
+                KnownDevices.announce()   // W8 D3：登记本机，智能体才知道 iPhone 的设备 id
                 await LocalProposalNotifier.registerCategories()
                 await LocalAgentMessageNotifier.registerCategories()
                 await LocalAgentChatNotifier.registerCategories()
                 do { try await store.ensureSubscription() } catch {
                     DevLog.shared.error("多端审批", "订阅审批推送失败（将靠前台轮询兜底）：\(error.localizedDescription)")
                 }
+                await push?.autoEnableIfNeverDisabled()   // W8：B5 默认开（你没手动关过时）
                 await center?.refresh()
             }
             proposals.startPolling()

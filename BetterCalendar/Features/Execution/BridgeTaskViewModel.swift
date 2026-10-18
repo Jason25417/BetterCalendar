@@ -67,15 +67,19 @@ import Observation
         Task { await refresh() }
     }
 
-    func start(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false) async {
-        guard queueStart(title: title, relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment) else { return }
+    /// startedAt（SPEC §19 W8）：审批通过的回溯起点（本机时钟）；换算成服务器时间后作开始命令的 occurredAt。nil = 此刻。
+    func start(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false,
+               startedAt: Date? = nil) async {
+        guard queueStart(title: title, relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment, startedAt: startedAt) else { return }
         await refresh()
     }
-    @discardableResult func queueStart(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false) -> Bool {
+    @discardableResult func queueStart(title: String, relatedRecordId: String? = nil, mode: BridgeTaskSession.Mode = .light, focusMinutes: Int? = nil, experiment: Bool = false,
+                                       startedAt: Date? = nil) -> Bool {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return false }
+        let occurredAt = startedAt.map { estimatedServerDate().addingTimeInterval(min(0, $0.timeIntervalSince(now()))) } ?? estimatedServerDate()
         return enqueue(BridgeTaskCommand(commandId: UUID().uuidString, action: .start, title: title,
-                                         occurredAt: estimatedServerDate(), relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment))
+                                         occurredAt: occurredAt, relatedRecordId: relatedRecordId, mode: mode, focusMinutes: focusMinutes, experiment: experiment))
     }
     func act(_ action: BridgeTaskCommand.Action, on session: BridgeTaskSession) async {
         guard action != .start else { return }

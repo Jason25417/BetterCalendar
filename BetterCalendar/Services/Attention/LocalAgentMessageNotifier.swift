@@ -59,8 +59,11 @@ import UserNotifications
 /// SPEC §19 C1：App 在关键时刻写事件唤醒智能体（实验，默认关——每个事件都消耗 Claude 订阅额度）。
 nonisolated enum AgentEventSettings {
     static let key = "agentEvents.enabled"
+    /// W8（Jason 2026-10-18）：默认开——只作用于从没设过的设备；手动关过的保留。
+    static let defaultEnabled = true
+    static func enabled(in d: UserDefaults) -> Bool { ExperimentDefaults.bool(key, default: defaultEnabled, in: d) }
     static var enabled: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
+        get { enabled(in: .standard) }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 }
