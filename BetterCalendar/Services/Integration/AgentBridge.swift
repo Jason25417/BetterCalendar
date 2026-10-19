@@ -10,6 +10,7 @@
 //  不认识的改动种类一律拒绝导入（移入 proposals/rejected/）并记错误，绝不猜测。
 //
 
+import CryptoKit
 import Foundation
 import Observation
 #if os(macOS)
@@ -249,7 +250,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         }
         let params = try list.enumerated().map { i, item -> ProposalParameter in
             let at = "\(path)[\(i)]"
-            let unknown = Set(item.keys.filter { !(item[$0] is NSNull) }).subtracting(["id", "label", "type", "bind", "default", "min", "max", "step", "unit", "anchor"])
+            let unknown = Set(item.keys.filter { !(item[$0] is NSNull) }).subtracting(["id", "label", "type", "bind", "default", "min", "max", "step", "unit", "anchor", "target"])
             guard unknown.isEmpty else { throw AgentBridgeError.invalid("\(at) 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
             guard let id = item["id"] as? String else { throw AgentBridgeError.invalid("\(at).id 必填") }
             guard let label = item["label"] as? String else { throw AgentBridgeError.invalid("\(at).label 必填") }
@@ -287,8 +288,13 @@ nonisolated struct AgentBridgeIO: Sendable {
                 }
                 anchor = d
             }
+            var target: UUID?
+            if let v = item["target"], !(v is NSNull) {
+                guard let s = v as? String, let t = UUID(uuidString: s) else { throw AgentBridgeError.invalid("\(at).target 必须是方案里那一块的 id（UUID）") }
+                target = t
+            }
             return ProposalParameter(id: id, label: label, kind: kind, bind: bind, unit: unit, defaultValue: try value("default"),
-                                     min: try value("min"), max: try value("max"), step: step, anchor: anchor)
+                                     min: try value("min"), max: try value("max"), step: step, anchor: anchor, target: target)
         }
         do { try ProposalParameterRules.validateDeclarations(params, for: action, where: path) }
         catch { throw AgentBridgeError.invalid(error.localizedDescription) }
@@ -309,6 +315,11 @@ nonisolated struct AgentBridgeIO: Sendable {
             "moveBlocks": ["moves"],
             "reminder": ["title", "body", "fireAt", "device"],
             "alarm": ["title", "fireAt", "device"],
+            // W18 时间线排程
+            "blockCreate": ["day", "blocks"],
+            "blockEdit": ["blockId", "title", "durationMinutes", "fixed", "important", "deadline", "clearDeadline", "expectedRevision"],
+            "blockDelete": ["blockId", "expectedRevision"],
+            "planDay": ["day", "steps"],
         ]
         guard let keys = allowed[kind] else {
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
@@ -404,9 +415,156 @@ nonisolated struct AgentBridgeIO: Sendable {
             guard let device else { throw AgentBridgeError.invalid("alarm 必须指定 iPhone：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
             return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
                           fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
+        case "blockCreate":
+            let day = try required(Self.day(a["day"], "blockCreate.day"), "day")
+            guard let raw = a["blocks"] as? [[String: Any]], !raw.isEmpty else {
+                throw AgentBridgeError.invalid("blockCreate.blocks 必须是非空数组，每项 {title, start, end 或 durationMinutes, fixed?, important?, deadline?, linkedItemId?, id?}")
+            }
+            guard raw.count <= PlanEditRules.maxGroup else { throw AgentBridgeError.invalid("blockCreate 超过技术防失控上限 \(PlanEditRules.maxGroup) 块，疑似文件出错") }
+            return .blockCreate(day: day, blocks: try raw.enumerated().map { i, b in
+                try Self.newBlock(b, path: "blockCreate.blocks[\(i)]", proposalId: proposalId, index: i)
+            })
+        case "blockEdit":
+            return .blockEdit(try Self.blockEdit(a, path: "blockEdit"))
+        case "blockDelete":
+            return .blockDelete(id: try required(uuid("blockId"), "blockId"), expectedRevision: revision)
+        case "planDay":
+            let day = try required(Self.day(a["day"], "planDay.day"), "day")
+            guard let raw = a["steps"] as? [[String: Any]], !raw.isEmpty else {
+                throw AgentBridgeError.invalid("planDay.steps 必须是非空数组，每项 {op: create|move|edit|delete, …}")
+            }
+            guard raw.count <= PlanEditRules.maxGroup else { throw AgentBridgeError.invalid("planDay 超过技术防失控上限 \(PlanEditRules.maxGroup) 步，疑似文件出错") }
+            var seen = Set<UUID>()
+            let steps = try raw.enumerated().map { i, item -> ProposalPlanStep in
+                let path = "planDay.steps[\(i)]"
+                guard item["kind"] == nil else { throw AgentBridgeError.invalid("\(path) 用 op 不用 kind") }
+                var rest = item; rest["op"] = nil
+                let step: ProposalPlanStep
+                do {
+                    switch item["op"] as? String {
+                    case "create": step = .create(try Self.newBlock(rest, path: path, proposalId: proposalId, index: i))
+                    case "move":
+                        rest["kind"] = "moveBlock"
+                        guard case let .moveBlock(id, start, end, rev) = try Self.action(from: rest, proposalId: proposalId) else { throw AgentBridgeError.invalid("格式错误") }
+                        step = .move(ProposalBlockMove(id: id, start: start, end: end, expectedRevision: rev))
+                    case "edit":
+                        step = .edit(try Self.blockEdit(rest, path: "edit"))
+                    case "delete":
+                        rest["kind"] = "blockDelete"
+                        guard case let .blockDelete(id, rev) = try Self.action(from: rest, proposalId: proposalId) else { throw AgentBridgeError.invalid("格式错误") }
+                        step = .delete(id: id, expectedRevision: rev)
+                    default:
+                        throw AgentBridgeError.invalid("op 必须是 create / move / edit / delete")
+                    }
+                } catch let AgentBridgeError.invalid(why) {
+                    throw AgentBridgeError.invalid(why.hasPrefix(path) ? why : "\(path)：" + why)
+                }
+                guard seen.insert(step.blockID).inserted else { throw AgentBridgeError.invalid("\(path)：同一块在 steps 里出现了不止一次") }
+                return step
+            }
+            return .planDay(day: day, steps: steps, isUndo: false)
         default:
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
         }
+    }
+
+    /// W18：逻辑日「yyyy-MM-dd」（本地时区）→ 该日零点（= 逻辑日标签）。
+    static func day(_ raw: Any?, _ path: String) throws -> Date? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; f.timeZone = .current
+        guard let s = raw as? String, s.count == 10, let d = f.date(from: s) else {
+            throw AgentBridgeError.invalid("\(path) 必须是逻辑日 yyyy-MM-dd（如 2026-10-20；凌晨 0–4 点属于前一天）")
+        }
+        return Calendar.current.startOfDay(for: d)
+    }
+
+    /// W18：新块的 id——智能体给了就用（要挂可调参数时得给）；没给就由提案 id + 序号推出（重复导入同一文件得到同样的 id）。
+    static func derivedBlockID(_ proposalId: UUID, _ index: Int) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data("block|\(proposalId.uuidString)|\(index)".utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50; bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
+    private static func isBool(_ v: Any?) -> Bool? {
+        guard let n = v as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return nil }
+        return n.boolValue
+    }
+    private static func minutes(_ v: Any?, _ path: String) throws -> Int? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded(),
+              n.intValue >= 1, n.intValue <= 24 * 60 else {
+            throw AgentBridgeError.invalid("\(path) 必须是 1–1440 的整数分钟")
+        }
+        return n.intValue
+    }
+    private static func isoDate(_ v: Any?, _ path: String) throws -> Date? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let s = v as? String, let d = isoFractional.date(from: s) ?? isoPlain.date(from: s) else {
+            throw AgentBridgeError.invalid("\(path) 必须是带时区的 ISO 8601 时间（如 2026-10-20T09:00:00-04:00）")
+        }
+        return d
+    }
+    private static func uuidField(_ v: Any?, _ path: String) throws -> UUID? {
+        guard let v, !(v is NSNull) else { return nil }
+        guard let s = v as? String, let id = UUID(uuidString: s) else { throw AgentBridgeError.invalid("\(path) 不是 UUID") }
+        return id
+    }
+
+    /// W18：新块（严格：只认这些键；end 与 durationMinutes 二选一；title 省略时必须关联事项）。
+    static func newBlock(_ b: [String: Any], path: String, proposalId: UUID, index: Int) throws -> ProposalNewBlock {
+        let keys: Set<String> = ["id", "title", "start", "end", "durationMinutes", "fixed", "important", "deadline", "linkedItemId"]
+        let unknown = Set(b.keys.filter { !(b[$0] is NSNull) }).subtracting(keys)
+        guard unknown.isEmpty else { throw AgentBridgeError.invalid("\(path) 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
+        let id = try uuidField(b["id"], "\(path).id") ?? derivedBlockID(proposalId, index)
+        let linked = try uuidField(b["linkedItemId"], "\(path).linkedItemId")
+        var title = ""
+        if let raw = b["title"], !(raw is NSNull) {
+            guard let t = raw as? String, t.count <= 200 else { throw AgentBridgeError.invalid("\(path).title 必须是不超过 200 字的字符串") }
+            title = t
+        }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || linked != nil else {
+            throw AgentBridgeError.invalid("\(path) 缺少 title（或用 linkedItemId 关联一条事项，沿用它的标题）")
+        }
+        guard let start = try isoDate(b["start"], "\(path).start") else { throw AgentBridgeError.invalid("\(path) 缺少 start") }
+        let end = try isoDate(b["end"], "\(path).end")
+        let duration = try minutes(b["durationMinutes"], "\(path).durationMinutes")
+        guard (end == nil) != (duration == nil) else { throw AgentBridgeError.invalid("\(path) 的 end 与 durationMinutes 二选一（必须写其中一个）") }
+        for k in ["fixed", "important"] where b[k] != nil && !(b[k] is NSNull) && isBool(b[k]) == nil {
+            throw AgentBridgeError.invalid("\(path).\(k) 必须是 true / false")
+        }
+        return ProposalNewBlock(id: id, title: title, start: start, end: end ?? start.addingTimeInterval(Double(duration!) * 60),
+                                isFixed: isBool(b["fixed"]) ?? false, important: isBool(b["important"]) ?? false,
+                                deadline: try isoDate(b["deadline"], "\(path).deadline"), linkedTaskID: linked)
+    }
+
+    /// W18：改块（严格：至少改一项；deadline 与 clearDeadline 不同时出现）。
+    static func blockEdit(_ a: [String: Any], path: String) throws -> ProposalBlockEdit {
+        let keys: Set<String> = ["kind", "blockId", "title", "durationMinutes", "fixed", "important", "deadline", "clearDeadline", "expectedRevision"]
+        let unknown = Set(a.keys.filter { !(a[$0] is NSNull) }).subtracting(keys)
+        guard unknown.isEmpty else { throw AgentBridgeError.invalid("\(path) 不认识的字段：\(unknown.sorted().joined(separator: ", "))") }
+        guard let id = try uuidField(a["blockId"], "\(path).blockId") else { throw AgentBridgeError.invalid("\(path) 缺少 blockId") }
+        var edit = ProposalBlockEdit(id: id)
+        if let raw = a["title"], !(raw is NSNull) {
+            guard let t = raw as? String, t.count <= 200 else { throw AgentBridgeError.invalid("\(path).title 必须是不超过 200 字的字符串") }
+            edit.title = t
+        }
+        edit.duration = try minutes(a["durationMinutes"], "\(path).durationMinutes").map { Double($0) * 60 }
+        for k in ["fixed", "important", "clearDeadline"] where a[k] != nil && !(a[k] is NSNull) && isBool(a[k]) == nil {
+            throw AgentBridgeError.invalid("\(path).\(k) 必须是 true / false")
+        }
+        edit.isFixed = isBool(a["fixed"]); edit.important = isBool(a["important"])
+        let deadline = try isoDate(a["deadline"], "\(path).deadline")
+        let clear = isBool(a["clearDeadline"]) ?? false
+        if isBool(a["clearDeadline"]) == false { throw AgentBridgeError.invalid("\(path).clearDeadline 只写 true（不清就别写）") }
+        guard !(deadline != nil && clear) else { throw AgentBridgeError.invalid("\(path) 的 deadline 与 clearDeadline 只能二选一") }
+        edit.deadline = deadline.map { .set($0) } ?? (clear ? .clear : nil)
+        if let raw = a["expectedRevision"], !(raw is NSNull) {
+            guard let r = raw as? String, r.count <= 64 else { throw AgentBridgeError.invalid("\(path).expectedRevision 必须是不超过 64 字的字符串") }
+            edit.expectedRevision = r
+        }
+        guard !edit.isEmpty else { throw AgentBridgeError.invalid("\(path) 至少要改一项（title / durationMinutes / fixed / important / deadline / clearDeadline）") }
+        return edit
     }
 
     private static let isoFractional: ISO8601DateFormatter = {

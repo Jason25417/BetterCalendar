@@ -328,6 +328,12 @@ final class AppContainer {
             actionExecutor.timer = execution
             let mover = ApprovedPlanMover(planStore: planStore, projection: projection, startedDays: startedDays)
             mover.progress = execution
+            // W18：你的日历 = 已占用（只读，与时间线协调器同一份设置过滤）。读失败 → 这次时间线改动不校验、明说（不当作空）
+            let calendarForPlan = calendarStore
+            mover.occupiedEvents = { window in
+                ExternalCalendarSettings.busy(try await calendarForPlan.externalEvents(in: window),
+                                              excluding: ExternalCalendarSettings.excludedTitles)
+            }
             actionExecutor.mover = mover
         }
         // W13 设备活动记录：测试环境用临时目录、不启动任何采集（各组件单测各自注入假实现）。

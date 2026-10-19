@@ -2,22 +2,36 @@
 //  ApprovedPlanMover.swift
 //  BetterCalendar
 //
-//  SPEC §19 W1 ③：审批通过的「挪动今天某个计划块」；W8（Jason 2026-10-18）：一次挪多块（moveBlocks）。
-//  - 规则校验（PlanMoveRules，纯函数）：固定块不动、正在做/做完的不动、不挪进过去、不出今天、不越 DDL、
-//    **最终整体布局**里挪动的块不与别的块（含同组）重叠；放不下给出明确原因。撞到别的块时由智能体把受影响的块
-//    一起放进同一个提案（参照 reflow 顺延），App 只校验最终布局——卡片上写什么就只改什么，不悄悄连带挪。
+//  SPEC §19 W1 ③：审批通过的「挪动今天某个计划块」；W8（Jason 2026-10-18）：一次挪多块（moveBlocks）；
+//  W18（Jason 2026-10-19）：智能体排时间线——加块 / 改块 / 删块 / 跨天挪 / 排一天（整组）。
+//  - 规则校验：全部走 PlanEditRules（唯一一套排布规则，纯函数）；PlanMoveRules 只是 W8 时代 API 的薄包装。
+//    **最终整体布局**合法才写；放不下给出明确原因，卡片上写什么就只改什么，不悄悄连带挪、不悄悄挤。
 //  - 写入（ApprovedPlanMover）：计划块写权限的**第四个持有者**（前三：确认写入 / 对账回流 / 时间线协调器）。
-//    理由：Jason 在卡片上批准的挪动 = 他亲手拖动（E1）的另一种输入方式，与对账回流同构——
-//    只按 ID 改块时间（updatePlanned），不整日覆盖、不碰标题以外的元数据。写后：
-//      · 发 planChangedExternally（带 updatedIDs）→ 时间线协调器把它当手改钉住 30 分钟（D12 用户最后动作赢）、排日程页刷新；
-//      · 钉住（P4 Q6：你批准的位置等同你亲手放的，当天自动调整绕开）；
-//      · ProjectionService 重投影绿色（P4 Q2：开工的日子绿色也一直在，橙色预览已退役）。
-//    权限表（架构地图 §2「计划块」行）需补这一行，见 W1 交付报告。
+//    理由：Jason 在卡片上批准的改动 = 他亲手改（E1）的另一种输入方式，与对账回流同构——只经 PlanStore 按 ID 改，
+//    不整日覆盖；删除走回收站（RetainedDeletion，30 天内可恢复）。写后：
+//      · 发 planChangedExternally（带 updatedIDs）→ 时间线协调器把它当手改冷却、排日程页刷新；
+//      · 挪过 / 改过时长的块钉住到它那天结束（P4 Q6：你批准的位置等同你亲手放的，自动调整绕开）；新加的块不钉
+//        （= 旧「确认计划」写下的块，当天照常参与自愈）；
+//      · 请 CalendarSyncEngine 重投影涉及的每一天（P4.1：它是唯一的日历写者，这里从不碰日历）。
+//    权限表（架构地图 §2「计划块」行）需补这一行，见 W1 / W18 交付报告。
+//  - W18 开关（agent.planEditing.enabled，默认开——日用版有意例外，见 PlanEditingSettings）：关着时只认今天、
+//    不读你的日历当已占用，与 W18 之前完全一致；新种类在执行器里直接拒收。
 //
 
 import Foundation
 
-/// 挪动计划块的本地排布规则（纯函数、可单测）。
+/// W18 开关：智能体能不能排时间线（今天以外的日子、加 / 改 / 删块、排一天）。
+/// **有意例外**：W17 约定新功能在日用版默认关；这条是 Jason 日用要走的主流程的核心，而且只是给智能体加能力，
+/// 每项改动仍要他批准 → 两个通道都默认开（Jason 2026-10-19 任务说明）。随 iCloud 设置同步（SettingsSync 白名单）。
+nonisolated enum PlanEditingSettings {
+    static let key = "agent.planEditing.enabled"
+    static var enabled: Bool {
+        get { ExperimentDefaults.bool(key, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
+/// W8 时代的「挪今天」规则 API（测试与旧调用方在用）：薄包装，规则本身在 PlanEditRules。
 enum PlanMoveRules {
     struct Context {
         /// 今天（逻辑日）的全部计划块。
@@ -25,13 +39,10 @@ enum PlanMoveRules {
         var now: Date
         /// 今天的逻辑日窗口（4:00–次日 4:00）。
         var dayWindow: DateInterval
-        /// 已完成 / 后台同时在做的计划块（不挪，也不当障碍——它们已不占「从现在起」的时间线）。
         var settledIDs: Set<UUID> = []
-        /// 前台正在做的块：不挪；它此刻占着的时间段是障碍。
         var active: (id: UUID, start: Date, end: Date)? = nil
     }
 
-    /// 一块的目标位置（end=nil 保持原时长）。
     struct Move: Equatable {
         var id: UUID
         var start: Date
@@ -44,104 +55,44 @@ enum PlanMoveRules {
         var end: Date
     }
 
-    /// 纯技术防失控上限（W10）：**不是产品规则**。Jason 2026-10-18：「一次最多挪 10 块」这类判断类数字没有数据支撑，
-    /// 取消；一次挪多少块以最终整体布局合法为准、由智能体按上下文判断。这里只防桥接文件出错时一次塞进成百上千块
-    ///（一天的计划块远少于此）。
-    nonisolated static let maxGroup = 200
+    nonisolated static let maxGroup = PlanEditRules.maxGroup
 
-    static func hm(_ d: Date) -> String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "HH:mm"
-        return f.string(from: d)
-    }
-    static func span(_ s: Date, _ e: Date) -> String { "\(hm(s))–\(hm(e))" }
+    static func hm(_ d: Date) -> String { PlanEditRules.hm(d) }
+    static func span(_ s: Date, _ e: Date) -> String { PlanEditRules.span(s, e) }
 
-    /// 单块：校验通过返回落点；不通过抛 ProposalExecutionError.invalid（带给人看的原因）。
     static func validate(id: UUID, start: Date, end requestedEnd: Date?, in c: Context) throws -> Checked {
         try validateGroup([Move(id: id, start: start, end: requestedEnd)], in: c)[0]
     }
 
-    /// 多块：对**挪完之后的整体布局**校验，返回每块落点（顺序同输入）。
-    /// restoring=true 只用于撤销（整组挪回执行前的位置）：原位置已过去也允许挪回、不查截止（原样恢复），
-    /// 组内块之间不查重叠（恢复的就是它们原来的相对位置）；与组外块重叠仍拒绝（不硬塞）。
     static func validateGroup(_ moves: [Move], in c: Context, restoring: Bool = false) throws -> [Checked] {
-        guard !moves.isEmpty else { throw ProposalExecutionError.invalid("没有要挪的块") }
-        guard moves.count <= maxGroup else { throw ProposalExecutionError.invalid("这次要挪 \(moves.count) 块，超过技术防失控上限 \(maxGroup)，疑似提案文件出错") }
-        guard Set(moves.map(\.id)).count == moves.count else { throw ProposalExecutionError.invalid("同一块在提案里出现了不止一次") }
-        let single = moves.count == 1
-        var checked: [Checked] = []
-        for m in moves {
-            guard let block = c.blocks.first(where: { $0.id == m.id }) else {
-                throw ProposalExecutionError.invalid("今天的计划里找不到这块（可能已删除或不在今天）")
-            }
-            let name = "「\(block.title)」"
-            guard !block.isFixed else { throw ProposalExecutionError.invalid("\(name)是固定安排，按规则不挪") }
-            if c.active?.id == m.id { throw ProposalExecutionError.invalid("\(name)正在计时，先结束或暂停再挪") }
-            guard !c.settledIDs.contains(m.id) else { throw ProposalExecutionError.invalid("\(name)已经做完或正在同时做，不挪") }
-            let start = m.start
-            let end = m.end ?? start.addingTimeInterval(block.end.timeIntervalSince(block.start))
-            // W11（Jason 2026-10-18）：「单块不超过 16 小时」是判断类数字，取消；只守有效性：结束晚于开始（分钟精度，至少 1 分钟）。
-            // 多长合适由智能体按上下文判断；「不出今天、不重叠、固定不动、不越截止」等排布规则照旧。
-            guard end.timeIntervalSince(start) >= 60 else {
-                throw ProposalExecutionError.invalid("\(name)的新时间段无效（结束须晚于开始，至少 1 分钟）")
-            }
-            if !restoring {
-                guard start != block.start || end != block.end else {
-                    throw ProposalExecutionError.invalid(single ? "\(name)已经在 \(span(start, end))，无需挪动"
-                                                         : "\(name)已经在 \(span(start, end))，无需挪动（不变的块不用列进提案）")
-                }
-                guard start >= c.now.addingTimeInterval(-60) else {
-                    throw ProposalExecutionError.invalid("\(name)的新开始时间 \(hm(start)) 已经过去了，只能往「从现在起」挪")
-                }
-            }
-            guard start >= c.dayWindow.start, end <= c.dayWindow.end else {
-                throw ProposalExecutionError.invalid("\(name)的新时间 \(span(start, end)) 超出今天（逻辑日到次日 4:00），本动作只挪今天之内")
-            }
-            if !restoring, let ddl = block.deadline, end > ddl {
-                throw ProposalExecutionError.invalid("\(name)挪到 \(span(start, end)) 会越过截止时间 \(hm(ddl))，按规则不越截止")
-            }
-            checked.append(Checked(block: block, start: start, end: end))
+        let ctx = PlanEditRules.Context(blocks: c.blocks, now: c.now, window: c.dayWindow, settledIDs: c.settledIDs, active: c.active)
+        let steps = moves.map { ProposalPlanStep.move(ProposalBlockMove(id: $0.id, start: $0.start, end: $0.end, expectedRevision: nil)) }
+        return try PlanEditRules.evaluate(steps, in: ctx, restoring: restoring).compactMap { r in
+            guard let b = r.before, let a = r.after else { return nil }
+            return Checked(block: b, start: a.start, end: a.end)
         }
-        let movedIDs = Set(moves.map(\.id))
-        // 障碍（组外）：前台正在做的块此刻占的时间段 + 其余仍在「从现在起」时间线上、这次不挪的块（未落定、尚未结束）。
-        var obstacles: [(title: String, start: Date, end: Date, fixed: Bool)] = []
-        if let a = c.active, let b = c.blocks.first(where: { $0.id == a.id }) {
-            obstacles.append((b.title, a.start, max(a.end, c.now), false))
-        }
-        for b in c.blocks where !movedIDs.contains(b.id) && b.id != c.active?.id && !c.settledIDs.contains(b.id) && b.end > c.now {
-            obstacles.append((b.title, b.start, b.end, b.isFixed))
-        }
-        obstacles.sort { $0.start < $1.start }
-        for k in checked {
-            let name = single ? "" : "「\(k.block.title)」"
-            guard let hit = obstacles.first(where: { $0.start < k.end && k.start < $0.end }) else { continue }
-            if hit.fixed {
-                throw ProposalExecutionError.invalid("\(name)新时间 \(span(k.start, k.end)) 与固定安排「\(hit.title)」(\(span(hit.start, hit.end))) 重叠，固定安排不动，放不下")
-            }
-            throw ProposalExecutionError.invalid("\(name)新时间 \(span(k.start, k.end)) 和「\(hit.title)」(\(span(hit.start, hit.end))) 重叠，放不下"
-                + (restoring ? "（挪回原位会和它撞上，不硬塞）" : "（不硬塞；要连带挪「\(hit.title)」，请把它也放进同一个提案一起挪）"))
-        }
-        if !restoring {
-            let sorted = checked.sorted { $0.start < $1.start }
-            for (a, b) in zip(sorted, sorted.dropFirst()) where b.start < a.end {
-                throw ProposalExecutionError.invalid("同组的「\(a.block.title)」(\(span(a.start, a.end))) 和「\(b.block.title)」(\(span(b.start, b.end))) 挪完会互相重叠")
-            }
-        }
-        return checked
     }
 }
 
-/// 挪动计划块的能力缝（执行器只依赖它；测试可换内存实现）。
+/// 一次写入的结果：每步改动前后（顺序同输入）+ 反向步骤（带写后的版本，供撤销）+ 刷新附注。
+struct PlanEditApplied {
+    var resolved: [PlanEditRules.Resolved]
+    /// 与 resolved 一一对应的反向步骤（撤销时逆序执行）。
+    var inverse: [ProposalPlanStep]
+    /// 日历画面刷新失败等附注（空 = 没事）。
+    var note: String
+}
+
+/// 时间线改动的能力缝（执行器只依赖它；测试用 ApprovedPlanMover + 内存 PlanStore）。
 @MainActor protocol PlanBlockMoving: AnyObject {
-    /// 今天（逻辑日）的某个计划块；不在今天 = nil。
-    func todayBlock(id: UUID) throws -> ScheduledBlock?
-    /// 只校验不写。
-    func check(id: UUID, start: Date, end: Date?) throws -> PlanMoveRules.Checked
-    /// 版本核对 + 校验 + 写入 + 刷新画面；返回改动前后。目标版本已变 → ProposalExecutionError.conflict。
-    func move(id: UUID, start: Date, end: Date?, expectedRevision: String) async throws -> (before: ScheduledBlock, after: ScheduledBlock, note: String)
-    /// 多块：只校验最终整体布局，不写。
-    func checkGroup(_ moves: [PlanMoveRules.Move], restoring: Bool) throws -> [PlanMoveRules.Checked]
-    /// 多块：逐块核版本（任一块已变 → conflict，整组不写）+ 整体校验 + 写入 + 刷新画面；返回每块改动前后（顺序同输入）。
-    func moveGroup(_ moves: [ProposalBlockMove], restoring: Bool) async throws -> (changes: [(before: ScheduledBlock, after: ScheduledBlock)], note: String)
+    /// W18 开关此刻是否打开（关 = 只认今天）。
+    var planEditingEnabled: Bool { get }
+    /// 可排范围内（今天起；开关关着只有今天）的某个计划块；不在 = nil。
+    func windowBlock(id: UUID) throws -> ScheduledBlock?
+    /// 只校验不写：依据真实数据（含你的日历 = 已占用）对最终整体布局校验。
+    func evaluate(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> [PlanEditRules.Resolved]
+    /// 逐步核版本（任一步已变 → conflict，整组不写）+ 整体校验 + 写入 + 刷新画面。
+    func apply(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> PlanEditApplied
 }
 
 @MainActor final class ApprovedPlanMover: PlanBlockMoving {
@@ -150,6 +101,10 @@ enum PlanMoveRules {
     private let startedDays: StartedDayStore?   // P4 起不再按开工与否分流（保留注入，组装点不变）
     /// 执行进展（已完成 / 正在做）；组装点在执行层建好后挂上。
     weak var progress: (any ExecutionProgressReading)?
+    /// W18：你的日历事件（只读，组装点按「排布时当作已占用的日历」设置过滤）。nil = 没接（测试）；读失败 = 这次不校验、明说。
+    var occupiedEvents: ((DateInterval) async throws -> [SystemCalendarEvent])?
+    /// W18 开关（组装点 / 测试可换）。
+    var enabledFlag: () -> Bool = { PlanEditingSettings.enabled }
     private let now: () -> Date
 
     /// 写后发的通知来源标记（时间线协调器只跳过自家标记，其余带 updatedIDs 的一律进手改冷却）。
@@ -160,105 +115,192 @@ enum PlanMoveRules {
         self.planStore = planStore; self.projection = projection; self.startedDays = startedDays; self.now = now
     }
 
-    private var label: Date { DayContext.logicalStartOfDay(now()) }
+    var planEditingEnabled: Bool { enabledFlag() }
+    private var horizon: Int { planEditingEnabled ? PlanEditRules.horizonDays : 0 }
+    private var labels: [Date] {
+        let today = DayContext.logicalStartOfDay(now())
+        return (0...horizon).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
+    }
 
-    private func context() throws -> PlanMoveRules.Context {
-        let label = label
+    private func windowBlocks() throws -> [ScheduledBlock] { try planStore.plannedBlocks(onLabels: labels) }
+
+    func windowBlock(id: UUID) throws -> ScheduledBlock? { try windowBlocks().first { $0.id == id } }
+
+    private func context(_ steps: [ProposalPlanStep]) async throws -> PlanEditRules.Context {
+        let now = now()
+        let blocks = try windowBlocks()
+        let window = PlanEditRules.window(now: now, horizon: horizon)
         let settled = progress?.settledPlannedIDs ?? []
         let prediction = progress?.activePrediction
-        return PlanMoveRules.Context(blocks: try planStore.plannedBlocks(on: label), now: now(),
-                                     dayWindow: DayContext.logicalWindow(forLabel: label),
-                                     settledIDs: settled.subtracting(prediction.map { [$0.id] } ?? []),
-                                     active: prediction.map { ($0.id, $0.start, $0.end) })
-    }
-
-    func todayBlock(id: UUID) throws -> ScheduledBlock? {
-        try planStore.plannedBlocks(on: label).first { $0.id == id }
-    }
-
-    func check(id: UUID, start: Date, end: Date?) throws -> PlanMoveRules.Checked {
-        try PlanMoveRules.validate(id: id, start: start, end: end, in: context())
-    }
-
-    func move(id: UUID, start: Date, end: Date?, expectedRevision: String) async throws -> (before: ScheduledBlock, after: ScheduledBlock, note: String) {
-        let ctx = try context()
-        guard let current = ctx.blocks.first(where: { $0.id == id }) else {
-            throw ProposalExecutionError.conflict("这块已不在今天的计划里（可能被删除或挪到别的日子）")
-        }
-        guard ProposalRevision.block(current) == expectedRevision else {
-            throw ProposalExecutionError.conflict("「\(current.title)」在提案之后被改过（现在 \(PlanMoveRules.span(current.start, current.end))），不覆盖")
-        }
-        let checked = try PlanMoveRules.validate(id: id, start: start, end: end, in: ctx)
-        try planStore.updatePlanned(id: id, start: checked.start, end: checked.end, title: current.title,
-                                   reason: .agentApproval)
-        var after = current; after.start = checked.start; after.end = checked.end
-        var note = "已把「\(current.title)」从 \(PlanMoveRules.span(current.start, current.end)) 挪到 \(PlanMoveRules.span(checked.start, checked.end))"
-        note += await afterWrite([id])
-        DevLog.shared.info("多端审批", note)
-        return (current, after, note)
-    }
-
-    func checkGroup(_ moves: [PlanMoveRules.Move], restoring: Bool) throws -> [PlanMoveRules.Checked] {
-        try PlanMoveRules.validateGroup(moves, in: context(), restoring: restoring)
-    }
-
-    func moveGroup(_ moves: [ProposalBlockMove], restoring: Bool) async throws -> (changes: [(before: ScheduledBlock, after: ScheduledBlock)], note: String) {
-        let ctx = try context()
-        // ① 先逐块核版本：任一块在提案（或执行）之后被改过 → 整组不写。
-        var originals: [ScheduledBlock] = []
-        for m in moves {
-            guard let current = ctx.blocks.first(where: { $0.id == m.id }) else {
-                throw ProposalExecutionError.conflict("有一块已不在今天的计划里（可能被删除或挪到别的日子），整组不改")
+        var ctx = PlanEditRules.Context(blocks: blocks, now: now, window: window,
+                                        settledIDs: settled.subtracting(prediction.map { [$0.id] } ?? []),
+                                        active: prediction.map { ($0.id, $0.start, $0.end) })
+        if planEditingEnabled, let occupiedEvents {
+            let events: [SystemCalendarEvent]
+            do { events = try await occupiedEvents(window) } catch {
+                // 原则 10：不设保险降级——读不到你的日历就不假装它是空的
+                DevLog.shared.warn("多端审批", "读不到你的日历，时间线改动这次没法校验：\(error.localizedDescription)")
+                throw ProposalExecutionError.unavailable("读不到你的日历（排布要把你的安排当已占用），这次没法校验，没有改动：\(error.localizedDescription)")
             }
-            guard let expected = m.expectedRevision else { throw ProposalExecutionError.invalid("「\(current.title)」缺少基线版本，未执行") }
+            let busy = events.filter { !$0.isAllDay && $0.end > $0.start }
+            let links = ExternalEventLinker.links(blocks: blocks, events: busy)
+            ctx.occupied = busy.map { e in
+                PlanEditRules.Occupied(title: e.title, start: e.start, end: e.end, calendar: e.calendarTitle,
+                                       linkedBlockID: links.first { $0.value == e }?.key)
+            }
+        }
+        for case let .restore(id, _) in steps {
+            if let t = try planStore.trashedPlanned(id: id) { ctx.trashed[id] = t }
+        }
+        return ctx
+    }
+
+    func evaluate(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> [PlanEditRules.Resolved] {
+        try PlanEditRules.evaluate(steps, in: await context(steps), restoring: restoring, planDay: planDay)
+    }
+
+    func apply(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> PlanEditApplied {
+        let ctx = try await context(steps)
+        let single = steps.count == 1
+        let byID = Dictionary(ctx.blocks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // ① 先逐步核版本：任一块在提案（或执行）之后被改过 → 整组不写。
+        for step in steps {
+            let id: UUID, expected: String?
+            switch step {
+            case let .move(m): id = m.id; expected = m.expectedRevision
+            case let .edit(e): id = e.id; expected = e.expectedRevision
+            case let .delete(i, rev): id = i; expected = rev
+            case .create, .restore: continue
+            }
+            guard let current = byID[id] else {
+                throw ProposalExecutionError.conflict(single ? "这块已不在计划里（可能被删除或挪到了可排范围以外）"
+                                                             : "有一块已不在计划里（可能被删除或挪到了可排范围以外），整组不改")
+            }
+            guard let expected else { throw ProposalExecutionError.invalid("「\(current.title)」缺少基线版本，未执行") }
             guard ProposalRevision.block(current) == expected else {
-                throw ProposalExecutionError.conflict("「\(current.title)」在提案之后被改过（现在 \(PlanMoveRules.span(current.start, current.end))），整组不覆盖")
+                throw ProposalExecutionError.conflict("「\(current.title)」在提案之后被改过（现在 \(PlanEditRules.when(current.start, current.end, now: ctx.now))），"
+                                                      + (single ? "不覆盖" : "整组不覆盖"))
             }
-            originals.append(current)
         }
         // ② 整体校验最终布局。
-        let checked = try PlanMoveRules.validateGroup(moves.map { PlanMoveRules.Move(id: $0.id, start: $0.start, end: $0.end) },
-                                                      in: ctx, restoring: restoring)
-        // ③ 写入；中途失败 → 已写的块挪回原位（尽力），再抛错（不留半组）。
-        var written: [ScheduledBlock] = []
+        let resolved = try PlanEditRules.evaluate(steps, in: ctx, restoring: restoring, planDay: planDay)
+        // ③ 写入；中途失败 → 已写的步骤逆序回滚（尽力），再抛错（不留半组）。
+        var inverse: [ProposalPlanStep] = []
+        var written: [ProposalPlanStep] = []
         do {
-            for (k, original) in zip(checked, originals) {
-                try planStore.updatePlanned(id: original.id, start: k.start, end: k.end, title: original.title, reason: .agentApproval)
-                written.append(original)
+            for r in resolved {
+                let back = try write(r)
+                inverse.append(back); written.append(back)
             }
         } catch {
-            for o in written {
-                do { try planStore.updatePlanned(id: o.id, start: o.start, end: o.end, title: o.title, reason: .agentApproval) } catch {
-                    DevLog.shared.error("多端审批", "整组挪动中途失败后，「\(o.title)」没能挪回原位：\(error.localizedDescription)")
+            for back in written.reversed() {
+                do { try rollback(back) } catch {
+                    DevLog.shared.error("多端审批", "时间线整组写入中途失败后，有一步没能回滚：\(error.localizedDescription)")
                 }
             }
-            DevLog.shared.error("多端审批", "整组挪动写入失败，已写的块已挪回：\(error.localizedDescription)")
+            DevLog.shared.error("多端审批", "时间线整组写入失败，已写的步骤已回滚：\(error.localizedDescription)")
             throw error
         }
-        let changes = zip(originals, checked).map { o, k -> (before: ScheduledBlock, after: ScheduledBlock) in
-            var after = o; after.start = k.start; after.end = k.end
-            return (o, after)
-        }
-        var note = (restoring ? "已整组挪回 \(changes.count) 块：" : "已一起挪动 \(changes.count) 块：")
-            + changes.map { "「\($0.before.title)」\(PlanMoveRules.span($0.before.start, $0.before.end)) → \(PlanMoveRules.span($0.after.start, $0.after.end))" }
-                .joined(separator: "；")
-        note += await afterWrite(changes.map(\.before.id))
-        DevLog.shared.info("多端审批", note)
-        return (changes, note)
+        let note = await afterWrite(resolved, restoring: restoring)
+        return PlanEditApplied(resolved: resolved, inverse: inverse, note: note)
     }
 
-    /// 写后：钉住（P4 Q6：你批准的位置 = 你亲手放的，当天自动调整绕开）+ 通知时间线协调器 + 重投影绿色
-    /// （P4 Q2：开工的日子绿色也一直在，不再跳过）。返回附加说明（刷新失败时）。
-    private func afterWrite(_ ids: [UUID]) async -> String {
-        do { try planStore.setPinned(ids: ids, until: ScheduledBlock.pinExpiry(forStart: now())) }
-        catch { DevLog.shared.warn("多端审批", "挪动已写入，但没能钉住（自动调整可能再挪它）：\(error.localizedDescription)") }
-        NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
-                                        userInfo: ["updatedIDs": ids, "source": Self.notificationSource])
-        let label = label
-        guard let projection else { return "" }
-        do { try await projection.project(label: label); return "" } catch {
-            DevLog.shared.warn("多端审批", "挪动已写入，但日历画面刷新失败：\(error.localizedDescription)")
-            return "（日历画面稍后同步：\(error.localizedDescription)）"
+    /// 写一步，返回它的反向步骤（带写后的版本）。
+    private func write(_ r: PlanEditRules.Resolved) throws -> ProposalPlanStep {
+        let reason = PlanWriteReason.agentApproval
+        switch r.step {
+        case .create:
+            let a = r.after!
+            try planStore.insertPlanned([a], reason: reason)
+            return .delete(id: a.id, expectedRevision: ProposalRevision.block(try stored(a.id)))
+        case .move:
+            let b = r.before!, a = r.after!
+            try planStore.updatePlanned(id: b.id, start: a.start, end: a.end, title: b.title, reason: reason)
+            return .move(ProposalBlockMove(id: b.id, start: b.start, end: b.end, expectedRevision: ProposalRevision.block(try stored(b.id))))
+        case let .edit(e):
+            let b = r.before!, a = r.after!
+            if e.title != nil || e.duration != nil {
+                try planStore.updatePlanned(id: b.id, start: a.start, end: a.end, title: a.title, reason: reason)
+            }
+            if e.isFixed != nil || e.important != nil || e.deadline != nil {
+                try planStore.updatePlannedAttributes(id: b.id, isFixed: a.isFixed, priority: a.priority, deadline: a.deadline, reason: reason)
+            }
+            var back = ProposalBlockEdit(id: b.id, expectedRevision: ProposalRevision.block(try stored(b.id)))
+            if e.title != nil { back.title = b.title }
+            if e.duration != nil { back.duration = b.end.timeIntervalSince(b.start) }
+            if e.isFixed != nil { back.isFixed = b.isFixed }
+            if e.important != nil { back.important = b.priority == .important }
+            if e.deadline != nil { back.deadline = b.deadline.map { .set($0) } ?? .clear }
+            return .edit(back)
+        case .delete:
+            let b = r.before!
+            try planStore.deletePlanned(ids: [b.id], reason: reason)
+            return .restore(id: b.id, deletionID: try planStore.trashedPlanned(id: b.id)?.deletionID)
+        case let .restore(id, deletionID):
+            try planStore.restorePlanned(id: id, deletionID: deletionID, reason: reason)
+            return .delete(id: id, expectedRevision: ProposalRevision.block(try stored(id)))
         }
+    }
+
+    /// 回滚一步（不再校验，只把数据放回去）。
+    private func rollback(_ back: ProposalPlanStep) throws {
+        let reason = PlanWriteReason.agentApproval
+        switch back {
+        case let .delete(id, _): try planStore.deletePlanned(ids: [id], reason: reason)
+        case let .restore(id, deletionID): try planStore.restorePlanned(id: id, deletionID: deletionID, reason: reason)
+        case let .move(m):
+            let cur = try stored(m.id)
+            try planStore.updatePlanned(id: m.id, start: m.start, end: m.end ?? cur.end, title: cur.title, reason: reason)
+        case let .edit(e):
+            let cur = try stored(e.id)
+            if e.title != nil || e.duration != nil {
+                try planStore.updatePlanned(id: e.id, start: cur.start, end: e.duration.map { cur.start.addingTimeInterval($0) } ?? cur.end,
+                                           title: e.title ?? cur.title, reason: reason)
+            }
+            if e.isFixed != nil || e.important != nil || e.deadline != nil {
+                var deadline = cur.deadline
+                switch e.deadline { case let .set(d)?: deadline = d; case .clear?: deadline = nil; case nil: break }
+                try planStore.updatePlannedAttributes(id: e.id, isFixed: e.isFixed ?? cur.isFixed,
+                                                      priority: e.important.map { $0 ? .important : .normal } ?? cur.priority,
+                                                      deadline: deadline, reason: reason)
+            }
+        case .create: break
+        }
+    }
+
+    private func stored(_ id: UUID) throws -> ScheduledBlock {
+        guard let b = try windowBlock(id: id) else {
+            throw ProposalExecutionError.unavailable("写入后读不回这一块，未完成")
+        }
+        return b
+    }
+
+    /// 写后：钉住挪过 / 改过时长的块（P4 Q6，到它那天结束）+ 通知时间线协调器 + 请日历同步引擎重投影涉及的每一天。
+    /// 返回附加说明（刷新失败时）。
+    private func afterWrite(_ resolved: [PlanEditRules.Resolved], restoring: Bool) async -> String {
+        var pins: [Date: [UUID]] = [:]
+        for r in resolved where r.placed {
+            switch r.step {
+            case .move, .edit: if let a = r.after { pins[ScheduledBlock.pinExpiry(forStart: a.start), default: []].append(a.id) }
+            default: break
+            }
+        }
+        for (until, ids) in pins {
+            do { try planStore.setPinned(ids: ids, until: until) }
+            catch { DevLog.shared.warn("多端审批", "改动已写入，但没能钉住（自动调整可能再挪它）：\(error.localizedDescription)") }
+        }
+        let touched = resolved.compactMap { $0.after?.id }
+        NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
+                                        userInfo: ["updatedIDs": touched, "source": Self.notificationSource])
+        guard let projection else { return "" }
+        let days = Set(resolved.flatMap { [$0.before?.start, $0.after?.start].compactMap { $0 }.map(DayContext.logicalStartOfDay) })
+        var failures: [String] = []
+        for label in days.sorted() {
+            do { try await projection.project(label: label) } catch {
+                DevLog.shared.warn("多端审批", "改动已写入，但 \(PlanEditRules.dayName(label)) 的日历画面刷新失败：\(error.localizedDescription)")
+                failures.append(error.localizedDescription)
+            }
+        }
+        return failures.isEmpty ? "" : "（日历画面稍后同步：\(failures[0])）"
     }
 }

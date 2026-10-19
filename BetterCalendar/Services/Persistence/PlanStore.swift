@@ -18,10 +18,18 @@ import SwiftData
 protocol PlanReading: AnyObject {
     func plannedBlocks(on day: Date) throws -> [ScheduledBlock]
     func deletedPlannedIDs(on day: Date) throws -> Set<UUID>
+    /// W18：若干逻辑日的计划块（一次批量读；智能体排时间线看「今天起几天」用）。
+    func plannedBlocks(onLabels labels: [Date]) throws -> [ScheduledBlock]
+    /// W18：回收站里这一块（最近一次删除）+ 那次删除的编号；已恢复 / 没删过 = nil。
+    func trashedPlanned(id: UUID) throws -> (block: ScheduledBlock, deletionID: UUID?)?
 }
 
 extension PlanReading {
     func deletedPlannedIDs(on day: Date) throws -> Set<UUID> { [] }
+    func plannedBlocks(onLabels labels: [Date]) throws -> [ScheduledBlock] {
+        try labels.flatMap { try plannedBlocks(on: $0) }.sorted { $0.start < $1.start }
+    }
+    func trashedPlanned(id: UUID) throws -> (block: ScheduledBlock, deletionID: UUID?)? { nil }
 }
 
 /// 写角色（GRANT UPDATE）：持有者=HomeViewModel（确认写入）+ ReconcileService（0.20 双向同步回流）。
@@ -37,6 +45,10 @@ protocol PlanWriting: AnyObject {
     func deletePlanned(ids: [UUID], reason: PlanWriteReason) throws
     /// 钉住 / 取消钉住（P4 Q6 图钉）：until = 截止时刻（nil = 取消）。不改内容、不升版本（图钉不是日历上的内容）。
     func setPinned(ids: [UUID], until: Date?) throws
+    /// W18：只改排程属性（固定 / 要紧 / 截止）；时间与标题走 updatePlanned。值没变 = 不保存。
+    func updatePlannedAttributes(id: UUID, isFixed: Bool, priority: BlockPriority, deadline: Date?, reason: PlanWriteReason) throws
+    /// W18：把回收站里的这一块恢复回计划（deletionID = 那次删除的编号，nil = 最近一次）。已有同身份的块 / 删除状态变了 → 抛错。
+    func restorePlanned(id: UUID, deletionID: UUID?, reason: PlanWriteReason) throws
     /// 给刚因「你在日历里删了」而进回收站的计划块写回执（P4.1，随 iCloud 同步；Mac 据此转交给智能体）。
     func recordCalendarDeletion(id: UUID, receipt: CalendarDeletionReceipt) throws
 }
@@ -164,6 +176,23 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
         return result
     }
 
+    func plannedBlocks(onLabels labels: [Date]) throws -> [ScheduledBlock] {
+        let wanted = Set(labels.map { Calendar.current.startOfDay(for: $0) })
+        let result = try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { !$0.isInTrash && $0.kind == .planned && wanted.contains(DayContext.logicalStartOfDay($0.start)) }
+            .sorted { $0.start < $1.start }
+            .map(Self.scheduled)
+        DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(wanted.count) 天")
+        return result
+    }
+
+    func trashedPlanned(id: UUID) throws -> (block: ScheduledBlock, deletionID: UUID?)? {
+        let rows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned && $0.id == id }
+        guard !rows.contains(where: { !$0.isInTrash }),
+              let row = rows.filter(\.isInTrash).max(by: { ($0.deletedAt ?? .distantPast) < ($1.deletedAt ?? .distantPast) }) else { return nil }
+        return (Self.scheduled(row), row.deletionID)
+    }
+
     func deletedPlannedIDs(on day: Date) throws -> Set<UUID> {
         let label = Calendar.current.startOfDay(for: day)
         let rows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned }
@@ -245,6 +274,33 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
             .filter { !$0.isInTrash && $0.kind == .planned && idSet.contains($0.id) }
         try RetainedDeletion.save(victims, in: context)
         DevLog.shared.info("PlanStore", "\(reason.rawValue)：删除 \(victims.count) 块")
+    }
+
+    func updatePlannedAttributes(id: UUID, isFixed: Bool, priority: BlockPriority, deadline: Date?, reason: PlanWriteReason) throws {
+        guard let block = try context.fetch(FetchDescriptor<PlanBlock>())
+            .first(where: { !$0.isInTrash && $0.id == id && $0.kind == .planned }) else { return }
+        guard block.isFixed != isFixed || block.priority != priority || block.deadline != deadline else { return }
+        block.isFixed = isFixed; block.priority = priority; block.deadline = deadline
+        stampWrite(block, reason)
+        try context.save()
+        DevLog.shared.info("PlanStore", "\(reason.rawValue)：改「\(block.title)」的固定/要紧/截止")
+    }
+
+    func restorePlanned(id: UUID, deletionID: UUID?, reason: PlanWriteReason) throws {
+        let rows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .planned && $0.id == id }
+        guard !rows.contains(where: { !$0.isInTrash }) else { throw DataArchiveError.invalid("已有同身份的计划块，不重复恢复") }
+        guard let row = rows.filter(\.isInTrash).max(by: { ($0.deletedAt ?? .distantPast) < ($1.deletedAt ?? .distantPast) }),
+              let current = row.deletionID, deletionID == nil || deletionID == current else {
+            throw DataArchiveError.invalid("回收站里找不到这次删掉的那一块（可能已经恢复过，或又被删了一次）")
+        }
+        let previous = row.restoredDeletionID, version = row.syncVersion, writer = row.syncWriter, source = row.syncSource
+        try row.acknowledgeRestoration(expected: current)
+        stampWrite(row, reason)
+        do { try context.save() } catch {
+            row.restoredDeletionID = previous; row.syncVersion = version; row.syncWriter = writer; row.syncSource = source
+            throw error
+        }
+        DevLog.shared.info("PlanStore", "\(reason.rawValue)：从回收站恢复「\(row.title)」")
     }
 
     func setPinned(ids: [UUID], until: Date?) throws {

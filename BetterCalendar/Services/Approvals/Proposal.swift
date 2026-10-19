@@ -87,6 +87,69 @@ nonisolated struct ProposalBlockMove: Codable, Equatable, Sendable {
     var expectedRevision: String?
 }
 
+/// W18：新加的一个计划块（时间线排程）。id 在提交前就定下（智能体给，或由提案 id 推出），撤销 = 按 id 移入回收站。
+nonisolated struct ProposalNewBlock: Codable, Equatable, Sendable {
+    var id: UUID
+    /// 空串 = 用关联事项的标题（准备提案时由 App 补上）。
+    var title: String
+    var start: Date
+    var end: Date
+    var isFixed: Bool = false
+    /// 要紧事（BlockPriority.important）
+    var important: Bool = false
+    var deadline: Date? = nil
+    /// 关联的待办 / 长期事项（LongTask.id）
+    var linkedTaskID: UUID? = nil
+}
+
+/// W18：截止时间怎么改。
+nonisolated enum ProposalDeadlineChange: Codable, Equatable, Sendable {
+    case set(Date)
+    case clear
+}
+
+/// W18：改一个计划块的属性（nil = 该项不改）。时长改的是结束时间（开始不动）。
+nonisolated struct ProposalBlockEdit: Codable, Equatable, Sendable {
+    var id: UUID
+    var title: String? = nil
+    /// 新时长（秒）
+    var duration: TimeInterval? = nil
+    var isFixed: Bool? = nil
+    var important: Bool? = nil
+    var deadline: ProposalDeadlineChange? = nil
+    var expectedRevision: String? = nil
+
+    var isEmpty: Bool { title == nil && duration == nil && isFixed == nil && important == nil && deadline == nil }
+}
+
+/// W18：「排一天」整组里的一步（整组校验最终布局、整组批准、整组撤销）。
+/// restore 只用于撤销（把这组删掉的块从回收站恢复），智能体不能提。
+nonisolated enum ProposalPlanStep: Codable, Equatable, Sendable {
+    case create(ProposalNewBlock)
+    case move(ProposalBlockMove)
+    case edit(ProposalBlockEdit)
+    case delete(id: UUID, expectedRevision: String?)
+    case restore(id: UUID, deletionID: UUID?)
+
+    var blockID: UUID {
+        switch self {
+        case let .create(b): b.id
+        case let .move(m): m.id
+        case let .edit(e): e.id
+        case let .delete(id, _), let .restore(id, _): id
+        }
+    }
+    var op: String {
+        switch self {
+        case .create: "create"
+        case .move: "move"
+        case .edit: "edit"
+        case .delete: "delete"
+        case .restore: "restore"
+        }
+    }
+}
+
 /// 机器执行的内容。新增种类时在这里加 case，并在 ProposalExecuting 实现里处理；
 /// 未识别的种类一律执行失败，绝不猜测。
 /// expectedRevision = 提案时目标的版本（ProposalRevision）；执行时目标版本已变 → 失败并说明，不覆盖用户事实。
@@ -122,6 +185,18 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 逆操作：取消提醒（expectedRevision = 设好时的版本）/ 取消闹钟。只用于撤销，智能体不能直接提。
     case reminderCancel(id: UUID, expectedRevision: String?)
     case alarmCancel(id: UUID)
+    // —— W18 时间线排程（Jason 2026-10-19：日用只走智能体，智能体必须能把事情放上时间线）——
+    // 合法性归 App：全部经 PlanEditRules 对**最终整体布局**校验（固定不动、不重叠、不越截止、你的日历=已占用只读、
+    // 正在做/做完的不动、放不下明说原因、不悄悄挤）。写入只经 PlanStore，绿色日历由 CalendarSyncEngine 投影。
+    /// 往某个逻辑日（day = 该日零点）加一个或多个计划块。撤销 = 把这几块移入回收站。
+    case blockCreate(day: Date, blocks: [ProposalNewBlock])
+    /// 改一个计划块：标题 / 时长 / 固定 / 要紧 / 截止。撤销 = 改回原值。
+    case blockEdit(ProposalBlockEdit)
+    /// 从时间线删掉一个计划块（进回收站，30 天内可恢复）。删除类：预授权规则永远不自动放行。撤销 = 从回收站恢复。
+    case blockDelete(id: UUID, expectedRevision: String?)
+    /// 排一天：一份提案里若干步新增 / 挪动 / 改 / 删（都围绕 day 这个逻辑日），整组校验、整组批准、整组撤销。
+    /// isUndo=true 只作逆操作（智能体不能提）：放宽「不进过去 / 不越截止 / 组内原有重叠」，见 PlanEditRules。
+    case planDay(day: Date, steps: [ProposalPlanStep], isUndo: Bool)
 
     var kindLabel: String {
         switch self {
@@ -137,6 +212,10 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .reminderCancel: "提醒：取消"
         case .alarmCancel: "闹钟：取消"
         case let .moveBlocks(moves, isUndo): isUndo ? "时间线：整组挪回" : "时间线：一起挪动 \(moves.count) 个计划块"
+        case let .blockCreate(day, blocks): "时间线：\(PlanEditRules.dayName(day))加 \(blocks.count) 个计划块"
+        case .blockEdit: "时间线：改计划块"
+        case .blockDelete: "时间线：删掉计划块（进回收站）"
+        case let .planDay(day, steps, isUndo): isUndo ? "时间线：整组撤销" : "时间线：排\(PlanEditRules.dayName(day))（\(steps.count) 步）"
         }
     }
 
@@ -155,6 +234,10 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .alarm: "alarm"
         case .reminderCancel: "reminderCancel"
         case .alarmCancel: "alarmCancel"
+        case .blockCreate: "blockCreate"
+        case .blockEdit: "blockEdit"
+        case .blockDelete: "blockDelete"
+        case .planDay: "planDay"
         }
     }
 
@@ -170,6 +253,7 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case let .itemSetDone(_, done, _): done ? "itemSetDone.done" : "itemSetDone.undone"
         case let .timer(command, _, _, _, _): "timer." + command.rawValue
         case let .moveBlocks(_, isUndo): isUndo ? "moveBlocks.undo" : "moveBlocks"
+        case let .planDay(_, _, isUndo): isUndo ? "planDay.undo" : "planDay"
         default: kind
         }
     }
@@ -178,6 +262,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     var ruleKindLabel: String {
         switch self {
         case .moveBlocks(_, false): "时间线：一起挪动多个计划块"
+        case .blockCreate: "时间线：加计划块"
+        case .planDay(_, _, false): "时间线：排一天（整组新增/挪动/改/删）"
         default: kindLabel
         }
     }
@@ -186,10 +272,11 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// （它的待办、计划块、计时、它排的提醒/闹钟）；将来写你的日历/提醒事项的种类在这里标 `.yours`。
     var ownership: ProposalOwnership { .betterCalendar }
 
-    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟）：预授权规则永远不能自动放行。
+    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天）：预授权规则永远不能自动放行。
     var isDestructive: Bool {
         switch self {
-        case .itemDiscard, .reminderCancel, .alarmCancel: true
+        case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete: true
+        case let .planDay(_, steps, _): steps.contains { if case .delete = $0 { true } else { false } }
         default: false
         }
     }
@@ -341,6 +428,7 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
             rev?.hasPrefix(ProposalActionExecutor.nativeRevisionPrefix) == true
                 ? "撤销 = 从提醒事项里删掉这条提醒（你在提醒事项里改过或勾掉了就不删）" : "撤销 = 取消这条提醒"
         case .alarmCancel?: "撤销 = 取消这个闹钟"
+        case let .planDay(_, steps, true)?: PlanEditRules.undoHint(steps)
         case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
         default: nil
         }

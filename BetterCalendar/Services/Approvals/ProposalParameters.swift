@@ -101,6 +101,8 @@ nonisolated struct ProposalParameter: Codable, Equatable, Sendable, Identifiable
     var step: Double? = nil
     /// 只用于 leadTime：要提醒的那件事的时刻
     var anchor: Date? = nil
+    /// W18：作用于这份方案里的哪一块（计划块 id）。一份方案里有多块（一起挪 / 加多块 / 排一天）时必填；只有一块时可省略。
+    var target: UUID? = nil
 }
 
 /// 你在卡片上调好的结果：最终值 + 套回动作后重新校验过的动作与「改动前 → 改动后」。
@@ -121,13 +123,90 @@ nonisolated enum ProposalParameterRules {
 
     // MARK: 绑定合法性
 
+    private struct BindKey: Hashable { var target: String; var bind: ProposalParameterBinding }
+
     /// 这种动作有哪些可调字段（没有的绑定一律拒收）。
     static func bindings(for action: ProposalAction) -> Set<ProposalParameterBinding> {
         switch action {
-        case .moveBlock: [.start, .end, .duration]
+        case .moveBlock, .moveBlocks(_, false), .blockCreate, .planDay(_, _, false): [.start, .end, .duration]
+        case .blockEdit: [.duration]
         case .timer(.start, _, _, _, _): [.startedAt]
         case .reminder, .alarm: [.fireAt, .leadTime]
         default: []
+        }
+    }
+
+    // MARK: W18 时间线多块：参数作用于其中一块（target）
+
+    /// 方案里可调时间的那几块（id → 开始 / 结束；结束 nil = 挪动时保持原时长）。单块动作（moveBlock）不在这里。
+    private static func slots(_ action: ProposalAction) -> [(id: UUID, start: Date?, end: Date?, op: String)]? {
+        switch action {
+        case let .moveBlocks(moves, false): return moves.map { ($0.id, $0.start, $0.end, "move") }
+        case let .blockCreate(_, blocks): return blocks.map { ($0.id, $0.start, $0.end, "create") }
+        case let .blockEdit(e): return [(e.id, nil, nil, e.duration == nil ? "edit" : "editDuration")]
+        case let .planDay(_, steps, false):
+            return steps.compactMap { step in
+                switch step {
+                case let .create(b): (b.id, b.start, b.end, "create")
+                case let .move(m): (m.id, m.start, m.end, "move")
+                case let .edit(e): (e.id, nil, nil, e.duration == nil ? "edit" : "editDuration")
+                default: nil
+                }
+            }
+        default: return nil
+        }
+    }
+
+    /// 参数作用于哪一块：多块时必须写 target；只有一块时可省略。
+    private static func slot(_ p: ProposalParameter, in action: ProposalAction, name: String) throws -> (id: UUID, start: Date?, end: Date?, op: String) {
+        guard let all = slots(action) else { throw ProposalExecutionError.invalid("\(name)绑定的字段不属于这项改动") }
+        if let target = p.target {
+            guard let s = all.first(where: { $0.id == target }) else {
+                throw ProposalExecutionError.invalid("\(name)的 target 不是这份方案里的块（要填方案里那一块的 id）")
+            }
+            return s
+        }
+        guard all.count == 1 else { throw ProposalExecutionError.invalid("\(name)：方案里有 \(all.count) 块，要用 target 写明调的是哪一块") }
+        return all[0]
+    }
+
+    /// 改方案里某一块的开始 / 结束（只用于 W18 多块动作）。
+    private static func setSlot(_ action: ProposalAction, _ id: UUID, start: Date?, end: Date??, duration: TimeInterval?) -> ProposalAction {
+        func shift(_ s0: Date, _ e0: Date?) -> (Date, Date?) {
+            var s = s0, e = e0
+            if let start { e = e0.map { start.addingTimeInterval($0.timeIntervalSince(s0)) }; s = start }
+            if let end { e = end }
+            if let duration { e = s.addingTimeInterval(duration) }
+            return (s, e)
+        }
+        func move(_ m: ProposalBlockMove) -> ProposalBlockMove {
+            guard m.id == id else { return m }
+            let (s, e) = shift(m.start, m.end)
+            return ProposalBlockMove(id: m.id, start: s, end: e, expectedRevision: m.expectedRevision)
+        }
+        func create(_ b: ProposalNewBlock) -> ProposalNewBlock {
+            guard b.id == id else { return b }
+            var b = b; let (s, e) = shift(b.start, b.end); b.start = s; b.end = e ?? b.end
+            return b
+        }
+        func edit(_ e: ProposalBlockEdit) -> ProposalBlockEdit {
+            guard e.id == id, let duration else { return e }
+            var e = e; e.duration = duration; return e
+        }
+        switch action {
+        case let .moveBlocks(moves, undo): return .moveBlocks(moves: moves.map(move), isUndo: undo)
+        case let .blockCreate(day, blocks): return .blockCreate(day: day, blocks: blocks.map(create))
+        case let .blockEdit(e): return .blockEdit(edit(e))
+        case let .planDay(day, steps, undo):
+            return .planDay(day: day, steps: steps.map { step in
+                switch step {
+                case let .create(b): .create(create(b))
+                case let .move(m): .move(move(m))
+                case let .edit(e): .edit(edit(e))
+                default: step
+                }
+            }, isUndo: undo)
+        default: return action
         }
     }
 
@@ -137,7 +216,7 @@ nonisolated enum ProposalParameterRules {
             throw ProposalExecutionError.invalid("\(place)最多 \(maxPerOption) 个（技术上限；卡片上建议不超过 2 个）")
         }
         let allowed = bindings(for: action)
-        var ids = Set<String>(), binds = Set<ProposalParameterBinding>()
+        var ids = Set<String>(), binds = Set<BindKey>()
         for p in params {
             let name = "\(place)「\(p.label.isEmpty ? p.id : p.label)」"
             guard !p.id.isEmpty, p.id.count <= idLimit,
@@ -156,16 +235,25 @@ nonisolated enum ProposalParameterRules {
             guard p.bind.kinds.contains(p.kind) else {
                 throw ProposalExecutionError.invalid("\(name)：字段「\(p.bind.rawValue)」只接受 " + p.bind.kinds.map(\.rawValue).sorted().joined(separator: " / ") + " 类型")
             }
-            if let clash = binds.first(where: { p.bind.clashes.contains($0) }) {
-                throw ProposalExecutionError.invalid("\(name)和绑定「\(clash.rawValue)」的参数在改同一个字段，只能留一个")
+            let key = p.target?.uuidString ?? ""
+            if let clash = binds.first(where: { $0.target == key && p.bind.clashes.contains($0.bind) }) {
+                throw ProposalExecutionError.invalid("\(name)和绑定「\(clash.bind.rawValue)」的参数在改同一个字段，只能留一个")
             }
-            guard binds.insert(p.bind).inserted else { throw ProposalExecutionError.invalid("\(place)里字段「\(p.bind.rawValue)」被绑了两次") }
+            guard binds.insert(BindKey(target: key, bind: p.bind)).inserted else { throw ProposalExecutionError.invalid("\(place)里字段「\(p.bind.rawValue)」被绑了两次") }
             // 单位：只有 number 带
             if p.kind == .number { guard p.unit != nil else { throw ProposalExecutionError.invalid("\(name)是数字，需要单位 unit（minute / hour）") } }
             else if p.unit != nil { throw ProposalExecutionError.invalid("\(name)：只有 number 类型带 unit") }
             // 提前量需要 anchor；别的不要
             if p.bind == .leadTime { guard p.anchor != nil else { throw ProposalExecutionError.invalid("\(name)是提前量，需要 anchor（要提醒的那件事的时刻）") } }
             else if p.anchor != nil { throw ProposalExecutionError.invalid("\(name)：只有提前量 leadTime 带 anchor") }
+            // W18：多块方案里参数作用于哪一块（target）；同一块的同一字段不能绑两次（上面的「被绑了两次」按块分开算）
+            if slots(action) != nil {
+                let s = try slot(p, in: action, name: name)
+                if p.bind != .duration, s.op.hasPrefix("edit") { throw ProposalExecutionError.invalid("\(name)：改块只能调时长（duration）") }
+                if p.bind == .duration, s.op == "edit" { throw ProposalExecutionError.invalid("\(name)：这一步没有改时长，没有可调的时长") }
+            } else if p.target != nil {
+                throw ProposalExecutionError.invalid("\(name)：只有多块的时间线改动（一起挪 / 加块 / 排一天）带 target")
+            }
             try validateRange(p, name: name)
         }
     }
@@ -230,6 +318,18 @@ nonisolated enum ProposalParameterRules {
         case let (.startedAt, .timer(.start, _, _, _, startAt)):
             guard let startAt else { throw ProposalExecutionError.invalid("\(name)要调回溯起点，改动里得先写一个 startedAt（现在是「从批准那刻算」）") }
             return .date(startAt)
+        case (.start, _) where slots(action) != nil, (.end, _) where slots(action) != nil, (.duration, _) where slots(action) != nil:
+            let s = try slot(p, in: action, name: name)
+            if case let .blockEdit(e) = action, let d = e.duration { return .number(amount(d, p)) }
+            if case let .planDay(_, steps, _) = action, case let .edit(e)? = steps.first(where: { $0.blockID == s.id }), let d = e.duration {
+                return .number(amount(d, p))
+            }
+            switch p.bind {
+            case .start: if let st = s.start { return .date(st) }
+            case .end: if let e = s.end { return .date(e) }
+            default: if let st = s.start, let e = s.end { return .number(amount(e.timeIntervalSince(st), p)) }
+            }
+            throw ProposalExecutionError.invalid("\(name)绑定的字段在这一块里没有值（挪动没写 end 时不能调结束 / 时长）")
         case let (.fireAt, .reminder(_, _, _, fireAt, _)), let (.fireAt, .alarm(_, _, fireAt, _)): return .date(fireAt)
         case let (.leadTime, .reminder(_, _, _, fireAt, _)), let (.leadTime, .alarm(_, _, fireAt, _)):
             guard let anchor = p.anchor, anchor >= fireAt else { throw ProposalExecutionError.invalid("\(name)的 anchor 要不早于提醒时刻（提前量 = anchor − 提醒时刻）") }
@@ -277,6 +377,12 @@ nonisolated enum ProposalParameterRules {
             return .moveBlock(id: id, start: start, end: start.addingTimeInterval(seconds!), expectedRevision: rev)
         case let (.startedAt, .timer(.start, blockId, title, rev, _)):
             return .timer(command: .start, blockId: blockId, title: title, expectedRevision: rev, startAt: date!)
+        case (.start, _) where slots(action) != nil:
+            return setSlot(action, try slot(p, in: action, name: name).id, start: date!, end: nil, duration: nil)
+        case (.end, _) where slots(action) != nil:
+            return setSlot(action, try slot(p, in: action, name: name).id, start: nil, end: .some(date!), duration: nil)
+        case (.duration, _) where slots(action) != nil:
+            return setSlot(action, try slot(p, in: action, name: name).id, start: nil, end: nil, duration: seconds!)
         case let (.fireAt, .reminder(id, title, body, _, device)):
             return .reminder(id: id, title: title, body: body, fireAt: date!, deviceId: device)
         case let (.fireAt, .alarm(id, title, _, device)):

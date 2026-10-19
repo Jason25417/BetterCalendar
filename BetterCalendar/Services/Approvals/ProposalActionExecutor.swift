@@ -140,20 +140,27 @@ enum ProposalTimerRules {
 
     // MARK: prepare
 
-    /// W9（P4 Q6，SPEC §19.13，原则 8「审慎越级」）：挪块动到**图钉**（你亲手改过时间的块，当天有效）——
+    /// W9（P4 Q6，SPEC §19.13，原则 8「审慎越级」）：时间线改动动到**图钉**（你亲手改过时间的块，当天有效）——
     /// 提案必须带越级理由，否则拒收；带了就在改动清单最前面点名是哪几块（审批卡另有 W10 的越级横幅）。
-    /// 越级提案永远不被预授权放行（PreauthPolicy 看 Proposal.escalation）。撤销（整组挪回）是你的动作，不查。
+    /// W18：删掉或取消一个**固定安排**同样算越级（那是你定下的承诺）；挪固定安排 / 改它的时长仍一律不行（规则里拒）。
+    /// 越级提案永远不被预授权放行（PreauthPolicy 看 Proposal.escalation）。撤销（整组挪回 / 整组撤销）是你的动作，不查。
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction {
         var prepared = try await prepare(action)
-        let pinned = try pinnedTargets(prepared.action)
-        guard !pinned.isEmpty else { return prepared }
-        let names = pinned.map { "「\($0)」" }.joined(separator: "、")
+        let (pinned, fixed) = try escalationTargets(prepared.action)
+        guard !pinned.isEmpty || !fixed.isEmpty else { return prepared }
+        let pinNames = pinned.map { "「\($0)」" }.joined(separator: "、")
+        let fixedNames = fixed.map { "「\($0)」" }.joined(separator: "、")
         guard escalation != nil else {
-            throw ProposalExecutionError.invalid("\(names)是你亲手放的位置（图钉，当天有效）；要动它，提案必须标「越级」并写明理由")
+            if !pinned.isEmpty {
+                throw ProposalExecutionError.invalid("\(pinNames)是你亲手放的位置（图钉，当天有效）；要动它，提案必须标「越级」并写明理由")
+            }
+            throw ProposalExecutionError.invalid("\(fixedNames)是固定安排；要删掉它或取消固定，提案必须标「越级」并写明理由")
         }
-        let line = ProposalChange(field: "⚠️ 这会动你亲手放的位置：\(names)（图钉，今天自动调整都绕开它）", before: nil, after: nil)
+        var lines: [ProposalChange] = []
+        if !pinned.isEmpty { lines.append(ProposalChange(field: "⚠️ 这会动你亲手放的位置：\(pinNames)（图钉，当天自动调整都绕开它）", before: nil, after: nil)) }
+        if !fixed.isEmpty { lines.append(ProposalChange(field: "⚠️ 这会删掉或取消固定安排：\(fixedNames)", before: nil, after: nil)) }
         var changes = prepared.changes ?? []
-        if !changes.contains(line) { changes.insert(line, at: 0) }
+        for line in lines.reversed() where !changes.contains(line) { changes.insert(line, at: 0) }
         prepared.changes = changes
         return prepared
     }
@@ -191,19 +198,33 @@ enum ProposalTimerRules {
                                       changes: changes, requiredDeviceId: target)
     }
 
-    /// 这项挪动会动到哪些图钉（标题）。只看挪块类；撤销用的整组挪回不算。
-    private func pinnedTargets(_ action: ProposalAction) throws -> [String] {
-        let ids: [UUID]
+    /// 这项时间线改动会越级动到哪些块（标题）：图钉（挪 / 删 / 改时长）、固定安排（删 / 取消固定）。撤销用的整组恢复不算。
+    private func escalationTargets(_ action: ProposalAction) throws -> (pinned: [String], fixed: [String]) {
+        let steps: [ProposalPlanStep]
         switch action {
-        case let .moveBlock(id, _, _, _): ids = [id]
-        case let .moveBlocks(moves, false): ids = moves.map(\.id)
-        default: return []
+        case let .moveBlock(id, start, end, rev): steps = [.move(ProposalBlockMove(id: id, start: start, end: end, expectedRevision: rev))]
+        case let .moveBlocks(moves, false): steps = moves.map { .move($0) }
+        case let .blockEdit(e): steps = [.edit(e)]
+        case let .blockDelete(id, rev): steps = [.delete(id: id, expectedRevision: rev)]
+        case let .planDay(_, s, false): steps = s
+        default: return ([], [])
         }
         let mover = try planMover()
-        return try ids.compactMap { id in
-            guard let b = try mover.todayBlock(id: id), b.isPinned(at: now()) else { return nil }
-            return b.title
+        var pinned: [String] = [], fixed: [String] = []
+        for step in steps {
+            guard let b = try mover.windowBlock(id: step.blockID) else { continue }
+            switch step {
+            case .move, .delete: if b.isPinned(at: now()) { pinned.append(b.title) }
+            case let .edit(e): if e.duration != nil, b.isPinned(at: now()) { pinned.append(b.title) }
+            default: break
+            }
+            switch step {
+            case .delete: if b.isFixed { fixed.append(b.title) }
+            case let .edit(e): if e.isFixed == false, b.isFixed { fixed.append(b.title) }
+            default: break
+            }
         }
+        return (pinned, fixed)
     }
 
     func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction {
@@ -340,32 +361,63 @@ enum ProposalTimerRules {
             let mover = try planMover()
             var baselined: [ProposalBlockMove] = []
             for m in moves {
-                guard let block = try mover.todayBlock(id: m.id) else {
-                    throw ProposalExecutionError.invalid("今天的计划里找不到其中一块（可能已删除或不在今天）")
-                }
+                guard let block = try mover.windowBlock(id: m.id) else { throw notFound(mover, "其中一块") }
                 let revision = try Self.baseline(m.expectedRevision, current: ProposalRevision.block(block), what: "「\(block.title)」")
                 baselined.append(ProposalBlockMove(id: m.id, start: m.start, end: m.end, expectedRevision: revision))
             }
-            let checked = try mover.checkGroup(moves.map { PlanMoveRules.Move(id: $0.id, start: $0.start, end: $0.end) }, restoring: false)
-            let resolved = zip(baselined, checked).map { ProposalBlockMove(id: $0.id, start: $1.start, end: $1.end, expectedRevision: $0.expectedRevision) }
-            var changes = checked.map { k in
-                ProposalChange(field: "「\(k.block.title)」时间", before: PlanMoveRules.span(k.block.start, k.block.end),
-                               after: PlanMoveRules.span(k.start, k.end))
-            }
-            changes.append(ProposalChange(field: "一起挪动 \(checked.count) 块；事后可整组挪回", before: nil, after: nil))
-            return PreparedProposalAction(action: .moveBlocks(moves: resolved, isUndo: false), changes: changes)
+            let resolved = try await mover.evaluate(baselined.map { .move($0) }, restoring: false, planDay: nil)
+            let resolvedMoves = resolved.compactMap { r -> ProposalBlockMove? in if case let .move(m) = r.step { m } else { nil } }
+            var changes = PlanEditRules.changes(resolved, now: now())
+            changes.append(ProposalChange(field: "一起挪动 \(resolved.count) 块；事后可整组挪回", before: nil, after: nil))
+            return PreparedProposalAction(action: .moveBlocks(moves: resolvedMoves, isUndo: false), changes: changes)
 
         case let .moveBlock(id, start, end, expected):
             let mover = try planMover()
-            guard let block = try mover.todayBlock(id: id) else {
-                throw ProposalExecutionError.invalid("今天的计划里找不到这块（可能已删除或不在今天）")
-            }
+            guard let block = try mover.windowBlock(id: id) else { throw notFound(mover, "这块") }
             let revision = try Self.baseline(expected, current: ProposalRevision.block(block), what: "「\(block.title)」")
-            let checked = try mover.check(id: id, start: start, end: end)
-            return PreparedProposalAction(action: .moveBlock(id: id, start: checked.start, end: checked.end, expectedRevision: revision),
-                                          changes: [ProposalChange(field: "「\(block.title)」时间",
-                                                                   before: PlanMoveRules.span(block.start, block.end),
-                                                                   after: PlanMoveRules.span(checked.start, checked.end))])
+            let resolved = try await mover.evaluate([.move(ProposalBlockMove(id: id, start: start, end: end, expectedRevision: revision))],
+                                                    restoring: false, planDay: nil)
+            guard case let .move(m) = resolved[0].step else { throw ProposalExecutionError.invalid("挪动校验结果异常") }
+            return PreparedProposalAction(action: .moveBlock(id: id, start: m.start, end: m.end, expectedRevision: revision),
+                                          changes: PlanEditRules.changes(resolved, now: now()))
+
+        case let .blockCreate(day, blocks):
+            let mover = try editingMover()
+            let cleaned = try blocks.map { try cleanNewBlock($0) }
+            let resolved = try await mover.evaluate(cleaned.map { .create($0) }, restoring: false, planDay: day)
+            var changes = PlanEditRules.changes(resolved, now: now())
+            changes.append(ProposalChange(field: "在\(PlanEditRules.dayName(day))加 \(resolved.count) 块；事后可撤销（移入回收站）", before: nil, after: nil))
+            return PreparedProposalAction(action: .blockCreate(day: day, blocks: cleaned), changes: changes)
+
+        case let .blockEdit(edit):
+            let mover = try editingMover()
+            let step = try baselineStep(.edit(edit), mover)
+            let resolved = try await mover.evaluate([step], restoring: false, planDay: nil)
+            guard case let .edit(normalized) = resolved[0].step else { throw ProposalExecutionError.invalid("改块校验结果异常") }
+            return PreparedProposalAction(action: .blockEdit(normalized), changes: PlanEditRules.changes(resolved, now: now()))
+
+        case let .blockDelete(id, expected):
+            let mover = try editingMover()
+            let step = try baselineStep(.delete(id: id, expectedRevision: expected), mover)
+            let resolved = try await mover.evaluate([step], restoring: false, planDay: nil)
+            guard case let .delete(_, revision) = resolved[0].step else { throw ProposalExecutionError.invalid("删块校验结果异常") }
+            return PreparedProposalAction(action: .blockDelete(id: id, expectedRevision: revision), changes: PlanEditRules.changes(resolved, now: now()))
+
+        case let .planDay(day, steps, isUndo):
+            guard !isUndo else { throw ProposalExecutionError.invalid("「整组撤销」只用于撤销，不能单独提出") }
+            let mover = try editingMover()
+            var prepared: [ProposalPlanStep] = []
+            for step in steps {
+                switch step {
+                case let .create(nb): prepared.append(.create(try cleanNewBlock(nb)))
+                case .restore: throw ProposalExecutionError.invalid("「从回收站恢复」只用于撤销，不能放进排一天")
+                default: prepared.append(try baselineStep(step, mover))
+                }
+            }
+            let resolved = try await mover.evaluate(prepared, restoring: false, planDay: day)
+            var changes = PlanEditRules.changes(resolved, now: now())
+            changes.append(ProposalChange(field: "排\(PlanEditRules.dayName(day))：\(resolved.count) 步一起批准；事后可整组撤销", before: nil, after: nil))
+            return PreparedProposalAction(action: .planDay(day: day, steps: resolved.map(\.step), isUndo: false), changes: changes)
         }
     }
 
@@ -508,20 +560,85 @@ enum ProposalTimerRules {
             return ProposalExecutionOutcome(note: "已取消这个闹钟", undo: ProposalUndoInfo(unavailableReason: "闹钟已取消；需要可以重新设"))
 
         case let .moveBlocks(moves, isUndo):
-            let result = try await planMover().moveGroup(moves, restoring: isUndo)
-            let back = result.changes.map { ProposalBlockMove(id: $0.before.id, start: $0.before.start, end: $0.before.end,
-                                                              expectedRevision: ProposalRevision.block($0.after)) }
-            return ProposalExecutionOutcome(note: result.note,
+            let result = try await planMover().apply(moves.map { .move($0) }, restoring: isUndo, planDay: nil)
+            let pairs = result.resolved.compactMap { r in r.before.flatMap { b in r.after.map { (b, $0) } } }
+            let note = (isUndo ? "已整组挪回 \(pairs.count) 块：" : "已一起挪动 \(pairs.count) 块：")
+                + pairs.map { "「\($0.0.title)」\(PlanEditRules.when($0.0.start, $0.0.end, now: now())) → \(PlanEditRules.when($0.1.start, $0.1.end, now: now()))" }
+                    .joined(separator: "；") + result.note
+            DevLog.shared.info("多端审批", note)
+            let back = result.inverse.compactMap { s -> ProposalBlockMove? in if case let .move(m) = s { m } else { nil } }
+            return ProposalExecutionOutcome(note: note,
                                             undo: isUndo ? ProposalUndoInfo(unavailableReason: "已整组挪回原来的时间")
                                                          : ProposalUndoInfo(action: .moveBlocks(moves: back, isUndo: true)))
 
         case let .moveBlock(id, start, end, expected):
             guard let expected else { throw ProposalExecutionError.invalid("缺少计划块的基线版本，未执行") }
-            let result = try await planMover().move(id: id, start: start, end: end, expectedRevision: expected)
-            return ProposalExecutionOutcome(note: result.note,
-                                            undo: ProposalUndoInfo(action: .moveBlock(id: id, start: result.before.start, end: result.before.end,
-                                                                                      expectedRevision: ProposalRevision.block(result.after))))
+            let result = try await planMover().apply([.move(ProposalBlockMove(id: id, start: start, end: end, expectedRevision: expected))],
+                                                     restoring: false, planDay: nil)
+            guard let b = result.resolved.first?.before, let a = result.resolved.first?.after,
+                  case let .move(back)? = result.inverse.first else { throw ProposalExecutionError.invalid("挪动结果异常") }
+            let note = "已把「\(b.title)」从 \(PlanEditRules.when(b.start, b.end, now: now())) 挪到 \(PlanEditRules.when(a.start, a.end, now: now()))" + result.note
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note,
+                                            undo: ProposalUndoInfo(action: .moveBlock(id: id, start: b.start, end: b.end, expectedRevision: back.expectedRevision)))
+
+        case let .blockCreate(day, blocks):
+            let mover = try planMover()
+            // 幂等（同提醒，冒烟 2026-10-18 教训）：上次已写进计划、回报没落地 → 这里会再被调用；一模一样的块都已在 = 按已完成回报
+            let existing = try blocks.map { try mover.windowBlock(id: $0.id) }
+            if !existing.isEmpty, zip(blocks, existing).allSatisfy({ nb, b in b.map { $0.title == nb.title && $0.start == nb.start && $0.end == nb.end } ?? false }) {
+                DevLog.shared.info("多端审批", "这 \(blocks.count) 块已经在计划里（上次执行过、回报没落地），按已完成回报")
+                let back = try existing.compactMap { $0 }.map { ProposalPlanStep.delete(id: $0.id, expectedRevision: ProposalRevision.block($0)) }
+                return ProposalExecutionOutcome(note: "已在\(PlanEditRules.dayName(day))加 \(blocks.count) 块（上次已写入）",
+                                                undo: ProposalUndoInfo(action: .planDay(day: day, steps: back.reversed(), isUndo: true)))
+            }
+            let result = try await mover.apply(blocks.map { .create($0) }, restoring: false, planDay: day)
+            return planOutcome(result, day: day, head: "已在\(PlanEditRules.dayName(day))加 \(blocks.count) 块")
+
+        case let .blockEdit(edit):
+            let result = try await planMover().apply([.edit(edit)], restoring: false, planDay: nil)
+            return planOutcome(result, day: dayOf(result), head: "已改计划块")
+
+        case let .blockDelete(id, expected):
+            let result = try await planMover().apply([.delete(id: id, expectedRevision: expected)], restoring: false, planDay: nil)
+            return planOutcome(result, day: dayOf(result), head: "已删掉计划块（在回收站，30 天内可恢复）")
+
+        case let .planDay(day, steps, isUndo):
+            let result = try await planMover().apply(steps, restoring: isUndo, planDay: isUndo ? nil : day)
+            if isUndo {
+                let note = "已整组撤销 \(result.resolved.count) 步：" + Self.summary(result.resolved, now: now()) + result.note
+                DevLog.shared.info("多端审批", note)
+                return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "已整组撤销"))
+            }
+            return planOutcome(result, day: day, head: "已排好\(PlanEditRules.dayName(day))（\(steps.count) 步）")
         }
+    }
+
+    /// W18 加 / 改 / 删 / 排一天的结果：一句话 + 撤销 = 反向步骤逆序整组执行（带写后的版本，之后被改过就整组不撤）。
+    private func planOutcome(_ result: PlanEditApplied, day: Date, head: String) -> ProposalExecutionOutcome {
+        let note = head + "：" + Self.summary(result.resolved, now: now()) + result.note
+        DevLog.shared.info("多端审批", note)
+        return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .planDay(day: day, steps: result.inverse.reversed(), isUndo: true)))
+    }
+
+    private func dayOf(_ result: PlanEditApplied) -> Date {
+        DayContext.logicalStartOfDay(result.resolved.first?.before?.start ?? result.resolved.first?.after?.start ?? now())
+    }
+
+    /// 结果说明里的一句一句（「+ 09:00–11:00「写论文」」「「健身」18:00–19:00 → 19:00–20:00」）。
+    private static func summary(_ resolved: [PlanEditRules.Resolved], now: Date) -> String {
+        resolved.map { r -> String in
+            switch r.step {
+            case .create, .restore: r.after.map { "+ \(PlanEditRules.when($0.start, $0.end, now: now))「\($0.title)」" } ?? ""
+            case .delete: r.before.map { "− 「\($0.title)」（\(PlanEditRules.when($0.start, $0.end, now: now))）" } ?? ""
+            case .move, .edit:
+                r.before.flatMap { b in r.after.map { a in
+                    a.start == b.start && a.end == b.end && a.title == b.title
+                        ? "「\(a.title)」属性已改"
+                        : "「\(b.title)」\(PlanEditRules.when(b.start, b.end, now: now)) → " + (a.title == b.title ? "" : "「\(a.title)」") + PlanEditRules.when(a.start, a.end, now: now)
+                } } ?? ""
+            }
+        }.joined(separator: "；")
     }
 
     // MARK: 内部
@@ -565,6 +682,52 @@ enum ProposalTimerRules {
     private func planMover() throws -> any PlanBlockMoving {
         guard let mover else { throw ProposalExecutionError.unavailable("这台设备没有接入时间线") }
         return mover
+    }
+
+    /// W18 新种类（加 / 改 / 删 / 排一天）要的时间线能力：开关关着就拒收并说明。
+    private func editingMover() throws -> any PlanBlockMoving {
+        let mover = try planMover()
+        guard mover.planEditingEnabled else {
+            throw ProposalExecutionError.unavailable("「智能体排时间线」在设置里关着（多端审批面板）：现在只能挪今天的块")
+        }
+        return mover
+    }
+
+    private func notFound(_ mover: any PlanBlockMoving, _ what: String) -> ProposalExecutionError {
+        .invalid(mover.planEditingEnabled
+                 ? "今天到 \(PlanEditRules.horizonDays) 天后的计划里找不到\(what)（可能已删除，或不在这段时间里）"
+                 : "今天的计划里找不到\(what)（可能已删除或不在今天）")
+    }
+
+    /// 改 / 挪 / 删现有块的一步：补全基线版本（带了就必须与此刻一致）。
+    private func baselineStep(_ step: ProposalPlanStep, _ mover: any PlanBlockMoving) throws -> ProposalPlanStep {
+        guard let block = try mover.windowBlock(id: step.blockID) else { throw notFound(mover, "这块") }
+        let current = ProposalRevision.block(block), what = "「\(block.title)」"
+        switch step {
+        case let .move(m):
+            return .move(ProposalBlockMove(id: m.id, start: m.start, end: m.end, expectedRevision: try Self.baseline(m.expectedRevision, current: current, what: what)))
+        case let .edit(e):
+            var e = e
+            if let t = e.title { e.title = try Self.cleanTitle(t) }
+            e.expectedRevision = try Self.baseline(e.expectedRevision, current: current, what: what)
+            return .edit(e)
+        case let .delete(id, rev):
+            return .delete(id: id, expectedRevision: try Self.baseline(rev, current: current, what: what))
+        case .create, .restore:
+            return step
+        }
+    }
+
+    /// 新块：标题（空 = 用关联事项的标题）+ 关联事项必须存在、不在回收站。
+    private func cleanNewBlock(_ nb: ProposalNewBlock) throws -> ProposalNewBlock {
+        var nb = nb
+        if let taskID = nb.linkedTaskID {
+            guard let task = try itemStore().task(id: taskID) else { throw ProposalExecutionError.invalid("找不到要关联的事项（可能已被删除）") }
+            guard !task.isInTrash else { throw ProposalExecutionError.invalid("要关联的「\(task.title)」在回收站里") }
+            if nb.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { nb.title = task.title }
+        }
+        nb.title = try Self.cleanTitle(nb.title)
+        return nb
     }
 
     private func liveTask(_ id: UUID) throws -> LongTask {

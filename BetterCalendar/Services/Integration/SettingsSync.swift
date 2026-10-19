@@ -42,6 +42,8 @@ enum SettingsSync {
         "activity.recording.enabled", "activity.recording.pausedUntil",   // 设备活动记录总开关 / 暂停到几点：在 iPhone 上暂停，Mac 也停（对人不对设备）
         // —— W16（2026-10-19）——
         "developer.optionsEnabled",            // 「开发者选项」：开发 / 测试控件的总开关（一端打开两端都显示）
+        // —— W18（2026-10-19）——
+        "agent.planEditing.enabled",           // 智能体排时间线（加 / 改 / 删块、跨天挪、排一天）：一端关了两端都关
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

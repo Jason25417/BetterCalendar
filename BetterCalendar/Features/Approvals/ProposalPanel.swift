@@ -20,6 +20,7 @@ struct ProposalPanel: View {
     #endif
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
+    @State private var planEditingOn = PlanEditingSettings.enabled
     @State private var notificationAllowed: Bool?
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
 
@@ -64,10 +65,15 @@ struct ProposalPanel: View {
             }
             #endif
             Section("智能体能看到什么（A2）") {
-                Text("只读：今天的计划、正在计时的事、待办池与长期事项、系统日历（今天及未来 3 天）、最近 3 天的实际。智能体不能借此改动任何数据。")
+                Text("只读：今天的计划、正在计时的事、待办池与长期事项、系统日历（今天及未来 3 天）、最近 3 天的实际；「智能体排时间线」开着时还有未来 7 天的计划块和你日历里的安排（当已占用）。智能体不能借此改动任何数据。")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("允许智能体读最近日记", isOn: Binding(get: { journalOn }, set: { journalOn = $0; AgentContextSettings.allowRecentJournal = $0 }))
                 Text("默认关。打开后附最近 3 天日记的摘要（每篇最多前 500 字，不含照片）；随设置同步到你的所有设备，随时可关。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("智能体排时间线") {
+                Toggle("允许智能体提议排时间线", isOn: Binding(get: { planEditingOn }, set: { planEditingOn = $0; PlanEditingSettings.enabled = $0 }))
+                Text("默认开。打开后智能体能提议：往今天到 7 天后加计划块、改块的标题 / 时长 / 固定 / 要紧 / 截止、删块（进回收站）、跨天挪块、一次排好一天。每一项仍要你批准，批准后可撤销；放不放得下由 BetterCalendar 按规则判（固定安排不动、不重叠、不越截止、你日历里的安排当已占用）。关掉 = 只能挪今天的块，和以前一样。随设置同步到你的所有设备。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let messages { attentionSection(messages) }
@@ -105,6 +111,7 @@ struct ProposalPanel: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
             journalOn = AgentContextSettings.allowRecentJournal   // 另一台设备改了开关
+            planEditingOn = PlanEditingSettings.enabled
         }
     }
 

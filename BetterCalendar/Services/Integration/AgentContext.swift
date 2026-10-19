@@ -42,6 +42,9 @@ enum AgentContextLimits {
     static let recentDays = 3
     /// 系统日历往后看几天（不含今天）。
     static let calendarAheadDays = 3
+    /// W18：未来几天（不含今天）的计划块总数上限；你的日历「已占用」条数上限。
+    static let upcomingBlocks = 120
+    static let occupied = 80
 }
 
 /// 收集好的只读数据（来源 → DTO）。
@@ -67,6 +70,8 @@ struct AgentContextInput {
         var lastWorkedAt: Date?
     }
     struct CalendarEvent { var title: String; var start: Date; var end: Date; var isAllDay = false; var calendar = "" }
+    /// W18：你的日历里一件「已占用」的事（只读；排布规则用的就是这份）。linkedBlockId = 与之是同一件事的计划块。
+    struct Occupied { var title: String; var start: Date; var end: Date; var calendar = ""; var linkedBlockId: UUID? = nil }
     /// W12：你自己列表里一条没完成的提醒（只读）。
     struct OwnReminderItem { var title: String; var due: Date?; var hasTime = true; var list = "" }
     struct Actual { var title: String; var start: Date; var end: Date }
@@ -93,6 +98,10 @@ struct AgentContextInput {
     var journal = Read<JournalDigest>()
     /// W13：设备活动摘要（已截断、带来源与时刻；nil = 没接活动记录）。构造见 ActivityContextSummary。
     var activity: [String: Any]? = nil
+    /// W18：智能体排时间线（开关开着才附 planning 段）：明天起几天的计划块（带 id / 版本 / 图钉）+ 你的日历「已占用」。
+    var planEditing = false
+    var upcoming = Read<Block>()
+    var occupied = Read<Occupied>()
 
     init(now: Date) { self.now = now }
 
@@ -103,6 +112,12 @@ struct AgentContextInput {
         let lo = Calendar.current.startOfDay(for: now)
         let hi = Calendar.current.date(byAdding: .day, value: AgentContextLimits.calendarAheadDays + 1, to: lo) ?? lo
         return DateInterval(start: lo, end: max(lo, hi))
+    }
+    /// W18：可排范围（今天起 PlanEditRules.horizonDays 个逻辑日）。
+    var planningWindow: DateInterval { PlanEditRules.window(now: now, horizon: PlanEditRules.horizonDays) }
+    /// W18：明天起的逻辑日标签。
+    var upcomingLabels: [Date] {
+        (1...PlanEditRules.horizonDays).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: logicalDayStart) }
     }
     /// 最近实际 / 日记：最近 3 个逻辑日（含今天）起点 → 现在。
     var recentWindow: DateInterval {
@@ -129,8 +144,7 @@ enum AgentBridgeContext {
         ]
 
         // 今天的计划块（绿色计划的真相源）。字段 blocks / start / end（HH:mm）保持 v1 兼容。
-        var today = section(source: "BetterCalendar 计划（PlanStore，今天这个逻辑日）", asOf: asOf, read: input.today,
-                            limit: AgentContextLimits.todayBlocks, key: "blocks") { b in
+        let blockJSON: (AgentContextInput.Block) -> [String: Any] = { b in
             var o: [String: Any] = ["title": clip(b.title), "start": hm.string(from: b.start), "end": hm.string(from: b.end),
              "startAt": t(b.start), "endAt": t(b.end), "fixed": b.isFixed, "important": b.important]
             if let id = b.id { o["id"] = id.uuidString }
@@ -139,7 +153,10 @@ enum AgentBridgeContext {
             if let p = b.pinnedUntil { o["pinnedUntil"] = t(p) }   // P4：有此键 = 图钉，动它须越级
             return o
         }
+        var today = section(source: "BetterCalendar 计划（PlanStore，今天这个逻辑日）", asOf: asOf, read: input.today,
+                            limit: AgentContextLimits.todayBlocks, key: "blocks", map: blockJSON)
         today["logicalDayStart"] = t(input.logicalDayStart)
+        today["day"] = PlanEditRules.dayKey(input.logicalDayStart)   // W18：blockCreate / planDay 的 day 用这个格式
         context["today"] = today
         if let targets = input.actionTargets { context["actionTargets"] = targets }
 
@@ -241,6 +258,32 @@ enum AgentBridgeContext {
         }
         // W13：最近的设备活动（只用来理解情境与时机；App/网站名永不进复盘、留底、反馈）。全量走 MCP read_activity。
         if let activity = input.activity { context["recentActivity"] = activity }
+        // W18：排时间线要看的（开关关着 = 不附，智能体就只能挪今天）。
+        if input.planEditing {
+            var planning: [String: Any] = [
+                "source": "BetterCalendar 计划（PlanStore）+ 你的日历（只读，排布时当作已占用）", "asOf": asOf, "enabled": true,
+                "horizonDays": PlanEditRules.horizonDays, "window": window(input.planningWindow),
+                "note": "day 用 yyyy-MM-dd（逻辑日，凌晨 0–4 点属于前一天）。今天的块在 today.blocks；明天起的在 days[].blocks（id / revision / pinnedUntil 同 today）。occupied = Jason 自己日历里的安排：只读、当作已占用，App 校验时绝不让块和它重叠（linkedBlockId = 和那一块是同一件事，对那一块不算障碍）。",
+            ]
+            let kept = Array(input.upcoming.items.prefix(AgentContextLimits.upcomingBlocks))
+            planning["days"] = input.upcomingLabels.map { label -> [String: Any] in
+                ["day": PlanEditRules.dayKey(label), "name": PlanEditRules.dayName(label), "logicalDayStart": t(label),
+                 "blocks": kept.filter { DayContext.logicalStartOfDay($0.start) == label }.map(blockJSON)]
+            }
+            planning["blocksTotal"] = input.upcoming.items.count
+            planning["blocksTruncated"] = input.upcoming.items.count > kept.count
+            if let e = input.upcoming.error { planning["blocksError"] = e }
+            planning["occupied"] = section(source: "你的日历（只读，已按「排布时当作已占用的日历」设置过滤，不含全天）", asOf: asOf,
+                                           read: input.occupied, limit: AgentContextLimits.occupied) { o in
+                var row: [String: Any] = ["title": clip(o.title), "start": t(o.start), "end": t(o.end), "calendar": clip(o.calendar)]
+                if let id = o.linkedBlockId { row["linkedBlockId"] = id.uuidString }
+                return row
+            }
+            context["planning"] = planning
+        } else {
+            context["planning"] = ["enabled": false, "source": "BetterCalendar 设置", "asOf": asOf,
+                                   "note": "「智能体排时间线」在设置里关着：只能挪今天的块（moveBlock / moveBlocks），不能加 / 改 / 删块，也不能动别的日子"] as [String: Any]
+        }
         return context
     }
 
@@ -274,6 +317,8 @@ enum AgentBridgeContext {
     private let running: () -> AgentContextInput.Running
     private let journalAllowed: () -> Bool
     private let actionTargets: () -> [String: Any]?
+    /// W18：智能体排时间线开关。
+    private let planEditing: () -> Bool
     /// 同一来源同一错误只记一次日志（每 20 秒刷新，别刷屏）；错误本身每次都写进上下文。
     private var loggedErrors: [String: String] = [:]
     /// W13：设备活动摘要（组装点设置；nil = 不附）。
@@ -284,8 +329,10 @@ enum AgentBridgeContext {
          reminderLedger: @escaping () throws -> ReminderProjectionLedger? = { try ReminderProjectionLedgerStore().load() },
          running: @escaping () -> AgentContextInput.Running,
          journalAllowed: @escaping () -> Bool = { AgentContextSettings.allowRecentJournal },
-         actionTargets: @escaping () -> [String: Any]? = { nil }) {
+         actionTargets: @escaping () -> [String: Any]? = { nil },
+         planEditing: @escaping () -> Bool = { PlanEditingSettings.enabled }) {
         self.actionTargets = actionTargets
+        self.planEditing = planEditing
         self.planStore = planStore; self.actualStore = actualStore; self.longTasks = longTasks; self.calendarStore = calendarStore
         self.journalStore = journalStore; self.running = running; self.journalAllowed = journalAllowed
         self.reminderStore = reminderStore; self.reminderLedger = reminderLedger
@@ -309,6 +356,32 @@ enum AgentBridgeContext {
             } catch { input.today.error = fail("今天的计划", error) }
         }
         input.running = running()
+        // W18：明天起几天的计划 + 你的日历「已占用」（与排布规则用的是同一份：同样按设置过滤、同样的关联）
+        input.planEditing = planEditing()
+        if input.planEditing {
+            var windowBlocks: [ScheduledBlock] = []
+            if let planStore {
+                do {
+                    windowBlocks = try planStore.plannedBlocks(onLabels: [input.logicalDayStart] + input.upcomingLabels)
+                    input.upcoming.items = windowBlocks.filter { DayContext.logicalStartOfDay($0.start) != input.logicalDayStart }.map {
+                        .init(title: $0.title, start: $0.start, end: $0.end, isFixed: $0.isFixed, important: $0.priority == .important,
+                              id: $0.id, revision: ProposalRevision.block($0), deadline: $0.deadline,
+                              pinnedUntil: $0.isPinned(at: input.now) ? $0.pinnedUntil : nil)
+                    }
+                } catch { input.upcoming.error = fail("未来几天的计划", error) }
+            }
+            if let calendarStore {
+                do {
+                    let busy = ExternalCalendarSettings.busy(try await calendarStore.externalEvents(in: input.planningWindow),
+                                                             excluding: ExternalCalendarSettings.excludedTitles)
+                        .filter { $0.end > $0.start }
+                    let links = ExternalEventLinker.links(blocks: windowBlocks, events: busy)
+                    input.occupied.items = busy.sorted { $0.start < $1.start }.map { e in
+                        .init(title: e.title, start: e.start, end: e.end, calendar: e.calendarTitle, linkedBlockId: links.first { $0.value == e }?.key)
+                    }
+                } catch { input.occupied.error = fail("你的日历（已占用）", error) }
+            }
+        }
         // 待办池 / 长期事项（缓存列表 + 一次批量算最近推进）
         if let longTasks {
             let todos = longTasks.todoItems(), longterm = longTasks.active()
@@ -386,7 +459,8 @@ enum AgentBridgeContext {
     private func clearRecovered(_ input: AgentContextInput) {
         let failing: [String: String?] = ["今天的计划": input.today.error, "最近推进": input.todos.error,
                                           "系统日历": input.calendar.error, "最近实际": input.actuals.error, "日记": input.journal.error,
-                                          "系统提醒事项": input.ownReminders.error, "提醒投影账本": input.reminderLedgerError]
+                                          "系统提醒事项": input.ownReminders.error, "提醒投影账本": input.reminderLedgerError,
+                                          "未来几天的计划": input.upcoming.error, "你的日历（已占用）": input.occupied.error]
         for (what, error) in failing where error == nil { loggedErrors[what] = nil }
     }
 }
