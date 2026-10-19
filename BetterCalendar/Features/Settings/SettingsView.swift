@@ -62,6 +62,7 @@ struct SettingsView: View {
     #endif
     @State private var showFeedback = false
     @State private var focusFollowOn = FocusFollowSettings.enabled
+    @AppStorage(TimelineAxisSettings.key) private var timelineAxis = TimelineAxisSettings.defaultValue   // W23
     #if os(macOS)
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     #endif
@@ -86,6 +87,13 @@ struct SettingsView: View {
                         Label("晚间复盘", systemImage: "moon.stars")
                     }
                 }
+            }
+            // W23：今天页时间轴（新功能，日用版默认关；随 iCloud 同步）
+            Section("今天页") {
+                Toggle("时间轴视图（实验）", isOn: $timelineAxis)
+                    .accessibilityIdentifier("bc.settings.timelineAxis")
+                Text("打开后，今天页的计划列表换成一根连续的时间轴：「现在」线以上是做成的事（蓝），以下是接下来的计划（绿），你日历里的安排是灰色、只读；4:00 的日界线带日期，顶上的日子条点一下滚到那天。绿色块可以直接拖动改时间、拉底边改时长（iPhone 长按后拖），放不下会写明原因、不会悄悄挤别的块；你拖过的块会钉住。关掉 = 回到原来的列表。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
             // W16：回收站是你找回东西的地方，常驻；同步诊断 / 播种 / 文件桥收进「开发者选项」

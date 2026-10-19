@@ -178,7 +178,10 @@ final class HomeViewModel {
     /// 强结束信号，收口卡据此出现（还要叠加「今天还没记录」，由视图查日记）。
     var wrapUpSignal: Bool {
         guard isLiveTargetDay else { return false }
-        return blocks.isEmpty || now() >= WorkHoursSettings.effectiveWindDown(from: now())
+        // 剩余为空：重铺口径下 blocks 本来就只有剩余；W23 原样口径下按「还没落定、还没过去」数（两种口径结果一致）
+        let settled = progress?.settledPlannedIDs ?? []
+        let remaining = blocks.contains { $0.end > now() && !settled.contains($0.id) }
+        return !remaining || now() >= WorkHoursSettings.effectiveWindDown(from: now())
     }
 
     /// 目标日是否处于实时模式（0.24 C2）：已开始 且 是逻辑今天——精修台只对"正在过的这一天"生效。
@@ -245,6 +248,47 @@ final class HomeViewModel {
         await commitEdits()
     }
 
+    // MARK: - W23 时间轴（2026-10-19）：一根连续的轴上直接拖 / 改；写入仍走上面这条 W19b 原路
+
+    /// 实时日是否按「从现在起」重铺列表（W19 卡片列表 = true）。时间轴设 false：轴自己按闸门呈现，
+    /// 这里拿库里原样——拖一块只改那一块（保存时其余块原样写回），不会因为保存把别的块悄悄挪了。
+    var relayoutLiveDay = true
+
+    /// 当前列表装的是哪一个逻辑日（加载 / 切页后才有）。时间轴用它判断：这一天的块该用编辑中的版本。
+    private(set) var pageDay: Date?
+
+    /// 时间轴要改某一天的块：这一页不是那天 → 先保存这一页、再切过去加载那天（同 selectDay + 切页）。
+    func focusDay(_ day: Date) async {
+        let label = Calendar.current.startOfDay(for: day)
+        guard pageDay != label || Calendar.current.startOfDay(for: targetDay) != label else { return }
+        await flushAutosave()
+        targetDay = label
+        targetDayDidChange()
+    }
+
+    /// 视图的 onChange(targetDay) 用：这一页已经是那天（focusDay 刚切过）就不再重复加载。
+    func targetDayDidChangeIfNeeded() {
+        guard pageDay != Calendar.current.startOfDay(for: targetDay) else { return }
+        targetDayDidChange()
+    }
+
+    /// 时间轴拖动 / 拉长缩短的落地：改列表里这一块的起止 → 立即保存（confirm：写 PlanStore、按「你眼前那一版」
+    /// 对比钉成图钉、请 CalendarSyncEngine 重投影）。调用方已按 PlanEditRules 校验过、并已 focusDay 到这一天。
+    /// 返回 false = 这一页里没有这块（不写任何东西）。
+    @discardableResult
+    func applyAxisSpan(id: UUID, start: Date, end: Date) async -> Bool {
+        guard let i = blocks.firstIndex(where: { $0.id == id }) else {
+            DevLog.shared.warn("今天页", "时间轴改动没落地：这一页里找不到那一块（可能刚被别处删掉）")
+            return false
+        }
+        blocks[i].start = start
+        blocks[i].end = end
+        blocks.sort { $0.start < $1.start }
+        committedCount = nil; markEditedIfLoaded(); persistDraft()
+        await flushAutosave()
+        return true
+    }
+
     /// 切到另一天：先把这一天没来得及保存的改动保存掉，再切（防止改动被丢、或被写到别的日子）。
     func selectDay(_ day: Date) async {
         await flushAutosave()
@@ -292,7 +336,8 @@ final class HomeViewModel {
     private func computeFreshBase() -> [EditableBlock]? {
         let stored = (try? planStore.plannedBlocks(on: targetDay)) ?? []
         guard !stored.isEmpty else { return nil }
-        guard isLiveTargetDay else { return stored.map(EditableBlock.init(from:)) }
+        // W23 时间轴：轴自己按闸门呈现（过去只画蓝、绿色从现在起），这里给库里原样——编辑只改你动的那块，别的块不被悄悄重铺
+        guard isLiveTargetDay, relayoutLiveDay else { return stored.map(EditableBlock.init(from:)) }
         let settled = progress?.settledPlannedIDs ?? []
         let nowT = now()
         let remaining = stored.filter { !settled.contains($0.id) && $0.end > nowT }
@@ -314,6 +359,7 @@ final class HomeViewModel {
     func autoLoadOnAppear() {
         guard !hasUnsavedChanges else { return }
         loadConfirmedPlan()
+        pageDay = Calendar.current.startOfDay(for: targetDay)
     }
 
     /// 当前草稿 → ICS 文本（导出/分享）。
@@ -816,6 +862,7 @@ final class HomeViewModel {
             }
             hasUnsavedChanges = true
             loadedBase = []
+            pageDay = Calendar.current.startOfDay(for: targetDay)
             scheduleAutosave()   // W19：那一天上次没来得及保存的改动，切过去就保存
         } else {
             let pageText = draftStore?.load(day: targetDay)?.inputText ?? ""
@@ -825,6 +872,7 @@ final class HomeViewModel {
             blocks = []
             draftSource = .empty
             loadConfirmedPlan()
+            pageDay = Calendar.current.startOfDay(for: targetDay)
         }
     }
 
