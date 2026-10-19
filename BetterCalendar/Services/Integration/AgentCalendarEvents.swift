@@ -26,7 +26,7 @@ enum AgentCalendarEvents {
                     "start": iso.string(from: d.block.start), "end": iso.string(from: d.block.end),
                     "fixed": d.block.isFixed, "important": d.block.priority == .important,
                     // 冒烟 2026-10-18：以前写的是对账那一轮的标签（可能是今天），明天的块会被写成今天；改按块自己所在的日历日
-                    "logicalDay": DayContext.dayKey(Calendar.current.startOfDay(for: d.block.start)),
+                    "logicalDay": DayContext.dayKey(d.block.start),   // 块开始时刻所在的逻辑日（dayKey 自带 4 点日界线；传零点会被算成前一天）
                     "handled": d.trimmedLive ? "trimmedRemainder" : (d.collectedToTodo ? "movedToTodo" : "removedFromTimeline"),
                 ]
                 if let ddl = d.block.deadline { o["deadline"] = iso.string(from: ddl) }
