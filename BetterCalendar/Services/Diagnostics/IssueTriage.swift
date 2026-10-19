@@ -57,7 +57,7 @@ nonisolated enum IssueTriage {
     private static let rules: [Rule] = [
         // —— (a) 你现在能处理 ——
         Rule(id: "key.sentinel", sources: nil, patterns: ["没有 openrouter api key", "没有 openai api key"], tier: .actionable,
-             headline: "哨兵的判断模型没有 key，暂时用兜底判断",
+             headline: "哨兵的判断模型没有 key，哨兵暂停了（不会换别的判断器）",
              action: "到 多端审批 → 哨兵 里填好 key"),
         Rule(id: "key.cloud", sources: nil,
              patterns: ["未配置 api key", "未配 api key", "没有 anthropic api key", "x-api-key", "authentication_error", "http 401", "invalid api key"],
@@ -107,16 +107,17 @@ nonisolated enum IssueTriage {
         Rule(id: "cancelled", sources: nil, patterns: ["cancellationerror", "cancelled", "已取消", "operation was canceled"], tier: .transient,
              headline: nil, action: nil),
 
-        // —— 有兜底的降级（结果照样出来了）：安静，反复出现才升级 ——
+        // —— 有兜底的降级（结果照样出来了）——原则 10（2026-10-19）：降级不许藏，结果出来但不是你以为的那种 → 横幅说清
+        //    （旧排程链的去留在 UI 结构层讨论；在那之前至少让降级可见）
         Rule(id: "fallback.ai", sources: ["端侧解析", "端侧微调", "微调", "排程", "reflow", "解析", "脱敏排序", "分步排序", "云端", "云端原文", "长期"],
-             patterns: [], tier: .transient,
-             headline: "AI 排程这阵子一直没成功，用的是本地兜底", action: "检查网络和 设置 → 云端排程大脑 的 key；点开日志看原因"),
+             patterns: [], tier: .actionable,
+             headline: "这次 AI 排程没成功，结果是本地兜底排的（没有智能排序 / 微调）", action: "检查网络和 设置 → 云端排程大脑 的 key；点开日志看原因"),
         Rule(id: "cloud.off", sources: nil, patterns: ["云端已关闭"], tier: .info, headline: nil, action: nil),
         Rule(id: "redraw.later", sources: ["投影", "对账", "时间线", "绿色淡出", "智能体运行", "智能体上下文", "设备活动", "共享计时", "多端审批", "数据同步"],
              patterns: ["下次", "再试", "兜底", "补报", "待传", "轮询", "暂不", "这一轮", "没传上"], tier: .transient,
              headline: nil, action: nil),
-        Rule(id: "sentinel.fallback", sources: ["哨兵"], patterns: ["没用上首选", "这一轮只看"], tier: .transient,
-             headline: "哨兵这阵子一直用兜底判断", action: "到 多端审批 → 哨兵 看原因"),
+        Rule(id: "sentinel.fallback", sources: ["哨兵"], patterns: ["没用上首选", "这一轮只看", "这一拍没判断"], tier: .transient,
+             headline: "哨兵这阵子一直判断失败、处于暂停", action: "到 多端审批 → 哨兵 看原因"),
 
         // —— 说明性：只进日志 ——
         Rule(id: "info.notify-past", sources: ["通知"], patterns: ["已过当前时刻"], tier: .info, headline: nil, action: nil),
