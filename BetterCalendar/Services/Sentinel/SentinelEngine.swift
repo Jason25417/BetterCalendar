@@ -25,7 +25,6 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
 @MainActor @Observable final class SentinelEngine {
     // 依赖
     private let judges: [any SentinelJudge]
-    private let fallback: any SentinelJudge
     let log: any SentinelDecisionLogging
     private let bridge: any SentinelBridgeAccess
     private let activity: any ActivityLog
@@ -69,10 +68,10 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     private var reportedStop: String?
     private var lastStatusWrite: (at: Date, state: String)?
 
-    init(judges: [any SentinelJudge], fallback: (any SentinelJudge)? = nil, log: any SentinelDecisionLogging,
+    init(judges: [any SentinelJudge], log: any SentinelDecisionLogging,
          bridge: any SentinelBridgeAccess, activity: any ActivityLog, defaults: UserDefaults = .standard,
          now: @escaping () -> Date = Date.init, gather: @escaping (Date) async -> AgentContextInput) {
-        self.judges = judges; self.fallback = fallback ?? RuleSentinelJudge(); self.log = log; self.bridge = bridge; self.activity = activity
+        self.judges = judges; self.log = log; self.bridge = bridge; self.activity = activity
         self.defaults = defaults; self.gather = gather; self.now = now
         settings = SentinelSettings.load(defaults)
         recent = log.entries(since: now().addingTimeInterval(-8 * 86400))
@@ -91,18 +90,16 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         }
     }
 
-    private var availableJudges: [any SentinelJudge] { orderedJudges.filter { $0.unavailableReason() == nil } }
+    /// 原则 10（Jason 2026-10-19）：不设保险降级——只用你选的那一个判断器；它不可用 / 失败 = 哨兵暂停并直说，不换替身、不用规则兜底。
+    private var selectedJudge: (any SentinelJudge)? { judges.first { $0.kind == settings.preferredJudge } }
 
-    /// 现在会用哪个判断器（都不可用 = 规则兜底）。
-    var judgeInUse: SentinelJudgeKind { availableJudges.first?.kind ?? .rule }
+    /// 现在用的判断器（= 你选的那个）。
+    var judgeInUse: SentinelJudgeKind { settings.preferredJudge }
 
     /// 没用上首选的原因（面板 / 状态文件显示；用的就是首选时为 nil）。
     var primaryUnavailableReason: String? {
-        guard judgeInUse != settings.preferredJudge else { return nil }
-        if let preferred = judges.first(where: { $0.kind == settings.preferredJudge }) {
-            return "\(preferred.kind.label)不可用：\(preferred.unavailableReason() ?? "未知原因")"
-        }
-        return "没有配置\(settings.preferredJudge.label)"
+        guard let preferred = selectedJudge else { return "没有配置\(settings.preferredJudge.label)" }
+        return preferred.unavailableReason().map { "\(preferred.kind.label)不可用：\($0)" }
     }
 
     // MARK: 统计（面板 / 状态文件）
@@ -171,8 +168,11 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     }
 
     private func currentGate(at t: Date) -> SentinelGate {
-        SentinelCadence.gate(settings: settings, attention: attention(), bridgeConnected: bridge.isConnected, now: t,
-                             costTodayUsd: costTodayUsd, calendar: calendar)
+        let g = SentinelCadence.gate(settings: settings, attention: attention(), bridgeConnected: bridge.isConnected, now: t,
+                                     costTodayUsd: costTodayUsd, calendar: calendar)
+        guard case .open = g else { return g }
+        if let why = primaryUnavailableReason { return .stop("哨兵暂停：\(why)。不会换别的判断器——修好或在面板里改选") }
+        return g
     }
 
     private func isAgentBusy() async -> Bool {
@@ -211,32 +211,22 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
                                         recentNotices: recentNotices(), attention: attention(), timeZone: timeZone)
         let digest = SentinelDigestBuilder.build(input)
 
-        // 判断器链：首选 → 其余可用的 → 规则。每一级失败都记下来（可见）。
+        // 只用你选的判断器（原则 10）：失败 = 这一拍不判断、直说，下一拍再试；不换替身。
         let clock = ContinuousClock(), started = clock.now
-        var judgment: SentinelJudgment?
-        var errors: [String] = []
-        for judge in availableJudges {
-            do { judgment = try await judge.judge(digest); break } catch {
-                errors.append("\(judge.kind.label)：\(error.localizedDescription.prefix(200))")
-            }
-        }
-        var fallbackReason: String? = nil
-        if judgment == nil {
-            judgment = await ruleJudgment(digest)
-            fallbackReason = errors.isEmpty ? (primaryUnavailableReason ?? "没有可用的判断器") : "调用失败：" + errors.joined(separator: "；")
-        } else if let used = judgment?.judge, used != settings.preferredJudge {
-            fallbackReason = errors.isEmpty ? primaryUnavailableReason : "调用失败，改用\(used.label)：" + errors.joined(separator: "；")
-        }
-        var j = judgment!
-        let latencyMs = Int((clock.now - started) / .milliseconds(1))
-        reportFallback(fallbackReason)
-        if errors.isEmpty {
-            consecutiveErrors = 0
-        } else {
+        guard let judge = selectedJudge else { return }   // 闸门已经拦下（stop），这里只是防御
+        let errors: [String] = []
+        let fallbackReason: String? = nil
+        var j: SentinelJudgment
+        do { j = try await judge.judge(digest) } catch {
             consecutiveErrors += 1
-            lastError = SentinelErrorNote(at: t, message: "判断器调用失败（已换下一个 / 兜底）：" + errors.joined(separator: "；"))
+            lastError = SentinelErrorNote(at: t, message: "\(judge.kind.label)调用失败，这一拍没判断（不换别的判断器）：\(error.localizedDescription.prefix(200))")
             DevLog.shared.warn("哨兵", lastError!.message)
+            SentinelCadence.ran(&cadence, at: t)
+            lastRunAt = t
+            return
         }
+        let latencyMs = Int((clock.now - started) / .milliseconds(1))
+        consecutiveErrors = 0
         // 决策模型：概率过阈值才算该叫醒。
         if let p = j.verdict.probability { j.verdict.wake = p >= settings.wakeThreshold }
 
@@ -373,19 +363,6 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         recent.append(entry)
         let cut = t.addingTimeInterval(-8 * 86400)
         recent.removeAll { $0.at < cut }
-    }
-
-    /// 规则兜底（它本身不抛错；万一抛了也给一个「不叫醒」，不让一拍崩掉）。
-    private func ruleJudgment(_ digest: SentinelDigest) async -> SentinelJudgment {
-        (try? await fallback.judge(digest))
-            ?? SentinelJudgment(verdict: .init(wake: false, reason: "规则兜底出错，这一轮不叫醒", urgency: .low, signals: []), judge: .rule)
-    }
-
-    private func reportFallback(_ reason: String?) {
-        guard reason != reportedFallback else { return }
-        if let reason { DevLog.shared.warn("哨兵", "没用上首选判断器：\(reason)") }
-        else if reportedFallback != nil { DevLog.shared.info("哨兵", "已恢复用\(settings.preferredJudge.label)判断") }
-        reportedFallback = reason
     }
 
     private func reportStop() {

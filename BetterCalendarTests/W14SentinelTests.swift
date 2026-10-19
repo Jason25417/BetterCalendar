@@ -187,47 +187,6 @@ import Testing
         #expect(log.rows.last?.outcome == .noWake && log.rows.count == 3)
     }
 
-    @Test func noKeyFallsBackToRulesVisibly() async throws {
-        let root = try tempRoot()
-        var transportCalls = 0
-        let claude = ClaudeSentinelJudge(apiKey: { nil }, cloudAllowed: { true }, transport: { _ in
-            transportCalls += 1; throw URLError(.notConnectedToInternet)
-        })
-        let log = MemorySentinelDecisionLog()
-        let e = engine(judge: claude, log: log, bridge: DirectorySentinelBridge(root: root), now: Self.noon)
-        e.settings.preferredJudge = .claude
-        #expect(e.judgeInUse == .rule && e.primaryUnavailableReason?.contains("API key") == true)
-        await e.runNow()
-        #expect(transportCalls == 0)
-        let row = try #require(log.rows.last)
-        #expect(row.judge == .rule && row.fallbackReason?.contains("API key") == true && row.costUsd == 0)
-        // 规则兜底依据摘要事实：「N1 表格」100 分钟后截止、没推进 → 叫醒
-        #expect(row.verdict.wake && row.verdict.signals == ["deadline_near_no_progress"] && row.outcome == .woke)
-        let status = try readJSON(root.appendingPathComponent("runtime/sentinel.json"))
-        #expect(status["judge"] as? String == "rule" && (status["fallbackReason"] as? String)?.contains("API key") == true)
-        // 云端关 / 只用端侧 → 也不上云
-        let offline = ClaudeSentinelJudge(apiKey: { "k" }, cloudAllowed: { false })
-        #expect(offline.unavailableReason()?.contains("端侧") == true)
-    }
-
-    @Test func callErrorFallsBackAndIsVisible() async throws {
-        let root = try tempRoot()
-        let claude = ClaudeSentinelJudge(apiKey: { "sk-test" }, cloudAllowed: { true }, transport: { req in
-            (Data(#"{"error":"overloaded"}"#.utf8), HTTPURLResponse(url: req.url!, statusCode: 529, httpVersion: nil, headerFields: nil)!)
-        })
-        let log = MemorySentinelDecisionLog()
-        let e = engine(judge: claude, log: log, bridge: DirectorySentinelBridge(root: root), now: Self.noon)
-        e.settings.preferredJudge = .claude
-        #expect(e.judgeInUse == .claude)
-        await e.runNow()
-        let row = try #require(log.rows.last)
-        #expect(row.judge == .rule && row.error?.contains("529") == true && row.fallbackReason?.contains("调用失败") == true)
-        #expect(e.lastError?.message.contains("兜底") == true && e.consecutiveErrors == 1 && e.stateLabel == "error")
-        let status = try readJSON(root.appendingPathComponent("runtime/sentinel.json"))
-        #expect(status["state"] as? String == "error" && status["consecutiveErrors"] as? Int == 1)
-        #expect(((status["lastError"] as? [String: Any])?["message"] as? String)?.contains("529") == true)
-    }
-
     @Test func decisionLogFilePersistsByMonthAndReadsBack() throws {
         let dir = try tempRoot()
         let log = FileSentinelDecisionLog(directory: dir)
@@ -386,16 +345,36 @@ import Testing
         #expect(log.rows.last?.outcome == .woke && log.rows.last?.verdict.wake == true)
     }
 
-    @Test func judgeChainFallsToNextJudgeVisibly() async throws {
-        let jev = JevSentinelJudge(apiKey: { "k" }, transport: http(402, ["error": "no credits"]))
-        let backup = FakeJudge(wake: false, kind: .openai)
+    // MARK: 原则 10：不设保险降级（Jason 2026-10-19）——只用选定判断器，不可用 / 失败就暂停并直说
+
+    @Test func missingKeyPausesSentinelVisiblyInsteadOfFallingBack() async throws {
+        let root = try tempRoot()
+        let jev = JevSentinelJudge(apiKey: { nil })
+        let backup = FakeJudge(wake: true, kind: .openai)   // 有可用的别家，也不许自动换过去
         let log = MemorySentinelDecisionLog()
-        let e = engine(judge: nil, judges: [backup, jev], log: log, bridge: DirectorySentinelBridge(root: try tempRoot()), now: Self.noon)
-        #expect(e.orderedJudges.map(\.kind) == [.jev, .openai] && e.judgeInUse == .jev)
+        let e = engine(judge: nil, judges: [jev, backup], log: log, bridge: DirectorySentinelBridge(root: root), now: Self.noon)
         await e.runNow()
-        let row = try #require(log.rows.last)
-        #expect(row.judge == .openai && backup.calls == 1)
-        #expect(row.fallbackReason?.contains("余额不足") == true && row.error?.contains("402") == true && e.consecutiveErrors == 1)
+        #expect(backup.calls == 0 && log.rows.isEmpty)
+        guard case let .stop(reason) = e.gate else { Issue.record("应暂停"); return }
+        #expect(reason.contains("OpenRouter") && reason.contains("不会换别的判断器") && e.stateLabel == "stopped")
+        let status = try readJSON(root.appendingPathComponent("runtime/sentinel.json"))
+        #expect(status["state"] as? String == "stopped" && status["judge"] as? String == "jev")
+    }
+
+    @Test func callFailureSkipsThisTickWithoutSubstituteAndIsVisible() async throws {
+        let root = try tempRoot()
+        let jev = JevSentinelJudge(apiKey: { "k" }, transport: http(402, ["error": "no credits"]))
+        let backup = FakeJudge(wake: true, kind: .openai)
+        let log = MemorySentinelDecisionLog()
+        let e = engine(judge: nil, judges: [jev, backup], log: log, bridge: DirectorySentinelBridge(root: root), now: Self.noon)
+        await e.runNow()
+        #expect(backup.calls == 0 && log.rows.isEmpty)
+        #expect(e.consecutiveErrors == 1 && e.stateLabel == "error")
+        #expect(e.lastError?.message.contains("402") == true && e.lastError?.message.contains("不换别的判断器") == true)
+        // 手动切换到另一家（你的决定）才会用它
+        e.settings.preferredJudge = .openai
+        await e.runNow()
+        #expect(backup.calls == 1 && log.rows.last?.judge == .openai && e.consecutiveErrors == 0)
     }
 
     // MARK: 防风暴
