@@ -29,7 +29,7 @@ struct ICSDocument: Transferable {
 struct HomeDeps {
     let arrangeDay: ArrangeDayUseCase
     let refiner: PlanRefining
-    let calendarStore: CalendarStore       // 真 EventKit（假日历族已删，2026-07-22）
+    let calendarStore: CalendarReading     // 真 EventKit 的只读角色（P4.1：写日历只经 CalendarSyncEngine）
     let reminderStore: ReminderStore
     let exporter: ICSExporting
     let planStore: PlanStore

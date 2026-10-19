@@ -37,6 +37,8 @@ protocol PlanWriting: AnyObject {
     func deletePlanned(ids: [UUID], reason: PlanWriteReason) throws
     /// 钉住 / 取消钉住（P4 Q6 图钉）：until = 截止时刻（nil = 取消）。不改内容、不升版本（图钉不是日历上的内容）。
     func setPinned(ids: [UUID], until: Date?) throws
+    /// 给刚因「你在日历里删了」而进回收站的计划块写回执（P4.1，随 iCloud 同步；Mac 据此转交给智能体）。
+    func recordCalendarDeletion(id: UUID, receipt: CalendarDeletionReceipt) throws
 }
 
 /// 计划块写入的真实来源（P4.0-8）：PlanStore 日志据此标注。曾经所有写入都叫「对账回流」，
@@ -77,6 +79,7 @@ extension ScheduledBlock {
 }
 
 extension PlanWriting {
+    func recordCalendarDeletion(id: UUID, receipt: CalendarDeletionReceipt) throws {}
     func updatePlanned(id: UUID, start: Date, end: Date, title: String) throws {
         try updatePlanned(id: id, start: start, end: end, title: title, reason: .unspecified)
     }
@@ -120,7 +123,7 @@ struct ActualBlock: Sendable, Identifiable, Equatable {
 }
 
 @MainActor
-final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
+final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, CalendarDeletionReceiptReading {
     private let context: ModelContext
     /// 本机写者标识（P4 Q8 作者宽限）：写进 PlanBlock.syncWriter。
     let writerID: String
@@ -253,6 +256,29 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting {
         for r in rows { r.pinnedUntil = until }
         try context.save()
         DevLog.shared.info("PlanStore", until == nil ? "取消图钉 \(rows.count) 块" : "图钉 \(rows.count) 块（当天有效）")
+    }
+
+    /// P4.1：回执写进这次删除的那一行（同 id 多行时取最近删的那行），并记下它属于哪一次删除。
+    func recordCalendarDeletion(id: UUID, receipt: CalendarDeletionReceipt) throws {
+        guard let row = try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter({ $0.isInTrash && $0.kind == .planned && $0.id == id })
+            .max(by: { ($0.deletedAt ?? .distantPast) < ($1.deletedAt ?? .distantPast) }),
+              let deletion = row.deletionID else { return }
+        var r = receipt
+        r.deletionID = deletion
+        guard let data = r.encoded() else { throw DataArchiveError.invalid("删除回执编码失败") }
+        row.deletionContext = data
+        try context.save()
+    }
+
+    /// 回收站里带有效回执的计划块（回执的 deletionID 必须等于行上当前这次删除；恢复过的不算）。
+    func calendarDeletionReceipts() throws -> [CalendarDeletionRecord] {
+        try context.fetch(FetchDescriptor<PlanBlock>())
+            .filter { $0.isInTrash && $0.kind == .planned && $0.deletionContext != nil }
+            .compactMap { row in
+                guard let r = CalendarDeletionReceipt.decode(row.deletionContext), r.deletionID == row.deletionID else { return nil }
+                return CalendarDeletionRecord(block: Self.scheduled(row), receipt: r)
+            }
     }
 
     // MARK: - 蓝色实际（真相源）

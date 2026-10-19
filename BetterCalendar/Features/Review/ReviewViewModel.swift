@@ -13,7 +13,8 @@ import SwiftUI   // Binding
 
 @Observable
 final class ReviewViewModel {
-    private let calendarStore: CalendarStore
+    private let calendarStore: CalendarReading   // 只读角色（P4.1）：补一笔画蓝经 CalendarSyncEngine
+    private let engine: CalendarSyncEngine?
     private let comparer: PlanComparing
     private let arrangeDay: ArrangeDayUseCase
     private let localStore: ReviewLocalStore
@@ -46,12 +47,13 @@ final class ReviewViewModel {
     var backfillBlocks: [EditableBlock] = []
     var backfillCommitted: Int?
 
-    init(calendarStore: CalendarStore, comparer: PlanComparing,
+    init(calendarStore: CalendarReading, comparer: PlanComparing,
          arrangeDay: ArrangeDayUseCase, localStore: ReviewLocalStore,
          longTasks: LongTaskStore? = nil, planStore: (PlanReading & ActualReading & ActualWriting)? = nil,
          looseDays: LooseDayStore? = nil, learning: LearningStore? = nil,
-         timeline: TimelineCoordinator? = nil) {
+         timeline: TimelineCoordinator? = nil, engine: CalendarSyncEngine? = nil) {
         self.calendarStore = calendarStore
+        self.engine = engine
         self.comparer = comparer
         self.arrangeDay = arrangeDay
         self.localStore = localStore
@@ -210,10 +212,8 @@ final class ReviewViewModel {
             try? planStore?.upsertActuals(backfillBlocks.map {
                 ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end)
             })
-            let existing = try await calendarStore.read(kind: .actual)
-            // 再投影日历（union 去重：同 标题+起始分钟=同一事件，重复确认不双份）
-            try await calendarStore.write(
-                CalendarMerge.union(existing: existing, additions: newDrafts, kind: .actual))
+            // 再投影日历（P4.1 经日历唯一写者；union 去重：同 标题+起始分钟=同一事件，重复确认不双份）
+            try await engine?.recordActuals(newDrafts)
             backfillCommitted = newDrafts.count
             BehaviorLog.record("补一笔", "\(newDrafts.count) 项")
             backfillBlocks = []

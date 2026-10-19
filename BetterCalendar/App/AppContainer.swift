@@ -20,7 +20,7 @@ final class AppContainer {
     let longTaskRefiner: LongTaskRefining
     // 假日历族退役删除（2026-07-22 Jason 拍板「直接删掉」）：Routing/Fake/CalendarSettings/预览页全删——
     // 生产只有一条路=真 EventKit；Fake 仅测试注入（文件已挪 BetterCalendarTests/）。
-    let calendarStore: CalendarStore           // 写/读真 Apple 日历（EventKit）
+    let calendarStore: CalendarReading         // 真 Apple 日历（EventKit）的只读角色——P4.1：写角色只交给 CalendarSyncEngine
     let reminderStore: ReminderStore           // 写真提醒事项（EventKit VTODO）
     let exporter: ICSExporting
     let comparer: PlanComparing                // 计划 × 实际 → 完成度（本地启发式）
@@ -40,7 +40,7 @@ final class AppContainer {
     let journalStore: JournalStore             // 反思层（日记）数据（M9/R1）
     let photoStore: PhotoStore                 // 日记照片：SwiftData(CKAsset 跨端) + 本地缓存
     let trash: RetainedTrashService
-    let projection: ProjectionService          // PlanStore→日历 单向投影（重构 P2）：唯一写绿色计划事件的地方（P4：橙色预览已退役）
+    let projection: CalendarSyncEngine         // 日历同步引擎（P4.1）：BetterCalendar 自家日历（绿/蓝）全 App 唯一写者（P4：橙色预览已退役）
     let reconcile: ReconcileService            // 双向同步（0.20）：日历手改按 ID 回流；与旧反向同步本质不同（指纹防回环）
     let reschedule: RescheduleService          // re-flow 编排（晨间 / 全天连续）
     let liveActivity: ExecutionLiveActivity    // 灵动岛/锁屏实时计时（iOS 真实现，macOS no-op）
@@ -52,6 +52,8 @@ final class AppContainer {
     let agentChat: AgentChatCenter             // SPEC §19 A1/F1 跟智能体说话（iCloud BCChatMessage；Mac 桥接转交）
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验；W8 起没手动关过就默认开；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
+    /// P4.1：另一台设备先发现的日历删除 → 转交给智能体（只 Mac 有；iOS/测试为 nil）
+    private(set) var deletionRelay: CalendarDeletionRelay?
     let activity: ActivityRecording            // SPEC §19 W13：设备活动记录（实验，默认开；W14 哨兵读 activity.log）
     let nativeActions: NativeActionsViewModel
     let bridgeTasks: BridgeTaskViewModel       // BC 云端统一计时；与 Dots 共用同一记录（W5：开关开时改记在 iCloud）
@@ -89,7 +91,8 @@ final class AppContainer {
             local: NaivePlanningEngine())
         // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
-        self.calendarStore = EventKitCalendarStore()
+        let eventKitCalendar = EventKitCalendarStore()   // 读写合一：只在这里构造，写角色只交给下面的 CalendarSyncEngine
+        self.calendarStore = eventKitCalendar
         self.exporter = ICSExporter()
         self.comparer = OverlapTitleComparer()
         self.notificationDelegate = NotificationDelegate(router: router)
@@ -293,10 +296,9 @@ final class AppContainer {
         self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
-        self.projection = ProjectionService(planStore: planStore, calendarStore: calendarStore)
+        self.projection = CalendarSyncEngine(planStore: planStore, calendarStore: eventKitCalendar)
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
-        self.trash = RetainedTrashService(context: SharedModelContainer.shared.mainContext,
-                                          calendar: calendarStore, projection: projection)
+        self.trash = RetainedTrashService(context: SharedModelContainer.shared.mainContext, projection: projection)
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
                                           calendarStore: calendarStore, projection: projection)
         // P4 Q3：你在苹果日历里删了 BetterCalendar 的块 → 照办后收进待办区（可找回）
@@ -384,10 +386,14 @@ final class AppContainer {
             self.sentinel = sentinel
             sentinel.start()
             // P4 Q3：日历里删了块 → 已照办；写事件让智能体按上下文决定要不要问一句（不再弹四选窗）
-            reconcile.onUserDeleted = { [weak bridge] deletions in
+            // P4.1：iPhone 先发现的删除——回执随 iCloud 到 Mac，中继补发一次（按块 id 去重，Mac 自己先发现的不重发）
+            let relay = CalendarDeletionRelay(source: planStore)
+            self.deletionRelay = relay
+            reconcile.onUserDeleted = { [weak bridge, weak relay] deletions in
                 bridge?.emit(kind: "calendar_user_deleted",
                              summary: AgentCalendarEvents.deletionSummary(deletions),
                              payload: AgentCalendarEvents.deletionPayload(deletions))
+                relay?.markRelayed(deletions.map(\.block.id))
             }
             execution.onBlockFinished = { [weak bridge] title, seconds in
                 bridge?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
@@ -446,8 +452,15 @@ final class AppContainer {
         if !TestHost.isActive { logSync.start() }
         SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）
         reconcile.start()
-        DataSyncMonitor.shared.start { [weak longTasks, weak execution, weak aggregator, weak learning] in
+        DataSyncMonitor.shared.start { [weak longTasks, weak execution, weak aggregator, weak learning, weak deletionRelay = self.deletionRelay, weak agentBridge = self.agentBridge] in
             longTasks?.reload(); execution?.reloadImportedData()
+            // P4.1：另一台设备记下的日历删除 → 转交智能体（桥接没接通 / 事件关着就留着下次再试）
+            deletionRelay?.relay { ds in
+                guard let bridge = agentBridge, bridge.eventsEnabled(), bridge.connected else { return false }
+                bridge.emit(kind: "calendar_user_deleted", summary: AgentCalendarEvents.deletionSummary(ds),
+                            payload: AgentCalendarEvents.deletionPayload(ds))
+                return true
+            }
             if let learning { aggregator?.reconcile(samples: learning.allSamples()) }
         }
         DataMaintenance.shared.start()
@@ -475,7 +488,8 @@ final class AppContainer {
                         arrangeDay: arrangeDay, localStore: reviewStore,
                         longTasks: longTasks, planStore: planStore, looseDays: looseDays,
                         learning: learning,    // E5b/D11：计划基线=当日最初快照
-                        timeline: timeline)    // E5c：溢出软标展示+逐件覆写
+                        timeline: timeline,    // E5c：溢出软标展示+逐件覆写
+                        engine: projection)    // P4.1：补一笔画蓝经日历唯一写者
     }
 
     // MARK: 页面依赖包（反向依赖清零 2026-07-12：Features 不再见 AppContainer，按页注入所需具体依赖）

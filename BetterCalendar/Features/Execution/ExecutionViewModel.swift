@@ -2,7 +2,7 @@
 //  ExecutionViewModel.swift
 //  BetterCalendar
 //
-//  menu bar 单键导航的大脑（Feature 层 VM，不新增协议；建在 CalendarStore 上）。
+//  menu bar 单键导航的大脑（Feature 层 VM，不新增协议；读日历用只读角色 CalendarReading，写一律经 CalendarSyncEngine）。
 //  「记录 = 导航」：点 完成/下一件/换一件 顺手攒出蓝色「实际」日历——无感采集，替代手动回填。
 //  状态机：空档 ⇄ 进行中某块 ⇄ 休息（休息=暂停当前块，不结束；回来继续同一件）。
 //  实时性：进行中的块不落盘（避免半截事件）；**每块「完成/切走」时**把全量实际刷进蓝日历。
@@ -16,7 +16,7 @@ import WidgetKit
 
 @Observable
 final class ExecutionViewModel {
-    private let calendarStore: CalendarStore
+    private let calendarStore: CalendarReading   // 只读角色（P4.1）：蓝色写入一律经 CalendarSyncEngine
     private let reschedule: RescheduleService   // P4：橙色连续预览退役后执行层不再调它；注入保留到 E5f 算法半重审时定去留
     // 执行层：读计划 + 读/写蓝色实际（真相源，蓝对账 A2）；**不改计划结构**（title/time/固定 仍只由确认写入 & 对账回流）。
     private let planStore: PlanReading & ActualReading & ActualWriting
@@ -35,7 +35,7 @@ final class ExecutionViewModel {
     }
     private let persistsRunState: Bool                // 运行态快照开关（测试关：test host 与真 App 共享 UserDefaults，别互相污染）
     private let startedDays: StartedDayStore?         // 实时模式标记（0.23 A：首次开始一件事=进实时模式）；nil=不标
-    private let projection: ProjectionService?        // 进实时模式时重投影该日（绿淡出）；nil=不投
+    private let projection: CalendarSyncEngine?       // 日历唯一写者（P4.1）：画蓝 + 做完后重画今天的绿；nil=不碰日历（测试）
 
     /// 今日计划块（绿），按开始时间排序。
     private(set) var planned: [PlannedItem] = []
@@ -251,11 +251,11 @@ final class ExecutionViewModel {
         breakCount = snap.breakCount
     }
 
-    init(calendarStore: CalendarStore, reschedule: RescheduleService,
+    init(calendarStore: CalendarReading, reschedule: RescheduleService,
          planStore: PlanReading & ActualReading & ActualWriting, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
          persistsRunState: Bool = true,
-         startedDays: StartedDayStore? = nil, projection: ProjectionService? = nil,
+         startedDays: StartedDayStore? = nil, projection: CalendarSyncEngine? = nil,
          canonicalTasks: BridgeTaskViewModel? = nil) {
         self.calendarStore = calendarStore
         self.reschedule = reschedule
@@ -595,10 +595,8 @@ final class ExecutionViewModel {
         do { try planStore.upsertActuals([ActualBlock(id: id, title: a.title, start: a.start, end: now, state: .live)]) }
         catch { DevLog.shared.warn("执行", "延长正在做的实际记录失败：\(error.localizedDescription)") }
         let draft = CalendarEventDraft(title: a.title, start: a.start, end: now, kind: .actual, blockID: id)
-        do {
-            let existing = try await calendarStore.read(kind: .actual)
-            try await calendarStore.write(CalendarMerge.union(existing: existing, additions: [draft], kind: .actual))
-        } catch { DevLog.shared.warn("执行", "延长蓝色实际失败：\(error.localizedDescription)") }
+        do { try await projection?.recordActuals([draft]) }   // P4.1：画蓝经日历唯一写者（读回 ∪ 新增，语义不变）
+        catch { DevLog.shared.warn("执行", "延长蓝色实际失败：\(error.localizedDescription)") }
         await projection?.repaintToday(reason: "蓝色延长")
         exportFocusState(event: "tick")
     }
@@ -1206,34 +1204,35 @@ final class ExecutionViewModel {
         await flushActuals()
     }
 
-    /// 把 done 写进蓝色「实际」日历——**合并不覆盖**（工程债修复 2026-07-04）：
-    /// 先读日历已有实际、与 done 做 union 再写，别处产生的实际（复盘回填/另一台设备）不会被删。
+    /// 把 done 写进真相（PlanStore 实际）并画进蓝色「实际」日历——**合并不覆盖**（工程债修复 2026-07-04）：
+    /// 引擎先读日历已有实际、与 done 做 union 再写，别处产生的实际（复盘回填/另一台设备）不会被删。
+    /// P4.1（2026-10-19）：① 日历写入改经 CalendarSyncEngine（唯一写者）；② **先落真相再画日历**——
+    /// 旧顺序是日历写失败就连真相一起跳过（没日历权限 / EventKit 出错时「做成了什么」只留在内存，重启即丢）。
     private func flushActuals() async {
         // 盖章：做的是计划块 → 盖计划块的 id（同一 UUID：绿色让位、蓝带同章出现）；
         // 计划外 bonus → 盖记录自己的 id（新章）。
         // P4 Q4c：被动推断的（固定块到点）只记数据、不画蓝。
         guard !done.isEmpty else { return }
+        // 蓝对账 A2：实际落 PlanStore 真相源（日历成投影）；按 id 幂等，不堆重复。
+        do {
+            try planStore.upsertActuals(done.map {
+                ActualBlock(id: $0.plannedID ?? $0.id, title: $0.title, start: $0.start, end: $0.end,
+                            state: $0.isAuto ? .auto : .recorded)
+            })
+        } catch {
+            DevLog.shared.error("执行", "实际记录落库失败（这次做成的仍在列表里，下次记下时再试）：\(error.localizedDescription)")
+        }
         let drafts = done.filter { !$0.isAuto }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .actual,
                                blockID: $0.plannedID ?? $0.id)
         }
         do {
-            var merged: [CalendarEventDraft] = []
-            if !drafts.isEmpty {
-                let existing = (try? await calendarStore.read(kind: .actual)) ?? []
-                merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
-                try await calendarStore.write(merged)
-            }
-            // 蓝对账 A2：实际同时落 PlanStore 真相源（日历成投影）；按 id 幂等，不堆重复。
-            try? planStore.upsertActuals(done.map {
-                ActualBlock(id: $0.plannedID ?? $0.id, title: $0.title, start: $0.start, end: $0.end,
-                            state: $0.isAuto ? .auto : .recorded)
-            })
+            let merged = try await projection?.recordActuals(drafts, readFailureIsEmpty: true) ?? 0
             // P4 Q2：做完的只剩蓝 → 重画今天（这件的绿色让位）
             await projection?.repaintToday(reason: "记下实际")
             // 双向：App 内完成 → 回勾对应提醒事项完成（幂等；无对应提醒的 id 自动忽略）。
             await reminderStore.markCompleted(blockIDs: Set(done.compactMap(\.plannedID)))
-            DevLog.shared.info("执行", "实际已更新：日历合并 \(merged.count) · 真相源 upsert \(done.count)")
+            DevLog.shared.info("执行", "实际已更新：日历合并 \(merged) · 真相源 upsert \(done.count)")
         } catch {
             lastError = error.localizedDescription
             DevLog.shared.error("执行", "写入实际日历失败：\(error.localizedDescription)")

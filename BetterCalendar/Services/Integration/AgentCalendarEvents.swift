@@ -37,7 +37,9 @@ enum AgentCalendarEvents {
             "clues": [
                 "calendar": "BetterCalendar · 计划",
                 "detectedAt": iso.string(from: ds.first?.detectedAt ?? .now),
-                "detectedBy": ProposalDevice.label,
+                "detectedBy": ds.first?.detectedBy ?? ProposalDevice.label,
+                // P4.1：另一台设备（如 iPhone）先发现、经 iCloud 回执由 Mac 转交的，标出来
+                "relayed": ds.contains { $0.detectedBy != nil },
                 "actor": "unknown (system calendar does not report who edited; treated as Jason's own action)",
             ],
             "note": "已照办，不要加回去；只在上下文需要时问一句（比如今天不做了？要不要换个时间？）。",

@@ -1,9 +1,15 @@
 //
-//  ProjectionService.swift
+//  CalendarSyncEngine.swift
 //  BetterCalendar
 //
-//  单一真相源投影（重构 P2，2026-07-07 Jason 拍板）：**PlanStore = 计划唯一真相；Apple 日历 = 只读投影**。
-//  - 所有改计划的路径统一「先写 PlanStore → project(label:)」；除本服务外**不得**写绿色计划事件。
+//  日历同步引擎（P4.1 单一写者，2026-10-19；前身 ProjectionService，2026-07-07 单一真相源投影）：
+//  **PlanStore = 计划与实际的唯一真相；Apple 日历 = 画面**。BetterCalendar 自家日历（绿/蓝/退役的橙）的
+//  **全 App 唯一写者就是本引擎**——只有它拿得到写角色 `CalendarProjecting`（类型系统落实，见 CalendarStore.swift；
+//  架构守卫单测 `calendarWriteCapabilityStaysInEngine`）。其他模块只改 PlanStore，再请引擎刷新：
+//  - 绿色计划：project(label:) / repaintToday / projectUpcomingWindow（下面「投影」）；
+//  - 蓝色实际：recordActuals / restoreActual（下面「蓝色实际」；执行页、复盘补一笔、回收站恢复都走这里）；
+//  - 橙色预览日历退役清扫：retirePreviewCalendar；
+//  - 入站（你在日历里的改动 → 真相）：ReconcileService 是引擎的入站半边，只拿只读角色，所有重画回到本引擎。
 //  - P4（SPEC §19.13，2026-10-18）两色流水线：
 //    · 橙色预览日历退役（Q1）：不再写；带章的旧橙块一次性清扫（retirePreviewCalendar），日历本身不删，
 //      里面你的无章事件原样留下、在 App 里提示你挪走；
@@ -14,13 +20,18 @@
 //    （另一台设备刚改、本机的计划数据还在 CloudKit 路上）→ 原样保留、不拿旧真相去盖；
 //    作者宽限：别的设备刚写的块，本机先不替它新建事件（防两台各建一份）。
 //  - 日历里的手改由 ReconcileService 按章回流；对账判不清的块经 holding 原样保留（P4.0-4）。
+//  - 蓝色仍是「读回 ∪ 新增」合并写（CalendarMerge.union，只增改不删）：P4.1 这一步只把写入口收进引擎、行为不变；
+//    改成「蓝色纯由 PlanStore 投影」（会删掉真相里没有的蓝块）留到跨设备实际同步验证之后（见 SPEC §19.14）。
 //
 
 import Foundation
 import EventKit   // 仅查权限用（避免冷启动弹权限框），不在此直接读写事件
 
+/// 旧名（P4.1 前）：保留别名，免得同批并行线（HomeView / ApprovedPlanMover 等）合并冲突；新代码一律写 CalendarSyncEngine。
+typealias ProjectionService = CalendarSyncEngine
+
 @MainActor
-final class ProjectionService {
+final class CalendarSyncEngine {
     private let planStore: PlanReading   // 只读角色：投影只读真相、只写画面（这就是它可随时安全重跑的原因）
     private let actuals: ActualReading?
     private let calendarStore: CalendarStore
@@ -196,6 +207,38 @@ final class ProjectionService {
             DevLog.shared.warn("投影", "清扫旧橙块失败（下次启动再试）：\(error.localizedDescription)")
             return nil
         }
+    }
+
+    // MARK: - 蓝色实际（P4.1：执行页 / 复盘补一笔 / 回收站恢复 的日历写入收口到这里；语义与搬家前逐字等价）
+
+    /// 把这些实际块并进蓝色日历——**合并不覆盖**：先读日历已有实际（此刻前后 7 天）、与 drafts 做 union 再写，
+    /// 别处产生的实际（复盘补一笔 / 另一台设备）不会被删（CalendarMerge.union：同「标题＋起始分钟」= 同一件）。
+    /// drafts 为空 = 不碰日历。返回写入集大小（日志用）。失败抛出，由调用方照旧记日志 / 显示。
+    /// - readFailureIsEmpty：读日历失败时按「日历里还没有」继续写（执行页 flushActuals 原语义 `try?`）；
+    ///   false = 读失败直接抛（复盘补一笔 / 蓝色延长原语义）。
+    @discardableResult
+    func recordActuals(_ drafts: [CalendarEventDraft], readFailureIsEmpty: Bool = false) async throws -> Int {
+        guard !drafts.isEmpty else { return 0 }
+        let existing: [CalendarEventDraft]
+        if readFailureIsEmpty {
+            existing = (try? await calendarStore.read(kind: .actual)) ?? []
+        } else {
+            existing = try await calendarStore.read(kind: .actual)
+        }
+        let merged = CalendarMerge.union(existing: existing, additions: drafts, kind: .actual)
+        try await calendarStore.write(merged)
+        return merged.count
+    }
+
+    /// 回收站恢复一条实际记录：它所在逻辑日的蓝色 = 日历里该日别的蓝块 ＋ 这一条（按窗口对齐）。
+    /// 必须先成功才确认恢复（失败抛出，记录留在回收站可再试）。
+    func restoreActual(id: UUID, title: String, start: Date, end: Date) async throws {
+        let window = DayContext.logicalWindow(forLabel: DayContext.logicalStartOfDay(start))
+        var existing = try await calendarStore.read(kind: .actual).filter {
+            $0.start >= window.start && $0.start < window.end && $0.blockID != id
+        }
+        existing.append(CalendarEventDraft(title: title, start: start, end: end, kind: .actual, blockID: id))
+        try await calendarStore.apply(existing, kind: .actual, window: window)
     }
 
     // MARK: - 跟随时间线协调器（P4 Q2：绿色开工后照常在日历里，协调器改了真相就跟着重画今天）

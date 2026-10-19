@@ -23,7 +23,7 @@ struct SettingsView: View {
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
     /// P4 Q4：列出你的日历（「排布时当作已占用的日历」）。只读。
-    var calendarStore: CalendarStore? = nil
+    var calendarStore: CalendarReading? = nil
     @State private var userCalendars: [String] = []
     @State private var busyExcluded: Set<String> = Set(ExternalCalendarSettings.excludedTitles)
     @State private var apiKey: String = ""

@@ -10,7 +10,7 @@ import Testing
             configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
     }
     private func service(_ context: ModelContext, _ calendar: CalendarStore) -> RetainedTrashService {
-        RetainedTrashService(context: context, calendar: calendar,
+        RetainedTrashService(context: context,
             projection: ProjectionService(planStore: PlanStore(context: context), calendarStore: calendar))
     }
 
@@ -160,7 +160,7 @@ import Testing
         #expect(try ArchiveCodec.encoder().encode(legacy) == original)
         try RetainedDeletion.save([row], in: context, at: time.addingTimeInterval(-60 * 86_400))
         let retained = try DataArchiveStore.capture(context)
-        #expect(retained.formatVersion == 2)
+        #expect(retained.formatVersion == DataArchiveStore.currentVersion)   // P4.1：v3 起归档 P4 同步字段
         try DataArchiveStore.validateRestoration(retained)
         let restored = try container()
         try DataArchiveStore.restore(retained, into: restored.mainContext)

@@ -2150,7 +2150,7 @@ struct LogicTests {
                                     "ReconcileService.swift",
                                     // 0.35.0：投影对齐前查画面上的外来带章事件（多设备 pass-through），
                                     // 不是把日历当数据源——语义见 ProjectionService.project（P4.0 起还用于原样保留待核对的块）
-                                    "ProjectionService.swift"]
+                                    "CalendarSyncEngine.swift"]
         var offenders: [String] = []
         let files = FileManager.default.enumerator(at: appRoot, includingPropertiesForKeys: nil)!
         for case let url as URL in files where url.pathExtension == "swift" {

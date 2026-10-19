@@ -24,7 +24,7 @@ enum DraftSource: String {
 final class HomeViewModel {
     private let arrangeDay: ArrangeDayUseCase
     private let refiner: PlanRefining
-    private let calendarStore: CalendarStore   // 只读用（排程上下文 busy）；写计划一律走 projection
+    private let calendarStore: CalendarReading   // 只读角色（排程上下文 busy）；写日历一律走 projection（CalendarSyncEngine）
     private let reminderStore: ReminderStore
     private let exporter: ICSExporting
     private let planStore: PlanStore           // ⚠️ 全 App 唯一的写者（PlanWriting）：只有「确认写入」落库
@@ -80,7 +80,7 @@ final class HomeViewModel {
     private(set) var freshnessSource: FreshnessSource = .external
 
     init(arrangeDay: ArrangeDayUseCase, refiner: PlanRefining,
-         calendarStore: CalendarStore, reminderStore: ReminderStore, exporter: ICSExporting,
+         calendarStore: CalendarReading, reminderStore: ReminderStore, exporter: ICSExporting,
          planStore: PlanStore, projection: ProjectionService,
          notifier: NotificationScheduling,
          longTaskStore: LongTaskStore? = nil, draftStore: DraftSnapshotStore? = nil,

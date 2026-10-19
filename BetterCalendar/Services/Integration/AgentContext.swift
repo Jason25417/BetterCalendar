@@ -266,7 +266,7 @@ enum AgentBridgeContext {
     private let planStore: (any PlanReading)?
     private let actualStore: (any ActualReading)?
     private let longTasks: LongTaskStore?
-    private let calendarStore: (any CalendarStore)?
+    private let calendarStore: (any CalendarReading)?
     private let journalStore: JournalStore?
     /// W12：系统提醒事项（只读：你自己的列表）+ BetterCalendar 投影账本（你删掉 / 改过时间的）。
     private let reminderStore: (any ReminderStore)?
@@ -279,7 +279,7 @@ enum AgentBridgeContext {
     /// W13：设备活动摘要（组装点设置；nil = 不附）。
     var activitySummary: ((Date) async -> [String: Any]?)?
 
-    init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarStore)?,
+    init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarReading)?,
          journalStore: JournalStore?, reminderStore: (any ReminderStore)? = nil,
          reminderLedger: @escaping () throws -> ReminderProjectionLedger? = { try ReminderProjectionLedgerStore().load() },
          running: @escaping () -> AgentContextInput.Running,

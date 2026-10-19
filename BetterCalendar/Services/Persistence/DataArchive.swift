@@ -66,7 +66,7 @@ nonisolated struct SealedDataArchive: Codable, Sendable {
         sha256 = ArchiveCodec.digest(try ArchiveCodec.encoder().encode(archive))
     }
     func verified() throws -> DataArchive {
-        guard [1, 2].contains(archive.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本，原文件保持不变") }
+        guard DataArchiveStore.supportedVersions.contains(archive.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本，原文件保持不变") }
         guard ArchiveCodec.digest(try ArchiveCodec.encoder().encode(archive)) == sha256 else {
             throw DataArchiveError.invalid("档案校验失败：内容已改变或文件不完整")
         }
@@ -86,12 +86,17 @@ nonisolated enum DataArchiveError: LocalizedError {
 
     static let retainedEntities: Set<String> = ["PlanBlock", "LongTask", "LongTaskCheckpoint", "JournalEntry", "JournalPhoto"]
     static let retentionFields: Set<String> = ["deletedAt", "deletionID", "restoredDeletionID", "deletionContext"]
+    /// P4（SPEC §19.13，W9 加进 PlanBlock）的同步字段：档案版本 3 起归档。
+    /// 旧档案（1/2）没有它们 → 升级时按「当时的语义」补默认：没钉、版本 0（旧数据）、写者/来源未知、实际=记下的。
+    static let syncFields: Set<String> = ["pinnedUntil", "syncVersion", "syncWriter", "syncSource", "actualState"]
+    static let currentVersion = 3
+    nonisolated static let supportedVersions: Set<Int> = [1, 2, 3]
 
-    /// Explicit additive interchange migration. The sealed v1 file is left intact.
+    /// Explicit additive interchange migration. The sealed v1/v2 file is left intact.
     static func upgraded(_ source: DataArchive) throws -> DataArchive {
-        guard [1, 2].contains(source.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本") }
+        guard supportedVersions.contains(source.formatVersion) else { throw DataArchiveError.invalid("不支持的档案版本") }
         var archive = source
-        if source.formatVersion == 1 {
+        if archive.formatVersion == 1 {
             for i in archive.records.indices where retainedEntities.contains(archive.records[i].entity) {
                 guard retentionFields.isDisjoint(with: archive.records[i].values.keys) else {
                     throw DataArchiveError.invalid("版本1档案含有新版删除字段，保留原文件")
@@ -99,6 +104,19 @@ nonisolated enum DataArchiveError: LocalizedError {
                 for key in retentionFields { archive.records[i].values[key] = .null }
             }
             archive.formatVersion = 2
+        }
+        if archive.formatVersion == 2 {
+            for i in archive.records.indices where archive.records[i].entity == "PlanBlock" {
+                guard syncFields.isDisjoint(with: archive.records[i].values.keys) else {
+                    throw DataArchiveError.invalid("版本2档案含有新版同步字段，保留原文件")
+                }
+                archive.records[i].values["pinnedUntil"] = .null
+                archive.records[i].values["syncVersion"] = .number(0)
+                archive.records[i].values["syncWriter"] = .null
+                archive.records[i].values["syncSource"] = .null
+                archive.records[i].values["actualState"] = .null
+            }
+            archive.formatVersion = 3
         }
         return archive
     }
@@ -127,7 +145,13 @@ nonisolated enum DataArchiveError: LocalizedError {
                 "deadline": try ArchiveValue.wrap(row.deadline),
                 "labels": try ArchiveValue.wrap(row.labels),
                 "linkedTaskID": try ArchiveValue.wrap(row.linkedTaskID),
-                "completion": try ArchiveValue.wrap(row.completion)
+                "completion": try ArchiveValue.wrap(row.completion),
+                // P4 同步字段（v3）：图钉、版本、写者、来源、实际状态——漏了它们，恢复后图钉丢失、被动推断的「auto」变成「记下的」
+                "pinnedUntil": try ArchiveValue.wrap(row.pinnedUntil),
+                "syncVersion": try ArchiveValue.wrap(row.syncVersion),
+                "syncWriter": try ArchiveValue.wrap(row.syncWriter),
+                "syncSource": try ArchiveValue.wrap(row.syncSource),
+                "actualState": try ArchiveValue.wrap(row.actualState)
             ]))
         }
         for row in try context.fetch(FetchDescriptor<ExecutionSession>()) {
@@ -241,7 +265,7 @@ nonisolated enum DataArchiveError: LocalizedError {
                 records[i].values.merge(metadata) { _, new in new }
             }
         }
-        return DataArchive(formatVersion: 2, createdAt: now, sourceVersion: AppInfo.version,
+        return DataArchive(formatVersion: currentVersion, createdAt: now, sourceVersion: AppInfo.version,
                            records: records.sorted { $0.key < $1.key })
     }
 
@@ -261,7 +285,7 @@ nonisolated enum DataArchiveError: LocalizedError {
             for record in archive.records {
                 switch record.entity {
                 case "PlanBlock":
-                    try requireFields(record, ["id", "title", "start", "end", "isFixed", "isAnchor", "kind", "timingStyle", "priority", "deadline", "labels", "linkedTaskID", "completion"])
+                    try requireFields(record, Set(["id", "title", "start", "end", "isFixed", "isAnchor", "kind", "timingStyle", "priority", "deadline", "labels", "linkedTaskID", "completion"]).union(syncFields))
                     let row = PlanBlock(title: "", start: .distantPast, end: .distantPast)
                     row.id = try record.get("id")
                     row.title = try record.get("title")
@@ -276,6 +300,11 @@ nonisolated enum DataArchiveError: LocalizedError {
                     row.labels = try record.get("labels")
                     row.linkedTaskID = try record.get("linkedTaskID")
                     row.completion = try record.get("completion")
+                    row.pinnedUntil = try record.get("pinnedUntil")
+                    row.syncVersion = try record.get("syncVersion")
+                    row.syncWriter = try record.get("syncWriter")
+                    row.syncSource = try record.get("syncSource")
+                    row.actualState = try record.get("actualState")
                     context.insert(row)
                     restoredKeys.append((record, row))
                 case "ExecutionSession":
@@ -531,6 +560,11 @@ extension DataArchiveStore {
                 row.labels = try record.get("labels")
                 row.linkedTaskID = try record.get("linkedTaskID")
                 row.completion = try record.get("completion")
+                row.pinnedUntil = try record.get("pinnedUntil")
+                row.syncVersion = try record.get("syncVersion")
+                row.syncWriter = try record.get("syncWriter")
+                row.syncSource = try record.get("syncSource")
+                row.actualState = try record.get("actualState")
             }
             for row in try context.fetch(FetchDescriptor<ExecutionSession>()) {
                 guard let record = replacements["ExecutionSession:" + String(describing: row.persistentModelID)] else { continue }

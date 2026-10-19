@@ -19,12 +19,12 @@ nonisolated struct TrashItem: Identifiable {
 /// opaque row identity and deletion receipt, never a mutable database object.
 @MainActor final class RetainedTrashService: TrashManaging {
     private let context: ModelContext
-    private let calendar: CalendarStore
-    private let projection: ProjectionService
+    /// 日历唯一写者（P4.1）：恢复计划块 = 重投影那天；恢复实际 = 画回那条蓝色。回收站自己不碰日历。
+    private let projection: CalendarSyncEngine
     private var busy = false
 
-    init(context: ModelContext, calendar: CalendarStore, projection: ProjectionService) {
-        self.context = context; self.calendar = calendar; self.projection = projection
+    init(context: ModelContext, projection: CalendarSyncEngine) {
+        self.context = context; self.projection = projection
     }
 
     private func key(_ row: any PersistentModel) -> String {
@@ -78,12 +78,7 @@ nonisolated struct TrashItem: Identifiable {
                     priority: block.priority, deadline: block.deadline, linkedTaskID: block.linkedTaskID,
                     labels: block.labels))
             } else {
-                let window = DayContext.logicalWindow(forLabel: label)
-                var existing = try await calendar.read(kind: .actual).filter {
-                    $0.start >= window.start && $0.start < window.end && $0.blockID != block.id
-                }
-                existing.append(CalendarEventDraft(title: title, start: start, end: end, kind: .actual, blockID: block.id))
-                try await calendar.apply(existing, kind: .actual, window: window)
+                try await projection.restoreActual(id: block.id, title: title, start: start, end: end)
             }
             guard block.start == start, block.end == end, block.title == title else {
                 throw DataArchiveError.invalid("恢复时日程内容发生变化，请刷新后重试；原记录仍保留")

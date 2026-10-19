@@ -92,6 +92,8 @@ struct CalendarUserDeletion: Sendable {
     let collectedToTodo: Bool
     let trimmedLive: Bool
     let detectedAt: Date
+    /// 发现删除的设备（nil = 本机；中继转交另一台设备的回执时 = 那台设备的名字）。
+    var detectedBy: String? = nil
 }
 
 @MainActor
@@ -99,8 +101,9 @@ struct CalendarUserDeletion: Sendable {
 final class ReconcileService {
     private let planReader: PlanReading
     private let planWriter: PlanWriting      // 显式授权：对账是 confirm 之外的计划写者之一（权限表在案）
-    private let calendarStore: CalendarStore
-    private let projection: ProjectionService
+    /// 只读角色（P4.1）：对账是日历同步引擎的「入站半边」——只读日历、只改真相，所有重画回到引擎（唯一写者）。
+    private let calendarStore: CalendarReading
+    private let projection: CalendarSyncEngine
     /// 指纹所在的库（注入=测试不污染真实 UserDefaults）；须与 ProjectionService 同一个。
     private let defaults: UserDefaults
     private let now: () -> Date
@@ -113,8 +116,10 @@ final class ReconcileService {
 
     /// Q3：删掉的块收进待办区（组装点接 LongTaskStore.addTodo）。返回 true = 收进去了。
     var collectTodo: ((ScheduledBlock, Date) -> Bool)?
-    /// Q3：照办之后通知（组装点接智能体桥接 calendar_user_deleted）。
+    /// Q3：照办之后通知（组装点接智能体桥接 calendar_user_deleted；只有 Mac 接）。
     var onUserDeleted: (([CalendarUserDeletion]) -> Void)?
+    /// 写进删除回执的本机名（线索，给智能体看）。测试可改。
+    var deviceLabel: String = ProposalDevice.label
 
     /// 给你看的一句话（不是错误）：BetterCalendar 自家日历里有你的事件——建议挪走（P4 Q1：预览日历退役后尤其）。
     private(set) var calendarNotice: String?
@@ -131,8 +136,8 @@ final class ReconcileService {
     /// userInfo["source"] 标来源（PlanChangeSource）；时间线协调器据此区分外部变更与本机回声（B10）。
     static let planChangedExternally = Notification.Name("bc.planChangedExternally")
 
-    init(planReader: PlanReading, planWriter: PlanWriting, calendarStore: CalendarStore,
-         projection: ProjectionService,
+    init(planReader: PlanReading, planWriter: PlanWriting, calendarStore: CalendarReading,
+         projection: CalendarSyncEngine,
          defaults: UserDefaults = .standard, now: @escaping () -> Date = { .now },
          calendarAuthorized: @escaping () -> Bool = { EKEventStore.authorizationStatus(for: .event) == .fullAccess }) {
         self.planReader = planReader
@@ -335,6 +340,13 @@ final class ReconcileService {
                         catch { DevLog.shared.error("对账", "照日历移走「\(b.title)」失败：\(error.localizedDescription)"); continue }
                         let collected = collectTodo?(b, thisLabel) ?? false
                         if collectTodo != nil, !collected { DevLog.shared.warn("对账", "「\(b.title)」已从时间线移走，但没能收进待办区（可在回收站找回）") }
+                        // P4.1：回执写进被删的那一行（随 iCloud 同步）——iPhone 先发现时，Mac 据此把事件转交给智能体
+                        do {
+                            try planWriter.recordCalendarDeletion(id: d.id, receipt: CalendarDeletionReceipt(
+                                detectedAt: now(), detectedBy: deviceLabel, collectedToTodo: collected))
+                        } catch {
+                            DevLog.shared.warn("对账", "「\(b.title)」的删除回执没写上（另一台设备的智能体可能收不到这次删除）：\(error.localizedDescription)")
+                        }
                         deletions.append(.init(block: b, label: thisLabel, collectedToTodo: collected, trimmedLive: false, detectedAt: now()))
                         DevLog.shared.info("对账", "「\(b.title)」从日历移出，已从时间线移走" + (collected ? "、收进待办区" : ""))
                     }
