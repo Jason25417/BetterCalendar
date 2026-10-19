@@ -59,7 +59,7 @@ actor CloudKitSharedTimerStore: SharedTimerRecordStore {
     private var changeToken: CKServerChangeToken?
     private var zoneReady = false
 
-    init(containerIdentifier: String = "iCloud.com.jason.BetterCalendar") {
+    init(containerIdentifier: String = AppChannel.current.cloudKitContainerID) {
         db = CKContainer(identifier: containerIdentifier).privateCloudDatabase
     }
 

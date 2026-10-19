@@ -9,6 +9,7 @@ final class DataMaintenance {
     private(set) var message = "尚未导出或校验"
     private(set) var latestArchive: URL?
     @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var snapshotTimer: Timer?
     var bridgeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "development.dataBridge") }
         set { UserDefaults.standard.set(newValue, forKey: "development.dataBridge") }
@@ -19,7 +20,7 @@ final class DataMaintenance {
         #else
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         #endif
-        return base.appendingPathComponent("BetterCalendar-Data", isDirectory: true)
+        return base.appendingPathComponent(AppChannel.current.dataFolderName, isDirectory: true)   // W17：Dev 版单独目录（开发修改入口也不串）
     }
 
     func start() {
@@ -27,10 +28,62 @@ final class DataMaintenance {
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.processInbox() }
         }
+        #if os(macOS)
+        // W17 发版前快照：启动 2 分钟后查一次（先让 iCloud 导入跑一会儿），之后每小时查；到期才导出。
+        snapshotTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.autoSnapshotIfDue() }
+        }
+        Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.autoSnapshotIfDue() }
+        }
+        #endif
+    }
+
+    // MARK: W17 自动快照（发版前的数据保险）
+
+    /// 自动快照目录：<数据档案目录>/auto/。发版脚本 scripts/release-dual.py 在日用版发版前检查这里（或手动导出的
+    /// snapshot-*.json）有没有足够新的档案，没有就拒绝发版。只写本机，不上传任何地方。
+    var autoSnapshotDirectory: URL { directory.appendingPathComponent("auto", isDirectory: true) }
+    /// 多久导一次 / 留几份（只轮换本功能自己写的 auto-*.json；手动导出的档案从不动）。
+    static let autoSnapshotInterval: TimeInterval = 20 * 3600
+    static let autoSnapshotKeep = 14
+
+    /// Mac：最新一份自动快照超过 20 小时 → 导出一份完整档案（与「导出完整数据档案」同一份内容），再删掉第 15 份及更早的自动快照。
+    /// 失败（如有未保存编辑）→ DevLog 可见，下个小时再试。
+    func autoSnapshotIfDue(now: Date = .now) {
+        guard !TestHost.isActive else { return }
+        let folder = autoSnapshotDirectory
+        let existing = Self.autoSnapshots(in: folder)
+        if let newest = existing.first, now.timeIntervalSince(newest.date) < Self.autoSnapshotInterval { return }
+        do {
+            let url = try writeArchive(prefix: "auto", to: folder).url
+            DevLog.shared.info("数据档案", "已自动保存快照 \(url.lastPathComponent)（发版前保险，只存本机）")
+            for old in Self.autoSnapshots(in: folder).dropFirst(Self.autoSnapshotKeep) {
+                try? FileManager.default.removeItem(at: old.url)
+            }
+        } catch {
+            DevLog.shared.warn("数据档案", "自动快照没存成（下个小时再试）：\(error.localizedDescription)")
+        }
+    }
+
+    /// 目录里的自动快照，新的在前。
+    nonisolated static func autoSnapshots(in folder: URL) -> [(url: URL, date: Date)] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files.filter { $0.lastPathComponent.hasPrefix("auto-") && $0.pathExtension == "json" }
+            .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+            .sorted { $0.1 > $1.1 }
     }
 
     /// Explicit snapshots; existing archives are never rotated or overwritten automatically.
     @discardableResult func exportArchive(prefix: String = "snapshot") throws -> URL {
+        let (url, count) = try writeArchive(prefix: prefix, to: directory)
+        latestArchive = url
+        message = "已导出 \(count) 条数据库记录（含照片本体）；尚未做恢复校验"
+        return url
+    }
+
+    /// 写一份完整档案到 folder（不改界面状态；手动导出与自动快照共用）。
+    private func writeArchive(prefix: String, to folder: URL) throws -> (url: URL, count: Int) {
         let context = SharedModelContainer.shared.mainContext
         guard !context.hasChanges else { throw DataArchiveError.invalid("请先保存当前编辑，再导出") }
         var archive = try DataArchiveStore.capture(context)
@@ -67,13 +120,11 @@ final class DataMaintenance {
         let kv = NSUbiquitousKeyValueStore.default.dictionaryRepresentation
         archive.localFiles["icloud-kv.plist"] = try PropertyListSerialization.data(fromPropertyList: kv, format: .xml, options: 0)
         let data = try ArchiveCodec.encoder().encode(SealedDataArchive(archive))
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let url = directory.appendingPathComponent("\(prefix)-\(UUID().uuidString).json")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("\(prefix)-\(UUID().uuidString).json")
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        latestArchive = url
-        message = "已导出 \(archive.records.count) 条数据库记录（含照片本体）；尚未做恢复校验"
-        return url
+        return (url, archive.records.count)
     }
 
     func validate(_ url: URL) throws {

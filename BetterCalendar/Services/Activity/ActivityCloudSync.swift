@@ -55,7 +55,7 @@ actor CloudKitActivityStore: ActivityCloudTransport {
     private let db: CKDatabase
     private var zoneReady = false
 
-    init(containerIdentifier: String = "iCloud.com.jason.BetterCalendar") {
+    init(containerIdentifier: String = AppChannel.current.cloudKitContainerID) {
         db = CKContainer(identifier: containerIdentifier).privateCloudDatabase
     }
 

@@ -3,7 +3,7 @@
 //  BetterCalendar
 //
 //  真 Apple 日历后端（M2）：把计划写进专用「计划」日历（绿）、读回。
-//  专用日历名带 (Dev) 与「计划/实际」标识，可整本删、不污染你别的日历。
+//  专用日历名带「计划/实际」标识（名字见 AppChannel：日用版带历史后缀 (Dev)，Dev 版前缀 BetterCalendar Dev），可整本删、不污染你别的日历。
 //  需日历 full access（首次写会弹权限）。
 //
 
@@ -28,11 +28,15 @@ actor EventKitCalendarStore: CalendarStore {
     // new 出这个 store（如路由测试）就挂死 runner（本次「test runner hung before connection」根因）。
     // 改 lazy → init 零副作用，仅真正 read/write（各自先 ensureAccess）时才建；生产行为等价。
     private lazy var store = EKEventStore()
-    private let titles: [PlanCalendarKind: String] = [
-        .planned: "BetterCalendar · 计划 (Dev)",
-        .actual: "BetterCalendar · 实际 (Dev)",
-        .preview: "BetterCalendar · 预览 (Dev)",
-    ]
+    /// 本通道的三本自建日历（W17：名字由 AppChannel 决定；日用版仍是历史名「BetterCalendar · 计划 (Dev)」）。
+    private let titles: [PlanCalendarKind: String] = EventKitCalendarStore.calendarTitles(for: .current)
+    /// 同设备上另一个通道（日用版 ↔ Dev 版）的自建日历：读「你的日历」时整本跳过，两边互不当成对方的安排。
+    private let siblingTitles: Set<String> = AppChannel.current.siblingCalendarTitles(EventKitCalendarStore.calendarLabels.map(\.1))
+
+    nonisolated static let calendarLabels: [(PlanCalendarKind, String)] = [(.planned, "计划"), (.actual, "实际"), (.preview, "预览")]
+    nonisolated static func calendarTitles(for channel: AppChannel) -> [PlanCalendarKind: String] {
+        Dictionary(uniqueKeysWithValues: calendarLabels.map { ($0.0, channel.calendarTitle($0.1)) })
+    }
 
     func write(_ drafts: [CalendarEventDraft]) async throws {
         try await ensureAccess()
@@ -185,7 +189,7 @@ actor EventKitCalendarStore: CalendarStore {
         let cal0 = Calendar.current
         let lo = cal0.startOfDay(for: day)
         guard let hi = cal0.date(byAdding: .day, value: 1, to: lo) else { return [] }
-        let ours = Set(titles.values)
+        let ours = Set(titles.values).union(siblingTitles)
         let others = store.calendars(for: .event).filter { !ours.contains($0.title) }
         guard !others.isEmpty else { return [] }
         let pred = store.predicateForEvents(withStart: lo, end: hi, calendars: others)
@@ -200,7 +204,7 @@ actor EventKitCalendarStore: CalendarStore {
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else {
             throw CalendarError(message: "无日历 full access，读不到系统日历")
         }
-        let ours = Set(titles.values)
+        let ours = Set(titles.values).union(siblingTitles)
         let others = store.calendars(for: .event).filter { !ours.contains($0.title) }
         guard !others.isEmpty else { return [] }
         let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: others)
@@ -216,7 +220,7 @@ actor EventKitCalendarStore: CalendarStore {
             throw CalendarError(message: "无日历 full access，读不到你的日历")
         }
         let ours = Set(titles.values)
-        let all = store.calendars(for: .event)
+        let all = store.calendars(for: .event).filter { !siblingTitles.contains($0.title) }   // 另一个通道的整本跳过
         guard !all.isEmpty else { return [] }
         let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: all)
         return store.events(matching: pred).compactMap { ev -> SystemCalendarEvent? in
@@ -230,7 +234,7 @@ actor EventKitCalendarStore: CalendarStore {
 
     func userCalendarTitles() async -> [String] {
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
-        let ours = Set(titles.values)
+        let ours = Set(titles.values).union(siblingTitles)
         return Array(Set(store.calendars(for: .event).map(\.title).filter { !ours.contains($0) })).sorted()
     }
 

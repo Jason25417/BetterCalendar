@@ -23,7 +23,7 @@ enum AppIntentRequest: String, Sendable {
     /// 各进程的 UserDefaults.standard 互不相通——共享域才能把请求递给主 App。macOS 无控件，照旧 standard。
     nonisolated private static var store: UserDefaults {
         #if os(iOS)
-        UserDefaults(suiteName: "group.com.jason.BetterCalendar") ?? .standard
+        UserDefaults(suiteName: AppChannel.current.appGroupID) ?? .standard
         #else
         .standard
         #endif

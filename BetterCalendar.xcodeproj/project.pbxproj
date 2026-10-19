@@ -75,6 +75,7 @@
 		B5C0FFEE2FF4A5C7008A96E1 /* Exceptions for "BetterCalendar" folder in "BetterCalendarWidgetsExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				App/AppChannel.swift,
 				AppIntents/AppIntentRequest.swift,
 				Features/Theme/AppTheme.swift,
 				Services/Execution/ExecutionActivityAttributes.swift,
@@ -404,6 +405,39 @@
 			};
 			name = Debug;
 		};
+		BD17DE0000000000000000A1 /* Dev configuration for PBXNativeTarget "BetterCalendarWidgetsExtension" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = "BetterCalendarWidgets-Dev.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 187;
+				DEVELOPMENT_TEAM = D2KWHV599Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterCalendarWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterCalendarWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.69.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.dev.BetterCalendarWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Dev;
+		};
 		B5317F012FF4A5C7008A96E1 /* Release configuration for PBXNativeTarget "BetterCalendarWidgetsExtension" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -502,6 +536,71 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
+		};
+		BD17DE0000000000000000A2 /* Dev configuration for PBXProject "BetterCalendar" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = D2KWHV599Z;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG BC_DEV_CHANNEL $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Dev;
 		};
 		B5590CB02FF29323008C3840 /* Release configuration for PBXProject "BetterCalendar" */ = {
 			isa = XCBuildConfiguration;
@@ -607,6 +706,54 @@
 			};
 			name = Debug;
 		};
+		BD17DE0000000000000000A3 /* Dev configuration for PBXNativeTarget "BetterCalendar" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "BetterCalendar-iOS-Dev.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "BetterCalendar-iOS-Dev.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "BetterCalendar-Dev.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 187;
+				DEVELOPMENT_TEAM = D2KWHV599Z;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BetterCalendar/Info.plist;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "番茄钟开始/结束时，执行你自己创建的快捷指令来开关系统专注模式";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.69.1;
+				OTHER_LDFLAGS = (
+					"-weak_framework",
+					FoundationModels,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendar.dev;
+				PRODUCT_MODULE_NAME = BetterCalendar;
+				PRODUCT_NAME = "BetterCalendar Dev";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Dev;
+		};
 		B5590CB32FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendar" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -675,6 +822,27 @@
 			};
 			name = Debug;
 		};
+		BD17DE0000000000000000A4 /* Dev configuration for PBXNativeTarget "BetterCalendarTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 187;
+				DEVELOPMENT_TEAM = D2KWHV599Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.69.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BetterCalendar Dev.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BetterCalendar Dev";
+			};
+			name = Dev;
+		};
 		B5590CB62FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendarTests" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -715,6 +883,25 @@
 			};
 			name = Debug;
 		};
+		BD17DE0000000000000000A5 /* Dev configuration for PBXNativeTarget "BetterCalendarUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 187;
+				DEVELOPMENT_TEAM = D2KWHV599Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.69.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jason.BetterCalendarUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = BetterCalendar;
+			};
+			name = Dev;
+		};
 		B5590CB92FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendarUITests" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -742,6 +929,7 @@
 			buildConfigurations = (
 				B5317F002FF4A5C7008A96E1 /* Debug configuration for PBXNativeTarget "BetterCalendarWidgetsExtension" */,
 				B5317F012FF4A5C7008A96E1 /* Release configuration for PBXNativeTarget "BetterCalendarWidgetsExtension" */,
+				BD17DE0000000000000000A1 /* Dev configuration for PBXNativeTarget "BetterCalendarWidgetsExtension" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -750,6 +938,7 @@
 			buildConfigurations = (
 				B5590CAF2FF29323008C3840 /* Debug configuration for PBXProject "BetterCalendar" */,
 				B5590CB02FF29323008C3840 /* Release configuration for PBXProject "BetterCalendar" */,
+				BD17DE0000000000000000A2 /* Dev configuration for PBXProject "BetterCalendar" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -758,6 +947,7 @@
 			buildConfigurations = (
 				B5590CB22FF29323008C3840 /* Debug configuration for PBXNativeTarget "BetterCalendar" */,
 				B5590CB32FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendar" */,
+				BD17DE0000000000000000A3 /* Dev configuration for PBXNativeTarget "BetterCalendar" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -766,6 +956,7 @@
 			buildConfigurations = (
 				B5590CB52FF29323008C3840 /* Debug configuration for PBXNativeTarget "BetterCalendarTests" */,
 				B5590CB62FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendarTests" */,
+				BD17DE0000000000000000A4 /* Dev configuration for PBXNativeTarget "BetterCalendarTests" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -774,6 +965,7 @@
 			buildConfigurations = (
 				B5590CB82FF29323008C3840 /* Debug configuration for PBXNativeTarget "BetterCalendarUITests" */,
 				B5590CB92FF29323008C3840 /* Release configuration for PBXNativeTarget "BetterCalendarUITests" */,
+				BD17DE0000000000000000A5 /* Dev configuration for PBXNativeTarget "BetterCalendarUITests" */,
 			);
 			defaultConfigurationName = Release;
 		};

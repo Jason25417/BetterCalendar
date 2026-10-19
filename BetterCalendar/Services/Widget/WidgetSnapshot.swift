@@ -37,7 +37,7 @@ nonisolated struct WidgetSnapshot: Codable {
 }
 
 nonisolated enum WidgetSnapshotStore {
-    static let appGroup = "group.com.jason.BetterCalendar"
+    static let appGroup = AppChannel.current.appGroupID   // W17：Dev 版用自己的 App Group
 
     static var fileURL: URL? {
         FileManager.default

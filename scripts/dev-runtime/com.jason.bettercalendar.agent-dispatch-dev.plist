@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- W17 Dev 版智能体调度（模板，由 Jason 本人安装，见 setup-dev-runtime.sh 的输出）。
+     只盯 Dev 工作区 BetterCalendar_AgentRuntime-dev/bridge/events；与日用版 com.jason.bettercalendar.agent-dispatch 互不相干。 -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.jason.bettercalendar.agent-dispatch-dev</string>
+  <key>ProgramArguments</key><array><string>__NODE__</string><string>__DEV__/dispatch/dispatch.mjs</string></array>
+  <key>WatchPaths</key><array><string>__DEV__/bridge/events</string></array>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>__DEV__/dispatch/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>__DEV__/dispatch/launchd.err.log</string>
+</dict></plist>

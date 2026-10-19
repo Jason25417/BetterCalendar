@@ -43,7 +43,7 @@ import Observation
               let dict = info as? [String: Any],
               let entitlements = dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
               entitlements["com.apple.developer.icloud-container-environment"] as? String == "Development",
-              (entitlements["com.apple.developer.icloud-container-identifiers"] as? [String])?.contains("iCloud.com.jason.BetterCalendar") == true else {
+              (entitlements["com.apple.developer.icloud-container-identifiers"] as? [String])?.contains(AppChannel.current.cloudKitContainerID) == true else {
             throw DataArchiveError.invalid("拒绝播种：签名未证明是指定容器的 Development 环境")
         }
     }
@@ -53,7 +53,7 @@ import Observation
         do {
             try requireDevelopmentSignature()
             guard !TestHost.isActive else { throw DataArchiveError.invalid("测试宿主禁止云端写入") }
-            guard try await CKContainer(identifier: "iCloud.com.jason.BetterCalendar").accountStatus() == .available else {
+            guard try await CKContainer(identifier: AppChannel.current.cloudKitContainerID).accountStatus() == .available else {
                 throw DataArchiveError.invalid("iCloud 账号当前不可用")
             }
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -80,7 +80,7 @@ import Observation
             }
             let configuration = ModelConfiguration("DevelopmentSchemaSeeder", schema: DataArchiveStore.schema,
                 url: support.appendingPathComponent("schema.store"),
-                cloudKitDatabase: .private("iCloud.com.jason.BetterCalendar"))
+                cloudKitDatabase: .private(AppChannel.current.cloudKitContainerID))
             let cloud = try ModelContainer(for: DataArchiveStore.schema, configurations: configuration)
             container = cloud
             let created = try CloudKitSchemaSeeder.seedRetainedDeletion(in: cloud.mainContext)
@@ -98,7 +98,7 @@ import Observation
     private func writeReceipt(phase: String, createdTypes: [String]? = nil, exportEndedAt: Date? = nil, error: String? = nil) {
         guard let receiptURL else { return }
         var value: [String: Any] = ["schemaVersion": 1, "phase": phase, "environment": "Development",
-            "container": "iCloud.com.jason.BetterCalendar", "updatedAt": ISO8601DateFormatter().string(from: .now),
+            "container": AppChannel.current.cloudKitContainerID, "updatedAt": ISO8601DateFormatter().string(from: .now),
             "expectedTypes": 5, "expectedAddedFields": 20, "createdTypes": createdTypes ?? self.createdTypes,
             "normalUserStoreOpened": false, "productionChanged": false]
         if let exportEndedAt { value["exportEndedAt"] = ISO8601DateFormatter().string(from: exportEndedAt) }

@@ -82,7 +82,7 @@ enum FocusFollow {
     private static let recordID = CKRecord.ID(recordName: "focus-run-state")
     private static let subscriptionID = "focus-follow-sub"
     private static var db: CKDatabase {
-        CKContainer(identifier: "iCloud.com.jason.BetterCalendar").privateCloudDatabase
+        CKContainer(identifier: AppChannel.current.cloudKitContainerID).privateCloudDatabase
     }
 
     /// 本机身份（区分发起端/跟随端）。

@@ -455,6 +455,10 @@ nonisolated struct AgentBridgeIO: Sendable {
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
         panel.message = "选择 BetterCalendar 智能体工作区里的 bridge 文件夹"
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        // W17：日用版只连日用工作区、Dev 版只连 Dev 工作区（bridge/CHANNEL 标记），两套数据绝不混。
+        if let mismatch = AppChannel.current.bridgeMismatch(url) {
+            report("没有连接", AgentBridgeError.invalid(mismatch)); return
+        }
         do {
             defaults.set(try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil), forKey: Self.bookmarkKey)
             folderPath = url.path; lastError = nil
@@ -485,6 +489,12 @@ nonisolated struct AgentBridgeIO: Sendable {
         guard let url = resolveFolder() else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        // W17：已连的目录后来被标成别的通道（或连错）→ 不同步、醒目报错（同一原因只记一次日志，不每 20 秒刷屏）。
+        if let mismatch = AppChannel.current.bridgeMismatch(url) {
+            let text = "桥接目录通道不符，已暂停同步：\(mismatch)"
+            if lastError != text { lastError = text; DevLog.shared.error("智能体桥接", text) }
+            return
+        }
         await sync(io: AgentBridgeIO(root: url))
     }
 

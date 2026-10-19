@@ -85,7 +85,7 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         do { if FileManager.default.fileExists(atPath: location.path) { outbox = try JSONDecoder().decode(BridgeOutbox.self, from: Data(contentsOf: location)); try outbox.validate() }; pendingCount = outbox.observations.count }
         catch { queueHealthy = false; reportFailure("本地队列读取失败，已保留原文件；请检查后再启用") }
         lastUpload = UserDefaults.standard.object(forKey:"dotStateBridge.lastUpload") as? Date
-        let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:"com.jason.BetterCalendar.StateBridge", kSecAttrAccount as String:account, kSecReturnData as String:true]
+        let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword, kSecAttrService as String:AppChannel.current.stateBridgeKeychainService, kSecAttrAccount as String:account, kSecReturnData as String:true]
         var item: CFTypeRef?
         if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data {
             credentials = try? JSONDecoder().decode(BridgeCredentials.self, from:data)
@@ -99,7 +99,7 @@ private final class BridgeNoRedirect: NSObject, URLSessionTaskDelegate {
         let c = try JSONDecoder().decode(BridgeCredentials.self, from:Data(text.utf8))
         guard let url = URL(string:c.siteURL), url.scheme == "https", url.host?.hasSuffix(".chatgpt.site") == true, url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, url.path.isEmpty || url.path == "/", !c.deviceToken.isEmpty, !c.platformToken.isEmpty else { throw NSError(domain:"StateBridge",code:1,userInfo:[NSLocalizedDescriptionKey:"需要私有接入站点的 HTTPS 地址和设备凭据"]) }
         if let prior = credentials, prior.deviceId != c.deviceId, !outbox.observations.isEmpty { throw NSError(domain:"StateBridge",code:2,userInfo:[NSLocalizedDescriptionKey:"旧设备还有待上传记录，请先上传完再更换设备"]) }
-        let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:"com.jason.BetterCalendar.StateBridge",kSecAttrAccount as String:account]
+        let query: [String: Any] = [kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:AppChannel.current.stateBridgeKeychainService,kSecAttrAccount as String:account]
         let data = try JSONEncoder().encode(c)
         var result = SecItemUpdate(query as CFDictionary,[kSecValueData as String:data] as CFDictionary)
         if result == errSecItemNotFound { var add = query; add[kSecValueData as String] = data; add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly; result = SecItemAdd(add as CFDictionary,nil) }
