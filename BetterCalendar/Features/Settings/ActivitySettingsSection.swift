@@ -166,6 +166,12 @@ struct ActivityShortcutGuide: View {
                 Text("随便打开一个 App 再回来：设置 → 设备活动记录（实验）里「快捷指令：App 打开 / 关闭」应变成「正常」。几分钟内 Mac 上也会收到（Mac 每 2 分钟从 iCloud 拉一次）。")
                 Text("想暂停：设置里点「暂停 1 小时」或关掉开关，快捷指令照常运行但什么都不记。")
             }
+            Section("不想逐个选 App？在 Mac 上生成「自动化版」") {
+                Text("快捷指令文件本身能带「App 已打开 / 已关闭」触发器和 App 名单（格式从你自己的「打开游戏模式」自动化里解出来的）。在 Mac 上把 iPhone 的装机清单导出来、生成两个带触发器的快捷指令，AirDrop 到 iPhone 导入，就不用在选择器里一个个勾。")
+                Text("① iPhone 用线连 Mac，解锁、点「信任」。② Mac 终端：xcrun devicectl list devices 找到 iPhone 的 Identifier；xcrun devicectl device info apps --device <它> --include-all-apps --json-output ~/Desktop/apps.json。③ 在源码目录：python3 scripts/make-activity-shortcuts.py --apps ~/Desktop/apps.json --out ~/Desktop/BetterCalendar-自动化 --harvest-shortcuts-db。④ 把生成的两个 .shortcut AirDrop 到 iPhone → 添加。")
+                Text("⚠️ 这条路还没在 iPhone 上验证过：导入后请到「自动化」标签看有没有多出两条、触发器里的 App 是否齐全。没有的话，就用上面的两条自动化手建（只多花 1 分钟）。")
+                    .foregroundStyle(.orange)
+            }
             Section("导入不了时（手动拼）") {
                 Text("在快捷指令里新建：打开用「获取当前 App」+「记录 App 打开」（App 选「当前 App」）；关闭用「等待 2 秒」+「获取当前 App」+「记录 App 关闭」（现在前台的 App 选「当前 App」）。")
             }
