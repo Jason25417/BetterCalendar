@@ -28,7 +28,27 @@ final class JournalStore {
         allEntries().first { DayContext.isSameLogicalDay($0.date, day) }
     }
 
-    /// 取当天条目，没有就建一个并插入（「写下今天」用）。
+    /// W28b：当天条目；没有就给一个**未落库**的草稿（只打开日记页不再插入空条目——以前会让「写下 1 篇」虚报）。
+    /// 草稿在第一次有输入时由 commit(_:) 落库。
+    func todayEntryOrDraft(_ now: Date = .now) -> JournalEntry {
+        entry(forLogicalDay: now) ?? JournalEntry(date: now)
+    }
+
+    /// 是否已落库（false = todayEntryOrDraft 给的草稿，还没写任何东西）。
+    func isPersisted(_ entry: JournalEntry) -> Bool { entry.modelContext != nil }
+
+    /// 保存一条（草稿有输入才插入；已落库的照常保存）。保存失败记 DevLog（失败可见）。
+    func commit(_ entry: JournalEntry) {
+        if entry.modelContext == nil {
+            guard entry.hasAnyInput else { return }
+            // 另一台设备同一天刚写的一条可能稍后经 iCloud 到达：那时会有两条（可见、不丢字），不在这里猜着合并
+            context.insert(entry)
+        }
+        do { try context.save() }
+        catch { DevLog.shared.warn("日记", "保存失败：\(error.localizedDescription)") }
+    }
+
+    /// 取当天条目，没有就建一个并插入（导入 / 测试用；界面走 todayEntryOrDraft + commit，避免空条目落库）。
     @discardableResult
     func entryForToday(_ now: Date = .now) -> JournalEntry {
         if let e = entry(forLogicalDay: now) { return e }
@@ -52,7 +72,7 @@ final class JournalStore {
     /// 今天（逻辑日）是否已有记录（正文或心情）——收口卡用：记录过就不再邀请。**只读不创建**。
     func hasContentToday(_ now: Date = .now) -> Bool {
         guard let e = entry(forLogicalDay: now) else { return false }
-        return !e.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || e.mood != nil
+        return e.hasRealContent
     }
 
     /// 某时刻之后的条目（按日期倒序，排除回收站）。只读；读失败抛错——给智能体上下文用（SPEC §19 A2，需 Jason 允许才调用）。
