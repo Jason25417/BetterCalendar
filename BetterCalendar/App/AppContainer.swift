@@ -514,6 +514,9 @@ final class AppContainer {
             timeline.writeLease = lease
             // W22b：手改冷却跨设备（同一 KV 存储的另一个键）
             timeline.sharedEdits = SharedRecentEdits(store: ICloudKVWriteLeaseStore(key: SharedRecentEdits.key))
+            // W27：溢出「已结算」跨设备标记 + 被动完成（固定块到点 / 提醒打勾）也只由持有写权的设备记进真相
+            timeline.sharedSpillMarks = SharedSpillMarks(store: ICloudKVWriteLeaseStore(key: SharedSpillMarks.key))
+            execution.automaticWriteGate = { [weak lease] in lease?.mayWriteAutomatically() ?? true }
             TimelineWriteLease.sharedForDev = lease
         }
         // P4 Q4：你的日历事件作为「已占用」参与排布（只读；按设置挑日历，默认全部）。读失败 = 不看（记日志）

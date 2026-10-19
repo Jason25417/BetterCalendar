@@ -251,6 +251,41 @@ final class ExecutionViewModel {
         breakCount = snap.breakCount
     }
 
+    // MARK: W27 两台设备的被动推断（固定块到点 / 提醒事项里打的勾）
+
+    /// 自动写闸（组装点接时间线写权租约 W22：只有持有写权的设备把被动推断记进真相）。nil = 不分写权（单测 / 旧行为）。
+    /// 你在 BetterCalendar 里的动作（完成 / 结束计时 / 补记）不经过它。
+    var automaticWriteGate: (() -> Bool)?
+    /// 时钟（loadToday 的「现在」；单测注入固定时刻）。
+    var clock: () -> Date = { .now }
+    /// 固定块到点自动完成的开关（默认读设置；单测注入，不碰共享 UserDefaults）。
+    var autoCompleteFixed: () -> Bool = { MeetingSettings.autoCompleteFixedBlocks }
+    /// 本机推断出、但写权在另一台设备而**没记进真相**的被动完成：只显示（今天列表里算做成），
+    /// flushActuals 一律跳过它们——由持有写权的设备记一次，同步过来后按 id 自然接上（防两台各记一份）。
+    private(set) var withheldPassive: [ActualRecord] = []
+
+    /// 被动信号（M6b，纯函数）：过了结束时刻的固定块（按计划发生）+ 今天在提醒事项里打勾的块 → 推断为实际。
+    /// 已有实际（按 id；无章的按标题相似）/ 你清掉过完成（tombstone）的块不推断。
+    static func passiveActuals(planned: [PlannedItem], recorded: [ActualRecord], cleared: Set<UUID>,
+                               reminderChecked: Set<UUID>, now: Date,
+                               autoCompleteFixed: Bool) -> [ActualRecord] {
+        var out: [ActualRecord] = []
+        for item in planned where !recorded.contains(where: {
+            $0.plannedID == item.id
+                || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
+            // 蓝对账 B：用户已在日历删过这块的蓝色实际（对账时盖了 tombstone）→ 不再自动重推断（删了 stick）。
+            if cleared.contains(item.id) { continue }
+            let meetingHappened = item.isFixed && item.end < now && autoCompleteFixed
+            let reminderChecked = reminderChecked.contains(item.id)
+            if meetingHappened || reminderChecked {
+                // P4 Q4c：固定块到点 = 被动推断，只记数据不画蓝；提醒事项里打勾 = 你的动作，照常画蓝
+                out.append(ActualRecord(plannedID: item.id, title: item.title,
+                                        start: item.start, end: item.end, isAuto: !reminderChecked))
+            }
+        }
+        return out
+    }
+
     init(calendarStore: CalendarReading, reschedule: RescheduleService,
          planStore: PlanReading & ActualReading & ActualWriting, reminderStore: ReminderStore,
          liveActivity: ExecutionLiveActivity, sessionStore: ExecutionSessionStore? = nil,
@@ -369,6 +404,10 @@ final class ExecutionViewModel {
                 done = actuals.filter { !runningIDs.contains($0.id) }
                     .map { ActualRecord(plannedID: $0.id, title: $0.title, start: $0.start, end: $0.end,
                                         isAuto: $0.state == .auto) }
+                // W27：写权在另一台时本机只显示的被动完成——真相里还没有就继续显示（到了就按 id 接上）
+                let storedIDs = Set(actuals.map(\.id))
+                withheldPassive.removeAll { $0.plannedID.map(storedIDs.contains) ?? false }
+                done += withheldPassive
             }
         } catch { DataSyncMonitor.shared.report("执行列表重读失败：\(error.localizedDescription)") }
     }
@@ -376,8 +415,9 @@ final class ExecutionViewModel {
     func loadToday() async {
         restoreRunStateIfNeeded()   // 0.20：重启/清后台后，同逻辑日的计时原样接上
         do {
+            let now = clock()
             // 计划块从 PlanStore（带 isFixed/timingStyle），不从日历（日历丢元数据）
-            let label = DayContext.logicalStartOfDay(.now)
+            let label = DayContext.logicalStartOfDay(now)
             let p = try planStore.plannedBlocks(on: label)
             let a = try await calendarStore.read(kind: .actual)
             let stored = (try? planStore.actualBlocks(on: label)) ?? []   // 蓝对账 A2：实际真相源=PlanStore(.actual)
@@ -396,7 +436,7 @@ final class ExecutionViewModel {
                 .map { ActualRecord(plannedID: $0.id, title: $0.title,
                                     start: $0.start, end: $0.end, isAuto: $0.state == .auto) }
             let storedIDs = Set(stored.map(\.id))
-            for c in a where DayContext.isSameLogicalDay(c.start, .now) {
+            for c in a where DayContext.isSameLogicalDay(c.start, now) {
                 // 只并入**带章**、真相源还没有的实际（迁移+跨设备）。**无章事件与数据库无关 → 一律忽略**
                 // （Jason 2026-07-09：用户在日历首建的裸蓝块太罕见，不认领/不改/不删，假装不存在——凡关联库的都带 ID 章）。
                 guard let bid = c.blockID, !storedIDs.contains(bid) else { continue }
@@ -408,26 +448,24 @@ final class ExecutionViewModel {
             // 0.25.4 根治：提醒打勾**按 blockID 精确匹配**（不再按标题相似——同名任务被往日旧提醒误标完成的 bug）
             let completedIDs = await reminderStore.completedBlockIDs()
             // W12（SPEC §19.13 Q5）：顺带跟上你在提醒事项里的其它操作（改时间 / 删除 / 待办截止打勾）——只记账、不改回
-            _ = await reminderStore.followUserChanges(now: .now)
-            let now = Date.now
-            for item in planned where !merged.contains(where: {
-                $0.plannedID == item.id
-                    || ($0.plannedID == nil && TitleMatch.similarity($0.title, item.title) >= 0.6) }) {
-                // 蓝对账 B：用户已在日历删过这块的蓝色实际（对账时盖了 tombstone）→ 不再自动重推断（删了 stick）。
-                if clearedIDs.contains(item.id) { continue }
-                let meetingHappened = item.isFixed && item.end < now && MeetingSettings.autoCompleteFixedBlocks
-                let reminderChecked = completedIDs.contains(item.id)
-                if meetingHappened || reminderChecked {
-                    // P4 Q4c：固定块到点 = 被动推断，只记数据不画蓝；提醒事项里打勾 = 你的动作，照常画蓝
-                    merged.append(ActualRecord(plannedID: item.id, title: item.title,
-                                               start: item.start, end: item.end, isAuto: !reminderChecked))
-                }
-            }
+            _ = await reminderStore.followUserChanges(now: now)
+            let passive = Self.passiveActuals(planned: planned, recorded: merged, cleared: clearedIDs,
+                                              reminderChecked: completedIDs, now: now,
+                                              autoCompleteFixed: autoCompleteFixed())
+            merged += passive
 
             // 进行中的 active 不动；done 用合并后的为准
             if active == nil {
                 done = merged
-                if merged.count > collectedCount {
+                // W27：两台设备都会推断出同一件被动完成——只让持有写权的设备记进真相（另一台只显示）；
+                // 万一两台都记了（离线 / 交接瞬间），实际按 id 收成一条（PlanStore.actualBlocks），不会双计
+                let mayRecordPassive = passive.isEmpty || (automaticWriteGate?() ?? true)
+                withheldPassive = mayRecordPassive ? [] : passive
+                if !mayRecordPassive {
+                    DevLog.shared.info("执行", "被动完成 \(passive.count) 件只显示不记：写权在另一台设备，由它记一次（防两台各记一份）")
+                    SmokeLog.hit("写权租约", "被动完成只显示不记·\(passive.count)")
+                }
+                if !passive.isEmpty && mayRecordPassive {
                     DevLog.shared.info("执行", "被动信号并入实际 \(merged.count - collectedCount) 件")
                     await flushActuals()
                 }
@@ -1212,6 +1250,9 @@ final class ExecutionViewModel {
         // 盖章：做的是计划块 → 盖计划块的 id（同一 UUID：绿色让位、蓝带同章出现）；
         // 计划外 bonus → 盖记录自己的 id（新章）。
         // P4 Q4c：被动推断的（固定块到点）只记数据、不画蓝。
+        // W27：写权在另一台时只显示的被动完成不写（由持有写权的设备记一次）
+        let withheldIDs = Set(withheldPassive.compactMap(\.plannedID))
+        let done = self.done.filter { !($0.plannedID.map(withheldIDs.contains) ?? false) }
         guard !done.isEmpty else { return }
         // 蓝对账 A2：实际落 PlanStore 真相源（日历成投影）；按 id 幂等，不堆重复。
         do {
