@@ -2,7 +2,7 @@
 //  PhoneActivitySources.swift
 //  BetterCalendar
 //
-//  W13（iPhone，便宜的附加来源）：每次 App 回到前台时回填——
+//  W13（iPhone / iPad，便宜的附加来源）：每次 App 回到前台时回填——
 //    - 运动状态（CoreMotion 运动活动历史，系统保留约 7 天）：步行 / 跑步 / 骑行 / 乘车 / 静止，只记状态变化；
 //    - 健康：睡眠段（把「睡着」的各阶段样本合并成一段）、锻炼（HealthKit）。
 //  权限：Info.plist 早已有 NSMotionUsageDescription / NSHealthShareUsageDescription，iOS entitlement 早已有 HealthKit，
@@ -101,6 +101,12 @@ import HealthKit
     }
 
     private func backfillHealth(now: Date) async {
+        // W28：iPad 上的健康数据是 iPhone / 手表经 iCloud 同步来的副本——由 iPhone 回填；iPad 再记一遍会重复，
+        // 还会把「睡觉 / 锻炼」记成发生在 iPad 上（不真实）。所以 iPad 不回填、也不弹健康授权。
+        if ActivityDeviceKind.current == .ipad {
+            status.set(.health, .off("iPad 不回填：这里的健康数据是 iPhone 同步来的副本，由 iPhone 记，免得重复"))
+            return
+        }
         guard HKHealthStore.isHealthDataAvailable() else { status.set(.health, .off("这台设备没有健康数据")); return }
         let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
         let workoutType = HKObjectType.workoutType()

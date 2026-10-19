@@ -19,7 +19,7 @@ struct SharedTimerBackendPanel: View {
         VStack(alignment: .leading, spacing: 6) {
             Toggle("共享计时改记在 iCloud（开发期）", isOn: Binding(get: { control.requested },
                                                                   set: { control.setRequested($0) }))
-            Text("计时记在：\(control.active.label)。切换在下次启动 App 时生效；当前通道还有正在计时或待同步的操作时不会切换，旧记录保留在原处。两台设备需各自打开。")
+            Text("计时记在：\(control.active.label)。切换在下次启动 App 时生效；当前通道还有正在计时或待同步的操作时不会切换，旧记录保留在原处。每台设备需各自打开。")
                 .font(.caption).foregroundStyle(.secondary)
             if let notice = control.notice {
                 Text(notice).font(.caption).foregroundStyle(control.restartPending ? Color.secondary : Color.orange)

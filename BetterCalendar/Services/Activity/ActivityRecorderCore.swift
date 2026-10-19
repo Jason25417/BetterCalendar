@@ -58,7 +58,8 @@ nonisolated struct ActivityRecorderCore: Sendable {
     private func event(_ kind: ActivityEvent.Kind, at: Date, app: ActivityFrontApp? = nil, url: String? = nil,
                        title: String? = nil, window: String? = nil, detail: [String: String]? = nil) -> ActivityEvent {
         ActivityEvent(at: at, kind: kind, source: .live, deviceId: deviceId, platform: platform,
-                      appName: app?.name, bundleID: app?.bundleID, url: url, pageTitle: title, windowTitle: window, detail: detail)
+                      appName: app?.name, bundleID: app?.bundleID, url: url, pageTitle: title, windowTitle: window, detail: detail,
+                      deviceKind: platform == "macOS" ? ActivityDeviceKind.mac.rawValue : nil)
     }
 
     private mutating func resetContext() { front = nil; page = nil; windowTitle = nil }

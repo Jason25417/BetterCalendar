@@ -27,14 +27,14 @@ struct AgentSettingsView: View {
                 .pickerStyle(.inline)
                 .accessibilityIdentifier("bc.settings.agent.kind")
             } footer: {
-                Text("两者是同一个 BetterCalendar 智能体的不同实现：职责、预授权规则、共享记忆都一样。同一时刻只接通一个，没选的那个收不到任何事件、什么都不会做。选中的那个跑不了时会在对话里直说哪里坏了，不会自动换成另一个——要换由你在这里切。设置随 iCloud 同步，两台设备接的是同一个。")
+                Text("两者是同一个 BetterCalendar 智能体的不同实现：职责、预授权规则、共享记忆都一样。同一时刻只接通一个，没选的那个收不到任何事件、什么都不会做。选中的那个跑不了时会在对话里直说哪里坏了，不会自动换成另一个——要换由你在这里切。设置随 iCloud 同步，各台设备接的是同一个。")
             }
 
             if hub.active == .builtin {
                 builtinSections
             } else {
                 Section {
-                    Text("Claude Code 跑在 Mac 上（经桥接文件夹与专用会话）：Mac 要开着、醒着，iPhone 上说的话由 Mac 转交。")
+                    Text("Claude Code 跑在 Mac 上（经桥接文件夹与专用会话）：Mac 要开着、醒着，iPhone / iPad 上说的话由 Mac 转交。")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }

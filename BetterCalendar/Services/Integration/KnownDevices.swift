@@ -2,7 +2,8 @@
 //  KnownDevices.swift
 //  BetterCalendar
 //
-//  SPEC §19 W8（D3 提醒与闹钟）：智能体要把「8 点叫我」设到 iPhone 上，得先知道 iPhone 的设备 id。
+//  SPEC §19 W8（D3 提醒与闹钟）：智能体要把「8 点叫我」设到 iPhone（或 iPad）上，得先知道那台设备的 id。
+//  W28：名册不假设只有两台设备（Mac + iPhone）；每台带上设备类别（mac / iphone / ipad），旧条目没有类别 → 按平台推断。
 //  每台设备启动 / 回到前台时把自己的身份（id、名字、平台）登记进 iCloud KV（NSUbiquitousKeyValueStore，
 //  与设置同步同一个存储）；Mac 写 context.json 时附上 actionTargets.devices，智能体据此填 targetDevice。
 //  只是一份「最近见过的设备」名册（只读参考，不是权限）：两端并发登记可能丢一条，下次启动会再补上，最终一致。
@@ -16,8 +17,16 @@ nonisolated struct KnownDevice: Codable, Equatable, Sendable {
     /// "iOS" / "macOS"
     var platform: String
     var seenAt: Date
+    /// W28：设备类别（ActivityDeviceKind.rawValue）。可选 = 兼容旧版本登记的条目（没有这个键）。
+    var kind: String? = nil
 
-    var isPhone: Bool { platform == "iOS" }
+    /// iOS 设备（iPhone / iPad）：能设系统闹钟（AlarmKit，iOS / iPadOS 26 起）。
+    var isIOSDevice: Bool { platform == "iOS" }
+    /// 设备类别；旧条目没登记类别 → macOS = Mac，iOS = iPhone（W28 之前只有 iPhone）。
+    var deviceKind: ActivityDeviceKind {
+        if let kind, let k = ActivityDeviceKind(rawValue: kind) { return k }
+        return platform == "macOS" ? .mac : .iphone
+    }
 }
 
 nonisolated enum KnownDevicesCodec {
@@ -47,7 +56,8 @@ nonisolated enum KnownDevicesCodec {
         #else
         let platform = "macOS"
         #endif
-        return KnownDevice(id: ProposalDevice.id, label: ProposalDevice.label, platform: platform, seenAt: .now)
+        return KnownDevice(id: ProposalDevice.id, label: ProposalDevice.label, platform: platform, seenAt: .now,
+                           kind: ActivityDeviceKind.current.rawValue)
     }
 
     /// 登记本机（启动 / 回到前台时调用）。测试环境不碰 iCloud。

@@ -3,7 +3,7 @@
 //  BetterCalendar
 //
 //  W13：设置页「设备活动记录（实验）」——白话披露（收什么、存哪、谁读、留多久、红线）+ 总开关 + 暂停 1 小时 + 各来源状态。
-//  iPhone 另有快捷指令自动化的设置步骤页。界面只读 ActivityRecording（组装点注入的 .current），不直接调系统 API
+//  iPhone / iPad 另有快捷指令自动化的设置步骤页（W28：文案按本机类别写，Mac 上逐台显示 iOS 设备的状态）。界面只读 ActivityRecording（组装点注入的 .current），不直接调系统 API
 //  （辅助功能授权按钮经 MacActivityProbe 的静态入口）。
 //
 
@@ -26,7 +26,7 @@ struct ActivitySettingsSection: View {
                 } else if recording.enabled {
                     Button("暂停 1 小时") { recording.pauseOneHour() }
                 }
-                Text("实验期默认打开，数据尽量记全，之后按使用情况删减。暂停与开关会同步到你的另一台设备。")
+                Text("实验期默认打开，数据尽量记全，之后按使用情况删减。暂停与开关会同步到你的其他设备。")
                     .font(.caption).foregroundStyle(.secondary)
 
                 DisclosureGroup("收集什么、存在哪、谁会读（请看一遍）", isExpanded: $showDisclosure) {
@@ -37,6 +37,12 @@ struct ActivitySettingsSection: View {
                     ActivityStatusRow(source: source, state: recording.status.states[source])
                 }
                 #if os(macOS)
+                ActivityRemoteDeviceRows(list: recording.status.remoteDeviceList(labels: recording.deviceLabels()))
+                #else
+                Text("这台是 \(ActivityDeviceKind.current.label)：这里记下的每一条都标为「\(ActivityDeviceKind.current.label)」，Mac 上的智能体按设备分开看。")
+                    .font(.caption).foregroundStyle(.secondary)
+                #endif
+                #if os(macOS)
                 if !MacActivityProbe.accessibilityTrusted {
                     Button("允许读取其他 App 的窗口标题（打开辅助功能设置）") { MacActivityProbe.requestAccessibility() }
                 }
@@ -45,7 +51,7 @@ struct ActivitySettingsSection: View {
                 }
                 #endif
                 #if os(iOS)
-                NavigationLink("设置 iPhone 快捷指令自动化（记录 App 打开/关闭）") {
+                NavigationLink("设置 \(ActivityDeviceKind.current.label) 快捷指令自动化（记录 App 打开/关闭）") {
                     ActivityShortcutGuide().navigationTitle("快捷指令自动化")
                 }
                 #endif
@@ -63,6 +69,42 @@ struct ActivitySettingsSection: View {
         #endif
     }
 }
+
+#if os(macOS)
+/// W28（Mac）：经 iCloud 汇来的每台 iOS 设备一行——最近一条记录、最近一次快捷指令。旧记录没有类别时按 iPhone 计并写明。
+private struct ActivityRemoteDeviceRows: View {
+    let list: [(device: ActivityRemoteDevice, label: String)]
+
+    var body: some View {
+        if list.isEmpty {
+            Text("还没收到任何 iPhone / iPad 的记录（在那台设备上打开 BetterCalendar、建好快捷指令自动化后，几分钟内会出现）。")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            ForEach(list, id: \.device.deviceId) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Image(systemName: item.device.kind == .ipad ? "ipad" : "iphone").foregroundStyle(.secondary)
+                        Text(item.label == item.device.kind.label ? item.label : "\(item.device.kind.label)「\(item.label)」")
+                        Spacer()
+                        Text(item.device.lastShortcutAt.map { "快捷指令 · 最近 \(Self.when($0))" } ?? "还没有快捷指令记录")
+                            .font(.caption).foregroundStyle(item.device.lastShortcutAt == nil ? Color.secondary : Color.green)
+                    }
+                    if let at = item.device.lastEventAt {
+                        Text("最近一条记录 \(Self.when(at))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if item.device.kindInferred {
+                        Text(ActivityDeviceKind.legacyNote).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func when(_ d: Date) -> String {
+        Calendar.current.isDateInToday(d) ? d.formatted(date: .omitted, time: .shortened) : d.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+#endif
 
 private struct ActivityStatusRow: View {
     let source: ActivitySource
@@ -118,12 +160,12 @@ struct ActivityDisclosureText: View {
             Group {
                 Text("收集什么").bold()
                 Text("Mac：前台用的是哪个 App、什么时候切换；浏览器（Safari、Chrome、Edge、Arc、Brave、Vivaldi）当前页的网址和标题（网址里像密码、令牌的参数会被抹成 REDACTED）；其他 App 的窗口标题（要你在辅助功能里允许）；多久没碰键盘鼠标（超过 3 分钟记一次「离开」，不记你按了什么）；锁屏 / 解锁、睡眠 / 唤醒；插电 / 电池和网络类型的变化。")
-                Text("iPhone：快捷指令自动化报告的「App 打开 / 关闭」——是哪个 App（快捷指令里「获取当前 App」取的名字）、什么时候；拉下控制中心 / 通知这种「盖一层」单独记，不算关闭；还有当时的电量；运动状态（步行、乘车、静止等）；健康里的睡眠段和锻炼；网络类型的变化。")
+                Text("iPhone / iPad：快捷指令自动化报告的「App 打开 / 关闭」——是哪个 App（快捷指令里「获取当前 App」取的名字）、什么时候、在哪台设备上；拉下控制中心 / 通知这种「盖一层」单独记，不算关闭；还有当时的电量；运动状态（步行、乘车、静止等）；健康里的睡眠段和锻炼（只由 iPhone 记——iPad 上的健康数据是 iPhone 同步来的副本）；网络类型的变化。")
                 Text("智能体那边（不在 App 里）：它能直接读 Mac 上 Edge、Chrome、Arc、Safari 的浏览历史，以及 macOS「屏幕使用时间」数据库里过去几周的 App 使用时段（要给 node「完全磁盘访问权限」）。")
             }
             Group {
                 Text("存在哪").bold()
-                Text("每台设备本机 App 容器里按天存一个文件。Mac 每 20 秒把文件复制到智能体工作区的 bridge/activity/。iPhone 的记录经你自己的 iCloud 私有数据库（只有你的账户能读）传到 Mac，云端副本 14 天后删除。")
+                Text("每台设备本机 App 容器里按天存一个文件。Mac 每 20 秒把文件复制到智能体工作区的 bridge/activity/。iPhone / iPad 的记录经你自己的 iCloud 私有数据库（只有你的账户能读）传到 Mac，云端副本 14 天后删除。")
                 Text("谁会读").bold()
                 Text("BetterCalendar 智能体（Mac 上的 Claude Code 专用会话，读本机文件）。哨兵（W14，Mac）会把一份摘要（含 App 名、网站域名）发给云端的判断模型来决定要不要叫醒智能体：首选 TypeSafe Jev（经 OpenRouter），也可选 OpenAI Decisions，兜底时用 Claude（Anthropic API）——也就是说摘要会离开你的设备。")
                 Text("留多久").bold()
@@ -138,14 +180,20 @@ struct ActivityDisclosureText: View {
 }
 
 #if os(iOS)
-/// iPhone 快捷指令自动化的最少步骤。个人自动化不能分享、不能由 App 创建，只能手动建；
+/// iPhone / iPad 快捷指令自动化的最少步骤（文案按本机类别；自动化在每台设备上各建一次，不随 iCloud 同步）。个人自动化不能分享、不能由 App 创建，只能手动建；
 /// 但「快捷指令」可以导入：两个做好的快捷指令随 App 打包（BetterCalendar/ActivityShortcuts/，已签名），这里一键分享给「快捷指令」。
 struct ActivityShortcutGuide: View {
     private static let openName = "BetterCalendar 记录 App 打开"
     private static let closeName = "BetterCalendar 记录 App 关闭"
 
+    private var kind: String { ActivityDeviceKind.current.label }
+
     var body: some View {
         List {
+            Section("每台设备各建一次") {
+                Text("快捷指令本身会随 iCloud 同步到你的其他设备，但「自动化」不会——iPhone 和 iPad 要各自建一遍下面的两条自动化。另一台已经导入过这两个快捷指令的话，这里多半已经有了，可跳过第一步。动作会自己认出是哪台设备，记录里分开标 iPhone / iPad。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("第一步：导入两个做好的快捷指令") {
                 shareRow(Self.openName, note: "获取当前 App → 记录 App 打开")
                 shareRow(Self.closeName, note: "等 2 秒 → 获取当前 App → 记录 App 关闭")
@@ -167,9 +215,9 @@ struct ActivityShortcutGuide: View {
                 Text("想暂停：设置里点「暂停 1 小时」或关掉开关，快捷指令照常运行但什么都不记。")
             }
             Section("不想逐个选 App？在 Mac 上生成「自动化版」") {
-                Text("快捷指令文件本身能带「App 已打开 / 已关闭」触发器和 App 名单（格式从你自己的「打开游戏模式」自动化里解出来的）。在 Mac 上把 iPhone 的装机清单导出来、生成两个带触发器的快捷指令，AirDrop 到 iPhone 导入，就不用在选择器里一个个勾。")
-                Text("① iPhone 用线连 Mac，解锁、点「信任」。② Mac 终端：xcrun devicectl list devices 找到 iPhone 的 Identifier；xcrun devicectl device info apps --device <它> --include-all-apps --json-output ~/Desktop/apps.json。③ 在源码目录：python3 scripts/make-activity-shortcuts.py --apps ~/Desktop/apps.json --out ~/Desktop/BetterCalendar-自动化 --harvest-shortcuts-db。④ 把生成的两个 .shortcut AirDrop 到 iPhone → 添加。")
-                Text("⚠️ 这条路还没在 iPhone 上验证过：导入后请到「自动化」标签看有没有多出两条、触发器里的 App 是否齐全。没有的话，就用上面的两条自动化手建（只多花 1 分钟）。")
+                Text("快捷指令文件本身能带「App 已打开 / 已关闭」触发器和 App 名单（格式从你自己的「打开游戏模式」自动化里解出来的）。在 Mac 上把这台 \(kind) 的装机清单导出来、生成两个带触发器的快捷指令，AirDrop 过来导入，就不用在选择器里一个个勾。")
+                Text("① 这台 \(kind) 用线连 Mac，解锁、点「信任」。② Mac 终端：ideviceinstaller list --user --xml > ~/Desktop/apps-\(ActivityDeviceKind.current.rawValue).xml（brew install ideviceinstaller；连着多台时加 -u <设备 UDID>）。③ 在源码目录：python3 scripts/make-activity-shortcuts.py --device \(ActivityDeviceKind.current.rawValue) --apps ~/Desktop/apps-\(ActivityDeviceKind.current.rawValue).xml --out ~/Desktop/BetterCalendar-自动化-\(kind) --harvest-shortcuts-db。④ 把生成的两个 .shortcut AirDrop 到这台 \(kind) → 添加。")
+                Text("⚠️ 这条路还没在真机上验证过：导入后请到「自动化」标签看有没有多出两条、触发器里的 App 是否齐全。没有的话，就用上面的两条自动化手建（只多花 1 分钟）。")
                     .foregroundStyle(.orange)
             }
             Section("导入不了时（手动拼）") {

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import BetterCalendar
 
-/// SPEC §19.5 D3（W8）：智能体经审批设「提醒」和「闹钟」（iPhone 系统闹钟）。W12 起提醒走提醒事项（两台设备都响），没接时改用本机通知。
+/// SPEC §19.5 D3（W8）：智能体经审批设「提醒」和「闹钟」（iPhone 系统闹钟）。W12 起提醒走提醒事项（各台设备都响），没接时改用本机通知。
 /// 两台「设备」（mac / phone）共用内存中转；排程能力用内存假实现；时钟注入。
 @MainActor @Suite struct W8ReminderTests {
     final class Clock { var now = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 22))! }
@@ -75,7 +75,7 @@ import Testing
     @Test func alarmIsRefusedOnMacOrUnknownDeviceAndNeverDowngraded() async throws {
         let r = rig()
         #expect(await r.mac.submit(draft(.alarm(id: UUID(), title: "赶大巴", fireAt: tomorrow8, deviceId: "mac"))) == nil)
-        #expect(r.mac.lastError?.contains("闹钟只能设在 iPhone 上") == true)
+        #expect(r.mac.lastError?.contains("闹钟只能设在 iPhone / iPad 上") == true)
         #expect(await r.mac.submit(draft(.alarm(id: UUID(), title: "赶大巴", fireAt: tomorrow8, deviceId: "ipad-unknown"))) == nil)
         #expect(r.mac.lastError?.contains("不认识") == true)
         // 防御：即使绕过准备直接在 Mac 上执行，也拒绝且不改成普通通知
@@ -91,7 +91,7 @@ import Testing
         let r = rig()
         let p = try #require(await r.mac.submit(draft(.reminder(id: UUID(), title: "交表", body: "N1 的表", fireAt: tomorrow8, deviceId: "mac"))))
         #expect(p.targetDeviceId == nil)   // device 不再固定执行设备
-        #expect(p.notificationBody.contains("10月19日 08:00 会出现在提醒事项里，iPhone 和 Mac 都会响"))
+        #expect(p.notificationBody.contains("10月19日 08:00 会出现在提醒事项里，各台设备（iPhone / iPad / Mac）都会响"))
         await r.mac.decide(p.id, .approve); await r.mac.refresh()
         let done = try #require(r.mac.proposals.first { $0.id == p.id })
         #expect(done.state == .applied && r.macScheduler.reminders.count == 1 && r.phoneScheduler.calls.isEmpty)

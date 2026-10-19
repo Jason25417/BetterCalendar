@@ -65,7 +65,7 @@ import Testing
         let hub: AgentHub
     }
 
-    func env(rules: PreauthRuleStore? = nil, isPhone: Bool = false, now: Date = W20BuiltinAgentTests.sunday) -> Env {
+    func env(rules: PreauthRuleStore? = nil, deviceKind: ActivityDeviceKind = .mac, now: Date = W20BuiltinAgentTests.sunday) -> Env {
         let d = UserDefaults(suiteName: "bc-w20-" + UUID().uuidString)!
         let clock = Clock(now)
         let chat = AgentChatCenter(transport: InMemoryAgentChatTransport(), notifier: SilentAgentChatNotifier(), ledger: MemoryOperationLedger(),
@@ -92,7 +92,7 @@ import Testing
         runtime.autoStart = false; runtime.debounce = 0
         let selection = AgentSelection(defaults: d)
         let claude = FakeClaudeCode()
-        let hub = AgentHub(selection: selection, builtin: runtime, memory: memory, claudeCode: claude, isPhone: isPhone, defaults: d, now: { clock.now })
+        let hub = AgentHub(selection: selection, builtin: runtime, memory: memory, claudeCode: claude, deviceKind: deviceKind, defaults: d, now: { clock.now })
         hub.eventsEnabled = { true }
         return Env(defaults: d, clock: clock, chat: chat, center: center, messages: messages, memory: memory, tools: tools,
                    model: model, runtime: runtime, selection: selection, claude: claude, hub: hub)
@@ -510,7 +510,7 @@ import Testing
         #expect(e.runtime.queuedCount == 1)
 
         // iPhone：晚 3 分钟才发，且对话里已有今天的复盘就不发
-        let phone = env(isPhone: true, now: cal.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 21, minute: 31))!)
+        let phone = env(deviceKind: .iphone, now: cal.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 21, minute: 31))!)
         phone.selection.select(.builtin)
         phone.defaults.set(true, forKey: EveningReviewSettings.enabledKey)
         #expect(phone.hub.dueEveningReview() == nil)
@@ -518,6 +518,14 @@ import Testing
         #expect(phone.hub.dueEveningReview() != nil)
         _ = await phone.chat.receiveAgent(AgentChatReplyDraft(id: UUID(), text: "今天做成了…", kind: .eveningReview))
         #expect(phone.hub.dueEveningReview() == nil)
+
+        // W28 iPad：再晚 3 分钟（21:36 起），没开 Mac 时不和 iPhone 同时各发一条
+        let pad = env(deviceKind: .ipad, now: cal.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 21, minute: 34))!)
+        pad.selection.select(.builtin)
+        pad.defaults.set(true, forKey: EveningReviewSettings.enabledKey)
+        #expect(pad.hub.dueEveningReview() == nil)
+        pad.clock.now = cal.date(from: DateComponents(year: 2026, month: 10, day: 18, hour: 21, minute: 37))!
+        #expect(pad.hub.dueEveningReview() != nil)
     }
 
     @Test func sentinelChannelDeliversInProcessWhenBuiltin() async throws {

@@ -178,6 +178,9 @@ struct AgentChatView: View {
 
     // MARK: 气泡
 
+    /// W28：气泡与卡片的最大宽度（iPad / 大窗口里一行太长难读；iPhone 与常见 Mac 窗口比它窄，不受影响）。
+    static let readableWidth: CGFloat = 680
+
     @ViewBuilder private func bubble(_ m: AgentChatMessage) -> some View {
         if m.author == .user {
             VStack(alignment: .trailing, spacing: 4) {
@@ -190,6 +193,7 @@ struct AgentChatView: View {
                     .padding(10).background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                 userStatus(m)
             }
+            .frame(maxWidth: Self.readableWidth, alignment: .trailing)   // W28：iPad 宽屏不拉成一整行
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.leading, 40)
         } else {
@@ -208,6 +212,7 @@ struct AgentChatView: View {
                 }
                 .font(.caption2).foregroundStyle(.secondary)
             }
+            .frame(maxWidth: Self.readableWidth, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.trailing, 40)
         }

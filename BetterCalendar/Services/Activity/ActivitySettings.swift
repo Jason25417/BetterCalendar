@@ -5,7 +5,7 @@
 //  W13 设备活动记录（实验）的开关、暂停、来源状态，以及网址清洗。
 //  Jason 2026-10-18：实验期数据源尽量宽（含一定侵入），靠清楚的披露而不是少采；默认开；日后按使用日志删减。
 //  - 总开关默认开（ExperimentDefaults：键不存在 = 从没设过 = 开）；「暂停 1 小时」= 记一个恢复时刻。
-//    两者随 iCloud 设置同步（SettingsSync 白名单）：在 iPhone 上暂停，Mac 的实时记录也停——「我现在不想被记」通常是对人不是对设备。
+//    两者随 iCloud 设置同步（SettingsSync 白名单）：在 iPhone / iPad 上暂停，Mac 的实时记录也停——「我现在不想被记」通常是对人不是对设备。
 //  - 每个来源一行状态：在工作 / 没有权限 / 失败（带原因）/ 已关或暂停 / 等待中——失败必须可见（开发期约定）。
 //
 
@@ -54,7 +54,7 @@ nonisolated enum ActivitySource: String, CaseIterable, Sendable {
         case .network: "网络类型（Wi-Fi / 蜂窝 / 有线 / 断网）"
         case .storage: "本机日文件"
         case .bridgeMirror: "镜像到智能体桥接目录"
-        case .cloudImport: "从 iCloud 导入 iPhone 记录"
+        case .cloudImport: "从 iCloud 导入 iPhone / iPad 记录"
         case .cloudUpload: "上传到 iCloud（给 Mac 上的智能体）"
         case .shortcut: "快捷指令：App 打开 / 关闭"
         case .motion: "运动状态（步行 / 跑步 / 乘车 / 静止）"
@@ -80,9 +80,35 @@ nonisolated enum ActivitySourceState: Equatable, Sendable {
     }
 }
 
+/// W28：一台远端 iOS 设备（iPhone / iPad）经 iCloud 汇来的记录情况（Mac 上每台设备一行状态）。
+nonisolated struct ActivityRemoteDevice: Equatable, Sendable {
+    var deviceId: String
+    var kind: ActivityDeviceKind
+    /// 类别是按旧规则推断的（W28 之前的记录没有类别字段 → 按 iPhone 计）。
+    var kindInferred: Bool
+    var lastEventAt: Date?
+    var lastShortcutAt: Date?
+
+    /// 并进一批记录（只看这台设备的；时刻取最大；只要有一条带类别就以带类别的为准）。
+    static func merge(_ existing: [String: ActivityRemoteDevice], _ events: [ActivityEvent]) -> [String: ActivityRemoteDevice] {
+        var out = existing
+        for e in events where e.platform != "macOS" {
+            let r = e.resolvedDeviceKind
+            var d = out[e.deviceId] ?? ActivityRemoteDevice(deviceId: e.deviceId, kind: r.kind, kindInferred: r.inferred)
+            if d.kindInferred && !r.inferred { d.kind = r.kind; d.kindInferred = false }
+            d.lastEventAt = max(d.lastEventAt ?? e.at, e.at)
+            if e.source == .shortcut { d.lastShortcutAt = max(d.lastShortcutAt ?? e.at, e.at) }
+            out[e.deviceId] = d
+        }
+        return out
+    }
+}
+
 /// 各来源状态板（设置页、桥接 status.json 共用）。失败第一次出现与原因变化时写 DevLog（不刷屏）。
 @MainActor @Observable final class ActivityStatusBoard {
     private(set) var states: [ActivitySource: ActivitySourceState] = [:]
+    /// W28（Mac）：各台远端 iOS 设备（按设备 id）。
+    private(set) var remoteDevices: [String: ActivityRemoteDevice] = [:]
     @ObservationIgnored private var logged: [ActivitySource: String] = [:]
     /// 测试里关掉 DevLog（仍然记状态）。
     @ObservationIgnored var logsFailures = true
@@ -100,6 +126,28 @@ nonisolated enum ActivitySourceState: Equatable, Sendable {
     }
 
     func working(_ source: ActivitySource, at: Date?) { set(source, .working(lastAt: at)) }
+
+    func noteRemote(_ events: [ActivityEvent]) {
+        let merged = ActivityRemoteDevice.merge(remoteDevices, events)
+        if merged != remoteDevices { remoteDevices = merged }
+    }
+
+    /// 远端设备按类别、名字排序（设置页 / status.json）。labels = 设备名册 id → 名字。
+    func remoteDeviceList(labels: [String: String]) -> [(device: ActivityRemoteDevice, label: String)] {
+        remoteDevices.values.map { ($0, labels[$0.deviceId] ?? $0.kind.label) }
+            .sorted { ($0.device.kind.rawValue, $0.label, $0.device.deviceId) < ($1.device.kind.rawValue, $1.label, $1.device.deviceId) }
+    }
+
+    /// 给 status.json 的远端设备列表。
+    func remoteSnapshot(labels: [String: String]) -> [[String: Any]] {
+        remoteDeviceList(labels: labels).map { d, label in
+            var o: [String: Any] = ["deviceId": d.deviceId, "kind": d.kind.rawValue, "label": label]
+            if d.kindInferred { o["kindNote"] = ActivityDeviceKind.legacyNote }
+            if let at = d.lastEventAt { o["lastEventAt"] = ActivityCodec.iso(at) }
+            if let at = d.lastShortcutAt { o["lastShortcutAt"] = ActivityCodec.iso(at) }
+            return o
+        }
+    }
 
     /// 「在工作」但没有新的事件时刻：已经是 working 就保留原来的最近时刻，不抹掉。
     func keepWorking(_ source: ActivitySource) {

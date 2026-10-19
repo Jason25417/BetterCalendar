@@ -14,7 +14,7 @@ struct BridgeTaskPanel: View {
                 Spacer()
                 Button("刷新") { Task { await model.refresh() } }.disabled(model.busy)
             }
-            Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
+            Text(model.backend == .icloud ? "各台设备共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
                 .font(.caption).foregroundStyle(.secondary)
             if model.sessions.isEmpty { Text(model.isStale ? "等待读取计时状态" : "目前没有正在计时的事项").foregroundStyle(.secondary) }
             ForEach(model.sessions) { session in

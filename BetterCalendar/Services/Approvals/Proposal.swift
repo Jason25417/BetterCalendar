@@ -207,8 +207,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemDiscard: "事项：移入回收站"
         case let .timer(command, _, _, _, _): "计时：" + command.label
         case .moveBlock: "时间线：挪动计划块"
-        case .reminder: "提醒：提醒事项（iPhone 和 Mac 都会响）"
-        case .alarm: "闹钟：iPhone 系统闹钟"
+        case .reminder: "提醒：提醒事项（各台设备都会响）"
+        case .alarm: "闹钟：iPhone / iPad 系统闹钟"
         case .reminderCancel: "提醒：取消"
         case .alarmCancel: "闹钟：取消"
         case let .moveBlocks(moves, isUndo): isUndo ? "时间线：整组挪回" : "时间线：一起挪动 \(moves.count) 个计划块"

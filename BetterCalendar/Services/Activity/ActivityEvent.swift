@@ -14,7 +14,7 @@ nonisolated struct ActivityEvent: Codable, Equatable, Sendable, Identifiable {
     enum Kind: String, Codable, Sendable {
         /// Mac：前台 App 切换（appName/bundleID 有值）。
         case appActivated
-        /// iPhone：快捷指令自动化报告的 App 打开 / 关闭。
+        /// iPhone / iPad：快捷指令自动化报告的 App 打开 / 关闭。
         case appOpened, appClosed
         /// 浏览器当前页（url/pageTitle 有值）；回填的历史记录也用它，source 标 history。
         case browserPage
@@ -37,7 +37,7 @@ nonisolated struct ActivityEvent: Codable, Equatable, Sendable, Identifiable {
     var at: Date
     var kind: Kind
     var source: Source = .live
-    /// 设备 id（ProposalDevice.id）与平台（"macOS" / "iOS"）。
+    /// 设备 id（ProposalDevice.id）与平台（"macOS" / "iOS"；iPad 也是 "iOS"，分 iPhone / iPad 看 deviceKind）。
     var deviceId: String
     var platform: String
     var appName: String? = nil
@@ -46,6 +46,48 @@ nonisolated struct ActivityEvent: Codable, Equatable, Sendable, Identifiable {
     var pageTitle: String? = nil
     var windowTitle: String? = nil
     var detail: [String: String]? = nil
+    /// W28：设备类别（ActivityDeviceKind.rawValue：mac / iphone / ipad）。可选字段 = 向后兼容：
+    /// 旧记录（W28 之前）没有它；JSON 里缺省就不写，老版本解码时忽略多出的键。读的时候一律走 resolvedDeviceKind。
+    var deviceKind: String? = nil
+
+    /// 设备类别：有记录就用记录的；没有（W28 之前的旧记录）→ macOS = Mac，iOS = iPhone（那时只有 iPhone 一台 iOS 设备），inferred = true。
+    var resolvedDeviceKind: (kind: ActivityDeviceKind, inferred: Bool) {
+        if let raw = deviceKind, let k = ActivityDeviceKind(rawValue: raw) { return (k, false) }
+        return (platform == "macOS" ? .mac : .iphone, platform != "macOS")
+    }
+}
+
+/// W28：设备类别（iPad 加入后，「iOS」不再等于 iPhone）。
+nonisolated enum ActivityDeviceKind: String, Codable, Sendable, CaseIterable {
+    case mac, iphone, ipad
+
+    var label: String {
+        switch self { case .mac: "Mac"; case .iphone: "iPhone"; case .ipad: "iPad" }
+    }
+
+    /// 旧记录（没有 deviceKind）按 iPhone 计的说明——摘要 / 状态行里如实写出来。
+    static let legacyNote = "W28 之前的 iOS 记录没有设备类别字段，按 iPhone 计（那时只有 iPhone 一台 iOS 设备）"
+
+    /// 型号标识 → 类别（纯函数，可单测）：iPad* = iPad，其余 iOS 设备 = iPhone。模拟器的 hw.machine 是 arm64，
+    /// 真实型号在环境变量 SIMULATOR_MODEL_IDENTIFIER 里。
+    static func fromModelIdentifier(_ machine: String, simulatorModel: String? = nil) -> ActivityDeviceKind {
+        let model = (simulatorModel?.isEmpty == false ? simulatorModel! : machine)
+        return model.hasPrefix("iPad") ? .ipad : .iphone
+    }
+
+    /// 本机类别（进程内算一次；不碰主线程 API，快捷指令后台进程里也能用）。
+    static let current: ActivityDeviceKind = {
+        #if os(macOS)
+        return .mac
+        #else
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var buf = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.machine", &buf, &size, nil, 0)
+        let machine = String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        return fromModelIdentifier(machine, simulatorModel: ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"])
+        #endif
+    }()
 }
 
 /// 活动记录存储：只追加；按时间窗读。实现由 W13 提供（Mac 本地按日文件），测试用内存版。

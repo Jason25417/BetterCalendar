@@ -2,13 +2,15 @@
 //  RecordAppEventIntents.swift
 //  BetterCalendar
 //
-//  W13：给 iPhone「快捷指令 → 自动化 → App 已打开 / 已关闭」用的两个动作（后台运行，不打开 BetterCalendar）。
+//  W13：给 iPhone / iPad「快捷指令 → 自动化 → App 已打开 / 已关闭」用的两个动作（后台运行，不打开 BetterCalendar）。
+//  W28：同一对动作在 iPad 上照样可用（App Intents 不分 iPhone / iPad）；设备类别由 ActivityPhoneSink 按本机型号盖章，
+//  快捷指令不用传。⚠️ 动作的 title / description 里不写任何平台名（2026-10 曾因 description 含「mac」被 App Store 拒：ITMS-90626）。
 //  做法来自 Jason 自己的快捷指令「打开/关闭游戏模式 v10.1」（原来用 Data Jar 记状态，现在搬进 BetterCalendar）：
 //    - 「记录 App 打开」：自动化选「全部 App」，快捷指令先「获取当前 App」，把它传进 App 参数 → 记打开，并记住这是哪个 App。
 //    - 「记录 App 关闭」：快捷指令先等 2 秒、再「获取当前 App」，把它传进「现在前台的 App」→ 与记住的比较：
 //      相同 = 只是控制中心 / 通知盖了一层（记 overlay，不算关闭）；空 = 回主屏幕（真关闭）；别的 App = 切换（记上一个关闭）。
 //    判断逻辑见 Services/Activity/PhoneAppSession.swift。
-//  做好的两个快捷指令（可导入）在仓库 BetterCalendar/ActivityShortcuts/（随 App 打包，iPhone 设置引导里一键分享导入），自动化里直接「运行快捷指令」它们即可。
+//  做好的两个快捷指令（可导入）在仓库 BetterCalendar/ActivityShortcuts/（随 App 打包，iPhone / iPad 设置引导里一键分享导入），自动化里直接「运行快捷指令」它们即可。
 //  注册成 App Shortcut：快捷指令 App 里零配置就能找到这两个动作。
 //  ⚠️ 快捷指令文件按类型名引用动作（com.jason.BetterCalendar.RecordAppOpenedIntent / RecordAppClosedIntent，参数 appName）：
 //     改类型名或参数名会让已导入的快捷指令失效，要同步重新生成 BetterCalendar/ActivityShortcuts/（scripts/make-activity-shortcuts.py）。

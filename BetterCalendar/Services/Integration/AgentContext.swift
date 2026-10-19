@@ -481,10 +481,11 @@ extension AgentBridgeContext {
              "zone": t.poolZone.rawValue, "status": t.status.rawValue, "hasNote": !t.note.isEmpty]
         }
         var targets: [String: Any] = ["items": items, "deviceId": ProposalDevice.id]
-        // W8 D3：最近见过的设备（提醒/闹钟的 targetDevice 从这里取；闹钟只能设在 platform=iOS 的设备上）。
+        // W8 D3：最近见过的设备（提醒/闹钟的 targetDevice 从这里取；闹钟只能设在 platform=iOS 的设备上——iPhone 或 iPad，kind 区分；kindInferred=true = 旧版本登记、没写类别，按 iPhone 计）。
         let iso = ISO8601DateFormatter()
         targets["devices"] = KnownDevices.all().map { d -> [String: Any] in
-            ["id": d.id, "label": d.label, "platform": d.platform, "lastSeenAt": iso.string(from: d.seenAt), "isThisDevice": d.id == ProposalDevice.id]
+            ["id": d.id, "label": d.label, "platform": d.platform, "kind": d.deviceKind.rawValue, "kindInferred": d.kind == nil,
+             "lastSeenAt": iso.string(from: d.seenAt), "isThisDevice": d.id == ProposalDevice.id]
         }
         targets["timer"] = timer.map { t -> [String: Any] in
             ["phase": t.phase.rawValue, "title": t.title ?? NSNull(), "blockId": t.blockId?.uuidString ?? NSNull(), "revision": t.revision]

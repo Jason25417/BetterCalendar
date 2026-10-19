@@ -439,10 +439,10 @@ nonisolated struct AgentBridgeIO: Sendable {
             return .reminder(id: proposalId, title: try required(string("title", max: 150), "title"), body: try string("body", max: 500),
                              fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         case "alarm":
-            // W8 D3：iPhone 系统闹钟（会响铃）。必须指定 iPhone：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
+            // W8 D3：iOS 系统闹钟（会响铃）。必须指定一台 iPhone / iPad（W28）：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
             let device = try string("device", max: 80) ?? targetDevice
             if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("alarm.device 与 targetDevice 不一致") }
-            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定 iPhone：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
+            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定一台 iPhone / iPad：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
             return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
                           fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         case "blockCreate":
