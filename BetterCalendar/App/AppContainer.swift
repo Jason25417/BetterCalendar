@@ -180,10 +180,10 @@ final class AppContainer {
             self.alertPush = nil
             self.agentMessages = AgentMessageCenter(transport: InMemoryAgentMessageTransport(), notifier: SilentAgentMessageNotifier(),
                                                     ledger: MemoryOperationLedger(), deviceId: "test-host",
-                                                    defaults: UserDefaults(suiteName: "bc-test-attention")!)
+                                                    defaults: .standard)   // W25：测试宿主里 .standard = 本次运行的一次性 suite
             self.agentChat = AgentChatCenter(transport: InMemoryAgentChatTransport(), notifier: SilentAgentChatNotifier(),
                                              ledger: MemoryOperationLedger(), deviceId: "test-host", deviceLabel: "测试",
-                                             defaults: UserDefaults(suiteName: "bc-test-chat")!)
+                                             defaults: .standard)
             self.proposals = ProposalCenter(transport: InMemoryProposalTransport(), executor: ExperimentOnlyExecutor(),
                                             notifier: SilentProposalNotifier(), ledger: MemoryOperationLedger(),
                                             deviceId: "test-host", deviceLabel: "测试")   // 测试 host：一律先问你（不接规则）

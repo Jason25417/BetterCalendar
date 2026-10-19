@@ -9,7 +9,17 @@ import SwiftUI
 import SwiftData
 
 #if !(BC_SCHEMA_SEEDER && DEBUG && os(macOS))
+/// 真正的入口（W25）：先在测试宿主里换掉全局状态入口（UserDefaults / iCloud KV / 用户目录 / 通知中心），
+/// 再交给 SwiftUI。必须早于 BetterCalendarApp 的属性初始化（@State container / @AppStorage 在 init 体之前就跑）。
+/// 生产里 installIfTestHost() 第一行就返回。
 @main
+enum BetterCalendarMain {
+    static func main() {
+        TestHostIsolation.installIfTestHost()
+        BetterCalendarApp.main()
+    }
+}
+
 struct BetterCalendarApp: App {
     @State private var container = AppContainer()
     @Environment(\.scenePhase) private var scenePhase

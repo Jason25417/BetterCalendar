@@ -39,7 +39,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     }
 
     func writeContext(_ object: [String: Any]) throws {
-        try writeAtomic(JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), to: "context.json")
+        try writeAtomic(SafeJSON.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]), to: "context.json")
     }
 
     func pendingProposalFiles() throws -> [URL] {
@@ -69,7 +69,7 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     func writeMessageResult(_ m: AgentMessage) throws {
         let object = Self.messageResultObject(m)
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        let data = try SafeJSON.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         let relative = "results/messages/\(m.id.uuidString).json"
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
     }
@@ -82,7 +82,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         let eventId = "\(kind)-\(id.prefix(8))"
         let object: [String: Any] = ["schemaVersion": 1, "id": eventId, "at": ISO8601DateFormatter().string(from: now),
                                      "kind": kind, "summary": summary, "payload": payload]
-        try writeAtomic(JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+        try writeAtomic(SafeJSON.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
                         to: "events/\(stamp)-\(kind)-\(id.prefix(8)).json")
         return eventId
     }
@@ -137,7 +137,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     /// W10：kind/changes = 你选中（或默认主）方案的；另附全部方案、你回的一句话（state = replied）、越级理由、代你决定的规则。
     func writeResult(_ p: Proposal, at now: Date) throws {
         let object = Self.resultObject(p, at: now)
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        let data = try SafeJSON.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         let relative = "results/\(p.id.uuidString).json"
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
     }

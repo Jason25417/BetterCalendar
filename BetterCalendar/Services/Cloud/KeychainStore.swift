@@ -8,12 +8,17 @@
 import Foundation
 import Security
 
-enum KeychainStore {
+nonisolated enum KeychainStore {   // W25：SecItem 线程安全；去掉隐式主 actor（原先后台闭包调用处一直报隔离警告）
     private static let service = AppChannel.current.keychainService   // W17：Dev 版用自己的服务名，不碰日用版的 key
     /// 默认账户 = Anthropic（向后兼容旧调用）。硅基流动传 LLMProvider.siliconflow.keychainAccount。
     static let defaultAccount = "anthropic-api-key"
+    /// W25：测试宿主里的钥匙串 = 本进程内存（测试宿主与日用版同 bundle、同服务名；条目还会经 iCloud 钥匙串同步到 iPhone）。
+    /// 绝不读到 Jason 的真 key（也就不会让单测真调付费 API），也绝不写 / 删他的条目。只按 TestHost 判断。
+    private static let testHostLock = NSLock()
+    nonisolated(unsafe) private static var testHostMemory: [String: String] = [:]
 
     static func saveAPIKey(_ key: String, account: String = defaultAccount) {
+        if TestHost.isActive { testHostLock.withLock { testHostMemory[account] = key }; return }
         deleteAPIKey(account: account)   // 清旧条目（含早期未开同步的本地条目）
         let add: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -28,6 +33,7 @@ enum KeychainStore {
     }
 
     static func loadAPIKey(account: String = defaultAccount) -> String? {
+        if TestHost.isActive { return testHostLock.withLock { testHostMemory[account] }.flatMap { $0.isEmpty ? nil : $0 } }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -46,6 +52,7 @@ enum KeychainStore {
     }
 
     static func deleteAPIKey(account: String = defaultAccount) {
+        if TestHost.isActive { _ = testHostLock.withLock { testHostMemory.removeValue(forKey: account) }; return }
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

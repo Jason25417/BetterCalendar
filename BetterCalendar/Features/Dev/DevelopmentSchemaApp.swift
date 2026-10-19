@@ -104,7 +104,7 @@ import Observation
         if let exportEndedAt { value["exportEndedAt"] = ISO8601DateFormatter().string(from: exportEndedAt) }
         if let error { value["error"] = error }
         do {
-            try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]).write(to: receiptURL, options: .atomic)
+            try SafeJSON.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]).write(to: receiptURL, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: receiptURL.path)
         } catch { status = "本地证据未保存：" + error.localizedDescription }
     }

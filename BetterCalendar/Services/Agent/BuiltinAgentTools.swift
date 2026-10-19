@@ -99,7 +99,7 @@ import Foundation
     }
 
     private func json(_ object: Any) throws -> String {
-        String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+        String(decoding: try SafeJSON.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
     }
 
     // MARK: propose_change
@@ -171,7 +171,7 @@ import Foundation
         let id = UUID()
         var file = try Self.proposalFile(args, id: id, eventId: eventId)
         if file["action"] == nil { file["action"] = ["kind": "experimentNoop"] }
-        var draft = try AgentBridgeIO.draft(from: JSONSerialization.data(withJSONObject: file))
+        var draft = try AgentBridgeIO.draft(from: SafeJSON.data(withJSONObject: file))
         draft.agentKey = AgentKind.builtin.rawValue
         draft.originLabel = label
         do { draft = try await proposals.prepare(draft) } catch {
@@ -233,7 +233,7 @@ import Foundation
         var file: [String: Any] = ["schemaVersion": 1, "id": UUID().uuidString]
         for k in allowed where args[k] != nil && !(args[k] is NSNull) { file[k] = args[k] }
         if let eventId { file["parentEventId"] = eventId }
-        var draft = try AgentBridgeIO.chatReplyDraft(from: JSONSerialization.data(withJSONObject: file))   // 与桥接同一套校验
+        var draft = try AgentBridgeIO.chatReplyDraft(from: SafeJSON.data(withJSONObject: file))   // 与桥接同一套校验
         draft.originLabel = label
         guard let m = await chat.receiveAgent(draft) else {
             throw AgentBridgeError.invalid("回复没有存进 iCloud：\(chat.lastError ?? "未知原因")")
@@ -252,7 +252,7 @@ import Foundation
         var file: [String: Any] = ["schemaVersion": 1, "id": UUID().uuidString, "originLabel": label]
         for k in allowed where args[k] != nil { file[k] = args[k] }
         if let eventId { file["parentEventId"] = eventId }
-        let draft = try AgentBridgeIO.messageDraft(from: JSONSerialization.data(withJSONObject: file))   // 与桥接同一套校验
+        let draft = try AgentBridgeIO.messageDraft(from: SafeJSON.data(withJSONObject: file))   // 与桥接同一套校验
         guard let m = await messages.receive(draft) else {
             throw AgentBridgeError.invalid("消息没有存进 iCloud：\(messages.lastError ?? "未知原因")")
         }

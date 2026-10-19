@@ -42,7 +42,7 @@ nonisolated struct ActivityBridgeMirror: Sendable {
             try fm.removeItem(at: remote.url(forDay: day)); result.pruned.append(day)
         }
         if let status {
-            let data = try JSONSerialization.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys])
+            let data = try SafeJSON.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: activityDir.appendingPathComponent("status.json"), options: .atomic)
         }
         return result

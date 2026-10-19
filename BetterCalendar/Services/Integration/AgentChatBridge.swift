@@ -54,7 +54,7 @@ extension AgentBridgeIO {
     /// 最近 40 条对话（只在内容变化时重写）。卡片附提案最新状态，智能体不必再翻 results/。
     func writeChatHistory(_ messages: [AgentChatMessage], proposals: [Proposal], status: (AgentChatMessage) -> AgentChatUserStatus, at now: Date) throws {
         let object = Self.chatHistoryObject(messages, proposals: proposals, status: status, at: now)
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        let data = try SafeJSON.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         if (try? Data(contentsOf: root.appendingPathComponent("chat/history.json"))) != data { try writeAtomic(data, to: "chat/history.json") }
     }
 

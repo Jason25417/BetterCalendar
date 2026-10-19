@@ -171,7 +171,7 @@ nonisolated enum SentinelHTTP {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try SafeJSON.data(withJSONObject: body)
         let (data, response) = try await transport(req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

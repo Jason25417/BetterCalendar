@@ -276,7 +276,7 @@ nonisolated enum FeatureUsageExport {
     @discardableResult
     static func writeBridge(_ report: FeatureUsageReport, io: AgentBridgeIO, channel: AppChannel = .current) throws -> Bool {
         if let mismatch = channel.bridgeMismatch(io.root) { throw AgentBridgeError.invalid(mismatch) }
-        let data = try JSONSerialization.data(withJSONObject: bridgeSummary(report, channel: channel), options: [.prettyPrinted, .sortedKeys])
+        let data = try SafeJSON.data(withJSONObject: bridgeSummary(report, channel: channel), options: [.prettyPrinted, .sortedKeys])
         let url = io.root.appendingPathComponent(bridgeFile)
         if (try? Data(contentsOf: url)) == data { return false }
         try io.writeAtomic(data, to: bridgeFile)
