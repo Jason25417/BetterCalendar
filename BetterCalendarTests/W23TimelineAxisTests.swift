@@ -287,9 +287,9 @@ import AppKit
         #expect(r2?.contains("固定安排") == true)
         let r3 = await r.axis.commitResize(try item(r, meeting.id), end: at(21, 15))
         #expect(r3?.contains("固定安排") == true)
-        // 拖到另一天：说明怎么做
-        let r4 = await r.axis.commitDrag(try item(r, paper.id), start: at(22, 9))
-        #expect(r4?.contains("同一天") == true)
+        // 拖到另一天（W26 起允许，见 W26AxisCrossDayTests）：拖进过去的日子照样拒绝
+        let r4 = await r.axis.commitDrag(try item(r, paper.id), start: at(19, 9))
+        #expect(r4?.contains("已经过去") == true)
         // 拖进过去
         let today = ScheduledBlock(title: "回邮件", start: at(20, 15), end: at(20, 16))
         try r.store.insertPlanned([today])

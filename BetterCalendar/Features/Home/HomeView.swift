@@ -258,7 +258,13 @@ struct HomeView: View {
                 guard let id = item.blockID, let ps = item.plannedStart else { return }
                 Task {
                     await model.focusDay(DayContext.logicalStartOfDay(ps))
-                    if model.blocks.contains(where: { $0.id == id }) { axisEditing = AxisEditTarget(id: id) }
+                    if model.blocks.contains(where: { $0.id == id }) {
+                        FeatureUsage.used(.todayAxisEdit)
+                        axisEditing = AxisEditTarget(id: id)
+                    } else {
+                        FeatureUsage.record(.todayAxisEdit, .failed, "找不到块")
+                        DevLog.shared.warn("今天页", "点时间轴上的块没打开编辑：这一页里找不到那一块（可能刚被别处改过）")
+                    }
                 }
             }, dayMenu: { day in axisDayMenu(day) })
         }
@@ -281,9 +287,25 @@ struct HomeView: View {
                 Label(loose ? "结束松散" : "这天松散一下", systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
             }
             if isToday {
-                Button { Task { await deps.execution.reconcileCalendarActuals() } } label: {
+                Button {
+                    FeatureUsage.used(.todayUpdateDoneFromCalendar, "时间轴")
+                    Task { await deps.execution.reconcileCalendarActuals() }
+                } label: {
                     Label("按系统日历更新今天做成的事", systemImage: "arrow.triangle.2.circlepath")
                 }
+            }
+            let planned = axis.planned(on: day)
+            if DisclosureSettings.showsDeepFeatures, !planned.isEmpty {
+                #if os(macOS)
+                Button { exportICS(model.ics(for: planned), via: "时间轴") } label: {
+                    Label("导出 ICS", systemImage: "square.and.arrow.up")
+                }
+                #else
+                ShareLink(item: ICSDocument(text: model.ics(for: planned)),   // iOS 分享面板：点了没有回调，探针记不到（同 W21 日记导出）
+                          preview: SharePreview("BetterCalendar 计划.ics")) {
+                    Label("导出 ICS", systemImage: "square.and.arrow.up")
+                }
+                #endif
             }
             Divider()
             Button { showChangelog = true } label: { Label("更新日志（\(BuildInfo.tag)）", systemImage: "info.circle") }
@@ -365,13 +387,16 @@ struct HomeView: View {
             #endif
             if isTodaySelected {
                 // 原「同步日历改动」：你在系统日历里删改了今天的蓝色实际 → 按日历更新（低频，收进这里）
-                Button { Task { await deps.execution.reconcileCalendarActuals() } } label: {
+                Button {
+                    FeatureUsage.used(.todayUpdateDoneFromCalendar, "卡片列表")
+                    Task { await deps.execution.reconcileCalendarActuals() }
+                } label: {
                     Label("按系统日历更新今天做成的事", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
             if DisclosureSettings.showsDeepFeatures, !model.blocks.isEmpty {
                 #if os(macOS)
-                Button { exportICS() } label: { Label("导出 ICS", systemImage: "square.and.arrow.up") }
+                Button { exportICS(model.currentICS(), via: "卡片列表") } label: { Label("导出 ICS", systemImage: "square.and.arrow.up") }
                 #else
                 ShareLink(item: ICSDocument(text: model.currentICS()),
                           preview: SharePreview("BetterCalendar 计划.ics")) {
@@ -453,6 +478,7 @@ struct HomeView: View {
                 if s.kind == .shelve {
                     Button("先放下") {
                         BehaviorLog.record("L3建议", "点「先放下」")
+                        FeatureUsage.used(.todaySuggestion, "先放下")
                         if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
                             deps.longTasks.shelve(t)
                         }
@@ -461,6 +487,7 @@ struct HomeView: View {
                 } else {
                     Button {
                         BehaviorLog.record("L3建议", "点「排进今天」")
+                        FeatureUsage.used(.todaySuggestion, "排进今天")
                         if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
                             Task { await model.admitFromPool(t) }
                         }
@@ -478,7 +505,10 @@ struct HomeView: View {
                 .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
                 .accessibilityLabel("别再提这件")
             }
-            .onAppear { BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现") }
+            .onAppear {
+                BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现")
+                FeatureUsage.seen(.todaySuggestion)   // 「别再提」不记用过：那是「不需要」的信号
+            }
         }
 
         // 结果上的话（中性、前向）：例「2 件在你编辑期间已完成，保持原样」
@@ -524,6 +554,7 @@ struct HomeView: View {
                 Spacer()
                 Button {
                     BehaviorLog.record("收口卡", "点击进收尾流程")
+                    FeatureUsage.used(.todayWrapUpCard)
                     deps.router.selectedTab = .journal
                     deps.router.journalRequest = .now
                     deps.router.wrapUpRequest = true
@@ -538,6 +569,7 @@ struct HomeView: View {
                                    startPoint: .topLeading, endPoint: .bottomTrailing),
                     in: RoundedRectangle(cornerRadius: 14))
         .onAppear {
+            FeatureUsage.seen(.todayWrapUpCard)   // 「先不收尾」不记用过
             BehaviorLog.recordOncePerDay(key: "收口卡",
                 "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : (Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) ? "过收工线" : "傍晚空档"))")
         }
@@ -775,12 +807,19 @@ struct HomeView: View {
     }
 
     #if os(macOS)
-    private func exportICS() {
+    private func exportICS(_ text: String, via surface: String) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "BetterCalendar计划.ics"
         panel.allowedContentTypes = [UTType(filenameExtension: "ics") ?? .data]
-        if panel.runModal() == .OK, let url = panel.url {
-            try? model.currentICS().write(to: url, atomically: true, encoding: .utf8)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            FeatureUsage.used(.todayExportICS, surface)
+        } catch {
+            // 失败可见（开发期约定）：原来是 try? 静默吞掉
+            FeatureUsage.record(.todayExportICS, .failed, surface)
+            DevLog.shared.error("今天页", "导出 ICS 没写成：\(error.localizedDescription)")
+            model.errorText = "导出 ICS 没写成：\(error.localizedDescription)"
         }
     }
     #endif

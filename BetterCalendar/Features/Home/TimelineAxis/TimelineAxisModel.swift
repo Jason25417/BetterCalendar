@@ -6,8 +6,9 @@
 //  读：计划块（PlanStore，跨今天前 3 天到后 7 天）+ 做成的事（今天 = 执行陪伴的「做成了」，过去 = PlanStore 实际）+
 //      正在做（执行陪伴）+ 你的日历（CalendarReading，只读，按「排布时当作已占用的日历」设置过滤）。
 //  写：只有拖动 / 拉长缩短——先按 W18 的 PlanEditRules（与智能体同一套排布规则：固定不挪、不重叠、不进过去、
-//      不越截止、不跨 4:00）校验，放不下就**写明原因、什么都不改**（绝不悄悄挤）；过了才交给 HomeViewModel 的
-//      W19b 原路保存（改列表 → 立即保存 → 你拖的块钉成图钉 → CalendarSyncEngine 重投影）。本类从不碰日历写。
+//      不越截止、不跨 4:00、在今天到 7 天后的可排范围里）校验，放不下就**写明原因、什么都不改**（绝不悄悄挤）；
+//      过了才交给 HomeViewModel：同一天走 W19b 原路保存（改列表 → 立即保存 → 你拖的块钉成图钉 → CalendarSyncEngine
+//      重投影）；跨天（W26）走按 ID 单块写（两天的其它块不碰，同样钉住、同样重投影）。本类从不碰日历写。
 //
 
 import Foundation
@@ -150,6 +151,12 @@ final class TimelineAxisModel {
             running: live?.axisRunning ?? [], occupied: occupied, windDownHour: WorkHoursSettings.windDownHour))
     }
 
+    /// 某一天的计划块（「这一天」菜单导出用）：正在编辑的那一天用编辑中的版本。
+    func planned(on label: Date) -> [ScheduledBlock] {
+        if let page = home.pageDay, page == label { return home.blocks.map(\.scheduled) }
+        return storedPlanned.filter { DayContext.logicalStartOfDay($0.start) == label }
+    }
+
     /// 今天从现在起还有没有绿色（收尾卡的「剩余为空」信号用）。
     func hasRemainingToday(in days: [AxisDay]) -> Bool {
         days.first { $0.label == todayLabel }?.items.contains { $0.kind == .plan && !$0.isRunning } ?? false
@@ -179,40 +186,60 @@ final class TimelineAxisModel {
     }
 
     /// 校验 → 写。返回 nil = 已落地；否则 = 没改的原因（同时放进 notice 给你看）。
+    /// 同一天：交给 HomeViewModel 的 W19b 原路（改列表 → 立即保存 → 钉住 → 重投影）。
+    /// 跨天（W26）：一天一页的保存是整页覆盖写，跨天改走按 ID 单块写（applyAxisCrossDayMove），两天的其它块不碰。
     @discardableResult
     func commit(id: UUID, label: Date, start: Date, end: Date, step: ProposalPlanStep) async -> String? {
         guard !isCommitting else { return nil }
         isCommitting = true
         defer { isCommitting = false }
-        // 拖动只在同一天里挪：一天一页的保存路径按天整页写，跨天要走智能体（PlanEditRules 的跨天挪 + 审批）
-        guard DayContext.logicalStartOfDay(start) == label else {
-            return refuse("拖动只在同一天里挪（一块不跨过凌晨 4:00 的日界线）；要挪到别的日子，跟智能体说一句")
-        }
+        let feature: FeatureID = { if case .move = step { return .todayAxisDrag } else { return .todayAxisResize } }()
+        let crossDay = DayContext.logicalStartOfDay(start) != label
+        let detail = crossDay ? "跨天" : "同一天"
         if let occupiedError {
+            FeatureUsage.record(feature, .abandoned, "读不到日历")
             return refuse(occupiedError)
         }
-        // 先把这一天切进编辑页、把等着的改动存掉，校验看的就是最新的库
-        await home.focusDay(label)
-        await home.flushAutosave()
+        if crossDay {
+            // 跨天只有「挪」：拉底边的开始不动，结束越过 4:00 由规则拒绝（一块不跨日界线）
+            await home.flushAutosave()
+        } else {
+            // 先把这一天切进编辑页、把等着的改动存掉，校验看的就是最新的库
+            await home.focusDay(label)
+            await home.flushAutosave()
+        }
         do { storedPlanned = try plans.plannedBlocks(onLabels: labels) } catch {
+            FeatureUsage.record(feature, .failed, "读计划")
             return refuse("这次没读到计划，没有改动：\(error.localizedDescription)")
         }
         now = clock()
         do {
             _ = try PlanEditRules.evaluate([step], in: context())
         } catch let e as ProposalExecutionError {
+            // 规则不许（放不下）：你试了、没落地——记「没做完」（常这样 = 轴可能不好用，给智能体 / 开发者的线索）
+            FeatureUsage.record(feature, .abandoned, detail)
             return refuse(e.errorDescription ?? "放不下")
         } catch {
+            FeatureUsage.record(feature, .abandoned, detail)
             return refuse(error.localizedDescription)
         }
-        guard await home.applyAxisSpan(id: id, start: start, end: end) else {
-            return refuse("这一块刚被别处改过或删掉了，没有改动")
+        if crossDay {
+            if let reason = await home.applyAxisCrossDayMove(id: id, start: start, end: end) {
+                FeatureUsage.record(feature, .failed, detail)
+                return refuse(reason)
+            }
+        } else {
+            guard await home.applyAxisSpan(id: id, start: start, end: end) else {
+                FeatureUsage.record(feature, .failed, detail)
+                return refuse("这一块刚被别处改过或删掉了，没有改动")
+            }
         }
         if let err = home.errorText {   // 保存路径自己的失败（写库 / 提醒同步）已在页面横幅上；这里只补一句
             DevLog.shared.warn("今天页", "时间轴改动保存时有问题：\(err)")
         }
         notice = nil
-        BehaviorLog.record("今天页时间轴", stepName(step))
+        FeatureUsage.used(feature, detail)
+        BehaviorLog.record("今天页时间轴", stepName(step) + (crossDay ? "（跨天）" : ""))
         await reload(includeCalendar: false)
         return nil
     }

@@ -289,6 +289,53 @@ final class HomeViewModel {
         return true
     }
 
+    /// W26 时间轴**跨天**拖动的落地（2026-10-19）：一天一页的保存路径（confirm）按天整页 replacePlanned——
+    /// 把一块写进另一天会把那天整页覆盖掉，所以跨天走**按 ID 单块写**（同 W18 ApprovedPlanMover 的跨天挪：updatePlanned），
+    /// 两天的其它块一律不碰。调用方已按 PlanEditRules 校验过（不进过去 / 不撞固定与你的日历 / 在可排范围 / 不跨 4:00）。
+    /// 写后：① 你亲手拖的 = 图钉（钉到它新那天结束，与同一天拖动同一语义；批准智能体的挪动不钉，那条路不经这里）；
+    /// ② 请 CalendarSyncEngine 重投影两天（它仍是唯一的日历写者）；③ 发「计划编辑」（时间线协调器重算、时间轴重读）；
+    /// ④ 这一页若正是涉及的两天之一，按库重新加载（不然页里的旧版本会在下次自动保存时把它写回原处）。
+    /// 返回 nil = 已落地；否则 = 没改的原因（什么都没写）。
+    func applyAxisCrossDayMove(id: UUID, start: Date, end: Date) async -> String? {
+        await flushAutosave()
+        // 上一处改动还在保存（isWorking 时 commitEdits 只是再排一次）：先不动，免得两条写入交错
+        guard !hasUnsavedChanges, !isWorking else { return "上一处改动还在保存，稍等一下再拖" }
+        let today = DayContext.logicalStartOfDay(now())
+        let labels = (0...PlanEditRules.horizonDays).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
+        let block: ScheduledBlock
+        do {
+            guard let b = try planStore.plannedBlocks(onLabels: labels).first(where: { $0.id == id }) else {
+                DevLog.shared.warn("今天页", "时间轴跨天拖动没落地：库里找不到那一块（可能刚被别处删掉）")
+                return "这一块刚被别处改过或删掉了，没有改动"
+            }
+            block = b
+            try planStore.updatePlanned(id: id, start: start, end: end, title: b.title, reason: .userEdit)
+        } catch {
+            DevLog.shared.error("今天页", "时间轴跨天拖动写入失败：\(error.localizedDescription)")
+            return "这次没挪成（写入失败）：\(error.localizedDescription)"
+        }
+        let from = DayContext.logicalStartOfDay(block.start), to = DayContext.logicalStartOfDay(start)
+        do {
+            try planStore.setPinned(ids: [id], until: ScheduledBlock.pinExpiry(forStart: start))
+        } catch {
+            // 挪已经写进去了；钉不上只是少了「自动调整绕开它」——要可见，但不把挪动算失败
+            DevLog.shared.warn("今天页", "跨天挪好了，但没钉住：\(error.localizedDescription)")
+            errorText = "已挪到\(PlanEditRules.relativeDayName(to, now: now()))；这次没钉住（自动调整可能会动它）：\(error.localizedDescription)"
+        }
+        for label in Set([from, to]).sorted() {
+            do { try await projection.project(label: label) } catch {
+                DevLog.shared.warn("今天页", "跨天挪已写入，但 \(PlanEditRules.dayName(label)) 的日历画面刷新失败：\(error.localizedDescription)")
+                errorText = "已挪好；\(PlanEditRules.dayName(label)) 的日历画面这次没刷新：\(error.localizedDescription)"
+            }
+        }
+        NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
+        if let page = pageDay, page == from || page == to {
+            loadConfirmedPlan()
+            persistDraft()
+        }
+        return nil
+    }
+
     /// 切到另一天：先把这一天没来得及保存的改动保存掉，再切（防止改动被丢、或被写到别的日子）。
     func selectDay(_ day: Date) async {
         await flushAutosave()
@@ -364,8 +411,11 @@ final class HomeViewModel {
     }
 
     /// 当前草稿 → ICS 文本（导出/分享）。
-    func currentICS() -> String {
-        let drafts = blocks.sorted { $0.start < $1.start }.map {
+    func currentICS() -> String { ics(for: blocks.map(\.scheduled)) }
+
+    /// 任意一组计划块 → ICS 文本（W26：时间轴的「这一天」菜单导出视口里那一天，不必先切页）。
+    func ics(for planned: [ScheduledBlock]) -> String {
+        let drafts = planned.sorted { $0.start < $1.start }.map {
             CalendarEventDraft(title: $0.title, start: $0.start, end: $0.end, kind: .planned)
         }
         return exporter.ics(for: drafts)

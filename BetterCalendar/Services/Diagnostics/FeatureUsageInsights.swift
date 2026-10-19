@@ -191,6 +191,12 @@ nonisolated enum FeatureUsageInterpreter {
                 return .init(feature: f, kind: .neverSeen,
                              evidence: "\(since)；它收在「\(parent.label)」的菜单 / 折叠区里，那里出现过 \(ps) 天、它用过 0 次")
             }
+        case let .gesture(parent):
+            let ps = report.stats[parent]?.seenDays ?? 0
+            if ps >= seenDaysForNotInterested, report.trackingDays >= minTrackingDaysForNeverSeen {
+                return .init(feature: f, kind: .neverSeen,
+                             evidence: "\(since)；它是「\(parent.label)」上的手势（没有按钮），那里出现过 \(ps) 天、它用过 0 次")
+            }
         case .none:
             break   // 没有「看见」这回事：不推断「不知道 / 不需要」
         }
