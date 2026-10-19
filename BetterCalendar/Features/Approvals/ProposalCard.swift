@@ -33,6 +33,7 @@ struct ProposalCard: View {
                 Text("不处理到 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened)) 就自动作废")
                     .font(.caption2).foregroundStyle(.secondary)
                 ProposalCardControls(center: center, proposal: p)
+                    .onAppear { FeatureUsage.seen(.proposalCard) }
             } else {
                 Text(p.notificationBody).font(.caption)
                 Text([state.label, p.resultNote].compactMap { $0 }.joined(separator: " · "))
@@ -57,7 +58,11 @@ struct ProposalCard: View {
         } else if p.state == .applied, p.action.touchesRealData {
             if center.canUndo(p) {
                 HStack(spacing: 8) {
-                    Button("撤销") { Task { await center.undo(p.id) } }.font(.caption).buttonStyle(.bordered)
+                    Button("撤销") {
+                        FeatureUsage.used(.proposalUndo)
+                        Task { await center.undo(p.id) }
+                    }.font(.caption).buttonStyle(.bordered)
+                    .onAppear { FeatureUsage.seen(.proposalUndo) }
                     if let hint = p.undoHint { Text(hint).font(.caption2).foregroundStyle(.secondary) }
                 }
             } else if let reason = center.undoBlockedReason(p) {

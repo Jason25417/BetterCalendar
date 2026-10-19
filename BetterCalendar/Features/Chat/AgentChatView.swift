@@ -64,6 +64,7 @@ struct AgentChatView: View {
         }
         .navigationTitle("智能体")
         .task {
+            FeatureUsage.seen(.agentPage)
             visible = true
             await chat.setViewing(scenePhase == .active)
             await chat.refresh()
@@ -207,7 +208,7 @@ struct AgentChatView: View {
                 .font(.caption2).foregroundStyle(status.isProblem ? .orange : .secondary)
                 .multilineTextAlignment(.trailing)
             if case .failed = status {
-                Button("重试") { Task { await chat.retry(m.id) } }.font(.caption)
+                Button("重试") { FeatureUsage.used(.agentChatRetry); Task { await chat.retry(m.id) } }.font(.caption)
                 Button("删掉", role: .destructive) { chat.discard(m.id) }.font(.caption)
             }
         }
@@ -249,6 +250,13 @@ struct AgentChatView: View {
                 .focused($inputFocused)
                 .onSubmit(send)
                 .accessibilityIdentifier("bc.chat.input")
+                // W21：打了字 = 开了头；清空没发 = 没做完（发出去 = 做完，见 send）
+                .onChange(of: draft) { old, new in
+                    let wasEmpty = old.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let isEmpty = new.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if wasEmpty, !isEmpty { FeatureUsage.begin(.agentChatSend) }
+                    if !wasEmpty, isEmpty { FeatureUsage.abandonIfOpen(.agentChatSend) }
+                }
             Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                 .buttonStyle(.borderless)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -261,7 +269,8 @@ struct AgentChatView: View {
     private func send() {
         let text = draft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        draft = ""
+        FeatureUsage.complete(.agentChatSend, "智能体页")
+        draft = ""   // complete 已关掉开头，清空不会记成没做完
         Task { await chat.send(text) }
     }
 }

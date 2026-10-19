@@ -46,7 +46,27 @@ import UIKit
     /// 卡片上「回一句」展开了输入框的提案（冒烟 2026-10-18：macOS List 行里的 @State 展开后行高不更新、输入框看不见——
     /// 状态放到这里，面板用它改行的 id 强制重排；对话卡片同样复用）。
     var replying: Set<UUID> = []
-    func toggleReplying(_ id: UUID) { if replying.contains(id) { replying.remove(id) } else { replying.insert(id) } }
+    /// W21：展开「回一句」= 开了头；没发就收起 = 没做完（功能使用探针）。
+    func toggleReplying(_ id: UUID) {
+        if replying.contains(id) {
+            replying.remove(id)
+            usage.abandonIfOpen(.proposalReply, key: id.uuidString)
+        } else {
+            replying.insert(id)
+            usage.begin(.proposalReply, key: id.uuidString)
+        }
+    }
+    /// W21 功能使用探针（只记哪个功能、什么事件；本机）。测试注入自己的实例。
+    var usage: FeatureUsageStore = FeatureUsage.shared
+    /// W21：卡片上开始调某个方案的数值（第一次改值时由 ProposalTuner 调）= 开了头；批准了这个方案 = 做完；
+    /// 拒绝 / 选了别的 / 提案作废 = 没做完。
+    func noteTuningStarted(_ id: UUID, option: Int) { usage.begin(.proposalTune, key: Self.tuneKey(id, option)) }
+    nonisolated static func tuneKey(_ id: UUID, _ option: Int) -> String { "\(id.uuidString)#\(option)" }
+    /// 关掉这份提案上还开着的「回一句 / 调数值」开头（记为没做完）。
+    private func abandonOpenAttempts(_ id: UUID) {
+        usage.abandonIfOpen(.proposalReply, key: id.uuidString)
+        for k in usage.openKeys(.proposalTune) where k.hasPrefix(id.uuidString + "#") { usage.abandonIfOpen(.proposalTune, key: k) }
+    }
     private var executing: Set<UUID> = []
     /// 冒烟 2026-10-18 bug A：本机已执行成功、但「已完成」回报没落地的提案（网络抖动 / 超时）。
     /// 留在这里（并持久化），刷新时只**补回报**、绝不重新执行；补上后移除。
@@ -240,6 +260,9 @@ import UIKit
             return
         }
         DevLog.shared.resolve(source: "多端审批")   // W16：拉取成功 = 之前的短暂失败自动消除
+        // W21：提案已有结论（别处处理 / 过期）而这里还开着「回一句 / 调数值」→ 没做完
+        let t = now()
+        for p in proposals where p.effectiveState(at: t).isClosed { abandonOpenAttempts(p.id) }
         await reconcileNotifications()
         for p in proposals where p.state == .approved && p.isExecutor(deviceId) && !executing.contains(p.id) {
             if let pending = unreported[p.id] { await reportApplied(p, note: pending.note, undo: pending.undo) }   // 已做完：只补回报
@@ -286,6 +309,8 @@ import UIKit
                 let picked = p.hasAlternatives && decision == .approve ? "，选了【\(p.chosen.index + 1). \(p.chosen.label)】" : ""
                 let tuned = p.tuningSummary.isEmpty ? "" : "；" + p.tuningSummary.joined(separator: "，")   // W11：记下最终值、改没改默认
                 record(actor, actorLabel, "decided", p, "\(decision == .approve ? "同意" : "拒绝")\(picked)（在 \(deviceLabel)）\(tuned)")
+                if decision == .approve, tuning != nil { usage.complete(.proposalTune, key: Self.tuneKey(id, choice ?? 0)) }
+                abandonOpenAttempts(id)
                 if let remember { self.remember(p, scope: remember.scope, effect: remember.effect) }
             case let .alreadyClosed(p):
                 record(actor, actorLabel, "lost", p, "已被处理：\(p.effectiveState(at: now()).label)；本次点击不重复执行")
@@ -293,6 +318,7 @@ import UIKit
             await refresh()
             return outcome
         } catch {
+            usage.record(decision == .approve ? .proposalApprove : .proposalDecline, .failed)
             fail("提交决定失败", error, proposals.first { $0.id == id })
             return nil
         }
@@ -363,6 +389,8 @@ import UIKit
         guard !text.isEmpty else { return false }
         let reply = ProposalUserReply(text: text, at: now(), deviceId: deviceId)
         let target: Proposal
+        // W21：卡片上展开过输入框的这句 = 卡片「回一句」（通知上的直接回复另记）；先关掉开头，免得下面 refresh 把它算成没做完
+        let fromCard = usage.end(.proposalReply, key: id.uuidString)
         do {
             switch try await transport.respond(id: id, reply: reply, at: now()) {
             case let .won(p):
@@ -373,6 +401,8 @@ import UIKit
                 record(.user, "你", "lost", p, "回一句时提案已被处理（\(p.effectiveState(at: now()).label)）；你的话照常转给智能体")
             }
         } catch {
+            usage.record(.proposalReply, .failed)
+            if fromCard { usage.begin(.proposalReply, key: id.uuidString) }   // 没发出去：输入框还开着，开头照旧算
             fail("回复提案失败", error, proposals.first { $0.id == id })
             return false
         }
@@ -386,8 +416,10 @@ import UIKit
             lastError = "提案已停止等待，但你的话没发出去：到对话页重试（已留在本机）"
             DevLog.shared.error("多端审批", lastError!)
             record(.system, "BetterCalendar（\(deviceLabel)）", "reply.forward.failed", target, lastError!)
+            usage.record(.proposalReply, .failed)
             return false
         }
+        if fromCard { usage.complete(.proposalReply, key: id.uuidString) }
         return true
     }
 
@@ -421,6 +453,7 @@ import UIKit
             let outcome = try await executor.perform(action)
             let marked = try await transport.markUndone(id: p.id, deviceId: deviceId, note: outcome.note, at: now())
             record(.user, actorLabel, "undone", marked, "撤销「\(p.title)」（在 \(deviceLabel)）：\(outcome.note)")
+            usage.record(.proposalApprove, .undone)   // W21：批准后的结果被撤销（常被撤销 = 结果不合预期）
             if let latest = try? await transport.fetchRecent() { proposals = latest }
             return true
         } catch {
@@ -434,6 +467,7 @@ import UIKit
         lastError = message
         DevLog.shared.error("多端审批", message)
         record(.user, actorLabel, "undo.failed", p, message)
+        usage.record(.proposalUndo, .failed)
     }
 
     // MARK: 内部

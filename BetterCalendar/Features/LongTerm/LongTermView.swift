@@ -86,7 +86,9 @@ struct LongTermView: View {
                             Text(parseError).font(.caption).foregroundStyle(.orange)
                         }
                         // 审计 #11：手打兜底走全 App 统一的「＋ 加一项」尾行（InlineAddRow，登记件）
-                        InlineAddRow(prompt: "手动加一件", placeholder: "这件长期的事叫…") { store.add(title: $0) }
+                        InlineAddRow(prompt: "手动加一件", placeholder: "这件长期的事叫…") {
+                            FeatureUsage.used(.longtermAddManual); store.add(title: $0)
+                        }
                     } else {
                         // 草稿：每条可删；确认前不落库（代理而不代权——写入永远是用户的动作）
                         Text("理解成这样，对吗？").font(.headline)
@@ -128,7 +130,10 @@ struct LongTermView: View {
                             .padding(.vertical, 2)
                         }
                         HStack {
-                            Button("重说") { draft = []; draftUpdates = []; parseError = nil }
+                            Button("重说") {
+                                FeatureUsage.abandonIfOpen(.longtermSay)   // W21：理解出草稿却没收下 = 没做完
+                                draft = []; draftUpdates = []; parseError = nil
+                            }
                                 .buttonStyle(.plain).foregroundStyle(.secondary)
                             Spacer()
                             Button {
@@ -162,12 +167,14 @@ struct LongTermView: View {
                             }
                             Spacer()
                             Button("排今天") {
+                                FeatureUsage.used(.longtermTodoToToday)
                                 router.scheduleRequest = .insertLongTask(entry.id)
                                 router.selectedTab = .schedule
                             }
                             .font(.caption).buttonStyle(.bordered).controlSize(.small)
                             .tint(.primary)
                             Button {
+                                FeatureUsage.used(.longtermTodoDiscard)
                                 store.discard(entry)
                             } label: { Image(systemName: "xmark.circle").foregroundStyle(.secondary) }
                             .buttonStyle(.plain)
@@ -177,6 +184,7 @@ struct LongTermView: View {
                         .padding(.vertical, 2)
                     }
                     InlineAddRow(prompt: "记一件想做的小事", placeholder: "想做的小事叫…") {
+                        FeatureUsage.used(.longtermTodoAdd)
                         store.addTodo(title: $0)
                     }
                 } header: {
@@ -192,7 +200,7 @@ struct LongTermView: View {
                                 HStack {
                                     Text(task.title).font(.callout)
                                     Spacer()
-                                    Button("捞回来") { store.unshelve(task) }
+                                    Button("捞回来") { FeatureUsage.used(.longtermUnshelve); store.unshelve(task) }
                                         .font(.caption).buttonStyle(.bordered).controlSize(.small)
                                         .tint(.primary)   // 审计 #2：次要动作收中性
                                 }
@@ -222,7 +230,7 @@ struct LongTermView: View {
                                     Spacer()
                                     // D2-C（2026-07-20 Jason 裁）：做成了可逆——与「先放下」的捞回对齐，
                                     // 详情面的「做成了」按钮因此不再是破坏性动作（U10 距离不需要了）
-                                    Button("拿回来") { store.reopen(task) }
+                                    Button("拿回来") { FeatureUsage.used(.longtermReopen); store.reopen(task) }
                                         .font(.caption).buttonStyle(.bordered).controlSize(.small)
                                         .tint(.primary)
                                         .help("误标了、或还想继续做——拿回在途，投入记录都还在")
@@ -241,12 +249,14 @@ struct LongTermView: View {
             .navigationDestination(for: UUID.self) { id in
                 if let task = store.items.first(where: { $0.id == id }) {
                     LongTaskDetailView(store: store, router: router, task: task)
+                        .onAppear { FeatureUsage.used(.longtermDetail) }
                 } else {
                     Text("这件事已不在列表里").foregroundStyle(.secondary)   // 审计 #17：术语
                 }
             }
             .onAppear {
                 store.reload()
+                FeatureUsage.seen(.longtermPage)
                 // 埋点（调研）：长期页访问频率——按天去重，用于观察第二尺度的真实使用强度
                 BehaviorLog.recordOncePerDay(key: "长期页", "长期页", "打开（在途 \(store.items.count) 件）")
             }
@@ -277,6 +287,7 @@ struct LongTermView: View {
                 } else {
                     draft = edit.creates
                     draftUpdates = edit.updates
+                    FeatureUsage.begin(.longtermSay)
                 }
                 return
             } catch {
@@ -299,7 +310,9 @@ struct LongTermView: View {
             } else {
                 draft = plan.longTasks
             }
+            FeatureUsage.begin(.longtermSay)
         } catch {
+            FeatureUsage.record(.longtermSay, .failed)
             parseError = "没能理解（\(error.localizedDescription)）——可以再说一遍，或用下面的手打入口。"
             DevLog.shared.warn("长期", "解析失败：\(error.localizedDescription)")
         }
@@ -335,6 +348,7 @@ struct LongTermView: View {
         DevLog.shared.info("长期", "说一句：新增 \(draft.count) 件 · 修改 \(appliedUpdates) 件")
         BehaviorLog.record("长期页", "说一句收下 新增\(draft.count)/改\(appliedUpdates)"
                            + (draft.contains { !$0.checkpoints.isEmpty } ? "（含阶段）" : ""))
+        FeatureUsage.complete(.longtermSay)
         draft = []; draftUpdates = []; sayText = ""; parseError = nil
     }
 
@@ -386,6 +400,7 @@ struct LongTermView: View {
     }
 
     private func insertToToday(_ task: LongTask) {
+        FeatureUsage.used(.longtermTaskToToday)
         router.scheduleRequest = .insertLongTask(task.id)
         router.selectedTab = .schedule
     }
@@ -461,6 +476,7 @@ struct LongTaskDetailView: View {
                             if !wasDone {
                                 celebrate(cp)   // 勾上=轻庆祝（庆祝白名单）；取消勾不庆祝也不惩罚
                                 BehaviorLog.record("长期页", "勾选阶段")
+                                FeatureUsage.used(.longtermCheckpoint, "详情页")
                             }
                         } label: {
                             Image(systemName: cp.doneAt != nil ? "checkmark.circle.fill" : "circle")
@@ -524,6 +540,7 @@ struct LongTaskDetailView: View {
 
             Section {
                 Button {
+                    FeatureUsage.used(.longtermTaskToToday, "详情页")
                     router.scheduleRequest = .insertLongTask(task.id)
                     router.selectedTab = .schedule
                     dismiss()
@@ -534,11 +551,11 @@ struct LongTaskDetailView: View {
                 .buttonStyle(.borderedProminent)
                 // 视觉轮 V1（2026-07-20 dark 截图实锤）：审计 #2 漏网点位——这两颗曾被全局 tint 染橙，
                 // 同屏三橙违条文2。做成了=绿族语义（不占彩色预算），先放下=中性。
-                Button { store.complete(task); dismiss() } label: {
+                Button { FeatureUsage.used(.longtermComplete); store.complete(task); dismiss() } label: {
                     Label("做成了", systemImage: "checkmark.seal.fill")   // 审计 #22：Form 系统场域不用 emoji（条文9）
                 }
                 .tint(theme.positiveTint)
-                Button("先放下（随时捞回）") { store.shelve(task); dismiss() }
+                Button("先放下（随时捞回）") { FeatureUsage.used(.longtermShelve); store.shelve(task); dismiss() }
                     .tint(.primary)
                     .foregroundStyle(.secondary)
             }

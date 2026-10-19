@@ -98,6 +98,8 @@ struct AgentContextInput {
     var journal = Read<JournalDigest>()
     /// W13：设备活动摘要（已截断、带来源与时刻；nil = 没接活动记录）。构造见 ActivityContextSummary。
     var activity: [String: Any]? = nil
+    /// W21：功能使用探针的精简段（已按开关裁剪；nil = 没接）。构造见 FeatureUsageExport.contextSection。
+    var featureUsage: [String: Any]? = nil
     /// W18：智能体排时间线（开关开着才附 planning 段）：明天起几天的计划块（带 id / 版本 / 图钉）+ 你的日历「已占用」。
     var planEditing = false
     var upcoming = Read<Block>()
@@ -258,6 +260,8 @@ enum AgentBridgeContext {
         }
         // W13：最近的设备活动（只用来理解情境与时机；App/网站名永不进复盘、留底、反馈）。全量走 MCP read_activity。
         if let activity = input.activity { context["recentActivity"] = activity }
+        // W21：功能使用（哪个功能用得多 / 可能不知道 / 不好用的线索）——只供偶尔温和提议，用法见 featureUsage.howToUse。
+        if let usage = input.featureUsage { context["featureUsage"] = usage }
         // W18：排时间线要看的（开关关着 = 不附，智能体就只能挪今天）。
         if input.planEditing {
             var planning: [String: Any] = [
@@ -323,6 +327,8 @@ enum AgentBridgeContext {
     private var loggedErrors: [String: String] = [:]
     /// W13：设备活动摘要（组装点设置；nil = 不附）。
     var activitySummary: ((Date) async -> [String: Any]?)?
+    /// W21：功能使用摘要（组装点设置；nil = 不附）。
+    var featureUsageSummary: ((Date) -> [String: Any]?)?
 
     init(planStore: (any PlanReading)?, actualStore: (any ActualReading)?, longTasks: LongTaskStore?, calendarStore: (any CalendarReading)?,
          journalStore: JournalStore?, reminderStore: (any ReminderStore)? = nil,
@@ -442,6 +448,7 @@ enum AgentBridgeContext {
             } catch { input.journal.error = fail("日记", error) }
         }
         if let activitySummary { input.activity = await activitySummary(now) }
+        if let featureUsageSummary { input.featureUsage = featureUsageSummary(now) }
         clearRecovered(input)
         return input
     }

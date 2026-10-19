@@ -282,6 +282,7 @@ final class HomeViewModel {
         guard !t.isEmpty else { return }
         await flushAutosave()
         let start = freeSlotStart(duration: 3600)
+        FeatureUsage.used(.todayAdd)   // W21：今天页写入路径（换成时间轴视图后照样记）
         await admitDirect(ScheduledBlock(title: t, start: start, end: start.addingTimeInterval(3600)))
     }
 
@@ -940,6 +941,7 @@ final class HomeViewModel {
         let nowLoose = looseDays?.isLoose(targetDay) ?? false
         if nowLoose { notifier.cancelDailyReminders() }
         BehaviorLog.record("松散日", nowLoose ? "标记" : "结束")
+        FeatureUsage.used(.todayLoose, nowLoose ? "标记" : "结束")
     }
 
     func move(_ source: IndexSet, _ destination: Int) {
@@ -963,11 +965,13 @@ final class HomeViewModel {
         // 填完时间按 start 排序（与 #5 一致：时间决定最终顺序，落到该在的位置）
         withAnimation(Motion.emphasis) { blocks.sort { $0.start < $1.start } }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
+        FeatureUsage.used(.todayDrag)   // W21：拖动的唯一写入口（哪个视图调都记）
     }
 
     func delete(id: UUID) {
         blocks.removeAll { $0.id == id }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
+        FeatureUsage.used(.todayDelete)
     }
 
     // MARK: - 并行组（0.22：同组=同时段，reflow 绑定；手动建/解组）
@@ -1008,6 +1012,7 @@ final class HomeViewModel {
         }
         withAnimation(Motion.emphasis) { blocks.sort { $0.start < $1.start } }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
+        FeatureUsage.usedThrottled(.todayEdit, "并行")
     }
 
     /// 复制某块，插在其后（右键菜单用）。新块自带新 id，归属/时间沿用原块。
@@ -1016,6 +1021,7 @@ final class HomeViewModel {
         var copy = blocks[i]; copy.id = UUID()
         blocks.insert(copy, at: i + 1)
         committedCount = nil; markEditedIfLoaded(); persistDraft()
+        FeatureUsage.usedThrottled(.todayEdit, "复制")
     }
 
     /// 按 id 的元素绑定——避免 `ForEach($:)` 在删除时的「独占访问」崩溃。
@@ -1037,6 +1043,8 @@ final class HomeViewModel {
                     // #5：改了开始时间 → 按 start 自动重排（动画滑到该去的位置）；只在 start 变时排，改标题/结束/星标不动位
                     if startChanged { withAnimation(Motion.emphasis) { self.blocks.sort { $0.start < $1.start } } }
                     self.persistDraft()
+                    // W21：直接改块（时间 / 标题 / 属性）的唯一写入口；打字逐字触发 → 2 分钟内只记一次
+                    FeatureUsage.usedThrottled(.todayEdit, startChanged ? "时间" : "其它")
                 }
             }
         )

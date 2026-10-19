@@ -364,9 +364,14 @@ final class AppContainer {
                 })
             // W13：最近设备活动摘要进 context.json；日文件每轮同步镜像到 bridge/activity/。
             context.activitySummary = { [weak activity] now in await activity?.contextSummary(now: now) }
+            // W21：功能使用摘要进 context.json（开关关着只写一句「未开启」）；汇总全表镜像到 bridge/usage.json（开着才写）。
+            context.featureUsageSummary = { now in
+                FeatureUsageExport.contextSection(FeatureUsageReporter.shared.report(now: now), enabled: FeatureUsageSettings.shareWithAgent)
+            }
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
             bridge.activityMirror = { [weak activity] io in await activity?.mirror(to: io) }
+            bridge.usageMirror = { io in FeatureUsageBridgeMirror.shared.mirror(to: io) }
             activity.startMac()   // 常驻记录（App 运行即记，含只剩菜单栏时）；开机自启实验期默认开
             // SPEC §19 A1/F1：桥接对话（转交你的消息、导入智能体回复、晚间复盘事件）；推送到达时立即同步一轮，压低转交延迟。
             bridge.chat = agentChat

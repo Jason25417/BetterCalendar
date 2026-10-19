@@ -17,7 +17,7 @@ struct CompleteOrStartControlIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
-        AppIntentRequest.enqueue(.completeCurrent)
+        AppIntentRequest.enqueue(.completeCurrent, source: "control")   // W21：来源 = 控件（功能使用探针分来源）
         return .result()
     }
 }

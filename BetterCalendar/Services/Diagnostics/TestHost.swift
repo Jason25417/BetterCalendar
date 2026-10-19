@@ -15,7 +15,7 @@
 //
 import Foundation
 
-enum TestHost {
+nonisolated enum TestHost {   // W21：纯环境变量读取，标 nonisolated 供功能使用探针（非主线程可调）使用
     static var isActive: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil

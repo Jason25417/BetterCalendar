@@ -29,16 +29,21 @@ enum AppIntentRequest: String, Sendable {
         #endif
     }
 
-    nonisolated static func enqueue(_ request: AppIntentRequest, payload: String? = nil) {
+    /// W21：source = 谁发起的（"control" = 控制中心控件；nil = 快捷指令 / Siri），只给功能使用探针分来源。
+    nonisolated static func enqueue(_ request: AppIntentRequest, payload: String? = nil, source: String? = nil) {
         let key = "appIntent.pendingRequest"
         let payloadKey = "appIntent.pendingPayload"
         store.set(request.rawValue, forKey: key)
+        if let source { store.set(source, forKey: sourceKey) } else { store.removeObject(forKey: sourceKey) }
         if let payload, !payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             store.set(payload, forKey: payloadKey)
         } else {
             store.removeObject(forKey: payloadKey)
         }
     }
+
+    nonisolated private static let sourceKey = "appIntent.pendingSource"
+    nonisolated static func source() -> String? { store.string(forKey: sourceKey) }
 
     nonisolated static func payload() -> String? {
         store.string(forKey: "appIntent.pendingPayload")
@@ -53,6 +58,7 @@ enum AppIntentRequest: String, Sendable {
         }
         store.removeObject(forKey: key)
         store.removeObject(forKey: payloadKey)
+        store.removeObject(forKey: sourceKey)
         return request
     }
 }

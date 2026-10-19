@@ -131,11 +131,16 @@ struct ChangeTraceSheet: View {
                     Button("关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("撤销今天的自动调整") { undoneCount = timeline.undoToday() }
+                    Button("撤销今天的自动调整") {
+                        let n = timeline.undoToday()
+                        undoneCount = n
+                        if n > 0 { FeatureUsage.record(.autoAdjust, .undone, "\(n) 块") }   // W21：自动调整的结果被你撤销
+                    }
                         .disabled(timeline.todayTraceCount() == 0)
                 }
             }
         }
         .frame(minWidth: 380, minHeight: 320)
+        .onAppear { FeatureUsage.used(.todayTraceReview) }
     }
 }
