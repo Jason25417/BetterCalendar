@@ -135,6 +135,65 @@ import SwiftData
         #expect(try w.plan.plannedBlocks(on: today).first?.end == at(13), "预报没写回")
     }
 
+    // MARK: W26c 本机真写了自动调整 → 早晚通知重排（没写权 / 不涉及 → 不动）
+
+    private func reminders(_ d: Device, _ w: World, recordedDay: Date?) -> (W26bAxisFollowTests.RecordingNotifier, UserDefaults) {
+        let notifier = W26bAxisFollowTests.RecordingNotifier()
+        let defaults = UserDefaults(suiteName: "w26c-\(UUID().uuidString)")!
+        if let recordedDay { DailyReminderDay.record(recordedDay, in: defaults) }
+        let clock = d.clock
+        d.co.reminderRefresher = DailyReminderRefresher(plans: w.plan, notifier: notifier, note: { _ in nil },
+                                                        defaults: defaults, now: { clock.now })
+        return (notifier, defaults)
+    }
+
+    @Test func automaticWritesRescheduleTodaysRemindersOnlyOnTheWritingDevice() async throws {
+        let w = try makeWorld()
+        let mac = makeDevice(w, id: "Mac", now: at(13))
+        let phone = makeDevice(w, id: "iPhone", now: at(13))
+        mac.lease.setForeground(true)
+        let (macN, _) = reminders(mac, w, recordedDay: today)
+        let (phoneN, _) = reminders(phone, w, recordedDay: today)
+        // 过点块被顺延到现在之后 → 今天最后一件的结束变了，晚通知（末块后 30 分钟）要跟着变
+        let stale = ScheduledBlock(title: "过点块", start: at(10), end: at(11))
+        try w.plan.replacePlanned([stale], on: today)
+
+        #expect(await phone.co.recompute(reason: "测试") == 0)
+        #expect(phoneN.calls.isEmpty, "没写权只算不写：不重排")
+
+        #expect(await mac.co.recompute(reason: "测试") == 1)
+        let moved = try #require(try w.plan.plannedBlocks(on: today).first)
+        #expect(macN.calls.count == 1, "持有者真写了：重排")
+        #expect(macN.calls.last?.evening == moved.end.addingTimeInterval(30 * 60))
+        #expect(macN.calls.last?.morning == nil, "早上那条已经过去：不排")
+
+        // 已排的通知属于明天（今晚保存过明天）：今天的自动调整不碰它
+        let other = makeDevice(w, id: "Mac", now: at(13, 30))
+        let (otherN, _) = reminders(other, w, recordedDay: cal.date(byAdding: .day, value: 1, to: today)!)
+        try w.plan.replacePlanned([ScheduledBlock(title: "又过点", start: at(9), end: at(10))], on: today)
+        #expect(await other.co.recompute(reason: "测试") >= 1)
+        #expect(otherN.calls.isEmpty, "不涉及已排通知的那天：不动")
+    }
+
+    @Test func spillForwardReschedulesTomorrowsReminders() async throws {
+        let w = try makeWorld()
+        let mac = makeDevice(w, id: "Mac", now: at(23))
+        mac.lease.setForeground(true)
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)!
+        let (n, _) = reminders(mac, w, recordedDay: tomorrow)
+        let later = ScheduledBlock(title: "明天的事", start: at(24 + 10), end: at(24 + 11))
+        try w.plan.replacePlanned([later], on: tomorrow)
+        // 今天没做的那件按你的选择排到明天同钟点（8:00）：比明天原来的第一件早 → 明早的通知提前
+        let b = ScheduledBlock(title: "排到明天", start: at(8), end: at(9))
+        try w.plan.replacePlanned([b], on: today)
+        mac.co.setSpillOverride(b.id, policy: .forward)
+        _ = mac.co.executeSpills(day: today)
+        await mac.co.pendingReminderRefresh?.value
+        let last = try #require(n.calls.last)
+        #expect(last.morning == at(24 + 8).addingTimeInterval(-15 * 60))
+        #expect(last.summary.contains("「排到明天」"))
+    }
+
     // MARK: 你的动作永远不经过闸
 
     @Test func userActionsAreNeverGated() async throws {
