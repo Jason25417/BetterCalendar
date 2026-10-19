@@ -19,7 +19,8 @@ import SwiftData
     var onExternalChange: (() -> Void)?
     init(_ box: SharedBox) { self.box = box }
     func load() -> Data? { box.data }
-    func save(_ data: Data) { box.data = data }
+    var failSync = false
+    @discardableResult func save(_ data: Data) -> Bool { box.data = data; return !failSync }
 }
 
 @MainActor private final class Clock { var now: Date; init(_ d: Date) { now = d } }
@@ -52,6 +53,7 @@ import SwiftData
         let traces: ChangeTraceStore
         let pool: LongTaskStore
         let box: SharedBox
+        let editsBox: SharedBox
         let logs: Logs
         let container: ModelContainer
     }
@@ -64,7 +66,7 @@ import SwiftData
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("w22-\(UUID().uuidString)", isDirectory: true)
         return World(plan: PlanStore(context: container.mainContext), started: started,
                      traces: ChangeTraceStore(directory: dir), pool: LongTaskStore(context: container.mainContext),
-                     box: SharedBox(), logs: Logs(), container: container)
+                     box: SharedBox(), editsBox: SharedBox(), logs: Logs(), container: container)
     }
 
     /// 一台设备：自己的时钟 / 执行进度 / 租约，共享真相与 KV。timingFlag 由闭包读，测试里随时改。
@@ -84,6 +86,7 @@ import SwiftData
         co.progress = progress
         co.longTasks = w.pool
         co.writeLease = lease
+        co.sharedEdits = SharedRecentEdits(store: FakeLeaseStore(w.editsBox), log: { level, msg in logs.lines.append((level, msg)) })
         return Device(co: co, lease: lease, clock: clock, progress: progress)
     }
 
@@ -313,6 +316,78 @@ import SwiftData
         phone.lease.setForeground(true)   // iPhone 回前台抢到写权
         _ = await phone.co.recompute(reason: "测试")
         #expect(!phone.co.pendingBackstop, "拿到写权那一轮补跑了")
+    }
+
+    // MARK: W22b 跨设备手改冷却
+
+    /// 在不持有写权的 iPhone 上批准智能体挪块 → 持有写权的 Mac 30 分钟内不把它排走；过期后恢复正常；不写图钉。
+    @Test func approvalOnNonHolderIsHeldOnHolderUntilCooldownExpires() async throws {
+        let w = try makeWorld()
+        let mac = makeDevice(w, id: "Mac", now: at(13))
+        let phone = makeDevice(w, id: "iPhone", now: at(13))
+        mac.lease.setForeground(true)
+        let b = ScheduledBlock(title: "智能体挪过的", start: at(10), end: at(11))
+        try w.plan.replacePlanned([b], on: today)
+
+        // iPhone 执行批准的挪块（同 ApprovedPlanMover：按 id 改时间 + 发带 updatedIDs 的通知）
+        try w.plan.updatePlanned(id: b.id, start: at(11), end: at(12), title: b.title, reason: .agentApproval)
+        _ = await phone.co.handlePlanChangedExternally(userInfo: ["updatedIDs": [b.id],
+                                                                  PlanChangeSource.key: ApprovedPlanMover.notificationSource])
+        #expect(mac.co.manualHolds[b.id] == nil, "前提：Mac 本机没有这条冷却")
+
+        // Mac（写者）重算：冷却窗内不挪
+        #expect(await mac.co.recompute(reason: "测试") == 0)
+        let held = try #require(try w.plan.plannedBlocks(on: today).first)
+        #expect(held.start == at(11), "另一台发布的冷却生效")
+        #expect(held.pinnedUntil == nil, "批准的挪块不是图钉")
+
+        // 30 分钟后：恢复正常维护
+        mac.clock.now = at(13, 31)
+        #expect(await mac.co.recompute(reason: "测试") == 1)
+        #expect(try w.plan.plannedBlocks(on: today).first?.start == at(13, 31))
+    }
+
+    /// 一键撤（另一条登记冷却的路径）同样跨设备；条目过期即被丢弃。
+    @Test func undoOnNonHolderIsHeldOnHolder() async throws {
+        let w = try makeWorld()
+        let mac = makeDevice(w, id: "Mac", now: at(13))
+        let phone = makeDevice(w, id: "iPhone", now: at(13))
+        mac.lease.setForeground(true)
+        let b = ScheduledBlock(title: "过点块", start: at(10), end: at(11))
+        try w.plan.replacePlanned([b], on: today)
+        _ = await mac.co.recompute(reason: "测试")
+        #expect(phone.co.undoToday() == 1)
+        #expect(await mac.co.recompute(reason: "测试") == 0)
+        #expect(try w.plan.plannedBlocks(on: today).first?.start == at(10))
+        let edits = SharedRecentEdits(store: FakeLeaseStore(w.editsBox), log: { _, _ in })
+        #expect(edits.active(now: at(13, 29))[b.id] != nil)
+        #expect(edits.active(now: at(13, 31)).isEmpty, "过期条目不再生效")
+    }
+
+    /// KV 同步失败可见（只记一次，不刷屏）；本机冷却照常。
+    @Test func sharedEditsSyncFailureIsLoggedOnce() {
+        let box = SharedBox()
+        let store = FakeLeaseStore(box)
+        store.failSync = true
+        var lines: [(DevLog.Level, String)] = []
+        let edits = SharedRecentEdits(store: store, log: { lines.append(($0, $1)) })
+        edits.publish(ids: [UUID()], until: at(13, 30), now: at(13))
+        edits.publish(ids: [UUID()], until: at(13, 31), now: at(13, 1))
+        #expect(lines.filter { $0.0 == .warning }.count == 1)
+        #expect(edits.active(now: at(13, 2)).count == 2, "本机副本仍在")
+        // 坏数据：读不懂只记一次
+        box.data = Data("坏".utf8)
+        _ = edits.active(now: at(13)); _ = edits.active(now: at(13))
+        #expect(lines.filter { $0.0 == .warning }.count == 2)
+    }
+
+    /// 条数上限：只留最晚到期的 maxEntries 条。
+    @Test func sharedEditsCapSize() {
+        let edits = SharedRecentEdits(store: FakeLeaseStore(SharedBox()), log: { _, _ in })
+        for i in 0..<(SharedRecentEdits.maxEntries + 20) {
+            edits.publish(ids: [UUID()], until: at(14).addingTimeInterval(TimeInterval(i)), now: at(13))
+        }
+        #expect(edits.active(now: at(13)).count == SharedRecentEdits.maxEntries)
     }
 
     /// 应急总闸关 = 旧行为：谁都能写，不碰共享存储。

@@ -20,6 +20,8 @@
 //  W22 写权租约（TimelineWriteLease）：两台设备都跑协调器，但**自动调整**（活动预报 / 顺延 / 启动补结算）只由持有写权的设备写；
 //  另一台照算（软标等派生态照常更新、用于显示），不写真相。你的动作（一键撤、收尾盖章硬执行、手改冷却登记）不经此闸。
 //  不接 writeLease（nil）= 永远可写，与改动前逐字等价（单测默认如此）。
+//  W22b：手改冷却（一键撤 / 日历手改回流 / 批准的挪块，全部经 noteManualEdits）同时发布到 iCloud KV（SharedRecentEdits），
+//  重算时与本机冷却合并——在另一台设备上动过的块，持有写权的设备 30 分钟内也不挪它。不写图钉。
 //
 
 import Foundation
@@ -72,6 +74,8 @@ final class TimelineCoordinator {
     private var rerunReason: String?
     /// W22：写权租约。nil = 不分写权（单测 / 旧行为）。
     var writeLease: TimelineWriteLease?
+    /// W22b：跨设备手改冷却（iCloud KV）。nil = 只有本机冷却（单测 / 旧行为）。
+    var sharedEdits: SharedRecentEdits?
     /// 启动补结算轮到本机时没有写权 → 记下，拿到写权的那一轮补跑（否则 Mac 常驻多日时永远轮不到）。
     private(set) var pendingBackstop = false
     /// 最近一轮因为没有写权而只算不写的调整数（观察窗 / 测试用）。
@@ -138,6 +142,8 @@ final class TimelineCoordinator {
     func noteManualEdits(ids: [UUID]) {
         let until = now().addingTimeInterval(TimeInterval(Self.manualHoldMinutes * 60))
         for id in ids { manualHolds[id] = until }
+        // W22b：同时发布给另一台设备——自动调整可能由它写（写权租约），它得知道这块刚被你动过
+        sharedEdits?.publish(ids: ids, until: until, now: now())
         SmokeLog.hit("手改冷却", "\(ids.count) 块进 30min 冷却")
     }
 
@@ -331,6 +337,8 @@ final class TimelineCoordinator {
         let prediction = progress?.activePrediction
         // 过期冷却清理
         manualHolds = manualHolds.filter { $0.value > now0 }
+        // W22b：并上另一台设备发布的手改冷却（你在那台上批准 / 改 / 撤销的块）
+        let holds = manualHolds.merging(sharedEdits?.active(now: now0) ?? [:]) { max($0, $1) }
 
         let workEnd = PinSchedule.workEnd(forLabel: today)
             .addingTimeInterval(TimeInterval(WorkHoursSettings.graceMinutes * 60))
@@ -344,7 +352,7 @@ final class TimelineCoordinator {
         let links = external.isEmpty ? [:] : ExternalEventLinker.links(blocks: blocks, events: external)
         let modules = candidates.map { b -> FluidModule in
             // 钉死：手改冷却（D12）/ 图钉（Q6，你亲手放的位置）/ 关联了你的日历事件（Q4，同一件事钉在原位）
-            let held = manualHolds[b.id] != nil || b.isPinned(at: now0) || links[b.id] != nil
+            let held = holds[b.id] != nil || b.isPinned(at: now0) || links[b.id] != nil
             let dur = b.end.timeIntervalSince(b.start)
             let calibrated = (b.isFixed || b.isAnchor || held)
                 ? nil : dur * DurationCalibration.defaultMultiplier

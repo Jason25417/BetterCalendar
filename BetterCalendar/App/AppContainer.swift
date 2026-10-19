@@ -455,6 +455,8 @@ final class AppContainer {
                 return (execution.active != nil || !execution.background.isEmpty, execution.activePrediction?.end)
             }
             timeline.writeLease = lease
+            // W22b：手改冷却跨设备（同一 KV 存储的另一个键）
+            timeline.sharedEdits = SharedRecentEdits(store: ICloudKVWriteLeaseStore(key: SharedRecentEdits.key))
             TimelineWriteLease.sharedForDev = lease
         }
         // P4 Q4：你的日历事件作为「已占用」参与排布（只读；按设置挑日历，默认全部）。读失败 = 不看（记日志）

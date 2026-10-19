@@ -207,7 +207,8 @@ nonisolated enum WriteLeasePolicy {
 /// 跨设备共享的一小块数据（生产 = iCloud KV；测试 = 内存假存储）。
 protocol WriteLeaseStoring: AnyObject {
     func load() -> Data?
-    func save(_ data: Data)
+    /// 返回 false = 已存本机但这次没能交给 iCloud（KV synchronize 失败）。
+    @discardableResult func save(_ data: Data) -> Bool
     /// 另一台设备改了它（KV 推送）→ 回调（主线程）。
     var onExternalChange: (() -> Void)? { get set }
 }
@@ -215,22 +216,25 @@ protocol WriteLeaseStoring: AnyObject {
 final class ICloudKVWriteLeaseStore: WriteLeaseStoring {
     static let key = "timeline.writeLease.v1"
     private let kv = NSUbiquitousKeyValueStore.default
+    /// 同一个 KV 存储里的一个键（写权租约 / W22b 跨设备手改冷却共用这个实现）。
+    let key: String
     var onExternalChange: (() -> Void)?
 
-    init() {
+    init(key: String = ICloudKVWriteLeaseStore.key) {
+        self.key = key
         NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: kv, queue: .main) { [weak self] note in
             let changed = note.userInfo?[NSUbiquitousKeyValueStoreChangedKeysKey] as? [String]
-            guard changed?.contains(Self.key) ?? true else { return }
+            guard let self, changed?.contains(self.key) ?? true else { return }
             Task { @MainActor [weak self] in self?.onExternalChange?() }
         }
     }
 
-    func load() -> Data? { kv.data(forKey: Self.key) }
-    func save(_ data: Data) {
-        kv.set(data, forKey: Self.key)
-        kv.synchronize()
+    func load() -> Data? { kv.data(forKey: key) }
+    @discardableResult func save(_ data: Data) -> Bool {
+        kv.set(data, forKey: key)
+        return kv.synchronize()
     }
 }
 
@@ -262,6 +266,7 @@ final class TimelineWriteLease {
     /// 最近一次判定：本机能不能写（状态行 / 协调器备注用）。
     private(set) var lastMayWrite = true
     private(set) var lastChangeNote = "（还没有判定过）"
+    private var syncFailureLogged = false
     private var observedKey: String?
     private var observedAt: Date?
 
@@ -344,7 +349,12 @@ final class TimelineWriteLease {
                                            timing: t.running, timingUntil: t.until, foreground: isForeground)
         let out = WriteLeasePolicy.decide(current: fresh, observedAt: observedAt, local: local, trigger: trigger, now: now())
         if let next = out.write, let data = try? JSONEncoder().encode(next) {
-            store.save(data)
+            if store.save(data) {
+                syncFailureLogged = false
+            } else if !syncFailureLogged {   // 只记第一次（没登录 iCloud 时每次续约都会失败，别刷屏）；恢复后再失败会再记
+                syncFailureLogged = true
+                log(.warning, "写权租约没能同步到 iCloud（KV synchronize 失败）——另一台设备暂时看不到，下次续约再试")
+            }
             current = next
             noteObserved(next)
         }
