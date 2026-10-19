@@ -303,7 +303,7 @@ private func shapes(_ c: SimulatedEventKitCalendar, _ kind: PlanCalendarKind) ->
         let clues = try #require(payload["clues"] as? [String: Any])
         #expect(clues["detectedBy"] as? String == "测试 iPhone" && clues["relayed"] as? Bool == true)
         #expect((payload["deletions"] as? [[String: Any]])?.first?["handled"] as? String == "movedToTodo")
-        #expect((payload["deletions"] as? [[String: Any]])?.first?["logicalDay"] as? String == DayContext.dayKey(at(21, 0)))
+        #expect((payload["deletions"] as? [[String: Any]])?.first?["logicalDay"] as? String == DayContext.dayKey(at(21, 9)))   // 块在 21 日 09:00 → 逻辑日 21 日
         // 再来一轮（又一次 CloudKit 导入）：不重复发
         #expect(r.relay.relay { emitted.append($0); return true } == 0)
         #expect(emitted.count == 1)
