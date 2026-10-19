@@ -59,11 +59,16 @@ nonisolated struct AgentBridgeIO: Sendable {
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    func writeMessageResult(_ m: AgentMessage) throws {
+    /// 一条主动消息的结果（桥接 results/messages/ 与 W20 内置智能体 read_messages 共用同一份形状）。
+    static func messageResultObject(_ m: AgentMessage) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        let object: [String: Any] = ["id": m.id.uuidString, "title": m.title, "delivery": m.delivery.rawValue,
-                                     "suppressReason": m.suppressReason ?? NSNull(), "reaction": m.reaction?.rawValue ?? NSNull(),
-                                     "reactedAt": m.reactedAt.map { iso.string(from: $0) } ?? NSNull(), "createdAt": iso.string(from: m.createdAt)]
+        return ["id": m.id.uuidString, "title": m.title, "delivery": m.delivery.rawValue,
+                "suppressReason": m.suppressReason ?? NSNull(), "reaction": m.reaction?.rawValue ?? NSNull(),
+                "reactedAt": m.reactedAt.map { iso.string(from: $0) } ?? NSNull(), "createdAt": iso.string(from: m.createdAt)]
+    }
+
+    func writeMessageResult(_ m: AgentMessage) throws {
+        let object = Self.messageResultObject(m)
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
         let relative = "results/messages/\(m.id.uuidString).json"
         if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
@@ -112,6 +117,14 @@ nonisolated struct AgentBridgeIO: Sendable {
     /// 只在内容变化时重写，避免无谓的文件抖动。
     /// W10：kind/changes = 你选中（或默认主）方案的；另附全部方案、你回的一句话（state = replied）、越级理由、代你决定的规则。
     func writeResult(_ p: Proposal, at now: Date) throws {
+        let object = Self.resultObject(p, at: now)
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        let relative = "results/\(p.id.uuidString).json"
+        if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
+    }
+
+    /// 一份提案的最新状态（桥接 results/<id>.json 与 W20 内置智能体 read_proposals 共用同一份形状）。
+    static func resultObject(_ p: Proposal, at now: Date) -> [String: Any] {
         let iso = ISO8601DateFormatter()
         var object: [String: Any] = ["id": p.id.uuidString, "title": p.title, "state": p.effectiveState(at: now).rawValue,
                                      "kind": p.executedAction.kind, "changes": Self.changesJSON(p.chosen.changes),
@@ -149,9 +162,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         if let stamp = p.preauth {
             object["preauth"] = ["ruleId": stamp.ruleId.uuidString, "effect": stamp.effect.rawValue, "rule": stamp.ruleLabel]
         }
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
-        let relative = "results/\(p.id.uuidString).json"
-        if (try? Data(contentsOf: root.appendingPathComponent(relative))) != data { try writeAtomic(data, to: relative) }
+        return object
     }
 
     /// 智能体提案文件 → 草稿。严格校验：种类与字段都必须认识，多一个不认识的键也拒绝；不认识的种类一律拒绝。
@@ -596,6 +607,11 @@ nonisolated struct AgentBridgeIO: Sendable {
     var activityMirror: ((AgentBridgeIO) async -> Void)?
     /// W21：功能使用汇总镜像（bridge/usage.json，开关关着时组装点不写）；失败由它自己记 DevLog，不打断同步。
     var usageMirror: ((AgentBridgeIO) -> Void)?
+    /// W20：只有「当前智能体 = Claude Code」时桥接才是通道（产品原则 9：没接通的实现没有任何通道）。
+    /// false → 不同步、不写任何桥接文件、不写事件、哨兵也拿不到目录。组装点接到 AgentSelection。
+    var isActive: () -> Bool = { true }
+    /// W20：智能体共享记忆（属于角色、各实现共用）：每轮写 bridge/shared-memory.md，导入 Claude Code 写的 shared-memory.update.json。
+    var sharedMemory: AgentSharedMemoryStore?
     /// 同步互斥：推送唤醒与定时轮询可能撞在一起；进行中再来的请求合并成「做完再跑一轮」，避免重复转交。
     private var syncing = false
     private var resyncRequested = false
@@ -635,7 +651,7 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 每 20 秒同步一次（测试环境不要启动）。
     func start(every seconds: Double = 20) {
-        guard loop == nil else { return }
+        guard loop == nil, isActive() else { return }
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -645,8 +661,13 @@ nonisolated struct AgentBridgeIO: Sendable {
         }
     }
 
+    /// W20：切到别的智能体时停掉轮询（没接通就不轮询）。
+    func stop() {
+        loop?.cancel(); loop = nil
+    }
+
     func sync() async {
-        guard let url = resolveFolder() else { return }
+        guard isActive(), let url = resolveFolder() else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         // W17：已连的目录后来被标成别的通道（或连错）→ 不同步、醒目报错（同一原因只记一次日志，不每 20 秒刷屏）。
@@ -660,6 +681,7 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 一轮同步（可直接用临时目录测试）。
     func sync(io: AgentBridgeIO) async {
+        guard isActive() else { return }
         if syncing { resyncRequested = true; return }
         syncing = true; defer { syncing = false }
         repeat { resyncRequested = false; await syncOnce(io: io) } while resyncRequested
@@ -669,6 +691,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         do {
             try io.prepare()
             try io.writeContext(await contextProvider())
+            if let sharedMemory { syncSharedMemory(io: io, store: sharedMemory) }
             let files = try io.pendingProposalFiles()
             if !files.isEmpty { await center.refresh() }
             for file in files {
@@ -714,6 +737,25 @@ nonisolated struct AgentBridgeIO: Sendable {
         refreshRuntime(io: io)
     }
 
+    /// W20：共享记忆——先导入 Claude Code 的整份改写（坏的 / 超上限的移到 shared-memory.rejected.json 并写原因），再写只读快照。
+    private func syncSharedMemory(io: AgentBridgeIO, store: AgentSharedMemoryStore) {
+        do {
+            if let text = try io.pendingSharedMemoryUpdate() {
+                do {
+                    try store.replace(text, by: "\(AgentKind.claudeCode.shortLabel)（\(ProposalDevice.label)）")
+                    try io.finishSharedMemoryUpdate(rejected: nil)
+                } catch {
+                    try io.finishSharedMemoryUpdate(rejected: error.localizedDescription)
+                    report("拒绝导入共享记忆更新", error)
+                }
+            }
+        } catch {
+            try? io.finishSharedMemoryUpdate(rejected: error.localizedDescription)
+            report("拒绝导入共享记忆更新", error)
+        }
+        do { try io.writeSharedMemory(store.memory) } catch { report("写共享记忆快照失败", error) }
+    }
+
     // MARK: 智能体运行时（SPEC §19 批次 11）
 
     /// 测试可注入时钟（健康判断：事件等待多久算调度器没在运行）。
@@ -749,14 +791,14 @@ nonisolated struct AgentBridgeIO: Sendable {
     /// 做完一件事等关键时刻：写事件唤醒智能体。未开启或未连接时什么都不做。
     /// 上下文收集要读 EventKit（async），所以写事件放进一个任务里跑；调用方保持同步签名。
     func emit(kind: String, summary: String, payload: [String: Any] = [:]) {
-        guard eventsEnabled(), connected else { return }
+        guard isActive(), eventsEnabled(), connected else { return }
         nonisolated(unsafe) let payload = payload
         Task { await emitNow(kind: kind, summary: summary, payload: payload) }
     }
 
     /// emit 的异步本体：先刷新快照再写事件（调度器被事件唤醒时，智能体读到的就是此刻的上下文）。
     func emitNow(kind: String, summary: String, payload: [String: Any] = [:]) async {
-        guard eventsEnabled(), let url = resolveFolder() else { return }
+        guard isActive(), eventsEnabled(), let url = resolveFolder() else { return }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         do {
@@ -775,6 +817,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     /// 不受「关键时刻唤醒」开关管——哨兵有自己的开关。refreshContext = 先刷新 context.json（唤醒前用）。
     /// 没连接或出错 → 抛出，由调用方写进自己的状态（失败可见）。
     func performInFolder(refreshContext: Bool, _ body: (AgentBridgeIO) throws -> Void) async throws {
+        guard isActive() else { throw AgentBridgeError.invalid("当前智能体不是 Claude Code：桥接目录不是通道") }
         guard let url = resolveFolder() else { throw AgentBridgeError.invalid("桥接目录未连接") }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }

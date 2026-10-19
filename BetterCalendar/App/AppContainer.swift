@@ -52,6 +52,8 @@ final class AppContainer {
     let agentChat: AgentChatCenter             // SPEC §19 A1/F1 跟智能体说话（iCloud BCChatMessage；Mac 桥接转交）
     let alertPush: ProposalAlertPushControl?   // SPEC §19 B5 可见推送开关（实验；W8 起没手动关过就默认开；测试环境为 nil）
     let agentBridge: AgentBridge?              // SPEC §19 P2：Mac 上与 BetterCalendar 智能体的桥接目录（iOS/测试为 nil）
+    /// W20 智能体适配器：当前接通哪个实现（Claude Code 经桥接 / 内置 DeepSeek），事件只送给它；没接通的没有任何通道。
+    let agentHub: AgentHub
     /// P4.1：另一台设备先发现的日历删除 → 转交给智能体（只 Mac 有；iOS/测试为 nil）
     private(set) var deletionRelay: CalendarDeletionRelay?
     let activity: ActivityRecording            // SPEC §19 W13：设备活动记录（实验，默认开；W14 哨兵读 activity.log）
@@ -345,13 +347,9 @@ final class AppContainer {
         let activity = ActivityRecording(log: FileActivityLog(root: activityRoot), deviceId: FocusFollow.deviceID)
         self.activity = activity
         ActivityRecording.current = activity
-        #if os(macOS)
-        if TestHost.isActive {
-            self.agentBridge = nil
-            self.sentinel = nil
-        } else {
-            // SPEC §19 A2：智能体看到的一天（全部只读；日记默认不给，面板开关允许后才附）。
-            let context = AgentContextGatherer(
+        // SPEC §19 A2：智能体看到的一天（全部只读；日记默认不给，面板开关允许后才附）。
+        // W20：两端都建——内置智能体在 iPhone 上也读同一份快照（Claude Code 经 Mac 桥接的 context.json 也是它）。
+        let context = AgentContextGatherer(
                 planStore: planStore, actualStore: planStore, longTasks: longTasks, calendarStore: calendarStore,
                 journalStore: journalStore, reminderStore: reminderStore,
                 running: { [weak execution] in
@@ -364,14 +362,40 @@ final class AppContainer {
                 actionTargets: { [weak longTasks, weak execution] in
                     AgentBridgeContext.actionTargets(longTasks: longTasks, timer: execution?.proposalTimerState)
                 })
-            // W13：最近设备活动摘要进 context.json；日文件每轮同步镜像到 bridge/activity/。
-            context.activitySummary = { [weak activity] now in await activity?.contextSummary(now: now) }
-            // W21：功能使用摘要进 context.json（开关关着只写一句「未开启」）；汇总全表镜像到 bridge/usage.json（开着才写）。
-            context.featureUsageSummary = { now in
-                FeatureUsageExport.contextSection(FeatureUsageReporter.shared.report(now: now), enabled: FeatureUsageSettings.shareWithAgent)
-            }
+        // W13：最近设备活动摘要进 context.json；日文件每轮同步镜像到 bridge/activity/。
+        context.activitySummary = { [weak activity] now in await activity?.contextSummary(now: now) }
+        // W21：功能使用摘要进 context.json（开关关着只写一句「未开启」）；汇总全表镜像到 bridge/usage.json（开着才写）。
+        context.featureUsageSummary = { now in
+            FeatureUsageExport.contextSection(FeatureUsageReporter.shared.report(now: now), enabled: FeatureUsageSettings.shareWithAgent)
+        }
+        // W20：智能体适配器 + 内置智能体（DeepSeek，key 在钥匙串 deepseek-api-key，iCloud 钥匙串同步）+ 角色共享记忆。
+        // 测试 host：不读真快照、不接网络（单测各自注入假模型）；当前智能体照常读设置（默认 Claude Code）。
+        let agentSelection = AgentSelection()
+        let agentMemory = AgentSharedMemoryStore()
+        let builtinTools = BuiltinAgentToolbox(proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory,
+                                               deviceLabel: ProposalDevice.label,
+                                               context: TestHost.isActive ? { [:] } : { await context.snapshot() })
+        let deepSeek = DeepSeekClient(apiKey: { TestHost.isActive ? nil : KeychainStore.loadAPIKey(account: DeepSeekClient.keychainAccount) })
+        let builtinAgent = BuiltinAgentRuntime(model: deepSeek, tools: builtinTools, usage: BuiltinAgentUsageStore())
+        builtinAgent.deviceLabel = ProposalDevice.label
+        builtinAgent.autoStart = !TestHost.isActive
+        #if os(iOS)
+        builtinAgent.beginBackgroundWork = { name in BackgroundWork.begin(name) }
+        #endif
+        let hubLocal: AgentHub
+        #if os(macOS)
+        if TestHost.isActive {
+            self.agentBridge = nil
+            self.sentinel = nil
+            hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: false)
+        } else {
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
+            // W20：桥接只在「当前智能体 = Claude Code」时是通道；共享记忆经桥接给 Claude Code 读写。
+            bridge.isActive = { [weak agentSelection] in agentSelection?.kind == .claudeCode }
+            bridge.sharedMemory = agentMemory
+            let hub = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: bridge, isPhone: false)
+            hubLocal = hub
             bridge.activityMirror = { [weak activity] io in await activity?.mirror(to: io) }
             bridge.usageMirror = { io in FeatureUsageBridgeMirror.shared.mirror(to: io) }
             activity.startMac()   // 常驻记录（App 运行即记，含只剩菜单栏时）；开机自启实验期默认开
@@ -382,11 +406,15 @@ final class AppContainer {
             }
             let wake = ProposalWake.onPush
             ProposalWake.onPush = { [weak bridge] in await wake?(); await bridge?.sync() }
-            bridge.start()
+            bridge.start()   // W20：当前智能体不是 Claude Code 时 start 什么都不做（不轮询）
             // SPEC §19 C1 W14 哨兵：高频看设备活动 / 计划 / 计时，判断要不要叫醒智能体（只写 sentinel_wake 事件，从不直接通知你）。
             // 判断器：首选 TypeSafe Jev（OpenRouter）→ OpenAI Decisions → Claude Haiku → 规则兜底（Jason 10-18 同意把摘要发给 OpenRouter / OpenAI）。
+            // W20：哨兵的通道跟着当前智能体走（Claude Code = 桥接目录；内置 = 进程内送达，见 AgentSentinelChannel）。
+            let sentinelRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("BetterCalendar/BuiltinAgent/sentinel", isDirectory: true)   // 沙盒容器内：日用 / Dev 各自一份
             let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
-                                          log: FileSentinelDecisionLog(), bridge: bridge,
+                                          log: FileSentinelDecisionLog(),
+                                          bridge: AgentSentinelChannel(hub: hub, bridge: bridge, localRoot: sentinelRoot),
                                           activity: activity.log) { await context.gather(now: $0) }
             sentinel.recentAgentWakes = { [weak bridge] in
                 (bridge?.runtime?.runs ?? []).filter { ($0.attempt ?? 0) >= 1 }
@@ -403,21 +431,43 @@ final class AppContainer {
             // P4.1：iPhone 先发现的删除——回执随 iCloud 到 Mac，中继补发一次（按块 id 去重，Mac 自己先发现的不重发）
             let relay = CalendarDeletionRelay(source: planStore)
             self.deletionRelay = relay
-            reconcile.onUserDeleted = { [weak bridge, weak relay] deletions in
-                bridge?.emit(kind: "calendar_user_deleted",
-                             summary: AgentCalendarEvents.deletionSummary(deletions),
-                             payload: AgentCalendarEvents.deletionPayload(deletions))
+            reconcile.onUserDeleted = { [weak hub, weak relay] deletions in
+                hub?.emit(kind: "calendar_user_deleted",
+                          summary: AgentCalendarEvents.deletionSummary(deletions),
+                          payload: AgentCalendarEvents.deletionPayload(deletions))
                 relay?.markRelayed(deletions.map(\.block.id))
-            }
-            execution.onBlockFinished = { [weak bridge] title, seconds in
-                bridge?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
-                             payload: ["title": title, "seconds": seconds])
             }
         }
         #else
         self.agentBridge = nil
+        hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: true)
+        // W20：iPhone 上只有内置智能体有通道（Claude Code 的删块事件仍由 Mac 的中继补发，见下方 deletionRelay）。
+        reconcile.onUserDeleted = { [weak hub = hubLocal] deletions in
+            hub?.emit(kind: "calendar_user_deleted", summary: AgentCalendarEvents.deletionSummary(deletions),
+                      payload: AgentCalendarEvents.deletionPayload(deletions))
+        }
         if !TestHost.isActive { activity.startPhone() }   // iPhone：回前台传队列 + 回填运动/健康
         #endif
+        let agentHub = hubLocal
+        self.agentHub = agentHub
+        // W20：做完一件事 → 当前智能体（两端；Claude Code 只在 Mac 有通道）。
+        execution.onBlockFinished = { [weak agentHub] title, seconds in
+            agentHub?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",
+                      payload: ["title": title, "seconds": seconds])
+        }
+        agentHub.eveningFacts = { [weak execution] in
+            AgentChatBridgeStep.eveningFacts(done: execution?.done.map { ($0.title, $0.start, $0.end) } ?? [])
+        }
+        agentChat.onUserMessageStored = { [weak agentHub] m in agentHub?.userMessageStored(m) }
+        proposals.didRefresh = { [weak agentHub] in agentHub?.proposalsRefreshed() }
+        agentChat.activeAgent = { [weak agentSelection] in agentSelection?.kind ?? .claudeCode }
+        _ = NotificationCenter.default.addObserver(forName: SettingsSync.didSyncRemotely, object: nil, queue: .main) { [weak agentSelection, weak agentMemory] _ in
+            MainActor.assumeIsolated { agentSelection?.reload(); agentMemory?.reload() }   // 另一台设备切了智能体 / 改了共享记忆
+        }
+        if !TestHost.isActive {
+            agentHub.apply(agentSelection.kind)
+            agentHub.startTicking()
+        }
         #if DEBUG
         // 开发期：带 BC_DEV_SEED_ACTIVITY=1 启动 → 往 iCloud zone BCActivity 传一条测试活动记录，
         // 用于在 CloudKit Development 建出 BCActivityEvent（字段 payload/at/kind/deviceId/platform/appName），再部署到 Production。
@@ -489,7 +539,7 @@ final class AppContainer {
             longTasks?.reload(); execution?.reloadImportedData()
             // P4.1：另一台设备记下的日历删除 → 转交智能体（桥接没接通 / 事件关着就留着下次再试）
             deletionRelay?.relay { ds in
-                guard let bridge = agentBridge, bridge.eventsEnabled(), bridge.connected else { return false }
+                guard let bridge = agentBridge, bridge.isActive(), bridge.eventsEnabled(), bridge.connected else { return false }
                 bridge.emit(kind: "calendar_user_deleted", summary: AgentCalendarEvents.deletionSummary(ds),
                             payload: AgentCalendarEvents.deletionPayload(ds))
                 return true
@@ -538,7 +588,8 @@ final class AppContainer {
                  timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
                  routines: RoutineTemplateStore.shared,  // K1：例行模板物化
                  proposals: proposals, agentMessages: agentMessages, alertPush: alertPush,
-                 agentChat: agentChat)   // W19：今天页底部「跟智能体说一句」
+                 agentChat: agentChat,   // W19：今天页底部「跟智能体说一句」
+                 agentHub: agentHub)     // W20：设置里的「当前智能体」
     }
 
     var journalDeps: JournalDeps {

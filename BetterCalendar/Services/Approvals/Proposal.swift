@@ -382,6 +382,10 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     /// 你调过数值时：套回你选的值、重新校验过的动作与「改动前 → 改动后」（执行的就是它）。没调 = nil，执行原方案。
     var tunedAction: ProposalAction? = nil
     var tunedChanges: [ProposalChange]? = nil
+    // —— W20（Optional：旧记录照常解码；只存在 JSON 载荷里，不改 CloudKit schema）——
+    /// 发起者是智能体时，是哪种实现提的（AgentKind.rawValue：claudeCode / builtin）；nil = 旧记录或非智能体（按 Claude Code 理解）。
+    /// 只用于追溯（留底、面板「发起」行）；Jason 2026-10-19：各实现是同一个 BetterCalendar 智能体，预授权规则不按实现分。
+    var agentKey: String? = nil
 
     /// 备选方案上限（卡片列得下、你看得过来；通知按钮另有系统限制）。
     static let maxAlternatives = 3
@@ -512,6 +516,8 @@ nonisolated struct ProposalDraft: Sendable {
     var alternatives: [ProposalAlternative] = []
     /// W11：主方案上的可调参数（默认值由 prepare 依据主方案动作算出）。备选方案的参数挂在各自的 ProposalAlternative 上。
     var parameters: [ProposalParameter] = []
+    /// W20：智能体的哪种实现提的（见 Proposal.agentKey）；nil = 不是智能体 / 经桥接的 Claude Code。
+    var agentKey: String? = nil
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40
