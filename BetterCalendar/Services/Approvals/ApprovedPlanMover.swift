@@ -103,6 +103,8 @@ struct PlanEditApplied {
     weak var progress: (any ExecutionProgressReading)?
     /// W18：你的日历事件（只读，组装点按「排布时当作已占用的日历」设置过滤）。nil = 没接（测试）；读失败 = 这次不校验、明说。
     var occupiedEvents: ((DateInterval) async throws -> [SystemCalendarEvent])?
+    /// W26b：早晚通知重排（改动涉及已排通知的那一天 → 按新计划重排）。nil = 不管通知（旧测试）。
+    var reminderRefresher: DailyReminderRefresher?
     /// W18 开关（组装点 / 测试可换）。
     var enabledFlag: () -> Bool = { PlanEditingSettings.enabled }
     private let now: () -> Date
@@ -282,8 +284,9 @@ struct PlanEditApplied {
         let touched = resolved.compactMap { $0.after?.id }
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
                                         userInfo: ["updatedIDs": touched, "source": Self.notificationSource])
-        guard let projection else { return "" }
         let days = Set(resolved.flatMap { [$0.before?.start, $0.after?.start].compactMap { $0 }.map(DayContext.logicalStartOfDay) })
+        await reminderRefresher?.refresh(affecting: days)
+        guard let projection else { return "" }
         var failures: [String] = []
         for label in days.sorted() {
             do { try await projection.project(label: label) } catch {

@@ -328,6 +328,8 @@ final class HomeViewModel {
                 errorText = "已挪好；\(PlanEditRules.dayName(label)) 的日历画面这次没刷新：\(error.localizedDescription)"
             }
         }
+        // 早晚通知若正属于这两天之一：按新计划重排（首块前 / 末块后的时刻可能变了）
+        await dailyReminderRefresher().refresh(affecting: [from, to])
         NotificationCenter.default.post(name: TimelineCoordinator.planEdited, object: nil)
         if let page = pageDay, page == from || page == to {
             loadConfirmedPlan()
@@ -793,6 +795,8 @@ final class HomeViewModel {
             freshBase = nil
             loadedBase = blocks         // W19：保存后的这一版 = 你眼前的那一版（下一次改动的图钉参照）
             persistDraft()
+            // W26b：记住已排的早晚通知属于哪一天（跨天挪不经过这里，改动涉及这一天时据此重排，见 DailyReminderRefresher）
+            DailyReminderDay.record(targetLabel, in: reminderDefaults)
             // 松散日：静音早晚提醒（传 nil → 清掉旧的、不排新的）——退场姿态之一，不催不算账
             if looseDays?.isLoose(targetDay) ?? false {
                 await notifier.scheduleDailyReminders(morning: nil, evening: nil, summary: "")
@@ -802,12 +806,11 @@ final class HomeViewModel {
                 await notifier.requestAuthorizationIfNeeded()
                 // E5d：早通知带待办区露脸计数——排明天时今天的溢出已收池（收工盖章在前），
                 // 明早的「昨天」正是此刻的池里溢出物
-                let pooled = longTaskStore?.todoItems()
-                    .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }
-                    .count ?? 0
+                // W26b：正文带上「给明天的一句话」（原来重新保存会把日记里并进去的那一行冲掉）
                 await notifier.scheduleDailyReminders(morning: times.morning, evening: times.evening,
-                                                      summary: Self.morningSummary(for: sorted,
-                                                                                   pooledFromYesterday: pooled))
+                                                      summary: DailyReminderContent.morningBody(
+                                                        summary: Self.morningSummary(for: sorted, pooledFromYesterday: pooledFromYesterday()),
+                                                        note: TomorrowNote.note(for: targetLabel.addingTimeInterval(12 * 3600))))
             }
         } catch {
             errorText = "写入失败：\(error.localizedDescription)"
@@ -823,13 +826,25 @@ final class HomeViewModel {
     /// 落点=第一件任务（前向：指向下一步动作）。纯函数、可单测。
     /// pooledFromYesterday（E5d）：待办区露脸计数——中性事实一行，不写「没做完」。
     static func morningSummary(for blocks: [EditableBlock], pooledFromYesterday: Int = 0) -> String {
-        let tasks = blocks.filter { !$0.isAnchor }.sorted { $0.start < $1.start }
-        guard !tasks.isEmpty else { return "今天安排好了，开始吧。" }
-        var parts = ["今天 \(tasks.count) 件"]
-        if let mit = tasks.first(where: { $0.priority == .important }) { parts.append("尽早：\(mit.title)") }
-        if let first = tasks.first { parts.append("第一件：「\(first.title)」——准备好了就开始") }
-        if pooledFromYesterday > 0 { parts.append("待办区有 \(pooledFromYesterday) 件昨天留下的") }
-        return parts.joined(separator: " · ")
+        DailyReminderContent.morningSummary(for: blocks.map(\.scheduled), pooledFromYesterday: pooledFromYesterday)
+    }
+
+    /// E5d：待办区里「昨天留下的」件数（早通知露脸计数）。
+    private func pooledFromYesterday() -> Int {
+        longTaskStore?.todoItems()
+            .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }
+            .count ?? 0
+    }
+
+    /// 早晚通知「属于哪一天」的存处（测试换独立 suite，不碰标准存储）。
+    var reminderDefaults: UserDefaults = DailyReminderDay.defaultStore
+
+    /// 早晚通知的重排器（跨天挪后用；与 confirm 同一套时刻 / 正文口径）。
+    func dailyReminderRefresher() -> DailyReminderRefresher {
+        DailyReminderRefresher(plans: planStore, notifier: notifier,
+                               isLoose: { [looseDays] in looseDays?.isLoose($0) ?? false },
+                               pooledFromYesterday: { [weak self] in self?.pooledFromYesterday() ?? 0 },
+                               defaults: reminderDefaults, now: now)
     }
 
     /// 把时刻重锚到 day 所在日历日的逻辑日：时分不变；凌晨时分（0–4 点）落**次日**日历日
