@@ -8,6 +8,8 @@ final class DataMaintenance {
     static let shared = DataMaintenance()
     private(set) var message = "尚未导出或校验"
     private(set) var latestArchive: URL?
+    /// 最近一次自动快照失败的原因（成功后清空）；面板显示，DevLog 同时记错误。
+    private(set) var autoSnapshotIssue: String?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var snapshotTimer: Timer?
     var bridgeEnabled: Bool {
@@ -49,20 +51,30 @@ final class DataMaintenance {
     static let autoSnapshotKeep = 14
 
     /// Mac：最新一份自动快照超过 20 小时 → 导出一份完整档案（与「导出完整数据档案」同一份内容），再删掉第 15 份及更早的自动快照。
-    /// 失败（如有未保存编辑）→ DevLog 可见，下个小时再试。
+    /// 失败 → DevLog 错误（🐞 + 横幅可见）+ 面板「自动快照」行显示原因，下个小时再试。
     func autoSnapshotIfDue(now: Date = .now) {
         guard !TestHost.isActive else { return }
-        let folder = autoSnapshotDirectory
+        autoSnapshot(now: now, in: autoSnapshotDirectory)
+    }
+
+    /// 自动快照本体（测试直接调：可指定目录 / 容器）。返回新写的档案；没到期或失败返回 nil。
+    @discardableResult
+    func autoSnapshot(now: Date, in folder: URL, container: ModelContainer = SharedModelContainer.shared) -> URL? {
         let existing = Self.autoSnapshots(in: folder)
-        if let newest = existing.first, now.timeIntervalSince(newest.date) < Self.autoSnapshotInterval { return }
+        if let newest = existing.first, now.timeIntervalSince(newest.date) < Self.autoSnapshotInterval { return nil }
         do {
-            let url = try writeArchive(prefix: "auto", to: folder).url
-            DevLog.shared.info("数据档案", "已自动保存快照 \(url.lastPathComponent)（发版前保险，只存本机）")
+            let written = try writeArchive(prefix: "auto", to: folder, container: container)
+            autoSnapshotIssue = nil
+            let note = written.unsavedNote.map { "；" + $0 } ?? ""
+            DevLog.shared.info("数据档案", "已自动保存快照 \(written.url.lastPathComponent)（发版前保险，只存本机）\(note)")
             for old in Self.autoSnapshots(in: folder).dropFirst(Self.autoSnapshotKeep) {
                 try? FileManager.default.removeItem(at: old.url)
             }
+            return written.url
         } catch {
-            DevLog.shared.warn("数据档案", "自动快照没存成（下个小时再试）：\(error.localizedDescription)")
+            autoSnapshotIssue = "自动快照没存成（下个小时再试）：\(error.localizedDescription)"
+            DevLog.shared.error("数据档案", autoSnapshotIssue!)
+            return nil
         }
     }
 
@@ -75,17 +87,44 @@ final class DataMaintenance {
     }
 
     /// Explicit snapshots; existing archives are never rotated or overwritten automatically.
-    @discardableResult func exportArchive(prefix: String = "snapshot") throws -> URL {
-        let (url, count) = try writeArchive(prefix: prefix, to: directory)
-        latestArchive = url
-        message = "已导出 \(count) 条数据库记录（含照片本体）；尚未做恢复校验"
-        return url
+    /// 失败时：message 换成失败原因（面板按钮旁那一行）+ DevLog 错误，再抛给调用方——绝不静默。
+    @discardableResult
+    func exportArchive(prefix: String = "snapshot", to folder: URL? = nil,
+                       container: ModelContainer = SharedModelContainer.shared) throws -> URL {
+        do {
+            let written = try writeArchive(prefix: prefix, to: folder ?? directory, container: container)
+            latestArchive = written.url
+            let note = written.unsavedNote.map { "\n" + $0 } ?? ""
+            message = "已导出 \(written.count) 条数据库记录（含照片本体）到 \(written.url.lastPathComponent)；尚未做恢复校验\(note)"
+            DevLog.shared.info("数据档案", "已导出完整档案 \(written.url.lastPathComponent)（\(written.count) 条）")
+            return written.url
+        } catch {
+            message = "导出没成功：\(error.localizedDescription)"
+            DevLog.shared.error("数据档案", message)
+            throw error
+        }
     }
 
     /// 写一份完整档案到 folder（不改界面状态；手动导出与自动快照共用）。
-    private func writeArchive(prefix: String, to folder: URL) throws -> (url: URL, count: Int) {
-        let context = SharedModelContainer.shared.mainContext
-        guard !context.hasChanges else { throw DataArchiveError.invalid("请先保存当前编辑，再导出") }
+    ///
+    /// W19b 修复（0.69.1「点导出没反应」）：旧实现直接用 mainContext，且 `mainContext.hasChanges` 时直接拒绝
+    /// （「请先保存当前编辑，再导出」）。日用中 mainContext 几乎总有未落盘的改动（自动保存有间隔、计时/日志/
+    /// 编辑随时在改），于是导出几乎必然被拒——错误写进面板的一行附加文字，又没有 DevLog，等于静默失败。
+    /// 现在：① 先替主上下文落盘一次（和系统自动保存做的是同一件事）；落盘失败不再挡导出，原因写进 DevLog 与结果；
+    /// ② 从**新建的独立 ModelContext** 读磁盘上的已保存数据，跟界面正在编辑的对象互不干扰。
+    private func writeArchive(prefix: String, to folder: URL,
+                              container: ModelContainer = SharedModelContainer.shared) throws -> (url: URL, count: Int, unsavedNote: String?) {
+        var unsavedNote: String?
+        let main = container.mainContext
+        if main.hasChanges {
+            do { try main.save() }
+            catch {
+                unsavedNote = "有未保存的改动没进这份档案（替你保存时失败：\(error.localizedDescription)）"
+                DevLog.shared.error("数据档案", "导出前保存主上下文失败——这些改动可能一直没落盘：\(error.localizedDescription)")
+            }
+        }
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
         var archive = try DataArchiveStore.capture(context)
         // Keep caches/markers in a separate namespace, not mixed into historical facts.
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -124,7 +163,7 @@ final class DataMaintenance {
         let url = folder.appendingPathComponent("\(prefix)-\(UUID().uuidString).json")
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        return (url, archive.records.count)
+        return (url, archive.records.count, unsavedNote)
     }
 
     func validate(_ url: URL) throws {

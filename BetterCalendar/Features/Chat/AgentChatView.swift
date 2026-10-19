@@ -18,6 +18,15 @@ nonisolated struct AgentChatCard: Identifiable, Equatable {
     static func resolve(_ ids: [UUID], in proposals: [Proposal]) -> [AgentChatCard] {
         ids.map { id in AgentChatCard(id: id, proposal: proposals.first { $0.id == id }) }
     }
+
+    /// W19b（P1 单射）：气泡里这张卡怎么长。
+    /// 待确认的提案已置顶在页顶「等你拍板」——气泡里只留一行指路（点了滚到并高亮置顶卡），不再画第二张整卡；
+    /// 有了结论（离开置顶区）→ 气泡显示结果卡；还没同步到 → 同步中。
+    nonisolated enum Presentation: Equatable { case pointerToPinned, fullCard, syncing }
+    func presentation(pinnedIds: Set<UUID>) -> Presentation {
+        guard proposal != nil else { return .syncing }
+        return pinnedIds.contains(id) ? .pointerToPinned : .fullCard
+    }
 }
 
 struct AgentChatView: View {
@@ -28,6 +37,8 @@ struct AgentChatView: View {
     var focusId: UUID? = nil
     @State private var draft = ""
     @State private var visible = false
+    /// 从气泡「在顶部等你拍板」点过来要闪一下的置顶卡（短暂高亮后清空）。
+    @State private var flashPinnedId: UUID?
     @FocusState private var inputFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
 
@@ -112,21 +123,36 @@ struct AgentChatView: View {
                 Label("等你拍板（\(pending.count)）", systemImage: "checkmark.seal")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 16).padding(.top, 8)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(pending) { p in ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(pending) { p in
+                                ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId || p.id == flashPinnedId)
+                                    .id(Self.pinnedAnchor(p.id))
+                            }
+                        }
+                        .padding(.horizontal, 16).padding(.bottom, 8)
                     }
-                    .padding(.horizontal, 16).padding(.bottom, 8)
+                    // 小窗口也不把对话挤出屏幕：置顶区最多占一截，多了在里面滚
+                    .frame(maxHeight: 340)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: flashPinnedId) { _, id in
+                        if let id { withAnimation { proxy.scrollTo(Self.pinnedAnchor(id), anchor: .top) } }
+                    }
                 }
-                // 小窗口也不把对话挤出屏幕：置顶区最多占一截，多了在里面滚
-                .frame(maxHeight: 340)
-                .fixedSize(horizontal: false, vertical: true)
             }
             .background(Color.secondary.opacity(0.05))
             .accessibilityIdentifier("bc.chat.pinnedPending")
+            .task(id: flashPinnedId) {
+                guard flashPinnedId != nil else { return }
+                try? await Task.sleep(for: .seconds(1.6))
+                if !Task.isCancelled { withAnimation { flashPinnedId = nil } }
+            }
             Divider()
         }
     }
+
+    private static func pinnedAnchor(_ id: UUID) -> String { "pinned-" + id.uuidString }
 
     private var emptyHint: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -161,7 +187,8 @@ struct AgentChatView: View {
                 Text(m.text)
                     .textSelection(.enabled)
                     .padding(10).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
-                ForEach(AgentChatCard.resolve(m.proposalIds, in: proposals.proposals)) { card in proposalCard(card) }
+                let pinnedIds = Set(proposals.pending.map(\.id))   // 与置顶区同一份判定
+                ForEach(AgentChatCard.resolve(m.proposalIds, in: proposals.proposals)) { card in proposalCard(card, pinnedIds: pinnedIds) }
                 HStack(spacing: 6) {
                     Text(m.createdAt.formatted(date: .omitted, time: .shortened))
                     if m.delivery == .suppressed, let why = m.suppressReason { Text("· 没弹通知：\(why)") }
@@ -186,10 +213,25 @@ struct AgentChatView: View {
         }
     }
 
-    @ViewBuilder private func proposalCard(_ card: AgentChatCard) -> some View {
-        if let p = card.proposal {
-            ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId)   // W19：与顶部置顶卡同一张
-        } else {
+    @ViewBuilder private func proposalCard(_ card: AgentChatCard, pinnedIds: Set<UUID>) -> some View {
+        switch card.presentation(pinnedIds: pinnedIds) {
+        case .pointerToPinned:
+            // W19b：待确认时整卡只在顶部出现一次（P1）；这里一行指路，点了滚过去并闪一下
+            Button { flashPinnedId = card.id } label: {
+                Label("「\(card.proposal?.title ?? "这份提案")」在顶部等你拍板", systemImage: "arrow.up.circle")
+                    .font(.caption).lineLimit(1)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("bc.chat.pinnedPointer")
+        case .fullCard:
+            if let p = card.proposal {
+                ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId)   // 有结论：结果卡（与设置里同一张）
+            }
+        case .syncing:
             Label("提案同步中…（会自动刷新）", systemImage: "arrow.triangle.2.circlepath")
                 .font(.caption).foregroundStyle(.secondary)
                 .padding(10)

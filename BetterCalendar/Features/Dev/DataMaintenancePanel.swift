@@ -11,6 +11,7 @@ struct DataMaintenancePanel: View {
     @State private var focus = FocusSyncDiagnostics.shared
     @State private var syncReport: URL?
 
+    /// 三个子视图在 Form 的 Section 里各成一行（诊断 / 导出 / 修改入口），导出结果不会被大行吞掉。
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(monitor.storage).font(.callout)
@@ -45,32 +46,52 @@ struct DataMaintenancePanel: View {
             Text("测量只含最近 100 条状态回执，不含任务标题。表观延迟含两端时钟偏差；首次读到旧状态也不代表它刚刚传输。需对照两端报告，才能确认动作到达时间。")
                 .font(.caption).foregroundStyle(.secondary)
             if let issue = monitor.issue { Text("最近发现的问题：" + issue).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
-            HStack {
-                Button("检查账号并重读本机数据") {
-                    monitor.refreshNow()
-                    Task { await monitor.checkAccount() }
-                    Task { await FocusFollow.ensureSubscription() }
-                    Task { await FocusFollow.refreshAndApply(reason: "手动检查") }
-                }
-                Button("导出完整数据档案") {
-                    perform { _ = try maintenance.exportArchive() }
-                }
+            Button("检查账号并重读本机数据") {
+                monitor.refreshNow()
+                Task { await monitor.checkAccount() }
+                Task { await FocusFollow.ensureSubscription() }
+                Task { await FocusFollow.refreshAndApply(reason: "手动检查") }
             }
+        }
+        // W19b：导出单独一行，结果（成功/失败）就写在按钮下面那一行 message 里——
+        // 0.69.1 时失败文字是大面板末尾「新长出来的一行」，Jason 看不到，等于静默失败。
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button("选择档案做恢复校验") { importing = true }
+                Button("导出完整数据档案") {
+                    result = ""
+                    // 失败已由 exportArchive 写进下面的 message（橙色）+ DevLog 错误，这里不重复显示
+                    _ = try? maintenance.exportArchive()
+                }
+                .accessibilityIdentifier("bc.data.export")
                 if let url = maintenance.latestArchive {
                     ShareLink("分享档案", item: url)
                     Button("校验刚导出的档案") { perform { try maintenance.validate(url) } }
                 }
+                Button("选择档案做恢复校验") { importing = true }
             }
+            Text(maintenance.message)
+                .font(.caption).foregroundStyle(maintenance.message.hasPrefix("导出没成功") ? Color.orange : Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("bc.data.export.status")
+            #if os(macOS)
+            Text(maintenance.autoSnapshotIssue ?? "自动快照：每 20 小时存一份到 \(maintenance.autoSnapshotDirectory.path)（发版前保险，只存本机）")
+                .font(.caption).foregroundStyle(maintenance.autoSnapshotIssue == nil ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            #endif
+            if !result.isEmpty {
+                Text(result).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        VStack(alignment: .leading, spacing: 8) {
             Toggle("开发期：允许文件请求修改数据", isOn: $bridge)
                 .onChange(of: bridge) { _, v in maintenance.bridgeEnabled = v }
             if bridge {
                 Text("修改入口：\(maintenance.directory.path)/request.json\n只接受带原值的既有记录修改；每次写入前保存档案。")
                     .font(.caption).textSelection(.enabled)
             }
-            Text(maintenance.message).font(.caption).textSelection(.enabled)
-            if !result.isEmpty { Text(result).font(.caption).foregroundStyle(.orange) }
             Text("云同步由系统调度，后台无法保证固定秒数。恢复校验只操作隔离空库；不会覆盖日用数据。")
                 .font(.caption).foregroundStyle(.secondary)
         }

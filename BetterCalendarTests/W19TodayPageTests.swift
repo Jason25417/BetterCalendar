@@ -199,13 +199,14 @@ import AppKit
             ScheduledBlock(title: "健身", start: t(17), end: t(18)),
             ScheduledBlock(title: "读书", start: t(21), end: t(22)),
         ], on: today)
-        _ = await c.proposals.submit(ProposalDraft(
+        let shotProposal = await c.proposals.submit(ProposalDraft(
             origin: .agent, originLabel: "BetterCalendar 智能体", targetDeviceId: c.proposals.deviceId,
             title: "把「健身」挪到 18:30",
             changes: [ProposalChange(field: "开始时间", before: "17:00", after: "18:30")], reason: "下午组会可能拖堂",
             action: .experimentNoop(note: "截图"), experiment: true, lifetime: 3600))
         _ = await c.agentChat.send("明天上午帮我排三小时写论文")
-        _ = await c.agentChat.receiveAgent(AgentChatReplyDraft(id: UUID(), text: "好，明天 9:00–12:00 写论文，已经提了一个提案，等你批准。"))
+        _ = await c.agentChat.receiveAgent(AgentChatReplyDraft(id: UUID(), text: "好，明天 9:00–12:00 写论文，已经提了一个提案，等你批准。",
+                                                                proposalIds: shotProposal.map { [$0.id] } ?? []))   // W19b：气泡里应只剩一行指路
 
         let theme = ThemeSettings.current
         let pages: [(String, AnyView)] = [

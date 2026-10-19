@@ -505,12 +505,21 @@ struct HomeView: View {
             List {
                 ForEach(model.blocks) { item in
                     editableRow(item)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
                 }
                 .onMove { model.move($0, $1) }   // 拖动 = 按新位置自动填时间（保时长），保存后成为图钉
                 addTailRow
+                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
+            // W19b：去掉 List 默认的顶部留白与左右缩进（macOS inset 样式 / iOS insetGrouped 自带的 section 边距），
+            // 时间线第一行紧贴「今天的安排」标题、与上方卡片左对齐。行间距由行自己的 listRowInsets 给。
+            .listStyle(.plain)
+            .contentMargins(.vertical, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
-            .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 60, 480)))
+            .frame(height: max(120, min(CGFloat(model.blocks.count) * 84 + 44, 480)))
             .accessibilityIdentifier("bc.today.timeline")
         }
 
