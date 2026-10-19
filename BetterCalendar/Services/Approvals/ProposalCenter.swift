@@ -205,6 +205,7 @@ import UIKit
         proposal.primaryLabel = draft.primaryLabel
         proposal.alternatives = draft.alternatives.isEmpty ? nil : draft.alternatives
         proposal.parameters = draft.parameters.isEmpty ? nil : draft.parameters
+        proposal.agentKey = draft.agentKey   // W20：哪种实现提的（追溯用）
         // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
         // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
         let verdict = gate.verdict(for: proposal)
@@ -245,7 +246,11 @@ import UIKit
             if let pending = unreported[p.id] { await reportApplied(p, note: pending.note, undo: pending.undo) }   // 已做完：只补回报
             else { await execute(p) }
         }
+        didRefresh?()
     }
+
+    /// W20：每次成功刷新后（组装点接到当前智能体：内置智能体据此发 proposal_resolved）。
+    var didRefresh: (() -> Void)?
 
     // MARK: 决定（通知按钮 / App 内按钮）
 

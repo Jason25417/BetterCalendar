@@ -52,6 +52,7 @@ struct HomeDeps {
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
     var agentChat: AgentChatCenter? = nil      // W19：底部「跟智能体说一句」
+    var agentHub: AgentHub? = nil              // W20：设置里的「当前智能体」
 }
 
 /// W19「今天」页（S-v2 结构层决定，2026-10-19）：原「排日程」与「今天」合并成首页，两端同一套。
@@ -156,7 +157,7 @@ struct HomeView: View {
                 NavigationStack {
                     SettingsView(trash: deps.trash, nativeActions: deps.nativeActions,
                                  proposals: deps.proposals, agentMessages: deps.agentMessages, alertPush: deps.alertPush,
-                                 calendarStore: deps.calendarStore)
+                                 agentHub: deps.agentHub, calendarStore: deps.calendarStore)
                         .navigationTitle("设置")
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar {

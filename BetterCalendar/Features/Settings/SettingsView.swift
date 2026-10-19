@@ -22,6 +22,7 @@ struct SettingsView: View {
     var proposals: ProposalCenter? = nil
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
+    var agentHub: AgentHub? = nil    // W20：当前智能体（Claude Code / 内置）与内置智能体的 key、预算、用量
     var bridge: AgentBridge? = nil   // W19：Mac 的智能体桥接连接区随「审批记录与规则」搬进设置（iOS 为 nil）
     /// P4 Q4：列出你的日历（「排布时当作已占用的日历」）。只读。
     var calendarStore: CalendarReading? = nil
@@ -72,6 +73,14 @@ struct SettingsView: View {
             // 桥接与哨兵（Mac）这些低频设置，以及晚间复盘的时刻。两端同一套。
             if let proposals {
                 Section("智能体") {
+                    if let agentHub {
+                        NavigationLink {
+                            AgentSettingsView(hub: agentHub)
+                        } label: {
+                            LabeledContent { Text(agentHub.active.shortLabel) } label: { Label("当前智能体", systemImage: "person.crop.circle.badge.checkmark") }
+                        }
+                        .accessibilityIdentifier("bc.settings.agent")
+                    }
                     NavigationLink {
                         ProposalPanel(center: proposals, bridge: bridge, alertPush: alertPush, messages: agentMessages,
                                       showsPending: false)

@@ -39,7 +39,7 @@ struct BetterCalendarApp: App {
             NavigationStack {
                 SettingsView(trash: container.trash, nativeActions: container.nativeActions,
                              proposals: container.proposals, agentMessages: container.agentMessages,
-                             alertPush: container.alertPush, bridge: container.agentBridge,
+                             alertPush: container.alertPush, agentHub: container.agentHub, bridge: container.agentBridge,
                              calendarStore: container.calendarStore)
             }
             .environment(container.sentinel)   // SPEC §19 C1 W14 哨兵区块（在「审批记录与规则」里）
@@ -65,7 +65,7 @@ struct BetterCalendarApp: App {
         // 入口 = 系统「窗口」菜单。
         Window("BetterCalendar 智能体", id: AgentChatWindow.id) {
             NavigationStack {
-                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge,
+                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub,
                               focusId: container.router.proposalFocusId)
             }
             .environment(\.appTheme, ThemeSettings.current)
@@ -143,7 +143,7 @@ struct BetterCalendarApp: App {
                     .tag(AppRouter.Tab.schedule)
                     .tabItem { Label("今天", systemImage: "sun.max") }
                 NavigationStack {
-                    AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge,
+                    AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub,
                                   focusId: container.router.proposalFocusId)
                 }
                 .tag(AppRouter.Tab.chat)
@@ -189,6 +189,8 @@ struct BetterCalendarApp: App {
                     container.nativeActions.remote?.startPolling()
                     Task { await container.proposals.refresh() }
                     Task { await container.agentMessages.refresh() }
+                    // W20：内置智能体接通时，回前台补上没接手的你的消息 / 提案结论 / 晚间复盘（Claude Code 时什么都不做）
+                    if container.agentHub.active == .builtin { Task { await container.agentChat.refresh(); container.agentHub.pump() } }
                 }
                 container.proposals.isForeground = phase == .active
                 FocusFollow.setForeground(phase == .active)

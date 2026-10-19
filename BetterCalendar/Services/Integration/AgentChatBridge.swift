@@ -53,8 +53,16 @@ extension AgentBridgeIO {
 
     /// 最近 40 条对话（只在内容变化时重写）。卡片附提案最新状态，智能体不必再翻 results/。
     func writeChatHistory(_ messages: [AgentChatMessage], proposals: [Proposal], status: (AgentChatMessage) -> AgentChatUserStatus, at now: Date) throws {
+        let object = Self.chatHistoryObject(messages, proposals: proposals, status: status, at: now)
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        if (try? Data(contentsOf: root.appendingPathComponent("chat/history.json"))) != data { try writeAtomic(data, to: "chat/history.json") }
+    }
+
+    /// 最近 limit 条对话（桥接 chat/history.json 与 W20 内置智能体 read_chat 共用同一份形状）。
+    static func chatHistoryObject(_ messages: [AgentChatMessage], proposals: [Proposal], status: (AgentChatMessage) -> AgentChatUserStatus,
+                                  at now: Date, limit: Int = 40) -> [String: Any] {
         let iso = ISO8601DateFormatter()
-        let rows: [[String: Any]] = messages.suffix(40).map { m in
+        let rows: [[String: Any]] = messages.suffix(limit).map { m in
             var row: [String: Any] = ["id": m.id.uuidString, "at": iso.string(from: m.createdAt), "author": m.author.rawValue,
                                       "kind": m.kind.rawValue, "text": m.text, "device": m.deviceLabel,
                                       "replyTo": m.replyTo?.uuidString ?? NSNull()]
@@ -68,8 +76,7 @@ extension AgentBridgeIO {
             }
             return row
         }
-        let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "messages": rows], options: [.prettyPrinted, .sortedKeys])
-        if (try? Data(contentsOf: root.appendingPathComponent("chat/history.json"))) != data { try writeAtomic(data, to: "chat/history.json") }
+        return ["schemaVersion": 1, "messages": rows]
     }
 }
 

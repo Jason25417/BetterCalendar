@@ -52,6 +52,8 @@ nonisolated struct AgentChatReplyDraft: Sendable, Equatable {
     var replyTo: UUID?
     var proposalIds: [UUID] = []
     var parentRef: String?
+    /// W20：留底里写哪个实现说的（nil = 经桥接的 Claude Code，沿用「BetterCalendar 智能体」）。
+    var originLabel: String? = nil
 }
 
 nonisolated protocol AgentChatTransport: Sendable {
@@ -252,6 +254,8 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     /// 打扰规则设置与主动通知额度：与 AgentMessageCenter 共用（组装点注入）。
     var attention: () -> AttentionSettings = { AttentionSettings.load() }
     var recentProactiveDeliveries: () -> [Date] = { [] }
+    /// W20：你的一句话已存进 iCloud（本机说的）→ 组装点接到当前智能体（内置智能体在本机进程内接手）。
+    var onUserMessageStored: ((AgentChatMessage) -> Void)?
     private var shownHere: Set<UUID>
     /// 本机已写过 user_message 事件的消息（回执写 iCloud 失败时也不重复唤醒智能体）。
     private var forwardedHere: Set<UUID>
@@ -315,6 +319,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
             outbox.removeAll { $0.id == m.id }; persistOutbox()
             record(.user, "你", "chat.sent", m, "在 \(deviceLabel) 说：\(m.text.prefix(40))")
             await refresh()
+            onUserMessageStored?(m)   // W20：内置智能体在本机接手（Claude Code 走 Mac 桥接转交，不用这个口）
             return m
         } catch {
             outboxErrors[m.id] = error.localizedDescription
@@ -409,7 +414,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         }
         do {
             try await transport.post(m)
-            record(.agent, "BetterCalendar 智能体", draft.kind == .eveningReview ? "chat.review" : "chat.reply", m,
+            record(.agent, draft.originLabel ?? "BetterCalendar 智能体", draft.kind == .eveningReview ? "chat.review" : "chat.reply", m,
                    (m.delivery == .delivered ? "" : "（不弹通知：\(m.suppressReason ?? "")）") + m.text.prefix(40))
             await refresh()
             return messages.first { $0.id == m.id } ?? m
@@ -437,6 +442,21 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     }
 
     func clearError() { lastError = nil }
+
+    /// W20：当前接通的智能体（组装点注入）。只影响「你的消息走到哪」的说法：内置智能体在说话的那台设备上接手，不经 Mac。
+    var activeAgent: () -> AgentKind = { .claudeCode }
+
+    /// 给界面的状态说法（P4 不让你猜：内置智能体时不再提「等 Mac 转交」）。
+    func label(for status: AgentChatUserStatus) -> String {
+        guard activeAgent() == .builtin else { return status.label }
+        switch status {
+        case .waitingForMac(false): return "已存到 iCloud，等内置智能体接手"
+        case .waitingForMac(true): return "内置智能体还没接手：说这句话的那台设备要打开 BetterCalendar（看 设置 → 智能体 的状态）"
+        case .withAgent(true): return "内置智能体超过 10 分钟没回复：看 设置 → 智能体 的状态"
+        case .expired: return "没送到：超过 6 小时都没被接手，不再处理（可以重新说一次）"
+        default: return status.label
+        }
+    }
 
     private func persistOutbox() {
         if outbox.isEmpty { defaults.removeObject(forKey: Self.outboxKey) }

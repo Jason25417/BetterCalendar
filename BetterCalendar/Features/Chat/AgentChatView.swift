@@ -33,6 +33,8 @@ struct AgentChatView: View {
     @Bindable var chat: AgentChatCenter
     @Bindable var proposals: ProposalCenter
     var bridge: AgentBridge? = nil
+    /// W20：当前智能体（内置智能体的运行状态 / 跑不了的原因显示在这里；Claude Code 时才提示 Mac 桥接）。
+    var hub: AgentHub? = nil
     /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
     var focusId: UUID? = nil
     @State private var draft = ""
@@ -91,8 +93,18 @@ struct AgentChatView: View {
         if let error = chat.lastError, DevLog.shared.shouldShowInline(source: "智能体对话", message: error) {
             banner(error, systemImage: "exclamationmark.triangle.fill") { chat.clearError() }
         }
+        if let hub, hub.active == .builtin {
+            if let p = hub.builtin.problem {
+                banner("\(p.message)。你可以：\(p.hint)", systemImage: "exclamationmark.triangle.fill") { hub.builtin.clearProblem() }
+            } else if hub.builtin.isRunning {
+                Label("内置智能体正在想…", systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 6)
+            }
+        }
         #if os(macOS)
-        if let bridge, !bridge.connected {
+        if hub?.active == .builtin {
+            EmptyView()   // W20：内置智能体在本机进程里接手，不需要 Mac 桥接
+        } else if let bridge, !bridge.connected {
             HStack {
                 Label("这台 Mac 还没连接智能体 bridge 文件夹，消息不会转交给智能体", systemImage: "link.badge.plus").font(.callout)
                 Spacer()
@@ -203,7 +215,7 @@ struct AgentChatView: View {
     @ViewBuilder private func userStatus(_ m: AgentChatMessage) -> some View {
         let status = chat.status(of: m)
         HStack(spacing: 8) {
-            Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(status.label)")
+            Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(chat.label(for: status))")
                 .font(.caption2).foregroundStyle(status.isProblem ? .orange : .secondary)
                 .multilineTextAlignment(.trailing)
             if case .failed = status {

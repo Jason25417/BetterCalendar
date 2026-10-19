@@ -46,6 +46,11 @@ enum SettingsSync {
         "agent.planEditing.enabled",           // 智能体排时间线（加 / 改 / 删块、跨天挪、排一天）：一端关了两端都关
         // —— W19（2026-10-19）——
         "reconcile.noticeDismissedKinds",      // 今天页「日历里有你的事件」提示：一端点「知道了」两端都不再出现
+        // —— W20（2026-10-19）——
+        "agent.active.v1",                     // 当前智能体（Claude Code / 内置）：两端接的是同一个智能体
+        "agent.sharedMemory.v1",               // 智能体共享记忆（属于角色，各实现共用；≤6000 字）
+        "agent.builtin.dailyBudgetUSD",        // 内置智能体每日预算（稳定性上限；每台设备各自按它记账）
+        "agent.builtin.model",                 // 内置智能体用哪个 DeepSeek 模型
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。
@@ -71,6 +76,7 @@ enum SettingsSync {
         "home.inputHeight": "窗口/输入框高度：界面布局状态",
         "execPanelExpanded": "执行面板折叠状态：界面布局状态",
         "bench.cloudModels": "开发工具（算法台）的模型勾选",
+        "agent.builtin.usage.v1": "内置智能体本机的用量与成本记账：每台设备记自己的调用，两台同时改一份计数会打架（W20，待 Jason 确认）",
     ]
 
     /// 远程设置到达通知（设置页据此重读 @State 刷新）。

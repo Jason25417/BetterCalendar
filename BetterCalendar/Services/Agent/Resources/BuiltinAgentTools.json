@@ -1,0 +1,981 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "read_context",
+   "description": "读取 BetterCalendar 此刻的状态快照（今天与未来 7 天的安排、计时、待办与长期事项、Jason 自己的日历与提醒事项（只读）、最近实际、最近设备活动摘要、可执行目标的 id 与版本）。快照里读取失败的块带 error，不能当成「没有」。",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "propose_change",
+   "description": "向 Jason 提交一项改动提案（iPhone 与 Mac 同时推审批通知）。提交≠执行：要他批准、设备回报「已完成」才算完成。种类与规则见系统提示「提出改动」。被拒收时返回原因（rejected），看原因调整后再提，或如实告诉他放不下、为什么。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "通知标题：一句话说明是什么事（≤80 字）"
+     },
+     "reason": {
+      "type": "string",
+      "description": "一句人话理由（讲得出依据，含 Jason 原话与你的关键假设）"
+     },
+     "action": {
+      "type": "object",
+      "properties": {
+       "kind": {
+        "type": "string",
+        "description": "改动种类",
+        "enum": [
+         "itemCreate",
+         "itemEdit",
+         "itemSetDone",
+         "timer",
+         "moveBlock",
+         "moveBlocks",
+         "blockCreate",
+         "blockEdit",
+         "blockDelete",
+         "planDay",
+         "reminder",
+         "alarm",
+         "experimentNoop"
+        ]
+       },
+       "itemId": {
+        "type": "string",
+        "description": "itemEdit / itemSetDone：事项 id（actionTargets.items[].id）"
+       },
+       "title": {
+        "type": "string",
+        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题"
+       },
+       "body": {
+        "type": "string",
+        "description": "reminder：提醒备注（可选）"
+       },
+       "fireAt": {
+        "type": "string",
+        "description": "reminder / alarm：时刻，ISO 8601 带时区"
+       },
+       "device": {
+        "type": "string",
+        "description": "alarm（必填）：iPhone 的设备 id（actionTargets.devices[] 里 platform=iOS）"
+       },
+       "note": {
+        "type": "string",
+        "description": "itemCreate / itemEdit：备注；experimentNoop：说明"
+       },
+       "done": {
+        "type": "boolean",
+        "description": "itemSetDone：true=标完成，false=取消完成"
+       },
+       "command": {
+        "type": "string",
+        "description": "timer：计时指令",
+        "enum": [
+         "start",
+         "pause",
+         "resume",
+         "stop"
+        ]
+       },
+       "blockId": {
+        "type": "string",
+        "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id"
+       },
+       "start": {
+        "type": "string",
+        "description": "moveBlock：新开始，ISO 8601 带时区"
+       },
+       "end": {
+        "type": "string",
+        "description": "moveBlock：新结束（可选）"
+       },
+       "day": {
+        "type": "string",
+        "description": "blockCreate / planDay：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
+       },
+       "blocks": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "string",
+           "description": "可选：自己给的新 UUID（要用 id 挂可调参数时）"
+          },
+          "title": {
+           "type": "string",
+           "description": "块标题（≤200 字）"
+          },
+          "start": {
+           "type": "string",
+           "description": "ISO 8601 带时区"
+          },
+          "end": {
+           "type": "string",
+           "description": "与 durationMinutes 二选一"
+          },
+          "durationMinutes": {
+           "type": "integer",
+           "description": "1–1440"
+          },
+          "fixed": {
+           "type": "boolean"
+          },
+          "important": {
+           "type": "boolean",
+           "description": "要紧事"
+          },
+          "deadline": {
+           "type": "string",
+           "description": "截止，ISO 8601 带时区"
+          },
+          "linkedItemId": {
+           "type": "string",
+           "description": "关联的事项 id（actionTargets.items[].id）"
+          }
+         },
+         "required": [
+          "start"
+         ],
+         "additionalProperties": false
+        },
+        "description": "blockCreate：要加的块"
+       },
+       "steps": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "op": {
+           "type": "string",
+           "description": "这一步做什么",
+           "enum": [
+            "create",
+            "move",
+            "edit",
+            "delete"
+           ]
+          },
+          "id": {
+           "type": "string",
+           "description": "可选：自己给的新 UUID（要用 id 挂可调参数时）"
+          },
+          "title": {
+           "type": "string"
+          },
+          "start": {
+           "type": "string",
+           "description": "ISO 8601 带时区"
+          },
+          "end": {
+           "type": "string",
+           "description": "可选，省略=保持原时长"
+          },
+          "durationMinutes": {
+           "type": "integer",
+           "description": "新时长（分钟，开始不动）"
+          },
+          "fixed": {
+           "type": "boolean",
+           "description": "取消固定要越级"
+          },
+          "important": {
+           "type": "boolean"
+          },
+          "deadline": {
+           "type": "string",
+           "description": "设截止（ISO 8601 带时区）"
+          },
+          "linkedItemId": {
+           "type": "string",
+           "description": "关联的事项 id（actionTargets.items[].id）"
+          },
+          "blockId": {
+           "type": "string"
+          },
+          "expectedRevision": {
+           "type": "string"
+          },
+          "clearDeadline": {
+           "type": "boolean",
+           "description": "只写 true：清掉截止"
+          }
+         },
+         "required": [
+          "op"
+         ],
+         "additionalProperties": false
+        },
+        "description": "planDay：每步 {op, …该操作的字段}（create 同 blocks[]；move 同 moves[]；edit 同 blockEdit；delete = blockId + expectedRevision?）"
+       },
+       "moves": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "blockId": {
+           "type": "string"
+          },
+          "start": {
+           "type": "string",
+           "description": "ISO 8601 带时区"
+          },
+          "end": {
+           "type": "string",
+           "description": "可选，省略=保持原时长"
+          },
+          "expectedRevision": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "blockId",
+          "start"
+         ],
+         "additionalProperties": false
+        },
+        "description": "moveBlocks：要一起挪的块"
+       },
+       "durationMinutes": {
+        "type": "integer",
+        "description": "blockEdit：新时长（分钟）"
+       },
+       "fixed": {
+        "type": "boolean",
+        "description": "blockEdit：设为固定 / 取消固定（取消要越级）"
+       },
+       "important": {
+        "type": "boolean",
+        "description": "blockEdit：要紧事"
+       },
+       "deadline": {
+        "type": "string",
+        "description": "blockEdit：设截止"
+       },
+       "clearDeadline": {
+        "type": "boolean",
+        "description": "blockEdit：只写 true，清掉截止"
+       },
+       "startedAt": {
+        "type": "string",
+        "description": "timer start：回溯起点（ISO 8601 带时区），要有证据"
+       },
+       "expectedRevision": {
+        "type": "string",
+        "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision）"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false,
+      "description": "要执行的改动（只写这种改动需要的字段；多写不认识的字段会被拒收）"
+     },
+     "changes": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "field": {
+         "type": "string"
+        },
+        "before": {
+         "type": "string"
+        },
+        "after": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "field"
+       ],
+       "additionalProperties": false
+      },
+      "description": "仅测试改动 experimentNoop 必填；真改动由 App 依据真实数据计算"
+     },
+     "lifetimeMinutes": {
+      "type": "integer",
+      "description": "有效期（分钟），1–10080；时效强的要快过期；省略=60"
+     },
+     "targetDevice": {
+      "type": "string",
+      "description": "指定执行设备 id；一般省略"
+     },
+     "escalation": {
+      "type": "string",
+      "description": "越级理由：只有确有必要动 Jason 的东西或图钉时才写（1–300 字）"
+     },
+     "primaryLabel": {
+      "type": "string",
+      "description": "有备选方案时主方案的短名字（≤40 字）"
+     },
+     "alternatives": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "label": {
+         "type": "string",
+         "description": "按钮上的短名字（≤40 字）"
+        },
+        "action": {
+         "type": "object",
+         "properties": {
+          "kind": {
+           "type": "string",
+           "description": "改动种类",
+           "enum": [
+            "itemCreate",
+            "itemEdit",
+            "itemSetDone",
+            "timer",
+            "moveBlock",
+            "moveBlocks",
+            "blockCreate",
+            "blockEdit",
+            "blockDelete",
+            "planDay",
+            "reminder",
+            "alarm",
+            "experimentNoop"
+           ]
+          },
+          "itemId": {
+           "type": "string",
+           "description": "itemEdit / itemSetDone：事项 id（actionTargets.items[].id）"
+          },
+          "title": {
+           "type": "string",
+           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题"
+          },
+          "body": {
+           "type": "string",
+           "description": "reminder：提醒备注（可选）"
+          },
+          "fireAt": {
+           "type": "string",
+           "description": "reminder / alarm：时刻，ISO 8601 带时区"
+          },
+          "device": {
+           "type": "string",
+           "description": "alarm（必填）：iPhone 的设备 id（actionTargets.devices[] 里 platform=iOS）"
+          },
+          "note": {
+           "type": "string",
+           "description": "itemCreate / itemEdit：备注；experimentNoop：说明"
+          },
+          "done": {
+           "type": "boolean",
+           "description": "itemSetDone：true=标完成，false=取消完成"
+          },
+          "command": {
+           "type": "string",
+           "description": "timer：计时指令",
+           "enum": [
+            "start",
+            "pause",
+            "resume",
+            "stop"
+           ]
+          },
+          "blockId": {
+           "type": "string",
+           "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id"
+          },
+          "start": {
+           "type": "string",
+           "description": "moveBlock：新开始，ISO 8601 带时区"
+          },
+          "end": {
+           "type": "string",
+           "description": "moveBlock：新结束（可选）"
+          },
+          "day": {
+           "type": "string",
+           "description": "blockCreate / planDay：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
+          },
+          "blocks": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "id": {
+              "type": "string",
+              "description": "可选：自己给的新 UUID（要用 id 挂可调参数时）"
+             },
+             "title": {
+              "type": "string",
+              "description": "块标题（≤200 字）"
+             },
+             "start": {
+              "type": "string",
+              "description": "ISO 8601 带时区"
+             },
+             "end": {
+              "type": "string",
+              "description": "与 durationMinutes 二选一"
+             },
+             "durationMinutes": {
+              "type": "integer",
+              "description": "1–1440"
+             },
+             "fixed": {
+              "type": "boolean"
+             },
+             "important": {
+              "type": "boolean",
+              "description": "要紧事"
+             },
+             "deadline": {
+              "type": "string",
+              "description": "截止，ISO 8601 带时区"
+             },
+             "linkedItemId": {
+              "type": "string",
+              "description": "关联的事项 id（actionTargets.items[].id）"
+             }
+            },
+            "required": [
+             "start"
+            ],
+            "additionalProperties": false
+           },
+           "description": "blockCreate：要加的块"
+          },
+          "steps": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "op": {
+              "type": "string",
+              "description": "这一步做什么",
+              "enum": [
+               "create",
+               "move",
+               "edit",
+               "delete"
+              ]
+             },
+             "id": {
+              "type": "string",
+              "description": "可选：自己给的新 UUID（要用 id 挂可调参数时）"
+             },
+             "title": {
+              "type": "string"
+             },
+             "start": {
+              "type": "string",
+              "description": "ISO 8601 带时区"
+             },
+             "end": {
+              "type": "string",
+              "description": "可选，省略=保持原时长"
+             },
+             "durationMinutes": {
+              "type": "integer",
+              "description": "新时长（分钟，开始不动）"
+             },
+             "fixed": {
+              "type": "boolean",
+              "description": "取消固定要越级"
+             },
+             "important": {
+              "type": "boolean"
+             },
+             "deadline": {
+              "type": "string",
+              "description": "设截止（ISO 8601 带时区）"
+             },
+             "linkedItemId": {
+              "type": "string",
+              "description": "关联的事项 id（actionTargets.items[].id）"
+             },
+             "blockId": {
+              "type": "string"
+             },
+             "expectedRevision": {
+              "type": "string"
+             },
+             "clearDeadline": {
+              "type": "boolean",
+              "description": "只写 true：清掉截止"
+             }
+            },
+            "required": [
+             "op"
+            ],
+            "additionalProperties": false
+           },
+           "description": "planDay：每步 {op, …该操作的字段}（create 同 blocks[]；move 同 moves[]；edit 同 blockEdit；delete = blockId + expectedRevision?）"
+          },
+          "moves": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "blockId": {
+              "type": "string"
+             },
+             "start": {
+              "type": "string",
+              "description": "ISO 8601 带时区"
+             },
+             "end": {
+              "type": "string",
+              "description": "可选，省略=保持原时长"
+             },
+             "expectedRevision": {
+              "type": "string"
+             }
+            },
+            "required": [
+             "blockId",
+             "start"
+            ],
+            "additionalProperties": false
+           },
+           "description": "moveBlocks：要一起挪的块"
+          },
+          "durationMinutes": {
+           "type": "integer",
+           "description": "blockEdit：新时长（分钟）"
+          },
+          "fixed": {
+           "type": "boolean",
+           "description": "blockEdit：设为固定 / 取消固定（取消要越级）"
+          },
+          "important": {
+           "type": "boolean",
+           "description": "blockEdit：要紧事"
+          },
+          "deadline": {
+           "type": "string",
+           "description": "blockEdit：设截止"
+          },
+          "clearDeadline": {
+           "type": "boolean",
+           "description": "blockEdit：只写 true，清掉截止"
+          },
+          "startedAt": {
+           "type": "string",
+           "description": "timer start：回溯起点（ISO 8601 带时区），要有证据"
+          },
+          "expectedRevision": {
+           "type": "string",
+           "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision）"
+          }
+         },
+         "required": [
+          "kind"
+         ],
+         "additionalProperties": false,
+         "description": "要执行的改动（只写这种改动需要的字段；多写不认识的字段会被拒收）"
+        },
+        "changes": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "field": {
+            "type": "string"
+           },
+           "before": {
+            "type": "string"
+           },
+           "after": {
+            "type": "string"
+           }
+          },
+          "required": [
+           "field"
+          ],
+          "additionalProperties": false
+         }
+        },
+        "parameters": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "id": {
+            "type": "string",
+            "description": "方案内唯一，1–32 位字母数字 - _"
+           },
+           "label": {
+            "type": "string",
+            "description": "卡片上的名字（≤20 字），如「提醒时间」"
+           },
+           "type": {
+            "type": "string",
+            "description": "number=数字（需 unit）/ duration=时长（分钟）/ timeOfDay=当天几点 / dateTime=日期+时间",
+            "enum": [
+             "number",
+             "duration",
+             "timeOfDay",
+             "dateTime"
+            ]
+           },
+           "bind": {
+            "type": "string",
+            "description": "moveBlock/moveBlocks/blockCreate/planDay: start|end|duration；blockEdit: duration；timer start: startedAt；reminder/alarm: fireAt|leadTime",
+            "enum": [
+             "start",
+             "end",
+             "duration",
+             "startedAt",
+             "fireAt",
+             "leadTime"
+            ]
+           },
+           "unit": {
+            "type": "string",
+            "description": "只用于 number",
+            "enum": [
+             "minute",
+             "hour"
+            ]
+           },
+           "default": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string"
+             }
+            ],
+            "description": "可省略（= action 里写的那个）；时刻类为带时区 ISO 8601"
+           },
+           "min": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string"
+             }
+            ],
+            "description": "滑块类必填；时刻类可选（ISO 8601）。只是界面提示"
+           },
+           "max": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string"
+             }
+            ],
+            "description": "同 min"
+           },
+           "step": {
+            "type": "number",
+            "description": "滑块步长（默认 1）"
+           },
+           "anchor": {
+            "type": "string",
+            "description": "只用于 leadTime：那件事的时刻（ISO 8601 带时区）"
+           },
+           "target": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "integer"
+             }
+            ],
+            "description": "多块改动：调的是哪一块——那一块的 id，或它在 moves / blocks / steps 里的序号（从 0 起）；只有一块时省略"
+           }
+          },
+          "required": [
+           "id",
+           "label",
+           "type",
+           "bind"
+          ],
+          "additionalProperties": false
+         },
+         "description": "可调参数（可选，建议 ≤2 个）：具体数值是你的判断、Jason 可能想自己微调时才挂"
+        }
+       },
+       "required": [
+        "label",
+        "action"
+       ],
+       "additionalProperties": false
+      },
+      "description": "备选方案（最多 3 个）；只有一种合理做法就别带"
+     },
+     "parameters": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string",
+         "description": "方案内唯一，1–32 位字母数字 - _"
+        },
+        "label": {
+         "type": "string",
+         "description": "卡片上的名字（≤20 字），如「提醒时间」"
+        },
+        "type": {
+         "type": "string",
+         "description": "number=数字（需 unit）/ duration=时长（分钟）/ timeOfDay=当天几点 / dateTime=日期+时间",
+         "enum": [
+          "number",
+          "duration",
+          "timeOfDay",
+          "dateTime"
+         ]
+        },
+        "bind": {
+         "type": "string",
+         "description": "moveBlock/moveBlocks/blockCreate/planDay: start|end|duration；blockEdit: duration；timer start: startedAt；reminder/alarm: fireAt|leadTime",
+         "enum": [
+          "start",
+          "end",
+          "duration",
+          "startedAt",
+          "fireAt",
+          "leadTime"
+         ]
+        },
+        "unit": {
+         "type": "string",
+         "description": "只用于 number",
+         "enum": [
+          "minute",
+          "hour"
+         ]
+        },
+        "default": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string"
+          }
+         ],
+         "description": "可省略（= action 里写的那个）；时刻类为带时区 ISO 8601"
+        },
+        "min": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string"
+          }
+         ],
+         "description": "滑块类必填；时刻类可选（ISO 8601）。只是界面提示"
+        },
+        "max": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string"
+          }
+         ],
+         "description": "同 min"
+        },
+        "step": {
+         "type": "number",
+         "description": "滑块步长（默认 1）"
+        },
+        "anchor": {
+         "type": "string",
+         "description": "只用于 leadTime：那件事的时刻（ISO 8601 带时区）"
+        },
+        "target": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "integer"
+          }
+         ],
+         "description": "多块改动：调的是哪一块——那一块的 id，或它在 moves / blocks / steps 里的序号（从 0 起）；只有一块时省略"
+        }
+       },
+       "required": [
+        "id",
+        "label",
+        "type",
+        "bind"
+       ],
+       "additionalProperties": false
+      },
+      "description": "可调参数（可选，建议 ≤2 个）：具体数值是你的判断、Jason 可能想自己微调时才挂"
+     }
+    },
+    "required": [
+     "title",
+     "reason",
+     "action"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_proposals",
+   "description": "查看你（BetterCalendar 智能体）最近提交的提案的最新状态：待确认 / 已同意 / 已完成 / 已拒绝 / 已过期 / 失败 / 已撤销 / replied（他回了一句，userReply.text 是原话）、选了哪个方案、可调参数他改没改、是否由预授权规则代他决定。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "description": "最多几份（1–50，默认 20）"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "reply_jason",
+   "description": "在 BetterCalendar 的对话里回复 Jason（他在 iPhone / Mac 的「智能体」页看到，可能弹通知）。他在对话里跟你说话（user_message）时必须用它回答；晚间复盘也用它写（kind=eveningReview）。要带提案卡片：先 propose_change 拿到 id 再放进 proposalIds。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string",
+      "description": "回复正文（≤1000 字）：简短、口语、指向下一步；不翻旧账、不算账"
+     },
+     "replyTo": {
+      "type": "string",
+      "description": "回应的是哪条 Jason 的消息（事件 payload.messageId）；主动开口 / 晚间复盘省略"
+     },
+     "proposalIds": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "description": "要以卡片呈现的提案 id（≤5）"
+     },
+     "kind": {
+      "type": "string",
+      "description": "默认 chat；晚间复盘填 eveningReview",
+      "enum": [
+       "chat",
+       "eveningReview"
+      ]
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "notify_jason",
+   "description": "主动给 Jason 发一句话（系统通知，只有「好 / 静音」）。只在关键时刻、确有一个他认可方向上的现在就能做的下一步时用；App 按打扰规则决定弹出还是拦下。同一件事不要和 reply_jason 都发。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "通知标题（≤60 字）"
+     },
+     "body": {
+      "type": "string",
+      "description": "一两句话正文（≤300 字），指向下一步"
+     },
+     "reason": {
+      "type": "string",
+      "description": "为什么此刻值得说（留底用，不展示）"
+     }
+    },
+    "required": [
+     "title",
+     "body",
+     "reason"
+    ],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_messages",
+   "description": "查看你发过的主动通知：弹出了还是被打扰规则拦下（及原因）、Jason 的反应（好 / 静音）。被拦下或静音时近期别再发同类。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "description": "最多几条（1–50，默认 20）"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "read_chat",
+   "description": "查看最近的对话（谁说的、说了什么、Jason 的消息走到哪、对话里提案卡片的最新状态）。回复前先看，避免重复回答已回过的话。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "description": "最多几条（1–40，默认 20）"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "update_shared_memory",
+   "description": "整份改写 BetterCalendar 智能体的共享记忆（各种实现共用的这一份：Jason 的偏好、正在跟进的事、最近被拒的提议、备忘）。当前全文已在系统提示里。只记以后真有用的事实，短句带日期；不写 App / 网站名的评价。上限 6000 字，超了会被拒，请合并精简。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string",
+      "description": "改写后的整份记忆（Markdown 短句）"
+     }
+    },
+    "required": [
+     "text"
+    ],
+    "additionalProperties": false
+   }
+  }
+ }
+]
