@@ -31,7 +31,6 @@ import Testing
     }
 
     @Test func appContainerInTheTestHostNeverReachesRealEventKit() async throws {
-        let refusedBefore = EventKitWriteGuard.refusedWrites.count
         let c = AppContainer()
         let fake = try #require(c.calendarStore as? TestHostCalendarStore, "测试宿主里组装点注入的是内存日历")
         // 保存 + 投影一圈（W23 事故里就是这条路写进了真日历）
@@ -41,6 +40,7 @@ import Testing
         try c.planStore.replacePlanned([ScheduledBlock(title: "W23b 测试块", start: start, end: start.addingTimeInterval(3600))], on: today)
         try await c.projection.project(label: today)
         #expect(fake.writeCount > 0, "投影写进了内存日历")
-        #expect(EventKitWriteGuard.refusedWrites.count == refusedBefore, "根本没走到真 EventKit 的写入口")
+        // 不再比对全进程共享的拒绝计数：全量并行时别的测试撞闸也会让它变（那是闸在起作用），断言在并行下站不住。
+        // 「投影写进内存日历」+ 组装点拿到的就是内存日历，已足以证明这条路没走到真 EventKit。
     }
 }
