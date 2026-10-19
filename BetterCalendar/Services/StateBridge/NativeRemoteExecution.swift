@@ -234,7 +234,8 @@ nonisolated enum NativeRemoteJSON {
     }
     func startPolling() {
         // W16：同 NativeApprovalInbox.start——未配置凭据时不建空转定时器
-        guard !TestHost.isActive, timer == nil, deviceId != nil else { return }
+        // 冻结总闸（2026-10-19，Jason 交 Claude 定）：Dots 时代采集开关关着 = 整个子系统不联网（凭据保留，Dots 适配器以后可复用）
+        guard !TestHost.isActive, timer == nil, deviceId != nil, UserDefaults.standard.bool(forKey: "dotStateBridge.enabled") else { return }
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in Task { @MainActor in await self?.poll() } }
         RunLoop.main.add(timer, forMode: .common); self.timer = timer
         Task { await poll() }
