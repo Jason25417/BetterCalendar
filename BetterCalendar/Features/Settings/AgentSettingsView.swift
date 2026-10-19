@@ -14,7 +14,8 @@ struct AgentSettingsView: View {
     @State private var keyInput = ""
     @State private var hasKey = KeychainStore.loadAPIKey(account: DeepSeekClient.keychainAccount) != nil
     @State private var model = BuiltinAgentSettings.model()
-    @State private var budget = BuiltinAgentSettings.budget()
+    @State private var budgetOn = BuiltinAgentSettings.budget() != nil
+    @State private var budget = BuiltinAgentSettings.budget() ?? 1.0
     @State private var showMemory = false
 
     var body: some View {
@@ -115,12 +116,19 @@ struct AgentSettingsView: View {
             Text("\(today.runs) 轮 · \(today.calls) 次调用 · 输入 \(today.cacheHitTokens + today.cacheMissTokens) token（命中缓存 \(today.cacheHitTokens)）· 输出 \(today.completionTokens) token")
                 .font(.caption).foregroundStyle(.secondary)
             LabeledContent("最近 7 天（这台设备）", value: String(format: "约 $%.3f", runtime.usage.last7DaysCost))
-            Stepper(value: $budget, in: 0.1...20, step: 0.1) {
-                Text(String(format: "每日预算 $%.2f", budget))
+            Toggle("设每日预算", isOn: $budgetOn)
+                .onChange(of: budgetOn) { _, on in
+                    if on { UserDefaults.standard.set(budget, forKey: BuiltinAgentSettings.budgetKey) }
+                    else { UserDefaults.standard.removeObject(forKey: BuiltinAgentSettings.budgetKey) }
+                }
+            if budgetOn {
+                Stepper(value: $budget, in: 0.1...20, step: 0.1) {
+                    Text(String(format: "每日预算 $%.2f", budget))
+                }
+                .onChange(of: budget) { _, v in UserDefaults.standard.set(v, forKey: BuiltinAgentSettings.budgetKey) }
             }
-            .onChange(of: budget) { _, v in UserDefaults.standard.set(v, forKey: BuiltinAgentSettings.budgetKey) }
         } header: { Text("用量与预算") } footer: {
-            Text("成本按 DeepSeek 官方价目估算（高峰时段按双倍算），以 DeepSeek 账单为准。每台设备各自记账、各自按预算停：用完当天就停下并在对话里说明，不会换成更便宜的方案继续跑。")
+            Text("成本按 DeepSeek 官方价目估算（高峰时段按双倍算），以 DeepSeek 账单为准。默认不设预算（试验阶段），只记账。打开「设每日预算」后每台设备各自按它停：用完当天就停下并在对话里说明，不会换成更便宜的方案继续跑。")
         }
 
         Section("隐私") {

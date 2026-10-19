@@ -51,7 +51,7 @@ enum SettingsSync {
         // —— W21（2026-10-19）——
         "featureUsage.shareWithAgent.enabled", // 让智能体参考功能使用统计（隐私偏好，两端一致；日用版默认关）
         // —— W23（2026-10-19）——
-        "today.timelineAxis.enabled",          // 今天页用时间轴（新功能，日用版默认关）：一端打开两端都换
+        "today.timelineAxis.enabled",          // 今天页用时间轴（Jason 10-19：两个通道都默认开）：一端打开两端都换
         // —— W20（2026-10-19）——
         "agent.active.v1",                     // 当前智能体（Claude Code / 内置）：两端接的是同一个智能体
         "agent.sharedMemory.v1",               // 智能体共享记忆（属于角色，各实现共用；≤6000 字）

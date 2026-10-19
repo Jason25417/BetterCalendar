@@ -24,11 +24,11 @@ nonisolated struct BuiltinAgentDayUsage: Codable, Equatable, Sendable {
 nonisolated enum BuiltinAgentSettings {
     static let budgetKey = "agent.builtin.dailyBudgetUSD"
     static let modelKey = "agent.builtin.model"
-    /// 默认每天 1 美元（flash 每次调用约 0.3–1 美分；1 美元 ≈ 一两百次调用，日用够、失控时也挡得住）。
-    static let defaultBudget = 1.0
-    static func budget(_ d: UserDefaults = .standard) -> Double {
-        let v = d.object(forKey: budgetKey) as? Double ?? defaultBudget
-        return v > 0 ? v : defaultBudget
+    /// 2026-10-19 Jason：试验阶段**不设预算**——默认没有上限（nil），用量照常记账可见。
+    /// 只有在设置里主动设了正数才按它停（设 0 / 删掉 = 回到不设）。
+    static func budget(_ d: UserDefaults = .standard) -> Double? {
+        guard let v = d.object(forKey: budgetKey) as? Double, v > 0 else { return nil }
+        return v
     }
     static func model(_ d: UserDefaults = .standard) -> String {
         let v = d.string(forKey: modelKey) ?? DeepSeekPricing.defaultModel

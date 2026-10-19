@@ -34,13 +34,14 @@ extension ExecutionViewModel: AxisLiveSource {
 }
 
 /// W23 开关：今天页用时间轴（关 = W19 的卡片列表，行为与没有这个功能完全一致）。
-/// 日用版纪律（W17）：新的、看得到的行为默认关——Dev 版默认开、日用版默认关，随 iCloud 设置同步。
+/// 日用版纪律（W17）本该默认关；**有意偏离**：2026-10-19 Jason 拍板日用版也默认打开试（两个通道都默认开），
+/// 设置里随时可关回卡片列表；随 iCloud 设置同步。
 enum TimelineAxisSettings {
     static let key = "today.timelineAxis.enabled"
-    /// 键不存在时的默认（= ExperimentDefaults.newFeature 的口径；给 @AppStorage 用，不写回）。
-    static var defaultValue: Bool { AppChannel.current.isDev }
+    /// 键不存在时的默认（给 @AppStorage 用，不写回）。
+    static var defaultValue: Bool { true }
     static var enabled: Bool {
-        get { ExperimentDefaults.newFeature(key) }
+        get { UserDefaults.standard.object(forKey: key) as? Bool ?? defaultValue }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 }

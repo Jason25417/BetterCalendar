@@ -386,6 +386,21 @@ import Testing
         #expect(BuiltinAgentSettings.model(e.defaults) == "deepseek-flash")
     }
 
+    @Test func noBudgetByDefaultKeepsRunning() async throws {
+        // Jason 10-19：试验阶段不设预算——没设过就没有上限，花得再多也照常调用（用量照常记账）
+        let e = env()
+        e.selection.select(.builtin)
+        #expect(BuiltinAgentSettings.budget(e.defaults) == nil)
+        e.model.repeating = FakeModel.call("read_chat", [:], usage: .init(cacheHitTokens: 0, cacheMissTokens: 10_000_000, completionTokens: 1000))
+        await e.runtime.run([AgentEvent(kind: "block_finished", summary: "x", at: e.clock.now)])
+        await e.runtime.run([AgentEvent(kind: "block_finished", summary: "y", at: e.clock.now)])
+        #expect(e.model.requests.count > 2)
+        if case .budgetReached? = e.runtime.problem { Issue.record("不设预算时不该因预算停") }
+        #expect(e.runtime.usage.today.costUSD > 1)
+        e.defaults.set(0, forKey: BuiltinAgentSettings.budgetKey)   // 设 0 = 回到不设
+        #expect(BuiltinAgentSettings.budget(e.defaults) == nil)
+    }
+
     // MARK: 请求形状（DeepSeek / OpenAI 兼容工具调用，无预填）
 
     @Test func requestShapeIsOpenAICompatibleToolsWithoutPrefill() async throws {

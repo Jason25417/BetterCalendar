@@ -241,9 +241,10 @@ extension DeepSeekClient: BuiltinAgentModel {
         let parent = events.count == 1 ? events[0].id : events.last?.id
         while true {
             try Task.checkCancellation()
-            let budget = BuiltinAgentSettings.budget(defaults)
-            let spent = usage.today.costUSD
-            guard spent < budget else { throw BuiltinAgentProblem.budgetReached(spent: spent, budget: budget) }
+            if let budget = BuiltinAgentSettings.budget(defaults) {   // 默认不设预算（Jason 10-19）；设了才按它停
+                let spent = usage.today.costUSD
+                guard spent < budget else { throw BuiltinAgentProblem.budgetReached(spent: spent, budget: budget) }
+            }
             guard counters.turns < maxTurns else { throw BuiltinAgentProblem.turnLimit(maxTurns) }
             counters.turns += 1
             let completion = try await model.complete(model: modelName, messages: messages, tools: toolDefs)
