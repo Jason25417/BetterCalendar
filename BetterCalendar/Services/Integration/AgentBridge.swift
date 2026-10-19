@@ -102,7 +102,7 @@ nonisolated struct AgentBridgeIO: Sendable {
     /// 只写这一个文件（只建 runtime/，不建 events/ 等通道目录）。
     func writeActiveAgentMarker(_ kind: AgentKind, channel: AppChannel = .current, at now: Date) throws {
         try fm.createDirectory(at: root.appendingPathComponent("runtime"), withIntermediateDirectories: true)
-        try writeAtomic(JSONSerialization.data(withJSONObject: Self.activeAgentMarkerObject(kind, channel: channel, at: now),
+        try writeAtomic(SafeJSON.data(withJSONObject: Self.activeAgentMarkerObject(kind, channel: channel, at: now),
                                                options: [.prettyPrinted, .sortedKeys]), to: Self.activeAgentMarkerPath)
     }
 
