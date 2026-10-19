@@ -7,7 +7,8 @@
 //  - 「现在」线 = 闸门：线以上只有蓝色做成的事，线以下是绿色计划；正在做的那块跨在线上（蓝到现在、绿是剩下的）；
 //  - 默认视口 =「闸门恒为主」：打开 / 点「今天」都把「现在」放在视口上部三分之一处（R10：打开即朝前）；
 //  - 顶上的日子条 =「跳到那天」（滚过去，不换页）；
-//  - 直接操作：拖绿色块挪时间、拉底边改时长（5 分钟吸附；iPhone 长按后拖，Mac 直接拖）；点一下改标题 / 性质 / 删除；
+//  - 直接操作：拖绿色块挪时间（W26 起可拖进别的日子，今天到 7 天后）、拉底边改时长（5 分钟吸附；iPhone 长按后拖，
+//    Mac 直接拖）；点一下改标题 / 性质 / 删除；
 //    放不下（规则不许）就写明原因、块回到原位——绝不悄悄挤。过去的 / 做成的 / 你的日历都不能拖。
 //  - 性能：日子一段一段懒加载（LazyVStack）；闸门每分钟离散跳一次（页面内，不是菜单栏 label——那里绝不放周期刷新）。
 //
@@ -28,8 +29,20 @@ struct TimelineAxisView<DayMenu: View>: View {
     @ScaledMetric(relativeTo: .caption2) private var gutter: CGFloat = 42
     @State private var position = ScrollPosition(edge: .top)
     @State private var viewportHeight: CGFloat = 0
-    @State private var offsetY: CGFloat = 0
+    /// W26：视口摘要（正在看哪一天 / 闸门在不在视口里）。只在**摘要变了**时更新——原来每一帧滚动都写 offsetY，
+    /// 整个 body（含 days() 组装）跟着每帧重算，滚起来白白耗电掉帧。
+    @State private var viewport = Viewport(visibleDay: nil, gateVisible: true)
     @State private var didInitialScroll = false
+    /// W26：上次离开前台的时刻（回来时离开够久 → 重新把闸门放回视口，R10「打开即朝前」）。
+    @State private var leftActiveAt: Date?
+
+    struct Viewport: Equatable {
+        var visibleDay: Date?
+        var gateVisible: Bool
+    }
+
+    /// 回到前台时离开超过这么久，就把视口重新对准「现在」（短暂切走再回来不跳，免得打断你正在看的地方）。
+    static var reanchorAfter: TimeInterval { 15 * 60 }
 
     /// 闸门在视口里的位置（从上往下的比例）：上面留一点做成的事，大部分给接下来的。
     static var gateViewportFraction: CGFloat { 0.3 }
@@ -66,14 +79,19 @@ struct TimelineAxisView<DayMenu: View>: View {
                 .scrollTargetLayout()
             }
             .scrollPosition($position)
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in offsetY = y }
+            .onScrollGeometryChange(for: Viewport.self, of: { g in
+                Self.viewport(offsetY: g.contentOffset.y, height: g.containerSize.height, geo: geo, now: axis.now)
+            }) { _, v in viewport = v }
             .onScrollGeometryChange(for: CGFloat.self, of: { $0.containerSize.height }) { _, h in
                 viewportHeight = h
                 if !didInitialScroll, h > 0 { didInitialScroll = true; scrollToGate(geo) }
             }
             .accessibilityIdentifier("bc.today.timeline")
         }
+        // 过了 4:00 日界线：轴的日子整体往后挪一天（每一段的位置都变了）→ 重新对准「现在」，不让视口停在错位的地方
+        .onChange(of: axis.todayLabel) { _, _ in if viewportHeight > 0 { scrollToGate(geometry) } }
         .task {
+            FeatureUsage.seen(.todayAxis)
             await axis.reload()
             // 闸门每分钟离散跳一次（对齐到整分）；页面消失即停（.task 随视图生命周期取消）
             while !Task.isCancelled {
@@ -84,7 +102,17 @@ struct TimelineAxisView<DayMenu: View>: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await axis.reload() } }
+            if phase == .active {
+                let away = leftActiveAt.map { Date.now.timeIntervalSince($0) } ?? 0
+                leftActiveAt = nil
+                Task {
+                    await axis.reload()
+                    // 离开够久再回来 = 新的一次「打开」：闸门回到视口上部（R10）
+                    if away >= Self.reanchorAfter, viewportHeight > 0 { scrollToGate(geometry) }
+                }
+            } else if leftActiveAt == nil {
+                leftActiveAt = .now
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: ReconcileService.planChangedExternally)) { _ in
             Task { await axis.reload(includeCalendar: false) }
@@ -99,16 +127,12 @@ struct TimelineAxisView<DayMenu: View>: View {
 
     // MARK: 跳到那天
 
-    /// 视口里正在看的那一天（视口上部三分之一处那一刻所属的逻辑日）。
-    private func visibleDay(_ geo: AxisGeometry) -> Date {
-        let probe = geo.time(atY: offsetY + max(0, viewportHeight) * Self.gateViewportFraction)
-        return DayContext.logicalStartOfDay(probe)
-    }
-
-    private func gateVisible(_ geo: AxisGeometry) -> Bool {
-        guard viewportHeight > 0 else { return true }
-        let y = geo.y(axis.now)
-        return y >= offsetY && y <= offsetY + viewportHeight
+    /// 视口摘要（纯函数）：正在看的那一天 = 视口上部三分之一处那一刻所属的逻辑日；闸门在不在视口里。
+    static func viewport(offsetY: CGFloat, height: CGFloat, geo: AxisGeometry, now: Date) -> Viewport {
+        let probe = geo.time(atY: offsetY + max(0, height) * gateViewportFraction)
+        let gateY = geo.y(now)
+        return Viewport(visibleDay: DayContext.logicalStartOfDay(probe),
+                        gateVisible: height <= 0 || (gateY >= offsetY && gateY <= offsetY + height))
     }
 
     private func scrollToGate(_ geo: AxisGeometry) {
@@ -122,13 +146,16 @@ struct TimelineAxisView<DayMenu: View>: View {
     }
 
     @ViewBuilder private func jumpBar(_ geo: AxisGeometry) -> some View {
-        let visible = visibleDay(geo)
+        let visible = viewport.visibleDay ?? axis.todayLabel
         HStack(spacing: 8) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(axis.labels, id: \.self) { label in
                         let selected = label == visible
-                        Button { scrollToDay(label, geo) } label: {
+                        Button {
+                            FeatureUsage.used(.todayAxisDayJump, label == axis.todayLabel ? "今天" : (label < axis.todayLabel ? "过去" : "往后"))
+                            scrollToDay(label, geo)
+                        } label: {
                             Text(Self.chipLabel(label, today: axis.todayLabel))
                                 .font(.callout)
                                 .lineLimit(1)
@@ -143,12 +170,16 @@ struct TimelineAxisView<DayMenu: View>: View {
                     }
                 }
             }
-            if !gateVisible(geo) {
-                Button { scrollToGate(geo) } label: {
+            if !viewport.gateVisible {
+                Button {
+                    FeatureUsage.used(.todayAxisBackToNow)
+                    scrollToGate(geo)
+                } label: {
                     Label("回到现在", systemImage: "scope").font(.caption)
                 }
                 .buttonStyle(.bordered).controlSize(.small)
                 .accessibilityIdentifier("bc.today.axis.backToNow")
+                .onAppear { FeatureUsage.seen(.todayAxisBackToNow) }
             }
             dayMenu(visible)
         }
@@ -318,7 +349,10 @@ private struct AxisDaySection: View {
         }
         let h = max(6, geo.y(end) - geo.y(start) - 1)
         let dragging = drag?.itemID == item.id
-        return AxisBlockView(item: item, start: start, end: end, height: h, dragging: dragging)
+        // W26 跨天拖：拖进别的逻辑日时，块上的时间带上落到哪一天（「明天 09:00–10:00」），松手前就看得见
+        let landing = DayContext.logicalStartOfDay(start)
+        let dayHint = dragging && landing != day.label ? PlanEditRules.relativeDayName(landing, now: now) : nil
+        return AxisBlockView(item: item, start: start, end: end, height: h, dragging: dragging, dayHint: dayHint)
             .frame(width: max(10, laneW - 3), height: h, alignment: .topLeading)
             .overlay(alignment: .bottom) {
                 if item.isDraggable { resizeHandle(item) }
@@ -401,6 +435,7 @@ private struct AxisBlockView: View {
     let end: Date
     let height: CGFloat
     let dragging: Bool
+    var dayHint: String? = nil
     @Environment(\.appTheme) private var theme
 
     private var tint: Color {
@@ -461,7 +496,7 @@ private struct AxisBlockView: View {
     }
 
     private var subtitle: String {
-        let span = PlanEditRules.span(start, end)
+        let span = (dayHint.map { $0 + " " } ?? "") + PlanEditRules.span(start, end)
         switch item.kind {
         case .occupied: return span + (item.calendarName.map { " · \($0)" } ?? "")
         case .actual: return item.isRunning ? "正在做 · 从 \(PlanEditRules.hm(start))" : span

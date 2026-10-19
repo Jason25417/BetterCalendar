@@ -65,6 +65,7 @@ struct MorningBriefStrip: View {
                         }
                         Spacer()
                         Button("排今天") {
+                            FeatureUsage.used(.todayMorningBrief)
                             router.scheduleRequest = .insertLongTask(entry.id)
                         }
                         .font(.caption).buttonStyle(.bordered).controlSize(.small)
@@ -79,6 +80,7 @@ struct MorningBriefStrip: View {
             .padding(10)
             .background(RoundedRectangle(cornerRadius: 10).fill(theme.surface))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary))
+            .onAppear { FeatureUsage.seen(.todayMorningBrief) }   // 点 ✕「今天先不排」不记用过
         }
     }
 }

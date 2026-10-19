@@ -23,7 +23,7 @@ struct AxisBlockEditor: View {
                     TextField("标题", text: $block.title)
                         .accessibilityIdentifier("bc.today.axis.edit.title")
                     LabeledContent("时间", value: PlanEditRules.span(block.start, block.end))
-                    Text("改时间：在时间轴上拖这一块；拉它的底边改时长。")
+                    Text("改时间：在时间轴上拖这一块（可以拖进别的日子）；拉它的底边改时长。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("性质") {

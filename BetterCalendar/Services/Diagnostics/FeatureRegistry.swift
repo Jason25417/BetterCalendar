@@ -18,14 +18,16 @@ nonisolated enum FeatureExposure: Sendable, Equatable {
     case onPage(FeatureID)
     /// 收在某个菜单 / 折叠区 / 详情页里：父级被看见 ≠ 它被看见（解读时措辞是「可能不知道，它收在 X 里」）。
     case inMenu(FeatureID)
+    /// W26：没有按钮的手势（在时间轴上拖 / 拉边）：所在处被看见 ≠ 知道能这么做（解读时措辞是「可能不知道，它是 X 上的手势」）。
+    case gesture(FeatureID)
     /// 没有「看见」这回事（通知按钮、快捷指令、控件、自动行为）：只按用过 / 撤销 / 出错解读。
     case none
 }
 
 nonisolated enum FeatureID: String, CaseIterable, Codable, Sendable {
-    // MARK: 今天页（W23 正在把中间的卡片列表换成连续时间轴：这里只登记稳定入口；拖 / 改 / 删 / 加记在
-    // HomeViewModel 的写入路径，换了视图照样记。提示条（主动建议 / 收尾卡 / 晨间摘要）与「这一天」菜单里的
-    // 导出 / 按日历更新等，待 W23 合并后由协调者补登记 + 埋点——没埋点的功能不能登记，否则会被误判成「没看见过」。）
+    // MARK: 今天页（改 / 删 / 加记在 HomeViewModel 的写入路径，卡片列表和时间轴两种视图都记；
+    // 「拖动」分两条：today.drag = 卡片列表里拖排序，today.axis.drag = 时间轴上拖时间。W26 补登记了时间轴、
+    // 提示条（主动建议 / 收尾卡 / 晨间摘要）与「这一天」菜单里的导出 / 按日历更新——每个 id 都有调用点，有测试守着。）
     case todayPage = "today.page"
     case todayDaySwitch = "today.daySwitch"
     case todayDrag = "today.drag"
@@ -35,6 +37,19 @@ nonisolated enum FeatureID: String, CaseIterable, Codable, Sendable {
     case todaySayToAgent = "today.sayToAgent"
     case todayLoose = "today.loose"
     case todayTraceReview = "today.traceReview"
+    // W26：时间轴（今天页默认视图）
+    case todayAxis = "today.axis"
+    case todayAxisDrag = "today.axis.drag"
+    case todayAxisResize = "today.axis.resize"
+    case todayAxisEdit = "today.axis.edit"
+    case todayAxisBackToNow = "today.axis.backToNow"
+    case todayAxisDayJump = "today.axis.dayJump"
+    // W26：今天页的提示条与「这一天」菜单
+    case todaySuggestion = "today.suggestion"
+    case todayWrapUpCard = "today.wrapUpCard"
+    case todayMorningBrief = "today.morningBrief"
+    case todayExportICS = "today.exportICS"
+    case todayUpdateDoneFromCalendar = "today.updateDoneFromCalendar"
 
     // MARK: 现在 / 下一件（今天页顶部与 Mac 菜单栏弹窗共用 ExecutionPanel；detail 记在哪个界面）
     case nowNextPanel = "nowNext.panel"
@@ -142,13 +157,24 @@ nonisolated enum FeatureID: String, CaseIterable, Codable, Sendable {
         switch self {
         case .todayPage: "今天页"
         case .todayDaySwitch: "切换日期（今天页顶部的日期条）"
-        case .todayDrag: "拖动调整时间线"
+        case .todayDrag: "拖动调整时间线（卡片列表）"
         case .todayEdit: "直接改块（时间 / 标题 / 属性）"
         case .todayDelete: "删除一块"
         case .todayAdd: "时间线「加一项」"
         case .todaySayToAgent: "今天页「跟智能体说一句」"
         case .todayLoose: "这天松散一下"
         case .todayTraceReview: "查看 / 撤销自动调整"
+        case .todayAxis: "今天页时间轴"
+        case .todayAxisDrag: "在时间轴上拖动改时间（含拖到别的日子）"
+        case .todayAxisResize: "在时间轴上拉底边改时长"
+        case .todayAxisEdit: "点时间轴上的块打开编辑"
+        case .todayAxisBackToNow: "时间轴「回到现在」"
+        case .todayAxisDayJump: "时间轴顶上的日子条（跳到那天）"
+        case .todaySuggestion: "主动建议条（排进今天 / 先放下）"
+        case .todayWrapUpCard: "收尾卡（进入收尾）"
+        case .todayMorningBrief: "晨间摘要（昨天留下的待办「排今天」）"
+        case .todayExportICS: "导出 ICS（「这一天」菜单）"
+        case .todayUpdateDoneFromCalendar: "按系统日历更新今天做成的事（「这一天」菜单）"
         case .nowNextPanel: "现在 / 下一件面板"
         case .nowNextStart: "开始这件 / 开始下一件"
         case .nowNextFinish: "完成这件"
@@ -259,6 +285,14 @@ nonisolated enum FeatureID: String, CaseIterable, Codable, Sendable {
         // 时间线有 ≥2 块时它在眼前；W23 重做时间线后由协调者补 seen（在那之前按今天页算）
         case .todayDrag, .todayEdit: .onPage(.todayPage)
         case .todayDelete, .todayLoose: .inMenu(.todayPage)
+        // 时间轴：轴本身出现即记 seen；拖 / 拉边是没有按钮的手势；点块编辑、日子条常驻在轴上；
+        // 「回到现在」只在闸门滚出视口时出现（出现时自己记 seen）
+        case .todayAxis, .todayAxisBackToNow: .direct
+        case .todayAxisDrag, .todayAxisResize: .gesture(.todayAxis)
+        case .todayAxisEdit, .todayAxisDayJump: .onPage(.todayAxis)
+        // 提示条只在条件满足时出现，出现时自己记 seen；点掉 / 别再提 / 先不收尾不算「用过」（那是「不需要」的信号）
+        case .todaySuggestion, .todayWrapUpCard, .todayMorningBrief: .direct
+        case .todayExportICS, .todayUpdateDoneFromCalendar: .inMenu(.todayPage)
         case .nowNextPanel: .direct
         case .nowNextStart, .nowNextFinish, .nowNextSwitch, .nowNextParallel, .nowNextBreak, .nowNextTiming, .nowNextAdHoc:
             .onPage(.nowNextPanel)
@@ -294,7 +328,7 @@ nonisolated enum FeatureID: String, CaseIterable, Codable, Sendable {
 
     /// 页面 / 面板本身（只记 seen，是别的功能的「所在处」）：解读层只对它说「可能不知道」，不说「不需要」。
     var isSurface: Bool {
-        [.todayPage, .nowNextPanel, .agentPage, .proposalCard, .longtermPage, .journalPage, .settingsPage].contains(self)
+        [.todayPage, .todayAxis, .nowNextPanel, .agentPage, .proposalCard, .longtermPage, .journalPage, .settingsPage].contains(self)
     }
 
     /// 自动行为：「用过」不由你发起，只看撤销（解读层不对它做「没用过」类推断）。
