@@ -328,6 +328,15 @@ final class AppContainer {
                                             startedDays: startedDays, projection: projection,
                                             canonicalTasks: bridgeTasks)
         bridgeTasks.onChange = { [weak execution] in execution?.syncCanonicalPresentation() }
+        // W26b/W26c：早晚通知重排器（批准的改动 + 时间线协调器的自动写共用一个）。测试宿主不接（不往测试进程里排真通知）
+        let looseForReminders = looseDays, poolForReminders = longTasks
+        let dailyReminders: DailyReminderRefresher? = TestHost.isActive ? nil : DailyReminderRefresher(
+            plans: planStore, notifier: notifier,
+            isLoose: { looseForReminders.isLoose($0) },
+            pooledFromYesterday: {
+                poolForReminders.todoItems()
+                    .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }.count
+            })
         if let actionExecutor {
             actionExecutor.timer = execution
             let mover = ApprovedPlanMover(planStore: planStore, projection: projection, startedDays: startedDays)
@@ -339,15 +348,7 @@ final class AppContainer {
                                               excluding: ExternalCalendarSettings.excludedTitles)
             }
             // W26b：批准的改动（含跨天挪）涉及已排早晚通知的那一天 → 按新计划重排（与今天页保存同一口径）
-            // 测试宿主不接（不往测试进程里排真通知）
-            let looseForReminders = looseDays, poolForReminders = longTasks
-            mover.reminderRefresher = TestHost.isActive ? nil : DailyReminderRefresher(
-                plans: planStore, notifier: notifier,
-                isLoose: { looseForReminders.isLoose($0) },
-                pooledFromYesterday: {
-                    poolForReminders.todoItems()
-                        .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }.count
-                })
+            mover.reminderRefresher = dailyReminders
             actionExecutor.mover = mover
         }
         // W13 设备活动记录：测试环境用临时目录、不启动任何采集（各组件单测各自注入假实现）。
@@ -507,6 +508,7 @@ final class AppContainer {
                                             traces: changeTraces)
         timeline.progress = execution
         timeline.longTasks = longTasks   // E5c：溢出硬执行 → 收待办区/回长期池
+        timeline.reminderRefresher = dailyReminders   // W26c：本机真写了自动调整 → 涉及已排早晚通知那天就重排
         // W22 写权租约：两台设备只让一台写自动调整（计时中的设备 > 最近回前台的 > 到期后先续约的）；租约存 iCloud KV。
         // 测试 host 不建（不碰真实 KV；协调器 writeLease=nil 即旧行为）
         if !TestHost.isActive {

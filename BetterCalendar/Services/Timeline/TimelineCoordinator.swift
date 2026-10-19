@@ -83,6 +83,17 @@ final class TimelineCoordinator {
     private(set) var pendingBackstop = false
     /// 最近一轮因为没有写权而只算不写的调整数（观察窗 / 测试用）。
     private(set) var lastSkippedWrites = 0
+    /// W26c：早晚通知重排器。本机**真写了**自动调整（顺延 / 活动预报 / 溢出排到明天 / 一键撤）→ 涉及的日子里
+    /// 若有已排早晚通知的那天，按新计划重排（过去的日子 / 不涉及 → 不动；松散日 → 静音）。没写权只算不写的轮次不重排
+    /// （那份调整由持有写权的设备写、它那边重排；本机的通知等改动同步回来、你在这台上保存时再按新计划排）。nil = 不管通知。
+    var reminderRefresher: DailyReminderRefresher?
+    /// 同步写入路径（溢出 / 一键撤）里发起的那次重排（测试 await 它）。
+    private(set) var pendingReminderRefresh: Task<Void, Never>?
+
+    private func refreshReminders(_ days: Set<Date>) {
+        guard let reminderRefresher, !days.isEmpty else { return }
+        pendingReminderRefresh = Task { await reminderRefresher.refresh(affecting: days) }
+    }
 
     init(planStore: PlanReading & PlanWriting & ActualReading,
          startedDays: StartedDayStore,
@@ -171,6 +182,7 @@ final class TimelineCoordinator {
         }
         guard !restored.isEmpty else { return 0 }
         noteManualEdits(ids: Array(restored))
+        refreshReminders([today])
         traces.append(ChangeTraceEntry(time: now(), blockID: restored.first ?? UUID(),
                                        title: "撤销 \(restored.count) 块", kind: "撤销",
                                        beforeStart: now(), beforeEnd: now(),
@@ -242,17 +254,21 @@ final class TimelineCoordinator {
         }
         let reference = DayContext.logicalWindow(forLabel: day).start
         var pooled = 0
+        var touchedDays: Set<Date> = []
         for (c, decision) in SpillResolver.resolveAll(spillCs, reference: reference) {
             guard let block = candidates.first(where: { $0.id == c.id }) else { continue }
             switch decision {
             case .dissolve:
                 try? planStore.deletePlanned(ids: [c.id], reason: .spill)   // 零记录、明天照常、不进偏差叙事
+                touchedDays.insert(DayContext.logicalStartOfDay(block.start))
             case .forward(let target):
                 // 用户显式「排到明天」：同钟点平移（懒物化——明天重算时自然归位）
                 let shift = target.timeIntervalSince(day)
                 try? planStore.updatePlanned(id: c.id, start: block.start.addingTimeInterval(shift),
                                              end: block.end.addingTimeInterval(shift), title: block.title,
                                              reason: .spill)
+                touchedDays.formUnion([DayContext.logicalStartOfDay(block.start),
+                                       DayContext.logicalStartOfDay(block.start.addingTimeInterval(shift))])
                 traces.append(ChangeTraceEntry(time: now(), blockID: c.id, title: c.title, kind: "顺延",
                                                beforeStart: block.start, beforeEnd: block.end,
                                                afterStart: block.start.addingTimeInterval(shift),
@@ -263,6 +279,7 @@ final class TimelineCoordinator {
                 // 收待办区（池投放件回它的长期任务——addTodo 的归属让路自动处理）；
                 // escalate（DDL 挡路/显式 ask）同收池但保露脸：晨间摘要置顶（E5d 按 DDL 排序）
                 try? planStore.deletePlanned(ids: [c.id], reason: .spill)
+                touchedDays.insert(DayContext.logicalStartOfDay(block.start))
                 longTasks?.addTodo(title: c.title,
                                    family: block.family,
                                    spilledFromDay: day,
@@ -279,6 +296,7 @@ final class TimelineCoordinator {
             }
         }
         markerDefaults.set(true, forKey: spillExecutedKey(day))
+        refreshReminders(touchedDays)   // 「排到明天」的块进了明天：明天的早晚通知可能要换
         sharedSpillMarks?.markSettled(day: day, by: writeLease?.deviceLabel ?? "另一台设备")
         spillOverrides = [:]
         softSpilledIDs = []
@@ -444,6 +462,8 @@ final class TimelineCoordinator {
             SmokeLog.hit("写权租约", "非持有者只算不写·\(skipped)")
         }
         guard wrote > 0 else { return 0 }
+        // W26c：本机真写了（wrote > 0 只在有写权时发生）→ 今天若是已排早晚通知的那天，末块后的晚通知等按新计划重排
+        await reminderRefresher?.refresh(affecting: [today])
         lastWriteNote = "\(reason)：写回 \(wrote) 块（软标 \(softSpilledIDs.count)）"
         DevLog.shared.info("时间线", lastWriteNote)
         SmokeLog.hit("影子直写绿", "\(reason)·写回 \(wrote)·软标 \(softSpilledIDs.count)")
