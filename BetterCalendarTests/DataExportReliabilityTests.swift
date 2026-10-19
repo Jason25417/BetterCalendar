@@ -105,4 +105,34 @@ import Testing
         let last = try #require(DevLog.shared.entries.last)
         #expect(last.level == .error && last.source == "数据档案")
     }
+
+    /// 2026-10-19 根因：偏好里有 Data（approvals.preauthRules.v1）/ Date 时，旧实现的 JSONSerialization 抛 ObjC 异常，
+    /// Swift catch 不住 → 导出任务被 runloop 吞掉、单测 host 无限挂起。锁住：非 JSON 值走 plist 原样进档案，JSON 值照旧。
+    /// 用独立 suite，绝不碰 UserDefaults.standard（test host 与日用版共用同一个容器的偏好）。
+    @Test func preferencesWithDataAndDateAreArchivedNotFatal() throws {
+        let suite = "bc-export-prefs-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let blob = Data([0x00, 0xFF, 0x10])
+        let when = Date(timeIntervalSince1970: 1_800_000_000)
+        defaults.set(blob, forKey: "blob")
+        defaults.set(when, forKey: "when")
+        defaults.set(["a", "b"], forKey: "list")
+        defaults.set(true, forKey: "flag")
+        defaults.set(42, forKey: "n")
+        var archive = DataArchive(createdAt: when, sourceVersion: "test", records: [])
+
+        try DataMaintenance.captureLocalPreferences(from: defaults, keys: ["blob", "when", "list", "flag", "n", "absent"], into: &archive)
+
+        #expect(archive.preferences["local:list"] == .array([.string("a"), .string("b")]))
+        #expect(archive.preferences["local:flag"] == .bool(true))
+        #expect(archive.preferences["local:n"] == .number(42))
+        #expect(archive.preferences["local:blob"] == nil && archive.preferences["local:absent"] == nil)
+        let blobPlist = try #require(archive.localFiles["local-defaults/blob.plist"])
+        let whenPlist = try #require(archive.localFiles["local-defaults/when.plist"])
+        #expect((try PropertyListSerialization.propertyList(from: blobPlist, format: nil) as? [String: Data])?["blob"] == blob)
+        #expect((try PropertyListSerialization.propertyList(from: whenPlist, format: nil) as? [String: Date])?["when"] == when)
+        // 整份档案能编码（seal）——旧实现在这一步之前就已经被异常带走
+        _ = try ArchiveCodec.encoder().encode(SealedDataArchive(archive))
+    }
 }
