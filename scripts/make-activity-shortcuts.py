@@ -9,7 +9,8 @@
      BetterCalendar 记录 App 关闭 = 等待 2 秒 → 获取当前 App → 「记录 App 关闭」（现在前台的 App = 当前 App）
 2. 自动化版（带「App 已打开 / 已关闭」触发器、App 名单已填好；含 Jason 的装机清单 = 个人数据，**不进仓库、不进 App 包**）：
      python3 scripts/make-activity-shortcuts.py --apps apps.json --out ~/Desktop/BetterCalendar-自动化
-   apps.json 来自 `xcrun devicectl device info apps --device <iPhone> --include-all-apps --json-output apps.json`
+   apps 名单二选一：`ideviceinstaller list --user --xml > apps.xml`（brew install libimobiledevice ideviceinstaller；不需要开发者模式，推荐）
+   或 `xcrun devicectl device info apps --device <iPhone> --include-all-apps --json-output apps.json`（需要 iPhone 开发者模式）
    （或一行一个 `bundle.id<TAB>名字<TAB>TEAMID` 的文本）。再加 `--harvest-shortcuts-db` 可从本机快捷指令库
    已有的 App 触发器里补 TeamIdentifier。
 
@@ -120,7 +121,21 @@ def parse_apps(text, include_apple=False):
     过滤：App Clip、隐藏、内部 App、自己、快捷指令；com.apple.* 默认不要（系统 App 太多、多数不值得记），--include-apple 保留可删除的那些。"""
     text = text.strip()
     rows = []
-    if text.startswith("{") or text.startswith("["):
+    if text.startswith("<?xml") or text.startswith("<plist"):
+        # `ideviceinstaller list --user --xml`（不需要开发者模式；2026-10-18 实际走通的路）：团队 ID 从签名权限里补
+        import plistlib, re
+        for a in plistlib.loads(text.encode("utf-8")):
+            bid = a.get("CFBundleIdentifier")
+            if not bid:
+                continue
+            ent = a.get("Entitlements") or {}
+            team = a.get("TeamIdentifier") or ent.get("com.apple.developer.team-identifier")
+            if not team:
+                m = re.match(r"^([A-Z0-9]{10})\.", ent.get("application-identifier") or "")
+                team = m.group(1) if m else None
+            rows.append({"bundle": bid, "name": a.get("CFBundleDisplayName") or a.get("CFBundleName") or bid,
+                         "team": team, "removable": True})
+    elif text.startswith("{") or text.startswith("["):
         data = json.loads(text)
         items = data.get("result", {}).get("apps") if isinstance(data, dict) else data
         if items is None:

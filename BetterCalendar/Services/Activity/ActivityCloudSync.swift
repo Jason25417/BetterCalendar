@@ -207,7 +207,8 @@ actor ActivityOutbox {
             else { status.working(.cloudImport, at: now) }
             if let last = incoming.map(\.at).max() {
                 lastImported = last
-                status.working(.shortcut, at: incoming.filter { $0.source == .shortcut }.map(\.at).max() ?? last)
+                // 冒烟 2026-10-19：只有真正的快捷指令记录才算「快捷指令正常」（以前任何 iPhone 记录都会刷新这一行，网络探测也算）
+                if let s = incoming.filter({ $0.source == .shortcut }).map(\.at).max() { status.working(.shortcut, at: s) }
             }
             await pruneIfDue(now: now, index: index)
             return written
