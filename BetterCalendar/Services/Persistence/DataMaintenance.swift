@@ -164,7 +164,7 @@ final class DataMaintenance {
     /// 本机偏好（UserDefaults）进档案。JSON 能表达的进 `preferences["local:<key>"]`；Data / Date 等 JSON 表达不了的
     /// plist 值整份原样存 `localFiles["local-defaults/<key>.plist"]`（同 icloud-kv.plist 的做法）。
     ///
-    /// 修复（2026-10-19）：旧实现对每个值直接 `JSONSerialization.data(withJSONObject:)`——遇到 Data（如
+    /// 修复（2026-10-19）：旧实现对每个值直接 `SafeJSON.data(withJSONObject:)`——遇到 Data（如
     /// approvals.preauthRules.v1，PreauthRules 存的是编码后的 Data）它抛的是 **ObjC 异常**（NSInvalidArgumentException），
     /// Swift 的 try/catch 接不住：异常越过 Swift 帧被 AppKit runloop 吞掉 → 导出/自动快照的主 actor 任务半路消失，
     /// 既不成功也不报错（又一次「点导出没反应」），单测 host 则无限挂起；之后主线程还可能因被撕裂的执行器状态 SIGSEGV。
@@ -174,7 +174,7 @@ final class DataMaintenance {
         for key in keys.sorted() {
             guard let value = defaults.object(forKey: key) else { continue }
             if JSONSerialization.isValidJSONObject([value]) {
-                let json = try JSONSerialization.data(withJSONObject: [value], options: [.sortedKeys])
+                let json = try SafeJSON.data(withJSONObject: [value], options: [.sortedKeys])
                 if case .array(let wrapped) = try ArchiveCodec.decoder().decode(ArchiveValue.self, from: json), let v = wrapped.first {
                     archive.preferences["local:" + key] = v
                     continue
@@ -214,12 +214,12 @@ final class DataMaintenance {
             DataSyncMonitor.shared.refreshNow()
             message = "已应用 \(request.edits.count) 条开发修改；旧内容保存在 \(backup.lastPathComponent)。云端到达另看同步状态。"
             let body = ["requestID": request.requestID.uuidString, "status": "applied-locally", "backup": backup.lastPathComponent]
-            try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .prettyPrinted]).write(to: receipt, options: .atomic)
+            try SafeJSON.data(withJSONObject: body, options: [.sortedKeys, .prettyPrinted]).write(to: receipt, options: .atomic)
         } catch {
             message = "开发修改未完成：\(error.localizedDescription)"
             DataSyncMonitor.shared.report(message)
             let body = ["status": "needs-review", "message": message, "requestFile": processing.lastPathComponent]
-            try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys, .prettyPrinted]).write(to: receipt, options: .atomic)
+            try? SafeJSON.data(withJSONObject: body, options: [.sortedKeys, .prettyPrinted]).write(to: receipt, options: .atomic)
         }
     }
 }

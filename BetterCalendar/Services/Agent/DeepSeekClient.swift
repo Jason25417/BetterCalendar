@@ -96,7 +96,7 @@ nonisolated struct DeepSeekClient: Sendable {
         var body: [String: Any] = ["model": model, "messages": encodedMessages, "max_tokens": maxTokens, "stream": false,
                                    "thinking": ["type": "disabled"]]
         if !tools.isEmpty { body["tools"] = tools; body["tool_choice"] = "auto" }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        return try SafeJSON.data(withJSONObject: body, options: [.sortedKeys])
     }
 
     func complete(model: String, messages: [DeepSeekMessage], tools: Data, maxTokens: Int = 2048) async throws -> DeepSeekCompletion {

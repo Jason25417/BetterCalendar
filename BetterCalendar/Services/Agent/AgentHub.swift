@@ -203,7 +203,7 @@ extension AgentBridge: ClaudeCodeAgentChannel {
             try FileManager.default.createDirectory(at: localRoot.appendingPathComponent("runtime"), withIntermediateDirectories: true)
             // 「智能体忙不忙」由哨兵读 runtime/status.json：内置智能体正在跑 = running。
             let state = hub.builtin.isRunning ? "running" : "idle"
-            try io.writeAtomic(JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "state": state]), to: "runtime/status.json")
+            try io.writeAtomic(SafeJSON.data(withJSONObject: ["schemaVersion": 1, "state": state]), to: "runtime/status.json")
             try body(io)
             try deliverWakes(io)
         }

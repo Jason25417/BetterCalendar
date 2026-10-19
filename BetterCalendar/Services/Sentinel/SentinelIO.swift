@@ -144,7 +144,7 @@ nonisolated enum SentinelBridgeFiles {
         let digest: [String: Any] = ["schemaVersion": 1, "writtenAt": iso.string(from: now), "hash": digestHash, "bytes": digestBytes,
                                      "trigger": trigger.rawValue, "decisionId": decisionId.uuidString, "text": digestText,
                                      "note": "哨兵判断时看到的摘要原文（含设备活动里的 App/网站名：只供你理解情况，不要写进复盘、留底或给 Jason 的消息）"]
-        try io.writeAtomic(JSONSerialization.data(withJSONObject: digest, options: [.prettyPrinted, .sortedKeys]), to: ref)
+        try io.writeAtomic(SafeJSON.data(withJSONObject: digest, options: [.prettyPrinted, .sortedKeys]), to: ref)
         prune(dir)
         let payload: [String: Any] = ["reason": verdict.reason, "urgency": verdict.urgency.rawValue, "signals": verdict.signals,
                                       "trigger": trigger.rawValue, "judge": judge.rawValue, "digestRef": ref, "digestHash": digestHash,
@@ -164,7 +164,7 @@ nonisolated enum SentinelBridgeFiles {
 
     static func writeStatus(io: AgentBridgeIO, _ status: [String: Any]) throws {
         try FileManager.default.createDirectory(at: io.root.appendingPathComponent("runtime", isDirectory: true), withIntermediateDirectories: true)
-        try io.writeAtomic(JSONSerialization.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys]), to: statusPath)
+        try io.writeAtomic(SafeJSON.data(withJSONObject: status, options: [.prettyPrinted, .sortedKeys]), to: statusPath)
     }
 
     private static func prune(_ dir: URL) {

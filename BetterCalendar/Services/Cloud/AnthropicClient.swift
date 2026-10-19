@@ -160,7 +160,7 @@ struct AnthropicClient {
         if jsonMode, let schema = jsonSchema {
             body["output_config"] = ["format": ["type": "json_schema", "schema": schema]]
         }
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try SafeJSON.data(withJSONObject: body)
         let obj = try await send(req, provider: "Anthropic")
         Self.logCacheUsage(obj, label: model())
         let stop = obj["stop_reason"] as? String
@@ -210,7 +210,7 @@ struct AnthropicClient {
         if let schema = jsonSchema {
             body["output_config"] = ["format": ["type": "json_schema", "schema": schema]]
         }
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try SafeJSON.data(withJSONObject: body)
 
         let (bytes, resp) = try await URLSession.shared.bytes(for: req)
         guard let http = resp as? HTTPURLResponse else { throw AnthropicError(message: "无 HTTP 响应") }
@@ -272,7 +272,7 @@ struct AnthropicClient {
         } else if jsonMode {
             body["response_format"] = ["type": "json_object"]
         }
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        req.httpBody = try SafeJSON.data(withJSONObject: body)
         let obj: [String: Any]
         do {
             obj = try await send(req, provider: "硅基流动")

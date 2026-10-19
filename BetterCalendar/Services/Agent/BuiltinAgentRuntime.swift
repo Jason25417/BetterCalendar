@@ -257,7 +257,7 @@ extension DeepSeekClient: BuiltinAgentModel {
                 if let text = completion.message.content?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
                    let waiting = events.last(where: { $0.kind == "user_message" }),
                    let mid = (waiting.payload["messageId"] as? String).flatMap(UUID.init), !ledger.repliedTo.contains(mid) {
-                    let args = try JSONSerialization.data(withJSONObject: ["text": String(text.prefix(1000)), "replyTo": mid.uuidString])
+                    let args = try SafeJSON.data(withJSONObject: ["text": String(text.prefix(1000)), "replyTo": mid.uuidString])
                     _ = await tools.call("reply_jason", arguments: String(decoding: args, as: UTF8.self), eventId: waiting.id, ledger: ledger)
                 }
                 return
@@ -280,7 +280,7 @@ extension DeepSeekClient: BuiltinAgentModel {
     }
 
     static func eventMessage(_ events: [AgentEvent]) -> String {
-        let body = (try? JSONSerialization.data(withJSONObject: ["events": events.map(\.json)], options: [.prettyPrinted, .sortedKeys]))
+        let body = (try? SafeJSON.data(withJSONObject: ["events": events.map(\.json)], options: [.prettyPrinted, .sortedKeys]))
             .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         return "本轮事件（\(events.count) 个，按时间先后；一起看、回应一次就好）：\n\(body)"
     }

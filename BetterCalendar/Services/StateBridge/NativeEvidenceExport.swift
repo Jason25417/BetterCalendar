@@ -23,7 +23,7 @@ nonisolated enum NativeEvidenceExport {
         let original = try JSONSerialization.jsonObject(with: bytes, options: [.fragmentsAllowed])
         var count = 0
         let safe = try redact(original, depth: 0, count: &count)
-        let encoded = try JSONSerialization.data(withJSONObject: safe, options: [.sortedKeys, .fragmentsAllowed])
+        let encoded = try SafeJSON.data(withJSONObject: safe, options: [.sortedKeys, .fragmentsAllowed])
         return (try JSONDecoder().decode(BridgeJSON.self, from: encoded), BridgePoolCodec.hash(bytes), count)
     }
 
@@ -85,7 +85,7 @@ nonisolated enum NativeEvidenceExport {
                          "excluded": ["connection configuration", "credential files", "SwiftData database", "photo binaries", "other device files", "cloud-only research logs"]] as [String: Any],
             "files": entries
         ]
-        return .init(data: try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]),
+        return .init(data: try SafeJSON.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]),
                      includedFiles: included, unavailableFiles: unavailable)
     }
 
