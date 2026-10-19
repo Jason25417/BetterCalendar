@@ -3,7 +3,8 @@
 //  BetterCalendar
 //
 //  SPEC §19 B3：App 内的多端审批入口——与系统通知、对话卡片指向同一份提案状态。
-//  开发期面板：待确认列表 + 最近结果 + 预授权规则（W10）+ 操作留底 + 发一条测试改动（空改动，不碰真实数据）。
+//  面板：待确认列表 + 最近结果 + 预授权规则（W10）；操作留底 / 发一条测试改动 / 转译统计 / 运行记录 / 延迟
+//  收在「开发者选项」后（W16）。
 //
 
 import SwiftUI
@@ -20,10 +21,12 @@ struct ProposalPanel: View {
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var notificationAllowed: Bool?
+    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
 
     var body: some View {
         List {
-            if let error = center.lastError {
+            // W16：同一判定（IssueTriage）——短暂的 iCloud / 网络失败升级前不在这里显示，日志与 🐞 计数里照样有
+            if let error = center.lastError, DevLog.shared.shouldShowInline(source: "多端审批", message: error) {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                     Button("知道了") { center.clearError() }
@@ -42,19 +45,21 @@ struct ProposalPanel: View {
                 ForEach(Array(closed)) { p in historyRow(p) }
             }
             PreauthRulesSection(center: center)   // W10 A3a：预授权规则（查看 / 改效果 / 删除，随设置同步）
-            AgentTranslationStatsSection(center: center, messages: messages)   // SPEC §19 批次 6：转译偏差统计（只统计）
+            if developerOptions {
+                AgentTranslationStatsSection(center: center, messages: messages)   // SPEC §19 批次 6：转译偏差统计（只统计；W16 收进开发者选项）
+            }
             #if os(macOS)
             if let bridge {
                 Section("BetterCalendar 智能体桥接（Mac）") {
                     Text(bridge.folderPath.map { "已连接：\($0)" } ?? "未连接：请选择智能体工作区里的 bridge 文件夹").font(.footnote)
                     if let last = bridge.lastSync { Text("上次同步 \(last.formatted(date: .omitted, time: .standard)) · 已导入 \(bridge.importedCount) 份提案").font(.caption).foregroundStyle(.secondary) }
-                    if let error = bridge.lastError { Text(error).font(.caption).foregroundStyle(.orange) }
+                    InlineIssueText(source: "智能体桥接", message: bridge.lastError)
                     HStack {
                         Button(bridge.connected ? "重新选择文件夹" : "选择 bridge 文件夹") { bridge.chooseFolder() }
                         if bridge.connected { Button("断开", role: .destructive) { bridge.disconnect() } }
                     }
                 }
-                if bridge.connected { AgentRuntimeSection(bridge: bridge) }   // SPEC §19 批次 11：最近运行 / 调度失败 / 越权记录
+                if bridge.connected, developerOptions { AgentRuntimeSection(bridge: bridge) }   // W16：运行内部数据收进开发者选项（失败照样进日志 / 横幅）   // SPEC §19 批次 11：最近运行 / 调度失败 / 越权记录
                 if let sentinel { SentinelSection(engine: sentinel) }   // SPEC §19 C1 W14：哨兵（要不要叫醒智能体）
             }
             #endif
@@ -70,22 +75,26 @@ struct ProposalPanel: View {
                 Section("App 关闭时也推送（实验，B5）") {
                     Toggle("新提案由 iCloud 直接推送", isOn: Binding(get: { alertPush.enabled }, set: { on in Task { await alertPush.set(on) } }))
                     Text("打开后，App 没运行也能弹出带批准/拒绝的通知；作用于你所有设备。和本机通知重复时只保留一条。默认开：你没手动关过时，App 启动会自动打开。").font(.caption).foregroundStyle(.secondary)
-                    if let e = alertPush.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
+                    InlineIssueText(source: "多端审批", message: alertPush.lastError)
                 }
                 .task { await alertPush.reload() }
             }
-            Section("开发期工具") {
-                Text("本机：\(center.deviceLabel)").font(.footnote).foregroundStyle(.secondary)
+            Section("通知与刷新") {
                 notificationRow
-                Button("发一条测试改动（由批准的那台设备执行）") { Task { await sendTest(target: nil) } }
-                Button("发一条测试改动（指定本机执行）") { Task { await sendTest(target: center.deviceId) } }
                 Button("立即刷新") { Task { await center.refresh() } }
             }
-            Section("操作留底（最近 30 条）") {
-                ForEach(Array(center.ledger.records().suffix(30).reversed())) { r in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(r.at.formatted(date: .omitted, time: .standard)) · \(r.actorLabel) · \(r.event)").font(.caption.monospaced())
-                        Text(r.detail).font(.caption).foregroundStyle(.secondary)
+            if developerOptions {
+                Section("开发期工具") {
+                    Text("本机：\(center.deviceLabel)").font(.footnote).foregroundStyle(.secondary)
+                    Button("发一条测试改动（由批准的那台设备执行）") { Task { await sendTest(target: nil) } }
+                    Button("发一条测试改动（指定本机执行）") { Task { await sendTest(target: center.deviceId) } }
+                }
+                Section("操作留底（最近 30 条）") {
+                    ForEach(Array(center.ledger.records().suffix(30).reversed())) { r in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(r.at.formatted(date: .omitted, time: .standard)) · \(r.actorLabel) · \(r.event)").font(.caption.monospaced())
+                            Text(r.detail).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -120,10 +129,12 @@ struct ProposalPanel: View {
             } else {
                 Button("静音 2 小时") { m.settings.mutedUntil = .now.addingTimeInterval(2 * 3600) }
             }
-            if let e = m.lastError { Text(e).font(.caption).foregroundStyle(.orange) }
+            InlineIssueText(source: "智能体消息", message: m.lastError)
             #if DEBUG
-            Button("发一条测试智能体消息（开发版）") {
-                Task { await m.receive(AgentMessageDraft(title: "测试消息", body: "开发联调：这是一条测试消息，不需要任何操作。", reason: "建立云端数据结构 / 联调")) }
+            if developerOptions {
+                Button("发一条测试智能体消息（开发版）") {
+                    Task { await m.receive(AgentMessageDraft(title: "测试消息", body: "开发联调：这是一条测试消息，不需要任何操作。", reason: "建立云端数据结构 / 联调")) }
+                }
             }
             #endif
             ForEach(Array(m.messages.prefix(10))) { msg in
@@ -177,7 +188,7 @@ struct ProposalPanel: View {
             ProposalOutcomeNotes(proposal: p)   // W10：你回的话 / 选了哪个方案 / 代你决定的规则 / 越级理由
             undoRow(p)
             let l = center.latency(for: p.id)
-            if l.notify != nil || l.withdraw != nil {
+            if developerOptions, l.notify != nil || l.withdraw != nil {
                 Text("本机延迟：通知 \(l.notify.map { String(format: "%.1f 秒", $0) } ?? "—") · 收起 \(l.withdraw.map { String(format: "%.1f 秒", $0) } ?? "—")")
                     .font(.caption2.monospaced()).foregroundStyle(.secondary)
             }

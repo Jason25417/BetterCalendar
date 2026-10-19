@@ -239,6 +239,7 @@ import UIKit
             fail("读取提案失败", error, nil)
             return
         }
+        DevLog.shared.resolve(source: "多端审批")   // W16：拉取成功 = 之前的短暂失败自动消除
         await reconcileNotifications()
         for p in proposals where p.state == .approved && p.isExecutor(deviceId) && !executing.contains(p.id) {
             if let pending = unreported[p.id] { await reportApplied(p, note: pending.note, undo: pending.undo) }   // 已做完：只补回报

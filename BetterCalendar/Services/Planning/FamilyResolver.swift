@@ -92,20 +92,4 @@ enum FamilyResolver {
         }
         return FamilyTaxonomy.fallback
     }
-
-    /// 批处理：给一组块定族并写进 labels（`family:` 前缀；已有族标签的不动——显式恒压）。
-    static func annotate(_ blocks: [ScheduledBlock], longTasks: LongTaskStore?,
-                         defaults: UserDefaults = .standard) -> [ScheduledBlock] {
-        blocks.map { b in
-            guard b.family == nil else { return b }
-            var nb = b
-            // 解析器可能已把 LLM 标注放进 labels（family: 前缀）——那 b.family 非 nil 不会走到这。
-            let fam = resolve(title: b.title, linkedTaskID: b.linkedTaskID, parsedFamily: nil,
-                              longTasks: longTasks, defaults: defaults)
-            if fam != FamilyTaxonomy.fallback {
-                nb.labels.append(ScheduledBlock.familyPrefix + fam)
-            }
-            return nb
-        }
-    }
 }

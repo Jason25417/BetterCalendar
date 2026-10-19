@@ -59,12 +59,6 @@ nonisolated enum ReminderStamp {
         if k.hasPrefix("reminder/ask/") { return .ask }
         return nil
     }
-
-    /// 「几点提醒我」章 → 提醒 id。
-    static func askID(from url: URL?) -> UUID? {
-        guard let k = key(url), k.hasPrefix("reminder/ask/") else { return nil }
-        return UUID(uuidString: String(k.dropFirst("reminder/ask/".count)))
-    }
 }
 
 /// 现有提醒的只读快照（EventKit 侧负责填）。

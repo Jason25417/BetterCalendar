@@ -328,6 +328,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     func refresh() async {
         do { messages = Array(try await transport.fetchRecent().suffix(Self.historyLimit)) }
         catch { fail("读取对话失败", error); return }
+        DevLog.shared.resolve(source: "智能体对话")   // W16：拉取成功 = 短暂失败自动消除
         lastRefresh = now()
         // 别的设备已经发出去的同 id 消息不再留在本机发件箱。
         let stored = Set(messages.map(\.id))

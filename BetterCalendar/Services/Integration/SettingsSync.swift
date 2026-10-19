@@ -40,6 +40,8 @@ enum SettingsSync {
         "reminder.projection.v1",              // 提醒投影账本（SPEC §19.13 Q5）：你在提醒事项里删掉 / 改过时间的，两端都认、都不重建不改回
         // —— W13（2026-10-18）——
         "activity.recording.enabled", "activity.recording.pausedUntil",   // 设备活动记录总开关 / 暂停到几点：在 iPhone 上暂停，Mac 也停（对人不对设备）
+        // —— W16（2026-10-19）——
+        "developer.optionsEnabled",            // 「开发者选项」：开发 / 测试控件的总开关（一端打开两端都显示）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

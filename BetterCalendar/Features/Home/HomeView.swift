@@ -79,6 +79,8 @@ struct HomeView: View {
     @State private var tnDismissTick = false       // 寄语条「今天先收起」即时刷新（存储在 TomorrowNote）
     @State private var briefDismissTick = 0        // 晨间摘要「今天先不排」即时刷新（E5d，存 UserDefaults）
     @State private var showTraceSheet = false      // 变更痕迹二层 sheet（E5d）
+    @State private var showDevLog = false          // W16：🐞 日志页（工具栏入口）
+    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
     #else
@@ -366,25 +368,9 @@ struct HomeView: View {
                     }
                 }
 
-                // 开发期：失败横幅，点开看错误日志（产品上架前切回静默）
-                if let issue = DevLog.shared.lastIssue {
-                    NavigationLink {
-                        DevLogView()
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: issue.level == .error
-                                  ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                            Text("[\(issue.source)] \(issue.message)").font(.caption)
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption2)
-                        }
-                        .padding(8)
-                        .foregroundStyle(issue.level == .error ? .red : .orange)
-                        .background((issue.level == .error ? Color.red : Color.orange).opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
+                // 开发期失败横幅（W16「安静但可见」）：只有你能处理的 / 已持续失败的才横幅，判定统一在 IssueTriage；
+                // 短暂、会自己恢复的只在工具栏 🐞 上计数。原始错误全在日志里（产品上架前切回静默自愈）。
+                IssueBanner()
 
                 // 新鲜度徽标（0.24 C2 → v2 两边再选）：中性、不打断——底层变了，
                 // 三个显式出路：对比两版 / 载入最新 / 继续编辑。绝不弹窗打断、绝不自动合并。
@@ -543,18 +529,23 @@ struct HomeView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     // 「预览（假日历）」入口退役（2026-07-11 Jason 定）：假日历 0.19.1 起已无写入路径，
                     // 观察页失去意义；CalendarPreviewView 代码保留（单测/开发排查可用），只撤 UI 入口。
+                    // W16：🐞 日志入口常驻（失败可见与「开发者选项」无关）；短暂问题只在这里计数
+                    IssueLogButton(isPresented: $showDevLog)
                     #if os(macOS)
-                    // 开发期：算法试验台（上架前随「可见报错」条款一起撤）
-                    Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
-                        .help("算法试验台（开发期）：解析/微调/reflow 各变体跑分对比")
-                    // 开发期：皮肤试衣间（美术样品阶段；M8 摘除）
-                    Button { openWindow(id: "skin-fitting") } label: { Label("皮肤试衣间", systemImage: "paintpalette") }
-                        .help("皮肤试衣间（开发期）：语义色 4 案 × 数字 2 案 × 明暗并排——样品评审")
+                    if developerOptions {
+                        // 开发期：算法试验台（W16 起收在「开发者选项」后）
+                        Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
+                            .help("算法试验台（开发期）：解析/微调/reflow 各变体跑分对比")
+                        // 开发期：皮肤试衣间（美术样品阶段；W16 起收在「开发者选项」后）
+                        Button { openWindow(id: "skin-fitting") } label: { Label("皮肤试衣间", systemImage: "paintpalette") }
+                            .help("皮肤试衣间（开发期）：语义色 4 案 × 数字 2 案 × 明暗并排——样品评审")
+                    }
                     #else
                     Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
                     #endif
                 }
             }
+            .sheet(isPresented: $showDevLog) { DevLogSheet(isPresented: $showDevLog) }
             #if !os(macOS)
             // 草稿全屏浏览/编辑（同一份数据，改动即生效；小窗只是入口）
             .sheet(isPresented: $showDraftExpanded) {

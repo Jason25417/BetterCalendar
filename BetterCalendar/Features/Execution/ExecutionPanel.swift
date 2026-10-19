@@ -72,9 +72,7 @@ struct ExecutionPanel: View {
                 Divider()
                 footer
             }
-            if let err = model.lastError {
-                Text(err).font(.caption2).foregroundStyle(.orange).lineLimit(2)
-            }
+            InlineIssueText(source: "执行", message: model.lastError, font: .caption2)   // W16：同一判定
             if compactCapable { expandToggle }
         }
         }

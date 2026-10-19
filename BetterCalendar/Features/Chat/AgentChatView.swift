@@ -85,7 +85,8 @@ struct AgentChatView: View {
     // MARK: 横幅（失败 / 离线可见）
 
     @ViewBuilder private var banners: some View {
-        if let error = chat.lastError {
+        // W16：同一判定（IssueTriage）——短暂的 iCloud / 网络失败升级前不弹横幅（日志与 🐞 计数里照样有）
+        if let error = chat.lastError, DevLog.shared.shouldShowInline(source: "智能体对话", message: error) {
             banner(error, systemImage: "exclamationmark.triangle.fill") { chat.clearError() }
         }
         #if os(macOS)
@@ -96,7 +97,7 @@ struct AgentChatView: View {
                 Button("选择 bridge 文件夹") { bridge.chooseFolder() }
             }
             .padding(10).background(Color.orange.opacity(0.12))
-        } else if let error = bridge?.lastError {
+        } else if let error = bridge?.lastError, DevLog.shared.shouldShowInline(source: "智能体桥接", message: error) {
             banner(error, systemImage: "exclamationmark.triangle") { }
         }
         #endif

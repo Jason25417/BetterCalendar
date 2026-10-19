@@ -47,6 +47,7 @@ final class DataSyncMonitor {
                 self.transportEvidence.finished(phase, at: endedAt, succeeded: event.succeeded, error: event.error)
                 if let error = event.error { self.report("CloudKit \(event.type)：\(error.localizedDescription)") }
                 if event.succeeded {
+                    DevLog.shared.resolve(source: "数据同步")   // W16：同步成功 = 之前的短暂失败自动消除
                     switch event.type {
                     case .import: self.lastImport = event.endDate; self.scheduleRefresh(.cloudImportSucceeded)
                     case .export: self.lastExport = event.endDate

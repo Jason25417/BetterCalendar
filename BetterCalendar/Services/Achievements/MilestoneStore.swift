@@ -77,8 +77,6 @@ final class MilestoneStore {
     private let kv = NSUbiquitousKeyValueStore.default
     private static let kvKey = "milestones.unlocked"   // [id: 解锁时刻(epoch)]
 
-    /// 本次 refresh 新解锁的（日记页静默条用；acknowledge 后清）。
-    private(set) var freshlyUnlocked: [Milestone] = []
     /// 已解锁 id → 解锁日期。
     private(set) var unlocked: [String: Date] = [:]
     /// 最近一次 refresh 算出的指标值（成就页「下一个」进度用）。
@@ -259,15 +257,11 @@ final class MilestoneStore {
             }
         }
         if !newly.isEmpty {
-            freshlyUnlocked = newly
             // #36（0.39.0）：解锁改走应用内 toast（顶部 8 秒自动收起）；日记页静默条退役
             AchievementToastCenter.shared.push(newly)
             save()
         }
     }
-
-    /// 日记页的静默解锁条被看过/收起。
-    func acknowledgeFresh() { freshlyUnlocked = [] }
 
     /// 成就带（按解锁时间正序=一条时间线）。
     var timeline: [(milestone: Milestone, date: Date)] {

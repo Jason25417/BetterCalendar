@@ -54,6 +54,11 @@ struct SettingsView: View {
     @State private var testResult: String?
     @State private var showAdvanced = false
     @State private var showFrozenDots = false   // 「已冻结：Dots 时代功能」默认折叠
+    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」（随 iCloud 设置同步）
+    @State private var showDevLog = false
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var showFeedback = false
     @State private var focusFollowOn = FocusFollowSettings.enabled
     #if os(macOS)
@@ -74,9 +79,9 @@ struct SettingsView: View {
             }
             #endif
             ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
-            Section("数据与同步（开发期）") {
-                DataMaintenancePanel()
-                if let trash { RetainedTrashPanel(service: trash) }
+            // W16：回收站是你找回东西的地方，常驻；同步诊断 / 播种 / 文件桥收进「开发者选项」
+            if let trash {
+                Section("回收站") { RetainedTrashPanel(service: trash) }
             }
             Section("云端排程大脑") {
                 Toggle("启用云端", isOn: $useCloud)
@@ -410,6 +415,7 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            developerSection
             frozenDotsSections
         }
         .formStyle(.grouped)   // System-Settings 风格分组卡片（修「排版不好看」）
@@ -423,6 +429,30 @@ struct SettingsView: View {
         // 别再改成 min/ideal/max 弹性尺寸追「可缩放」：那会让窗口撑到内容高、超屏后无法滚被截断（0.18.22 踩过、0.18.38 回退）。
         .frame(width: 520, height: 600)
         #endif
+    }
+
+    /// W16「开发者选项」：开发 / 测试控件的唯一总开关（默认关，随设置同步）。只藏入口、不删功能。
+    /// 错误日志入口不受它管——失败可见在试用期必须一直在。
+    @ViewBuilder private var developerSection: some View {
+        Section("开发者选项") {
+            Toggle("显示开发者选项", isOn: $developerOptions)
+            Text("打开后显示开发 / 测试用的控件：多端审批里的「发一条测试改动」与内部统计、CloudKit 播种、算法试验台、皮肤试衣间、引擎观察窗、已冻结的 BC 审批入口。默认关；随设置同步到你的所有设备。")
+                .font(.caption).foregroundStyle(.secondary)
+            Button("打开错误日志") { showDevLog = true }
+                .sheet(isPresented: $showDevLog) { DevLogSheet(isPresented: $showDevLog) }
+        }
+        if developerOptions {
+            #if os(macOS)
+            Section("开发工具窗口") {
+                HStack {
+                    Button("算法试验台") { openWindow(id: "algo-bench") }
+                    Button("皮肤试衣间") { openWindow(id: "skin-fitting") }
+                    Button("引擎观察窗") { openWindow(id: "engine-window") }
+                }
+            }
+            #endif
+            Section("数据与同步（开发期）") { DataMaintenancePanel() }
+        }
     }
 
     /// Dots 时代功能（SPEC §19.8 冻结清单，2026-10-18 批次 8）：代码与行为原样保留、不再推进，
@@ -440,7 +470,7 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Text("这些是 Dots 时代的内测功能，已冻结：保留不删、不再推进，由「多端审批」和 BetterCalendar 智能体接替。收起只是藏起入口，后台行为不变（共享计时与个人状态上传照常）。")
+            Text("这些是 Dots 时代的内测功能，已冻结：保留不删、不再推进，由「多端审批」和 BetterCalendar 智能体接替。收起只是藏起入口；没配置过 StateBridge 时这些功能完全不运行（不上传、不建定时器）。")
                 .font(.caption).foregroundStyle(.secondary)
         }
         if showFrozenDots {

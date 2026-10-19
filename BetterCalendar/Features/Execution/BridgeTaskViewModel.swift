@@ -55,7 +55,8 @@ import Observation
     }
 
     func startPolling() {
-        guard timer == nil, !TestHost.isActive else { return }
+        // W16：旧通道（StateBridge）未配置时 isEnabled=false → 不建每秒空转的定时器；iCloud 后端恒 true，照常
+        guard timer == nil, !TestHost.isActive, isEnabled else { return }
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }

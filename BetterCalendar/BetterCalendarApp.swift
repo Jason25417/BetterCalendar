@@ -13,6 +13,7 @@ import SwiftData
 struct BetterCalendarApp: App {
     @State private var container = AppContainer()
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」
     #if os(macOS)
     // 菜单栏项改由 AppKit NSStatusItem 自管（潮汐式直显计时），不再用 MenuBarExtra。
     @State private var menuBar: MenuBarController?
@@ -44,11 +45,13 @@ struct BetterCalendarApp: App {
             BenchView(runner: container.bench)
                 .environment(\.appTheme, ThemeSettings.current)
         }
+        .commandsRemoved()   // W16：不进「窗口」菜单；入口只在「开发者选项」打开时出现（Home 工具栏 / 设置）
 
         // 皮肤试衣间（开发期，美术样品阶段）：入口=Home 工具栏调色盘 / 窗口菜单。随开发件 M8 摘除。
         Window("皮肤试衣间", id: "skin-fitting") {
             SkinFittingView()
         }
+        .commandsRemoved()   // W16：同上
 
         // SPEC §19 A1：跟 BetterCalendar 智能体说话（Mac = 独立窗口，可与主窗口并排）。入口=主窗口工具栏「对话」/ 通知 / 窗口菜单。
         Window("BetterCalendar 智能体", id: AgentChatWindow.id) {
@@ -60,12 +63,13 @@ struct BetterCalendarApp: App {
             .frame(minWidth: 380, idealWidth: 460, minHeight: 420, idealHeight: 640)
         }
 
-        // 引擎观察窗（开发期，统一时间线 P1 配套）：窗口菜单打开。逐批扩节，M8 摘除。
+        // 引擎观察窗（开发期，统一时间线 P1 配套）：W16 起从 设置 → 开发者选项 打开。逐批扩节，M8 摘除。
         Window("引擎观察窗", id: "engine-window") {
             EngineWindowView()
                 .environment(\.appTheme, ThemeSettings.current)
                 .tint(ThemeSettings.current.accent)
         }
+        .commandsRemoved()   // W16：入口改为 设置 → 开发者选项
         #endif
     }
 
@@ -82,7 +86,10 @@ struct BetterCalendarApp: App {
                 #if os(macOS)
                 AgentChatWindow.OpenButton(router: container.router)
                 #endif
-                Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
+                // 已冻结的 Dots 时代「BC 审批」入口（W16）：收在「开发者选项」后；通知点进来的路径（openNativeApprovals）不变
+                if developerOptions {
+                    Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认（已冻结）", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
+                }
                 Button { container.router.openProposals = true } label: { Label("多端审批", systemImage: "checkmark.seal").accessibilityIdentifier("bc.proposals.open") }
             }
             .sheet(isPresented: Binding(get: { container.router.openProposals }, set: { container.router.openProposals = $0 })) {
@@ -181,6 +188,10 @@ struct BetterCalendarApp: App {
                     Task { await StateBridgeCollector.shared.recover() }
                     Task { await container.bridgeTasks.refresh() }
                     Task { await container.nativeApprovals.refresh() }
+                    // W16：冻结子系统的定时器只在已配置时才建；配置发生在启动之后的，回到前台补建（都幂等）
+                    container.bridgeTasks.startPolling()
+                    container.nativeApprovals.start()
+                    container.nativeActions.remote?.startPolling()
                     Task { await container.proposals.refresh() }
                     Task { await container.agentMessages.refresh() }
                 }

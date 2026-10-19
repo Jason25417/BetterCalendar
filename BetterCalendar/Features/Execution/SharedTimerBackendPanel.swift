@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SharedTimerBackendPanel: View {
     @Bindable var control: SharedTimerBackendControl
+    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16：播种按钮只在「开发者选项」里出现
     #if DEBUG
     @State private var seeding = false
     @State private var seedResult: String?
@@ -24,6 +25,7 @@ struct SharedTimerBackendPanel: View {
                 Text(notice).font(.caption).foregroundStyle(control.restartPending ? Color.secondary : Color.orange)
             }
             #if DEBUG
+            if developerOptions {
             Button(seeding ? "正在写入…" : "在 Development 建出计时 schema（DEBUG）") {
                 seeding = true
                 Task {
@@ -33,6 +35,7 @@ struct SharedTimerBackendPanel: View {
                 }
             }.disabled(seeding)
             if let seedResult { Text(seedResult).font(.caption).foregroundStyle(.secondary) }
+            }
             #endif
         }
     }

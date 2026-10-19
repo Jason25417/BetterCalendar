@@ -173,6 +173,7 @@ actor CloudKitAgentMessageStore: AgentMessageTransport {
     /// 推送唤醒 / 回前台时调用：本机弹出新的、未被回应的消息（6 小时内），已回应的收起。
     func refresh() async {
         do { messages = try await transport.fetchRecent() } catch { fail("读取智能体消息失败", error); return }
+        DevLog.shared.resolve(source: "智能体消息")   // W16：拉取成功 = 短暂失败自动消除
         let cutoff = now().addingTimeInterval(-6 * 3600)
         for m in messages where m.delivery == .delivered && m.reaction == nil && m.createdAt > cutoff && !shownHere.contains(m.id) {
             await notifier.show(m)

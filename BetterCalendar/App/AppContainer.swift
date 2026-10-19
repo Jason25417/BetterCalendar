@@ -158,7 +158,8 @@ final class AppContainer {
         notificationDelegate.handleApprovalDecision = { [weak inbox = nativeApprovals] binding, decision in
             await inbox?.decideFromNotification(binding, decision: decision)
         }
-        if !TestHost.isActive { Task { await NativeApprovalNotification.registerCategories() } }
+        // W16：冻结的 BC 审批通知类别只在配置过 StateBridge 时注册（默认不动；也避免与下方多端审批类别并发覆盖）
+        if !TestHost.isActive, StateBridgeClient.shared.configured { Task { await NativeApprovalNotification.registerCategories() } }
         // SPEC §19 多端审批：CloudKit 私有库独立 zone；测试环境走内存中转、不碰网络与通知中心。
         // W1 真改动执行器：事项现在就能接；计时 / 挪动计划块在执行层与时间线建好后挂上（见下方）。
         // 测试 host 不接真执行器（只做空改动），单测各自注入内存数据。

@@ -99,8 +99,6 @@ final class ReviewLocalStore {
 
     // MARK: - 旧 UserDefaults 数据一次性迁移
 
-    private static let migratedFlag = "review.migratedToSwiftData"
-
     /// 死代码审计（2026-07-22）：UserDefaults→SwiftData 的一次性迁移已完成历史使命（写方 v0.6 已删、
     /// 所有设备均已跑过 ≥v0.6）→ 迁移函数退役，换成一次性清掉躺在 defaults plist 里的三族源键
     /// （"review.activeDays" / "review.mvp.<日期>"×N / "review.mvpNote.<日期>"×N）与旧迁移旗标。

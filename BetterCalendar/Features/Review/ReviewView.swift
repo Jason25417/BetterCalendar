@@ -326,17 +326,6 @@ struct ReviewPanel: View {
         return "\(minutes) 分钟"
     }
 
-    // 中性/正向措辞（绝不出现「失败/未完成」）
-    static func phrase(_ item: ComparedItem) -> String {
-        switch item.status {
-        case .done:    return item.isContentChange ? "改做：\(item.plannedTitle ?? "")" : "完成"
-        case .partial: return "做了一部分"
-        case .over:    return "做得比计划更多"
-        case .extra:   return "计划外 · bonus"
-        case .missed:  return "未做"
-        }
-    }
-
     /// 默认复盘面用的中性措辞（去对比化：不提"计划外/比计划更多"这类把对比引回来的词，一律平权庆祝）。
     static func calmPhrase(_ item: ComparedItem) -> String {
         switch item.status {

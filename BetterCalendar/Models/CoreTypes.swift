@@ -39,21 +39,6 @@ enum PlanCalendarKind: String, Codable, CaseIterable, Sendable {
     case preview    // 橙：从现在起的可行预览（当前时刻右侧，随 re-flow 动态，被蓝色蚕食，日终消失）
 }
 
-/// 反思层（日记）条目来源（数据预留，功能后做）。
-// MARK: - 设置用枚举
-
-enum NotifyMode: String, Codable, CaseIterable, Sendable {
-    case minimal           // 早晚各一条
-    case withFixedBlocks   // 早晚 + 固定块
-    case silent
-}
-
-enum ParserMode: String, Codable, CaseIterable, Sendable {
-    case cloudLLM   // 原型期：云端 Claude
-    case onDevice   // 端侧 Foundation Models（留接口，后换）
-    case manual
-}
-
 // MARK: - DTO（实现无关）
 
 /// 解析输出：自然语言 → 结构化（未落库、未排程）。

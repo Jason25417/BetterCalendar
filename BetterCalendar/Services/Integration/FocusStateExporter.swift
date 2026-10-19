@@ -107,13 +107,6 @@ enum FocusStateExporter {
 
     private static var fileURL: URL? { bridgeURL("focus-state.json") }
 
-    /// 状态文件是否已存在（menu bar tick 用：联动开着+有任务在进行+文件缺失 → 补写一份，
-    /// 让"任务进行中途才开开关"也立即接上，不用等下一个事件）。
-    static var stateFileExists: Bool {
-        guard let url = fileURL else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
-    }
-
     static func write(active: State.Active?, event: State.Event?) {
         guard !isTestHost, isEnabled, let url = fileURL else { return }
         let state = State(updatedAt: .now, active: active, lastEvent: event)

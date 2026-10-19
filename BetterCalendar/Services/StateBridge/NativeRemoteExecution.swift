@@ -233,7 +233,8 @@ nonisolated enum NativeRemoteJSON {
         } catch { refreshLocal(); fail(error) }
     }
     func startPolling() {
-        guard !TestHost.isActive, timer == nil else { return }
+        // W16：同 NativeApprovalInbox.start——未配置凭据时不建空转定时器
+        guard !TestHost.isActive, timer == nil, deviceId != nil else { return }
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in Task { @MainActor in await self?.poll() } }
         RunLoop.main.add(timer, forMode: .common); self.timer = timer
         Task { await poll() }

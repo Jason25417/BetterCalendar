@@ -50,9 +50,4 @@ struct ArrangeDayUseCase {
         let s = cal.date(bySettingHour: hour, minute: sc.minute ?? 0, second: 0, of: base) ?? start
         return (s, s.addingTimeInterval(max(0, end.timeIntervalSince(start))))
     }
-
-    /// 兼容旧调用（复盘回填等只要决策）。
-    func callAsFunction(text: String, referenceDate: Date = .now, now: Date = .now) async throws -> PlanDecision {
-        try await full(text: text, referenceDate: referenceDate, now: now).decision
-    }
 }

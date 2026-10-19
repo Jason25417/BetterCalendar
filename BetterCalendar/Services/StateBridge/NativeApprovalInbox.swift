@@ -196,7 +196,8 @@ extension NativeApprovalNotifying {
         self.notificationsEnabled = preferences.bool(forKey: "bc.nativeApprovalNotifications")
     }
     func start() {
-        guard !TestHost.isActive, timer == nil else { return }
+        // W16：已冻结的 Dots 子系统默认完全不动——没配置 StateBridge 凭据就不建 20 秒定时器（配置后回到前台再调 start 即生效）
+        guard !TestHost.isActive, timer == nil, service.nativeDeviceId != nil else { return }
         let timer = Timer(timeInterval: 20, repeats: true) { [weak self] _ in Task { @MainActor in await self?.refresh() } }
         RunLoop.main.add(timer, forMode: .common); self.timer = timer
         Task { await refresh() }
