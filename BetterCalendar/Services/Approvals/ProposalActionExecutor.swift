@@ -451,6 +451,12 @@ enum ProposalTimerRules {
             return ProposalExecutionOutcome(note: note, undo: undo)
 
         case let .reminder(id, title, body, fireAt, _):
+            // 幂等（冒烟 2026-10-18）：上次执行成功但回报没落地 → 这里会再被调用；提醒事项里已有这条就直接算完成，不重写、不报「已过」。
+            if let askReminders, let existing = await askReminders.existingAskReminder(id: id) {
+                DevLog.shared.info("提醒", "「\(title)」已经在提醒事项里（上次执行过、回报没落地），按已完成回报")
+                return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，iPhone 和 Mac 都会响",
+                                                undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: Self.nativeRevisionPrefix + existing.revision)))
+            }
             guard fireAt > now() else { throw ProposalExecutionError.invalid("提醒时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补发") }
             // W12：先写进提醒事项（两台设备都响）；列表只在本机 / 没有提醒事项权限 → 改用本机通知，结果里写明只有这台会响
             var fallbackWhy = "这台设备没有接入提醒事项"

@@ -192,6 +192,12 @@ actor ReminderProjector: ReminderStore, AskReminderProjecting {
         return AskReminderReceipt(revision: Self.askRevision(title: title, fireAt: fireAt), sourceName: reach.sourceName)
     }
 
+    func existingAskReminder(id: UUID) async -> AskReminderReceipt? {
+        guard let read = try? await access.readList(), let key = ReminderStamp.key(ReminderStamp.askURL(id)) else { return nil }
+        guard let r = read.items.first(where: { ReminderStamp.key($0.url) == key && !$0.isCompleted }) else { return nil }
+        return AskReminderReceipt(revision: Self.askRevision(title: r.title, fireAt: r.due), sourceName: read.reach?.sourceName ?? "")
+    }
+
     func removeAskReminder(id: UUID, expectedRevision: String?) async throws -> String {
         let read: ReminderListRead
         do { read = try await access.readList() } catch {

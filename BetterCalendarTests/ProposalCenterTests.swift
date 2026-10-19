@@ -17,6 +17,59 @@ import Testing
         func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome { throw Boom() }
     }
 
+    /// 冒烟 2026-10-18 bug A：回报（report）网络抖动——先失败 N 次再恢复。
+    final class FlakyTransport: ProposalTransport, @unchecked Sendable {
+        let inner = InMemoryProposalTransport()
+        var failReports = 0
+        var reportCalls = 0
+        struct Net: Error, LocalizedError { var errorDescription: String? { "模拟 iCloud 不可达" } }
+        func submit(_ proposal: Proposal) async throws { try await inner.submit(proposal) }
+        func fetchRecent() async throws -> [Proposal] { try await inner.fetchRecent() }
+        func decide(id: UUID, decision: ProposalDecision, choice: Int?, tuning: ProposalTuning?, deviceId: String, at: Date) async throws -> ProposalDecisionOutcome {
+            try await inner.decide(id: id, decision: decision, choice: choice, tuning: tuning, deviceId: deviceId, at: at)
+        }
+        func respond(id: UUID, reply: ProposalUserReply, at: Date) async throws -> ProposalDecisionOutcome { try await inner.respond(id: id, reply: reply, at: at) }
+        func report(id: UUID, state: ProposalState, note: String, undo: ProposalUndoInfo?, at: Date) async throws -> Proposal {
+            reportCalls += 1
+            if failReports > 0 { failReports -= 1; throw Net() }
+            return try await inner.report(id: id, state: state, note: note, undo: undo, at: at)
+        }
+        func markUndone(id: UUID, deviceId: String, note: String, at: Date) async throws -> Proposal { try await inner.markUndone(id: id, deviceId: deviceId, note: note, at: at) }
+    }
+    @MainActor final class CountingExecutor: ProposalExecuting {
+        var performed = 0
+        func prepare(_ action: ProposalAction) async throws -> PreparedProposalAction { PreparedProposalAction(action: action, changes: nil) }
+        func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome { performed += 1; return ProposalExecutionOutcome(note: "做完了", undo: nil) }
+    }
+
+    @Test func reportFailureIsRetriedLaterWithoutReexecuting() async throws {
+        let clock = Clock()
+        let transport = FlakyTransport(); transport.failReports = 10   // 比重试次数多：这一轮回报注定失败
+        let executor = CountingExecutor(), ledger = MemoryOperationLedger()
+        let defaults = UserDefaults(suiteName: "bc-unreported-" + UUID().uuidString)!
+        let mac = ProposalCenter(transport: transport, executor: executor, notifier: FakeNotifier(), ledger: ledger,
+                                 deviceId: "mac", deviceLabel: "Mac", informDefaults: defaults, now: { clock.now })
+        let proposal = try #require(await mac.submit(draft(target: "mac")))
+        _ = await mac.decide(proposal.id, .approve)
+        #expect(executor.performed == 1)
+        #expect(mac.unreportedCount == 1 && mac.lastError?.contains("没回报") == true)
+        #expect(ledger.records().contains { $0.event == "report.pending" })
+        #expect(try await transport.fetchRecent().first?.state == .approved)   // iCloud 上仍是「已同意」
+        // 网络恢复：刷新只补回报，不再执行
+        transport.failReports = 0
+        await mac.refresh()
+        #expect(executor.performed == 1)
+        #expect(mac.unreportedCount == 0)
+        #expect(try await transport.fetchRecent().first?.state == .applied)
+        #expect(ledger.records().contains { $0.event == "applied" })
+        // 持久化：新实例（模拟重启）也不会重复执行
+        transport.failReports = 10
+        let mac2 = ProposalCenter(transport: transport, executor: executor, notifier: FakeNotifier(), ledger: ledger,
+                                  deviceId: "mac", deviceLabel: "Mac", informDefaults: defaults, now: { clock.now })
+        await mac2.refresh()
+        #expect(executor.performed == 1)
+    }
+
     final class Clock { var now = Date(timeIntervalSince1970: 1_792_000_000) }
 
     struct Pair {

@@ -130,6 +130,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             object["userReply"] = ["text": reply.text, "at": iso.string(from: reply.at), "deviceId": reply.deviceId]
         }
         if let escalation = p.escalation { object["escalation"] = escalation }
+        if let stamp = p.preauth { object["ruleId"] = stamp.ruleId.uuidString; object["ruleLabel"] = stamp.ruleLabel }   // W10：规则代决定的，带上规则 id（冒烟 2026-10-18 补）
         // W11：可调参数——已批准：选中方案每个参数的默认值、最终值、你改没改；未决定：主方案的声明与默认值。
         let shownParams = p.chosenValues != nil ? p.chosen.parameters : (p.parameters ?? [])
         if !shownParams.isEmpty {

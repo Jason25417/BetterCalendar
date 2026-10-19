@@ -276,6 +276,24 @@ actor Collector {
         #expect(await list.items.count == 1)
     }
 
+    /// 冒烟 2026-10-18 bug A：执行成功但回报没落地 → App 重启后对同一提案再执行一次。要幂等：不报「已过」、不重写、按已完成回报。
+    @Test func reexecutingARemindMeAfterLostReportIsIdempotent() async throws {
+        let list = FakeReminderList(), scheduler = FakeLocalScheduler()
+        let e = executor(list, scheduler: scheduler)
+        let rid = UUID(), fire = at(21, 8)
+        let first = try await e.perform(.reminder(id: rid, title: "喝水", body: nil, fireAt: fire, deviceId: nil))
+        #expect(await list.items.count == 1)
+        let late = ProposalActionExecutor(items: nil, deviceId: "phone", now: { fire.addingTimeInterval(3600) })   // 时刻已过
+        late.askReminders = projector(list, device: "phone"); late.notifications = scheduler
+        let again = try await late.perform(.reminder(id: rid, title: "喝水", body: nil, fireAt: fire, deviceId: nil))
+        #expect(await list.items.count == 1 && scheduler.scheduled.isEmpty)
+        #expect(again.note.contains("已写进提醒事项") && again.undo?.action == first.undo?.action)
+        // 没写过的、时刻已过的：照旧拒绝补发
+        await #expect(throws: ProposalExecutionError.self) {
+            _ = try await late.perform(.reminder(id: UUID(), title: "别的", body: nil, fireAt: fire, deviceId: nil))
+        }
+    }
+
     @Test func localSourceFallbackIsVisible() async throws {
         let list = FakeReminderList(), scheduler = FakeLocalScheduler()
         await list.setReach(ReminderListReach(sourceName: "在我的 iPhone 上", syncsAcrossDevices: false))

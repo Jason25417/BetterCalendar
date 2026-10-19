@@ -106,4 +106,11 @@ nonisolated protocol AskReminderProjecting: AnyObject, Sendable {
     func addAskReminder(id: UUID, title: String, body: String?, fireAt: Date) async throws -> AskReminderReceipt
     /// 撤销：删掉那条提醒。版本对不上（你改过 / 勾掉了）或找不到 → 抛 conflict，不删。返回给人看的一句话。
     func removeAskReminder(id: UUID, expectedRevision: String?) async throws -> String
+    /// 幂等用：这条「几点提醒我」是否已经在提醒事项里（按章找，未勾掉的）。读不到 / 没权限 → nil（当作不知道，由调用方走正常路径）。
+    /// 冒烟 2026-10-18 发现：执行成功但回报没落地 → App 重启后重复执行并误报「时刻已过」；先查这个就不会。
+    func existingAskReminder(id: UUID) async -> AskReminderReceipt?
+}
+
+extension AskReminderProjecting {
+    func existingAskReminder(id: UUID) async -> AskReminderReceipt? { nil }
 }

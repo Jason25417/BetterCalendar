@@ -92,7 +92,7 @@ extension Proposal {
 }
 
 /// 执行真改动后保存的撤销信息（随提案存进 iCloud，各端都能看到「能不能撤销」）。
-nonisolated struct ProposalUndoInfo: Equatable, Sendable {
+nonisolated struct ProposalUndoInfo: Codable, Equatable, Sendable {
     var action: ProposalAction?
     var deviceId: String?
     var unavailableReason: String?

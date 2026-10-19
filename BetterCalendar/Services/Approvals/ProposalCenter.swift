@@ -44,6 +44,14 @@ import UIKit
     private let now: () -> Date
     /// 正在执行的提案，防止同一台设备并发重复执行。
     private var executing: Set<UUID> = []
+    /// 冒烟 2026-10-18 bug A：本机已执行成功、但「已完成」回报没落地的提案（网络抖动 / 超时）。
+    /// 留在这里（并持久化），刷新时只**补回报**、绝不重新执行；补上后移除。
+    private var unreported: [UUID: PendingReport] = [:]
+    nonisolated struct PendingReport: Codable, Sendable { var note: String; var undo: ProposalUndoInfo?; var at: Date }
+    static let unreportedKey = "approvals.unreported.v1"
+    /// 回报的单次超时与重试次数（稳定性参数，不是产品规则）。
+    static let reportTimeout: TimeInterval = 30
+    static let reportAttempts = 3
 
     /// 「做完告诉你」已在本机通知过的提案（持久化防重启重弹；nil defaults = 只在内存）。
     private let informDefaults: UserDefaults?
@@ -60,7 +68,22 @@ import UIKit
         self.deviceId = deviceId; self.deviceLabel = deviceLabel; self.now = now
         self.informDefaults = informDefaults
         informedHere = Set((informDefaults?.stringArray(forKey: Self.informedKey) ?? []).compactMap(UUID.init))
+        if let data = informDefaults?.data(forKey: Self.unreportedKey),
+           let saved = try? JSONDecoder().decode([String: PendingReport].self, from: data) {
+            unreported = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in UUID(uuidString: k).map { ($0, v) } })
+        }
     }
+
+    private func saveUnreported() {
+        guard let d = informDefaults else { return }
+        if unreported.isEmpty { d.removeObject(forKey: Self.unreportedKey); return }
+        if let data = try? JSONEncoder().encode(Dictionary(uniqueKeysWithValues: unreported.map { ($0.key.uuidString, $0.value) })) {
+            d.set(data, forKey: Self.unreportedKey)
+        }
+    }
+
+    /// 面板 / 测试：还有几份「做完了但没回报」。
+    var unreportedCount: Int { unreported.count }
 
     /// App 在前台时为 true：前台每 20 秒兜底刷新一次（推送丢失也能收敛）。
     var isForeground = false
@@ -214,7 +237,8 @@ import UIKit
         }
         await reconcileNotifications()
         for p in proposals where p.state == .approved && p.isExecutor(deviceId) && !executing.contains(p.id) {
-            await execute(p)
+            if let pending = unreported[p.id] { await reportApplied(p, note: pending.note, undo: pending.undo) }   // 已做完：只补回报
+            else { await execute(p) }
         }
     }
 
@@ -412,9 +436,11 @@ import UIKit
     private func execute(_ p: Proposal) async {
         executing.insert(p.id); defer { executing.remove(p.id) }
         do {
+            DevLog.shared.info("多端审批", "执行「\(p.title)」（\(p.executedAction.kind)）…")
             let outcome = try await executor.execute(p)
-            let done = try await transport.report(id: p.id, state: .applied, note: outcome.note, undo: outcome.undo, at: now())
-            record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, "[\(p.executedAction.kind)] " + outcome.note)
+            DevLog.shared.info("多端审批", "已执行「\(p.title)」，回报中：\(outcome.note.prefix(80))")
+            await reportApplied(p, note: outcome.note, undo: outcome.undo)
+            return
         } catch {
             let note = "执行失败：\(error.localizedDescription)"
             if let failed = try? await transport.report(id: p.id, state: .failed, note: note, at: now()) {
@@ -424,6 +450,54 @@ import UIKit
         }
         if let latest = try? await transport.fetchRecent() { proposals = latest }
         await reconcileNotifications()
+    }
+
+    /// 执行成功后的回报：超时 + 重试；仍失败 → 记进 unreported（持久化），之后每次刷新只补回报、不再执行，失败可见。
+    private func reportApplied(_ p: Proposal, note: String, undo: ProposalUndoInfo?) async {
+        executing.insert(p.id); defer { executing.remove(p.id) }
+        let transport = self.transport, id = p.id, at = now()
+        var lastError: Error?
+        for attempt in 1...Self.reportAttempts {
+            do {
+                let done = try await Self.withTimeout(Self.reportTimeout) {
+                    try await transport.report(id: id, state: .applied, note: note, undo: undo, at: at)
+                }
+                if unreported.removeValue(forKey: p.id) != nil { saveUnreported(); DevLog.shared.info("多端审批", "「\(p.title)」的「已完成」已补报") }
+                record(.system, "BetterCalendar（\(deviceLabel)）", "applied", done, "[\(p.executedAction.kind)] " + note)
+                if let latest = try? await transport.fetchRecent() { proposals = latest }
+                await reconcileNotifications()
+                return
+            } catch let e as ProposalTransportError {
+                // 状态机拒绝（例如另一端已撤销 / 已回报）：不是网络问题，不再重试，也不留账
+                lastError = e
+                if case .invalidTransition = e { break }
+            } catch {
+                lastError = error
+                if attempt < Self.reportAttempts { try? await Task.sleep(for: .seconds(Double(attempt) * 2)) }
+            }
+        }
+        if unreported[p.id] == nil { unreported[p.id] = PendingReport(note: note, undo: undo, at: at); saveUnreported() }
+        let message = "「\(p.title)」已执行成功，但「已完成」没回报到 iCloud（\(lastError?.localizedDescription ?? "未知")）；会在下次刷新时补报，不会重复执行"
+        self.lastError = message
+        DevLog.shared.error("多端审批", message)
+        record(.system, "BetterCalendar（\(deviceLabel)）", "report.pending", p, message)
+    }
+
+    private static func withTimeout<T: Sendable>(_ seconds: TimeInterval, _ op: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await op() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw ReportTimeout(seconds: seconds)
+            }
+            let first = try await group.next()!
+            group.cancelAll()
+            return first
+        }
+    }
+    nonisolated struct ReportTimeout: LocalizedError {
+        var seconds: TimeInterval
+        var errorDescription: String? { "回报超过 \(Int(seconds)) 秒没有返回" }
     }
 
     /// 待决定的都挂一条通知；不再待决定的都收起（B2：一端决定后其他端收起）。
