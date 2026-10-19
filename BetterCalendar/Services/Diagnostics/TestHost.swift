@@ -15,7 +15,7 @@
 //
 import Foundation
 
-enum TestHost {
+nonisolated enum TestHost {   // W23b：EventKit actor 里的写闸要同步读它（只读环境变量，无状态）
     static var isActive: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil

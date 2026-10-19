@@ -91,7 +91,9 @@ final class AppContainer {
             local: NaivePlanningEngine())
         // 微调链 v2：默认=云端 Claude 优先、失败→端侧 FM 兜底、均败=保持原样；「只使用端侧」开=FM only
         self.refiner = FoundationModelsPlanRefiner(fallback: ClaudePlanRefiner(client: anthropic))
-        let eventKitCalendar = EventKitCalendarStore()   // 读写合一：只在这里构造，写角色只交给下面的 CalendarSyncEngine
+        // 读写合一：只在这里构造，写角色只交给下面的 CalendarSyncEngine。
+        // W23b：测试宿主里注入内存日历（绝不碰真 EventKit；只按 TestHost 判断，生产恒真日历）
+        let eventKitCalendar: any CalendarStore = TestHost.isActive ? TestHostCalendarStore() : EventKitCalendarStore()
         self.calendarStore = eventKitCalendar
         self.exporter = ICSExporter()
         self.comparer = OverlapTitleComparer()
@@ -108,7 +110,7 @@ final class AppContainer {
         // EventKit 只是薄读写层；你在提醒事项里的操作（打勾 / 改时间 / 删除）记进操作留底，待办池截止被勾掉 = 做成了。
         let reminderOps = ReminderOpsRecorder(ledger: TestHost.isActive ? MemoryOperationLedger() : FileOperationLedger(),
                                               deviceId: ProposalDevice.id, pool: longTasks)
-        let reminderProjector = ReminderProjector(access: EventKitReminderStore(), deviceId: ProposalDevice.id,
+        let reminderProjector = ReminderProjector(access: TestHost.isActive ? TestHostReminderList() : EventKitReminderStore(), deviceId: ProposalDevice.id,
                                                   opsSink: { ops in await reminderOps.record(ops) })
         self.reminderStore = reminderProjector
         let actionJournal: any NativeActionJournaling = TestHost.isActive ? NativeActionMemoryJournal() : NativeActionFileJournal()
