@@ -134,6 +134,48 @@ struct ActualBlock: Sendable, Identifiable, Equatable {
     var state: ActualState = .recorded
 }
 
+/// W27 实际的身份 = 计划块 id（计划外 bonus = 自身 id）。两台设备可能各插一行同 id 的实际（CloudKit 没有唯一约束），
+/// 读的时候按 id 收成一条；保留者的规则是**确定性**的（只看行内容，不看本机行号）——Mac 和 iPhone 选出同一行。
+nonisolated enum ActualIdentity {
+    struct Candidate: Equatable, Sendable {
+        var block: ActualBlock
+        /// 写入版本（PlanStore 写实际时盖；旧数据 = 0）。
+        var version: Int64
+    }
+
+    /// 状态优先：记下的 ＞ 正在长的 ＞ 被动推断（你的动作 / 计时的测量值赢过「到点算发生了」）。
+    static func rank(_ s: ActualState) -> Int {
+        switch s {
+        case .recorded: 2
+        case .live: 1
+        case .auto: 0
+        }
+    }
+
+    /// a 是否比 b 更该留下：状态 → 版本新 → 结束晚 → 开始早 → 标题（全同 = 内容相同，留哪份都一样）。
+    static func preferred(_ a: Candidate, over b: Candidate) -> Bool {
+        if rank(a.block.state) != rank(b.block.state) { return rank(a.block.state) > rank(b.block.state) }
+        if a.version != b.version { return a.version > b.version }
+        if a.block.end != b.block.end { return a.block.end > b.block.end }
+        if a.block.start != b.block.start { return a.block.start < b.block.start }
+        return a.block.title < b.block.title
+    }
+
+    /// 同 id 收成一条（顺序 = 首次出现的顺序）。
+    static func collapse(_ items: [Candidate]) -> [Candidate] {
+        var order: [UUID] = []
+        var best: [UUID: Candidate] = [:]
+        for c in items {
+            if let cur = best[c.block.id] {
+                if preferred(c, over: cur) { best[c.block.id] = c }
+            } else {
+                order.append(c.block.id); best[c.block.id] = c
+            }
+        }
+        return order.compactMap { best[$0] }
+    }
+}
+
 @MainActor
 final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, CalendarDeletionReceiptReading {
     private let context: ModelContext
@@ -153,6 +195,13 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
         row.syncVersion = max(ms, row.syncVersion + 1)
         row.syncWriter = writerID
         row.syncSource = reason.rawValue
+    }
+
+    /// 实际行的版本（W27）：只在内容真变时盖——同 id 多行收成一条时「后写的赢」，两台设备据同一份数据选出同一行。
+    private func stampActual(_ row: PlanBlock) {
+        let ms = Int64((now().timeIntervalSince1970 * 1000).rounded())
+        row.syncVersion = max(ms, row.syncVersion + 1)
+        row.syncWriter = writerID
     }
 
     private static func scheduled(_ b: PlanBlock) -> ScheduledBlock {
@@ -340,13 +389,29 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
     // MARK: - 蓝色实际（真相源）
 
     /// 读回某**逻辑日**的实际块（蓝色）。day 语义同 plannedBlocks（4 点日界线、凌晨须先转标签）。
+    /// W27：同一 id 的实际在两台设备各插了一行（CloudKit 不支持唯一约束：两台离线 / 交接瞬间各记一次）→ 按 id 收成一条
+    /// （ActualIdentity.preferred 选保留者，两台设备算出同一个），读者永远看不到重复、不会双计。
     func actualBlocks(on day: Date) throws -> [ActualBlock] {
         let label = Calendar.current.startOfDay(for: day)
-        return try context.fetch(FetchDescriptor<PlanBlock>())
+        let rows = try context.fetch(FetchDescriptor<PlanBlock>())
             .filter { !$0.isInTrash && $0.kind == .actual && DayContext.logicalStartOfDay($0.start) == label }
-            .sorted { $0.start < $1.start }
-            .map { ActualBlock(id: $0.id, title: $0.title, start: $0.start, end: $0.end,
-                               state: ActualState(stored: $0.actualState)) }
+        let collapsed = ActualIdentity.collapse(rows.map(Self.actualCandidate))
+        if collapsed.count < rows.count { noteCollapsed(rows.count - collapsed.count, day: label) }
+        return collapsed.map(\.block).sorted { $0.start < $1.start }
+    }
+
+    private static func actualCandidate(_ r: PlanBlock) -> ActualIdentity.Candidate {
+        ActualIdentity.Candidate(block: ActualBlock(id: r.id, title: r.title, start: r.start, end: r.end,
+                                                    state: ActualState(stored: r.actualState)),
+                                 version: r.syncVersion)
+    }
+
+    /// 同 id 多行只在第一次看到时记一笔（每次读都会遇到，别刷屏）。
+    private var collapsedNoted: Set<String> = []
+    private func noteCollapsed(_ extra: Int, day: Date) {
+        let key = "\(Self.dayStr(day))#\(extra)"
+        guard collapsedNoted.insert(key).inserted else { return }
+        DevLog.shared.info("PlanStore", "\(Self.dayStr(day)) 有 \(extra) 条实际是另一台设备同时记的同一件（同一 id）——按一条算，下次写入时两份会收成一样")
     }
 
     /// 某计划块的完成闩（读 planned 行的 completion；kind 过滤避免撞同 UUID 的实际行）。
@@ -366,20 +431,34 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
         let allRows = try context.fetch(FetchDescriptor<PlanBlock>()).filter { $0.kind == .actual }
         let existing = allRows.filter { !$0.isInTrash }
         let deletedIDs = Set(allRows.filter { $0.isInTrash }.map(\.id))
-        var byID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        // W27：同 id 可能有多行（两台设备各记过一次，CloudKit 导入后并存）→ 一律写穿所有行，让它们收敛成同一份
+        var byID = Dictionary(grouping: existing, by: \.id)
+        var keptRecorded = 0
         for b in blocks {
             if deletedIDs.contains(b.id), byID[b.id] == nil {
                 DevLog.shared.warn("PlanStore", "已删除的实际记录保持在回收站，不自动重建")
                 continue
             }
-            if let row = byID[b.id] {
-                row.title = b.title; row.start = b.start; row.end = b.end
-                row.actualState = b.state.stored
+            if let rows = byID[b.id] {
+                // 被动推断（固定块到点）永远不覆盖已经记下的 / 正在长的实际（另一台设备拿旧状态补记时不降级）
+                let current = ActualIdentity.collapse(rows.map(Self.actualCandidate)).first?.block.state ?? .auto
+                if b.state == .auto, current != .auto { keptRecorded += 1; continue }
+                for row in rows {
+                    let next = b.state.stored
+                    guard row.title != b.title || row.start != b.start || row.end != b.end || row.actualState != next else { continue }
+                    row.title = b.title; row.start = b.start; row.end = b.end
+                    row.actualState = next
+                    stampActual(row)
+                }
             } else {
                 let row = PlanBlock(id: b.id, title: b.title, start: b.start, end: b.end, kind: .actual)
                 row.actualState = b.state.stored
-                context.insert(row); byID[b.id] = row
+                stampActual(row)
+                context.insert(row); byID[b.id] = [row]
             }
+        }
+        if keptRecorded > 0 {
+            DevLog.shared.info("PlanStore", "\(keptRecorded) 条被动推断没覆盖已记下的实际（记下的赢）")
         }
         try context.save()
         DevLog.shared.info("PlanStore", "实际块 upsert \(blocks.count) 项（真相源）")

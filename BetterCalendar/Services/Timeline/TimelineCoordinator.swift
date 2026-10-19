@@ -22,6 +22,7 @@
 //  不接 writeLease（nil）= 永远可写，与改动前逐字等价（单测默认如此）。
 //  W22b：手改冷却（一键撤 / 日历手改回流 / 批准的挪块，全部经 noteManualEdits）同时发布到 iCloud KV（SharedRecentEdits），
 //  重算时与本机冷却合并——在另一台设备上动过的块，持有写权的设备 30 分钟内也不挪它。不写图钉。
+//  W27：溢出结算的「已结算」标记同样发布到 iCloud KV（SharedSpillMarks）——另一台结算过的日子不再收一遍池。
 //
 
 import Foundation
@@ -76,6 +77,8 @@ final class TimelineCoordinator {
     var writeLease: TimelineWriteLease?
     /// W22b：跨设备手改冷却（iCloud KV）。nil = 只有本机冷却（单测 / 旧行为）。
     var sharedEdits: SharedRecentEdits?
+    /// W27：溢出「已结算」跨设备标记（iCloud KV）。nil = 只看本机标记（单测 / 旧行为）。
+    var sharedSpillMarks: SharedSpillMarks?
     /// 启动补结算轮到本机时没有写权 → 记下，拿到写权的那一轮补跑（否则 Mac 常驻多日时永远轮不到）。
     private(set) var pendingBackstop = false
     /// 最近一轮因为没有写权而只算不写的调整数（观察窗 / 测试用）。
@@ -221,6 +224,12 @@ final class TimelineCoordinator {
     @discardableResult
     func executeSpills(day: Date) -> Int {
         guard !markerDefaults.bool(forKey: spillExecutedKey(day)) else { return 0 }
+        // W27：另一台设备已经结算过这一天（它的删除可能还在 CloudKit 路上）→ 不再收一遍（防待办区同一件两份）
+        if let by = sharedSpillMarks?.settledBy(day: day) {
+            markerDefaults.set(true, forKey: spillExecutedKey(day))
+            DevLog.shared.info("溢出", "\(DayContext.dayKey(day)) 已由「\(by)」结算过，本机不再重复收池")
+            return 0
+        }
         let candidates = pendingSpillCandidates(day: day)
         guard !candidates.isEmpty else {
             markerDefaults.set(true, forKey: spillExecutedKey(day))
@@ -270,6 +279,7 @@ final class TimelineCoordinator {
             }
         }
         markerDefaults.set(true, forKey: spillExecutedKey(day))
+        sharedSpillMarks?.markSettled(day: day, by: writeLease?.deviceLabel ?? "另一台设备")
         spillOverrides = [:]
         softSpilledIDs = []
         DevLog.shared.info("溢出", "硬执行 \(DayContext.dayKey(day))：候选 \(candidates.count) · 收池 \(pooled)")
