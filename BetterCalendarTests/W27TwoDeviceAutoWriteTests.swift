@@ -282,4 +282,38 @@ import SwiftData
         #expect(macPool.todoItems().count == 1 && phonePool.todoItems().isEmpty, "待办区只有一份")
         #expect(try phonePlan.plannedBlocks(on: today).count == 1, "iPhone 不动数据，等 Mac 的删除同步过来")
     }
+
+    // MARK: W27b 手动对账：没画蓝的被动推断不是「你在日历里删了」
+
+    @Test func calendarReconcileNeverDeletesPassiveAutoActuals() async throws {
+        let store = try Store()
+        let clock = TestClock(at(13))
+        let plan = PlanStore(context: store.context, writerID: "mac", now: { clock.now })
+        let calendar = FakeCalendarStore()
+        let vm = ExecutionViewModel(calendarStore: calendar,
+                                    reschedule: RescheduleService(planStore: plan, planner: NaivePlanningEngine()),
+                                    planStore: plan, reminderStore: FakeReminderStore(),
+                                    liveActivity: NoLiveActivity(), persistsRunState: false)
+        vm.clock = { clock.now }
+        vm.autoCompleteFixed = { true }
+        let meeting = meeting()                                                         // 到点被动推断：auto，不画蓝
+        let kept = ScheduledBlock(title: "写报告", start: at(8), end: at(9))             // 记下的，蓝色还在
+        let removed = ScheduledBlock(title: "回邮件", start: at(11, 30), end: at(12))    // 记下的，你在日历里删了蓝色
+        try plan.replacePlanned([meeting, kept, removed], on: today)
+        try plan.upsertActuals([
+            ActualBlock(id: meeting.id, title: meeting.title, start: meeting.start, end: meeting.end, state: .auto),
+            ActualBlock(id: kept.id, title: kept.title, start: kept.start, end: kept.end),
+            ActualBlock(id: removed.id, title: removed.title, start: removed.start, end: removed.end)])
+        try await calendar.write([CalendarEventDraft(title: kept.title, start: kept.start, end: kept.end,
+                                                     kind: .actual, blockID: kept.id)])
+
+        await vm.reconcileCalendarActuals()
+
+        let actuals = try plan.actualBlocks(on: today)
+        #expect(Set(actuals.map(\.id)) == [meeting.id, kept.id], "只有画过蓝、日历里没了的那条算你删的")
+        #expect(actuals.first { $0.id == meeting.id }?.state == .auto, "被动推断原样保留")
+        let cleared = try plan.clearedPlannedIDs(on: today)
+        #expect(cleared == [removed.id], "tombstone 只盖在你删掉的那块上；会议照常自动完成")
+        #expect(vm.isDone(vm.planned.first { $0.id == meeting.id }!), "会议仍算做成")
+    }
 }

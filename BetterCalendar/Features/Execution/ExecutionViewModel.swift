@@ -492,15 +492,18 @@ final class ExecutionViewModel {
     /// 逻辑：真相源里有、但日历里已无的带章蓝块 = 用户删了 → 删真相源实际 + 给对应计划块盖 tombstone
     /// （completion=.missed）→ loadToday 的自动完成不再重推断（删了 stick）。带章还在但时间/标题改了 → 回填。
     /// （无章新建认领待后续：需给日历事件盖章回写、防重复导入，CalendarStore 暂无改事件能力。）
+    /// W27b：只有**画成蓝色**的实际（记下的 / 正在长的）才可能「被你在日历里删掉」；被动推断（auto，固定块到点）
+    /// 从不画蓝，日历里本来就没有它——绝不能当成你删了（否则会议实际被删 + 盖 tombstone，此后不再自动完成）。
     func reconcileCalendarActuals() async {
-        let label = DayContext.logicalStartOfDay(.now)
+        let now = clock()
+        let label = DayContext.logicalStartOfDay(now)
         let stored: [ActualBlock]
         let calEvents: [CalendarEventDraft]
         do {
             stored = try planStore.actualBlocks(on: label)
             guard !stored.isEmpty else { return }
             calEvents = try await calendarStore.read(kind: .actual)
-                .filter { DayContext.isSameLogicalDay($0.start, .now) }
+                .filter { DayContext.isSameLogicalDay($0.start, now) }
         } catch {
             DataSyncMonitor.shared.report("实际日历读取失败，已保留全部记录：\(error.localizedDescription)")
             return
@@ -514,17 +517,25 @@ final class ExecutionViewModel {
                 if c.start != s.start || c.end != s.end || c.title != s.title {   // 时间/标题回填：你在日历改了实际
                     timeUpdates.append(ActualBlock(id: s.id, title: c.title, start: c.start, end: c.end))
                 }
-            } else {
-                deleted.append(s.id)   // 带章实际日历里没了 → 你删了
+            } else if s.state != .auto {
+                deleted.append(s.id)   // 画过蓝的带章实际日历里没了 → 你删了
             }
+            // auto（被动推断）不画蓝 → 日历里没有是正常的，原样保留
         }
         guard !deleted.isEmpty || !timeUpdates.isEmpty else { return }
-        if !timeUpdates.isEmpty { try? planStore.upsertActuals(timeUpdates) }
+        if !timeUpdates.isEmpty {
+            do { try planStore.upsertActuals(timeUpdates) }
+            catch { DevLog.shared.error("对账", "实际时间/标题回填没存上：\(error.localizedDescription)") }
+        }
         if !deleted.isEmpty {
-            try? planStore.deleteActuals(ids: deleted)
-            let plannedIDs = Set((try? planStore.plannedBlocks(on: label))?.map(\.id) ?? [])
-            for id in deleted where plannedIDs.contains(id) {
-                try? planStore.latchCompletion(plannedID: id, .missed)   // tombstone：删了不再自动重推断
+            do {
+                try planStore.deleteActuals(ids: deleted)
+                let plannedIDs = Set(try planStore.plannedBlocks(on: label).map(\.id))
+                for id in deleted where plannedIDs.contains(id) {
+                    try planStore.latchCompletion(plannedID: id, .missed)   // tombstone：删了不再自动重推断
+                }
+            } catch {
+                DevLog.shared.error("对账", "同步你在日历里删掉的实际没存完整：\(error.localizedDescription)")
             }
         }
         DevLog.shared.info("对账", "蓝色实际对账：删 \(deleted.count) · 时间/标题回填 \(timeUpdates.count)")
