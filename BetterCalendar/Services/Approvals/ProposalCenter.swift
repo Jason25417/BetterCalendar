@@ -43,6 +43,10 @@ import UIKit
     let ledger: any OperationLedger
     private let now: () -> Date
     /// 正在执行的提案，防止同一台设备并发重复执行。
+    /// 卡片上「回一句」展开了输入框的提案（冒烟 2026-10-18：macOS List 行里的 @State 展开后行高不更新、输入框看不见——
+    /// 状态放到这里，面板用它改行的 id 强制重排；对话卡片同样复用）。
+    var replying: Set<UUID> = []
+    func toggleReplying(_ id: UUID) { if replying.contains(id) { replying.remove(id) } else { replying.insert(id) } }
     private var executing: Set<UUID> = []
     /// 冒烟 2026-10-18 bug A：本机已执行成功、但「已完成」回报没落地的提案（网络抖动 / 超时）。
     /// 留在这里（并持久化），刷新时只**补回报**、绝不重新执行；补上后移除。

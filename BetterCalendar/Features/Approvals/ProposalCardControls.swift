@@ -35,7 +35,6 @@ struct ProposalEscalationBanner: View {
 struct ProposalCardControls: View {
     @Bindable var center: ProposalCenter
     let proposal: Proposal
-    @State private var replying = false
     @State private var replyText = ""
     @State private var scope: PreauthScope = .kindOnBetterCalendar
     @State private var sending = false
@@ -43,7 +42,7 @@ struct ProposalCardControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if proposal.hasAlternatives { optionCards } else { decisionRow }
-            if replying { replyField }
+            if center.replying.contains(proposal.id) { replyField }
         }
     }
 
@@ -60,7 +59,7 @@ struct ProposalCardControls: View {
                 Button("同意") { Task { await center.decide(proposal.id, .approve) } }.buttonStyle(.borderedProminent)
             }
             Button("拒绝", role: .destructive) { Task { await center.decide(proposal.id, .decline) } }.buttonStyle(.bordered)
-            Button("回一句") { replying.toggle() }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
+            Button("回一句") { center.toggleReplying(proposal.id) }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
             rememberMenu
         }
         .controlSize(.small)
@@ -113,7 +112,7 @@ struct ProposalCardControls: View {
             }
             HStack(spacing: 8) {
                 Button("都不要", role: .destructive) { Task { await center.decide(proposal.id, .decline) } }.buttonStyle(.bordered)
-                Button("回一句") { replying.toggle() }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
+                Button("回一句") { center.toggleReplying(proposal.id) }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
             }
             .controlSize(.small)
         }
@@ -140,7 +139,7 @@ struct ProposalCardControls: View {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !sending else { return }
         sending = true
         Task {
-            if await center.reply(proposal.id, text: text) { replyText = ""; replying = false }
+            if await center.reply(proposal.id, text: text) { replyText = ""; center.replying.remove(proposal.id) }
             sending = false
         }
     }

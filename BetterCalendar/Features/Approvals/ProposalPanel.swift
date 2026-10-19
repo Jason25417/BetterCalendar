@@ -33,6 +33,7 @@ struct ProposalPanel: View {
                 if center.pending.isEmpty { Text("现在没有需要你确认的改动").foregroundStyle(.secondary) }
                 ForEach(center.pending) { p in
                     pendingCard(p).listRowBackground(p.id == focusId ? Color.accentColor.opacity(0.08) : nil)
+                        .id("\(p.id.uuidString)-\(center.replying.contains(p.id))")   // 展开「回一句」时换 id，逼 List 重新量行高
                 }
             }
             Section("最近结果") {
