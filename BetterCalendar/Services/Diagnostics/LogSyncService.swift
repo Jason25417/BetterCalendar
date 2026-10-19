@@ -93,23 +93,24 @@ final class LogSyncService {
     private func dumpToFiles() {
         #if os(macOS)
         guard dumpEnabled else { return }
-        let logs = fetchAll()
+        // W19b 发现：在主线程同步写 ~/Downloads 时，系统等「下载」文件夹授权会把整个 App 卡死 → 先取出纯文本，写文件放后台
+        let files = fetchAll().map { (name: $0.deviceName.replacingOccurrences(of: "/", with: "-") + "-\($0.dayKey).log", text: $0.text) }
         let fm = FileManager.default
+        var dirs: [URL] = []
         if let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            writeLogs(logs, to: base.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true))
+            dirs.append(base.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true))
         }
         if let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first {
-            writeLogs(logs, to: dl.appendingPathComponent("BetterCalendar-logs", isDirectory: true))
+            dirs.append(dl.appendingPathComponent("BetterCalendar-logs", isDirectory: true))
         }
+        Task.detached(priority: .utility) { Self.writeLogFiles(files, to: dirs) }
         #endif
     }
 
-    private func writeLogs(_ logs: [DeviceLog], to dir: URL) {
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for log in logs {
-            let safeName = log.deviceName.replacingOccurrences(of: "/", with: "-")
-            let url = dir.appendingPathComponent("\(safeName)-\(log.dayKey).log")
-            try? log.text.write(to: url, atomically: true, encoding: .utf8)
+    nonisolated private static func writeLogFiles(_ files: [(name: String, text: String)], to dirs: [URL]) {
+        for dir in dirs {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for f in files { try? f.text.write(to: dir.appendingPathComponent(f.name), atomically: true, encoding: .utf8) }
         }
     }
 }
