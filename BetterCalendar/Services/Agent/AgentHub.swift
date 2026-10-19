@@ -18,12 +18,14 @@ import Observation
 @MainActor protocol ClaudeCodeAgentChannel: AnyObject {
     func emit(kind: String, summary: String, payload: [String: Any])
     func activate()
-    func deactivate()
+    /// 切到别的实现（active = 现在接通的那个）：关掉这条通道。
+    func deactivate(active: AgentKind)
 }
 
 extension AgentBridge: ClaudeCodeAgentChannel {
-    func activate() { start(); Task { await sync() } }
-    func deactivate() { stop() }
+    /// W24：开 / 关通道时各写一次「当前智能体」状态标记（只给心跳看，不是通道），心跳才不会把「切到内置」误报成「App 没在运行」。
+    func activate() { markActiveAgent(.claudeCode); start(); Task { await sync() } }
+    func deactivate(active: AgentKind) { stop(); markActiveAgent(active) }
 }
 
 @MainActor @Observable final class AgentHub {
@@ -57,7 +59,7 @@ extension AgentBridge: ClaudeCodeAgentChannel {
             builtin.deactivate()
             claudeCode?.activate()
         case .builtin:
-            claudeCode?.deactivate()
+            claudeCode?.deactivate(active: .builtin)
             pump()
         }
     }
