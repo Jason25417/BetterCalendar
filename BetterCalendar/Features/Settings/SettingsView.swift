@@ -22,6 +22,7 @@ struct SettingsView: View {
     var proposals: ProposalCenter? = nil
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
+    var bridge: AgentBridge? = nil   // W19：Mac 的智能体桥接连接区随「审批记录与规则」搬进设置（iOS 为 nil）
     /// P4 Q4：列出你的日历（「排布时当作已占用的日历」）。只读。
     var calendarStore: CalendarReading? = nil
     @State private var userCalendars: [String] = []
@@ -67,17 +68,25 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            #if os(iOS)
+            // W19（S-v2）：待确认卡置顶在「智能体」页；这里是审批记录、预授权规则、智能体能看什么、主动找你、
+            // 桥接与哨兵（Mac）这些低频设置，以及晚间复盘的时刻。两端同一套。
             if let proposals {
-                Section("多端审批") {
+                Section("智能体") {
                     NavigationLink {
-                        ProposalPanel(center: proposals, alertPush: alertPush, messages: agentMessages).navigationTitle("多端审批")
+                        ProposalPanel(center: proposals, bridge: bridge, alertPush: alertPush, messages: agentMessages,
+                                      showsPending: false)
+                            .navigationTitle("审批记录与规则")
                     } label: {
-                        Label("打开多端审批（待确认 \(proposals.pending.count)）", systemImage: "checkmark.seal")
+                        Label("审批记录与规则", systemImage: "checkmark.seal")
+                    }
+                    .accessibilityIdentifier("bc.settings.approvals")
+                    NavigationLink {
+                        AgentChatSettingsView()
+                    } label: {
+                        Label("晚间复盘", systemImage: "moon.stars")
                     }
                 }
             }
-            #endif
             ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
             // W16：回收站是你找回东西的地方，常驻；同步诊断 / 播种 / 文件桥收进「开发者选项」
             if let trash {
@@ -360,7 +369,7 @@ struct SettingsView: View {
                         ForEach(DisclosureStyle.allCases) { Text($0.label).tag($0) }
                     }
                     // 死代码审计 2026-07-22 Jason 裁：选项保留（等将来实现），但「没效果」必须一眼可见——提前单说
-                    Text("「控制台」「禅」目前还没有效果（选了暂时等同「向导」）。向导＝排日程页按时刻只显当刻所需（渐进披露 v2）。")
+                    Text("「控制台」「禅」目前还没有效果（选了暂时等同「向导」）。向导＝今天页按时刻只显当刻所需（渐进披露 v2）。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Text("双向同步（P4，谁的东西谁做主）：在系统日历里挪/改绿色计划块，App 立即照办，挪过时间的块当天不再被自动调整（图钉）；删掉一块 = 从今天的时间线移走、收进待办区（可找回）。你自己日历里的事件 BetterCalendar 只读、不复制，同一件事只画你那一份。")
@@ -393,7 +402,7 @@ struct SettingsView: View {
 
                     Stepper("提醒提前 \(leadMinutes) 分钟", value: $leadMinutes, in: 0...120, step: 5)
                         .onChange(of: leadMinutes) { _, v in ReminderSettings.leadMinutes = v }
-                    Text("确认写入时把「尽早」和有具体截止(DDL)的事项写进 系统「提醒事项」（带提前提醒）。")
+                    Text("保存计划时把有具体截止(DDL)的事项写进 系统「提醒事项」（带提前提醒）。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Toggle("固定块（会议）过点自动记完成", isOn: Binding(
@@ -411,7 +420,7 @@ struct SettingsView: View {
                         ForEach(PushIntensity.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                     .onChange(of: pushIntensity) { _, v in SuggestionSettings.intensity = v }
-                    Text("排日程页顶部偶尔提醒一句临近 DDL / 久放的未来任务（休息日全静音、可「别再提」永久静音某件）。默认温和。")
+                    Text("今天页顶部偶尔提醒一句临近 DDL / 久放的未来任务（休息日全静音、可「别再提」永久静音某件）。默认温和。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

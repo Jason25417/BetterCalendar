@@ -688,7 +688,7 @@ enum ProposalTimerRules {
     private func editingMover() throws -> any PlanBlockMoving {
         let mover = try planMover()
         guard mover.planEditingEnabled else {
-            throw ProposalExecutionError.unavailable("「智能体排时间线」在设置里关着（多端审批面板）：现在只能挪今天的块")
+            throw ProposalExecutionError.unavailable("「智能体排时间线」在设置里关着（设置 → 审批记录与规则）：现在只能挪今天的块")
         }
         return mover
     }

@@ -74,7 +74,7 @@ nonisolated enum SentinelCadence {
     static func gate(settings: SentinelSettings, attention: AttentionSettings, bridgeConnected: Bool, now: Date,
                      costTodayUsd: Double, calendar: Calendar = .current) -> SentinelGate {
         guard settings.enabled else { return .disabled("哨兵已关") }
-        guard bridgeConnected else { return .skip("桥接目录未连接（多端审批面板里选 bridge 文件夹）") }
+        guard bridgeConnected else { return .skip("桥接目录未连接（设置 → 审批记录与规则里选 bridge 文件夹）") }
         guard attention.enabled else { return .skip("「允许智能体主动通知你」已关") }
         if let until = attention.mutedUntil, now < until { return .skip("静音中（到 \(until.formatted(date: .omitted, time: .shortened))）") }
         if AttentionPolicy.inQuietHours(attention, at: now, calendar: calendar) {

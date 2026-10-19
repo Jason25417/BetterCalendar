@@ -343,5 +343,11 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
         f.reconcile.dismissCalendarNotice()
         await f.reconcile.reconcileWindow()
         #expect(f.reconcile.calendarNotice == nil, "收起后同样的情况不再提示")
+        // W19：点一次「知道了」就一直收着——数量变了也不复活（旧实现按数量做键，多一个事件就又冒出来）
+        f.calendar.seed(.planned, "理发", at(21, 17), at(21, 18))
+        await f.reconcile.reconcileWindow()
+        #expect(f.reconcile.calendarNotice == nil, "同类提示数量变化后仍不再出现")
+        #expect(f.defaults.stringArray(forKey: ReconcileService.noticeDismissedKindsKey) == ["greenForeign"])
+        #expect(SettingsSync.syncedKeys.contains(ReconcileService.noticeDismissedKindsKey), "收起随 iCloud 设置同步")
     }
 }

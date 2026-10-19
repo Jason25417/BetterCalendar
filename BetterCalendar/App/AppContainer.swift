@@ -511,7 +511,8 @@ final class AppContainer {
                  reconcile: reconcile, trash: trash, nativeActions: nativeActions,
                  timeline: timeline,                     // E5d：晨间摘要/痕迹条/一键撤
                  routines: RoutineTemplateStore.shared,  // K1：例行模板物化
-                 proposals: proposals, agentMessages: agentMessages, alertPush: alertPush)
+                 proposals: proposals, agentMessages: agentMessages, alertPush: alertPush,
+                 agentChat: agentChat)   // W19：今天页底部「跟智能体说一句」
     }
 
     var journalDeps: JournalDeps {

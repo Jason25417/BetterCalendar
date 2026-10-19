@@ -2,7 +2,7 @@
 //  HomeView.swift
 //  BetterCalendar
 //
-//  首页：说一天 → 排今天 → 可编辑草稿（拖/改/标/删加）→ 自然语言微调 → 确认写入日历。
+//  「今天」首页（W19 S-v2）：现在 / 下一件 + 这一天的时间线（可直接拖、改，自动保存）+ 跟智能体说一句。
 //
 
 import SwiftUI
@@ -51,8 +51,14 @@ struct HomeDeps {
     var proposals: ProposalCenter? = nil       // SPEC §19：iPhone 的多端审批入口在设置里（iOS 首页无工具栏）
     var agentMessages: AgentMessageCenter? = nil
     var alertPush: ProposalAlertPushControl? = nil
+    var agentChat: AgentChatCenter? = nil      // W19：底部「跟智能体说一句」
 }
 
+/// W19「今天」页（S-v2 结构层决定，2026-10-19）：原「排日程」与「今天」合并成首页，两端同一套。
+/// 自上而下：① 现在 / 下一件（复用执行陪伴面板与它的开始 / 完成逻辑）② 选哪天 ③ 这一天的时间线
+///（今天 = 做成了的 + 接下来的计划，可直接拖、直接改，改完自动保存；你拖过的块按原路径成为图钉）
+/// ④ 底部常驻「跟智能体说一句」（交给 AgentChatCenter.send，并切到「智能体」页看回复与提案）。
+/// 老排程链（「说说你的一天」输入框 / 排今天·排明天 / AI 调整 / 确认写入日历 + 它们的状态行）已从界面退役。
 struct HomeView: View {
     // 收尾卡 v2（0.38）：可见性 = 既有强信号 ∨ 傍晚线后事实性收工；盖章/收起/已有日记则不出现
     @State private var wrapUpDismissTick = 0   // 「先不收尾」后强制重算
@@ -67,46 +73,32 @@ struct HomeView: View {
             && (deps.execution.lastCompletionAt.map { Date.now.timeIntervalSince($0) >= 45 * 60 } ?? false)
     }
 
-    // 加一项（0.36.0 AI 定名/时长 → 批次3 融进列表尾行）：一句话=addBlockSmart；留空回车=空白项（老路保留）
+    // 时间线尾行「＋ 加一项」：只写标题，在空档放一小时（不经 AI）
     @State private var addRowActive = false
-    @State private var smartAddText = ""
+    @State private var addRowText = ""
 
     let deps: HomeDeps
     @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次A 起逐点消费）
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: HomeViewModel
     @State private var l3Tick = 0                  // 「别再提」后强制重算 L3 建议
-    @State private var showFreshCompare = false    // 徽标 v2：两版只读对比 sheet
     @State private var tnDismissTick = false       // 寄语条「今天先收起」即时刷新（存储在 TomorrowNote）
     @State private var briefDismissTick = 0        // 晨间摘要「今天先不排」即时刷新（E5d，存 UserDefaults）
     @State private var showTraceSheet = false      // 变更痕迹二层 sheet（E5d）
     @State private var showDevLog = false          // W16：🐞 日志页（工具栏入口）
+    @State private var sayText = ""                // 底部「跟智能体说一句」
+    @FocusState private var sayFocused: Bool
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」
     #if os(macOS)
-    @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
+    @Environment(\.openWindow) private var openWindow   // 开发期窗口（开发者选项打开时）
     #else
     @State private var showSettings = false        // iOS 没有 ⌘, Settings scene → app 内设置页
-    @State private var showDraftExpanded = false   // iOS 草稿全屏浏览/编辑（小窗太挤）
+    @State private var showDraftExpanded = false   // iOS 时间线全屏编辑（小屏太挤）
     #endif
-    // （日历后端 @AppStorage 已删——后端退役恒 eventKit，按钮文案不再依赖它，2026-07-21）
-    @AppStorage("home.inputHeight") private var inputHeight: Double = 96   // 输入框高度（拖拽可调，记忆）
-    @State private var dragBaseHeight: Double?
-    // 渐进披露 v2（0.26）：有草稿/计划 = 改/看的时刻，输入折叠成"重说"入口；点开临时展开重排。
-    @State private var reSayExpanded = false
-    /// 有草稿或已加载计划 = 进入"改/看"时刻（写入区显示、输入折叠）。
-    private var showingPlanArea: Bool { !model.blocks.isEmpty || model.hasUnsavedChanges }
-    /// 「确认写入 + 同步」合一按钮的标题（Jason 2026-07-09）：绿(计划)与蓝(实际)是一天里错开的两相、
-    /// 并集覆盖整天——"改/看"时刻是确认写入绿计划，"过"时刻叠加同步蓝色实际的日历改动。
-    private var confirmSyncButtonTitle: String {
-        // 后端退役后清理（2026-07-21）：原文案按 @AppStorage("calendar.backend") 猜「真/假日历」——
-        // 该开关已恒 eventKit，「（假）日历」分支是死代码、且 @AppStorage 的初始时序会误显「假」误导用户
-        // （本次 bug 的可见症状之一）。直接写死为「写入日历」，不再判断真/假、去掉 (Dev) 遗留后缀。
-        guard model.isLiveTargetDay else { return "确认写入日历" }                        // 说/改/看：仅确认写入（绿）
-        return model.hasUnsavedChanges ? "确认写入 · 同步日历" : "同步日历改动"            // 过：叠加/单做蓝色对账
-    }
 
     init(deps: HomeDeps) {
         self.deps = deps
-        _model = State(initialValue: HomeViewModel(
+        let vm = HomeViewModel(
             arrangeDay: deps.arrangeDay,
             refiner: deps.refiner,
             calendarStore: deps.calendarStore,
@@ -120,465 +112,46 @@ struct HomeView: View {
             looseDays: deps.looseDays,
             startedDays: deps.startedDays,
             progress: deps.execution,
-            routines: deps.routines))
+            routines: deps.routines)
+        vm.autoCommit = true   // W19：直接操作即保存（没有「确认写入」这一步了）
+        _model = State(initialValue: vm)
+    }
+
+    /// 选中的是不是逻辑今天（「现在 / 下一件」与「做成了」只属于今天）。
+    private var isTodaySelected: Bool {
+        Calendar.current.startOfDay(for: model.targetDay) == DayContext.logicalDay(offset: 0)
     }
 
     var body: some View {
-        @Bindable var model = model
         NavigationStack {
-            ScrollView {   // 页面过长可整页滚动（0.16.3）
-            VStack(alignment: .leading, spacing: 12) {
-                // 版本/构建标签移到左上（2026-07-09 Jason）：平台·渠道·版本(build)，点开看更新日志
-                NavigationLink { ChangelogView() } label: {
-                    Text(BuildInfo.tag)
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
-                HStack {
-                    Text("说说你的一天").font(.headline)
-                    Spacer()
-                    // 「松散一下」挪进目标日菜单（批次6）：它是这一天的属性，语义归属日选择器而非常驻顶栏
-                    targetDayMenu
-                    if model.isLiveTargetDay {
-                        // 1b 态标识（方案 A，Jason 2026-07-14 裁）：顶栏胶囊，一眼可辨「列表=从现在起的剩余」
-                        Text("实时 · 从现在起")
-                            .font(.caption2)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background(Capsule().fill(.quaternary.opacity(0.6)))
-                            .foregroundStyle(.secondary)
-                            .help("今天已开始：这里显示并编辑「从现在起」的剩余计划（=橙色预览，改完确认即生效）；已完成/已过去的块在日记页复盘里")
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        nowNextCard
+                        dayStrip
+                        notices
+                        timeline
+                        footerTag
                     }
+                    .padding()
                 }
-
-                // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你——发出者是用户自己，
-                // 不写=不存在；点 ✕ 只收当天（明天有新寄语照常出现）。
-                if let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
-                    MessageStrip(icon: "sunrise", tint: theme.looseTint, text: "昨晚的你说：\(tn)") {
-                        Button { TomorrowNote.dismiss(); tnDismissTick = true } label: {
-                            Image(systemName: "xmark").font(.caption2)
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                        .accessibilityLabel("今天先收起")
-                    }
-                }
-
-                // 晨间摘要（E5d）：昨日收池露脸 + DDL 置顶 + 一键入线；当天可收（TomorrowNote 同族）
-                let _ = briefDismissTick
-                if !MorningBrief.isDismissedToday {
-                    MorningBriefStrip(longTasks: deps.longTasks, router: deps.router,
-                                      onDismiss: { briefDismissTick += 1 })
-                }
-
-                // 变更痕迹轻提示（E5d，预授权直写绿的配套义务）：一行计数 → 点开二层 sheet（R12 世界归因）
-                if let timeline = deps.timeline, timeline.todayTraceCount() > 0 {
-                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.looseTint,
-                                 text: "计划今天有 \(timeline.todayTraceCount()) 处自动调整") {
-                        Button("查看") { showTraceSheet = true }
-                            .buttonStyle(.plain).font(.caption).foregroundStyle(theme.accent)
-                    }
-                }
-
-                // P4 Q1：BetterCalendar 自家日历里有你的事件（预览日历退役后尤其）——提示挪走，可收起（不是错误）
-                if let notice = deps.reconcile.calendarNotice {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.secondary)
-                        Text(notice).font(.callout).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Button { deps.reconcile.dismissCalendarNotice() } label: { Image(systemName: "xmark") }
-                            .buttonStyle(.borderless).help("知道了")
-                    }
-                    .padding(10)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-
-                // 松散日：退场 + 见证的姿态横幅（不删任何计划、可撕；深层姿态效果后续接）
-                if deps.looseDays.isLoose(model.targetDay) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "moon.stars.fill").foregroundStyle(theme.looseTint)
-                        Text("松散日 · 已经退场陪你了——不催、不算账。想排还是能排，也可以就好好休息。")
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(theme.looseTint.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-
-                // L3 主动建议（唯一主动·顶部一行）：休息日全静音、可"别再提"永久静音、强度可调
-                let _ = l3Tick   // 让"别再提"后重算（静音集存 UserDefaults、非 @Observable）
-                let l3 = deps.longTasks.l3Suggestions(
-                    loose: deps.looseDays.isLoose(model.targetDay),
-                    intensity: SuggestionSettings.intensity.cap,
-                    muted: SuggestionSettings.mutedTaskIDs)
-                ForEach(l3) { s in
-                    // 统一消息条（0.28.1）：L3 建议与 A+B 状态行同一视觉家族（位置各守其位）
-                    // 换装 B：建议=提议未确认 → 预览橙族（同「从现在起」语义，让出系统橙）
-                    MessageStrip(icon: "lightbulb", tint: theme.previewTint, text: s.text) {
-                        if s.kind == .shelve {
-                            Button("先放下") {
-                                BehaviorLog.record("L3建议", "点「先放下」")
-                                if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
-                                    deps.longTasks.shelve(t)
-                                }
-                            }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                            .tint(.primary)   // 体检 #8
-                        } else {
-                            Button {
-                                BehaviorLog.record("L3建议", "点「排进今天」")
-                                if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
-                                    model.smartInsertFromLongTask(t)
-                                }
-                            } label: {
-                                Label("排进今天", systemImage: "calendar.badge.plus")   // 审计 #13：同动作同文案同图标（U7）
-                            }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
-                            .tint(.primary)   // 体检 #8：建议条内动作收中性
-                        }
-                        Button {
-                            BehaviorLog.record("L3建议", "静音（别再提）")
-                            SuggestionSettings.mute(s.id); l3Tick += 1
-                        } label: {
-                            Image(systemName: "xmark").font(.caption2)
-                        }
-                        .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
-                        .accessibilityLabel("别再提这件")
-                    }
-                    .onAppear {   // 埋点：出现按 (天, 建议) 去重
-                        BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现")
-                    }
-                }
-
-                // ===== 统一输入组件（S2 附录A 合并案，批次3）：一框双模 =====
-                // 「说的时刻」（无计划 / ↺ 重说模式）提交=整排；「改/看的时刻」提交=AI 微调（含「再加一项…」）。
-                unifiedInput
-                // 剩余地形（E5e §14.6）：空间事实一行——不评判、超订不显负数（「今天已排满」即止）
-                if let terrain = model.terrainLine {
-                    Text(terrain).font(.caption2).foregroundStyle(.secondary)
-                }
-                if model.isWorking, !deps.liveDraft.streaming.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        // #42 流式跳动修复（2026-07-20）：块 UUID 每次增量 decode 都重新生成 →
-                        // 按 id 的 ForEach 每帧全量重建（闪烁）。流式区已改追加序（不排序），
-                        // 用 offset 做稳定 identity——旧行内容不变、新行只在尾部出现，一次冒一块、不再跳。
-                        ForEach(Array(deps.liveDraft.streaming.enumerated()), id: \.offset) { _, b in
-                            HStack(spacing: 6) {
-                                Text(b.start.formatted(date: .omitted, time: .shortened))
-                                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                                Text(b.title).font(.caption)
-                            }
-                        }
-                    }
-                    .padding(.leading, 2)
-                    .animation(Motion.standard, value: deps.liveDraft.streaming.count)   // 新块淡入（条文10）
-                }
-
-                // A 状态行（0.26 ABC → 0.28.1 统一消息条）：确定性成功状态「✓ 排好 N 件」——与 note(B) 叠加
-                if let n = model.arrangedCount {
-                    MessageStrip(icon: "checkmark.circle.fill", tint: theme.positiveTint,
-                                 text: "排好 \(n) 件", textStyle: .primary)
-                }
-                // C 状态行（#15，0.29.0）：微调完成的确定性反馈——N=本地 diff 出的事实，
-                // 非模型自由发挥（自由通道审核未过：可能违措辞红线；模型嗓音只走宪法约束的 note=B）
-                if let c = model.refinedChangeCount {
-                    MessageStrip(icon: c > 0 ? "checkmark.circle.fill" : "info.circle",
-                                 tint: c > 0 ? theme.positiveTint : .gray,
-                                 text: c > 0 ? "已按指令调整 \(c) 处" : "没识别出要改的动作——一切保持原样",
-                                 textStyle: .primary)
-                }
-                // B：模型 note（宪法约束、温和前向）。防呆：抽风成「1」这种垃圾 → trim 后太短不显
-                if let note = model.note,
-                   note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
-                    // 换装 B：信息蓝并入 actualTint 族——同屏只保留一种蓝（微决策留档）
-                    MessageStrip(icon: "quote.opening", tint: theme.actualTint, text: note)
-                }
-                if !model.pendingLongTasks.isEmpty {
-                    Label("识别到未来事项：\(model.pendingLongTasks.map(\.title).joined(separator: "、"))——确认写入时加入「未来任务」",
-                          systemImage: "tray.and.arrow.down")
-                        .font(.caption).foregroundStyle(theme.looseTint)
-                }
-                if let err = model.errorText {
-                    Text(err).font(.callout).foregroundStyle(.red)
-                }
-                if let snap = model.pendingRestore {
-                    HStack(spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath").font(.caption).foregroundStyle(.secondary)
-                        Text("上次有未保存的修改（为 \(Self.dayLabel(snap.targetDay)) · 存于 \(snap.savedAt.formatted(date: .omitted, time: .shortened))）")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("恢复") { model.applyPendingRestore() }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(theme.actualTint).underline()
-                        Button("丢弃") { model.dismissPendingRestore() }
-                            .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
-                        Spacer()
-                    }
-                }
-
-                // 未来任务/在途：只在"说的时刻"出现（改/看时收起——渐进披露 v2）
-                if !showingPlanArea { ongoingSection }
-
-                // 收尾卡 v2（0.38，#33 拍板）：从橙色小横条升级为独立大卡——与报错带视觉彻底分离，
-                // 「先不收尾」一键当天收起。触发新增「傍晚线后事实性收工」（最后完成后空档 ≥45 分钟）。
-                // 红线照旧：措辞绝不出现「还剩 N 件」；已盖章/已收起当天不再出现。
-                if model.tomorrowReadyCelebration {
-                    // 第二仪式（0.38，#33 拍板③）：收尾章后顺手排完明天 → 一次性庆祝
-                    VStack(spacing: 6) {
-                        CelebrationBurst()
-                        Text("明天也就位了——睡个好觉").font(.headline)   // 体检 #15：emoji 清理（星光已承载庆祝）
-                        Button("收下") { model.tomorrowReadyCelebration = false }
-                            .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(16)   // 换装 C：卡面间距对齐 8pt 网格
-                    .background(theme.looseTint.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))   // 夜/月族归位（C）
-                }
-                if wrapUpCardVisible {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "sunset.fill").font(.title3).foregroundStyle(theme.accent)   // 字阶收敛（C）
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("今天的工作差不多了").font(.headline)
-                                Text("花 30 秒收个尾——看看做成了什么，给今天写一句话。")
-                                    .font(.callout).foregroundStyle(.secondary)
-                            }
-                        }
-                        HStack {
-                            Button("先不收尾") { WrapUpSeal.dismissToday(); wrapUpDismissTick += 1 }
-                                .buttonStyle(.plain).foregroundStyle(.secondary).font(.callout)
-                            Spacer()
-                            Button {
-                                BehaviorLog.record("收口卡", "点击进收尾流程")
-                                deps.router.selectedTab = .journal
-                                deps.router.journalRequest = .now
-                                deps.router.wrapUpRequest = true
-                            } label: {
-                                Label("进入收尾", systemImage: "arrow.right.circle.fill").font(.callout)
-                            }
-                            // S3-P2（2026-07-14）：提议卡内用普通音量——最强音量（borderedProminent）
-                            // 是页面主务「确认写入」的专属；收尾有三重入口兜底（卡+晚通知+menu bar 回看今天）。
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(16)   // 换装 C：卡面间距对齐 8pt 网格
-                    // 换装 B：收口卡=情感时刻场域（条文 11 白名单）→ 暮色橙 accent 打底，粉尾保留暖意
-                    .background(LinearGradient(colors: [theme.accent.opacity(0.16), Color.pink.opacity(0.10)],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                                in: RoundedRectangle(cornerRadius: 14))
-                    .onAppear {   // 埋点（调研 B 组）：出现按天去重 + 触发信号
-                        BehaviorLog.recordOncePerDay(key: "收口卡",
-                            "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : (Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) ? "过收工线" : "傍晚空档"))")
-                    }
-                }
-
-                // 开发期失败横幅（W16「安静但可见」）：只有你能处理的 / 已持续失败的才横幅，判定统一在 IssueTriage；
-                // 短暂、会自己恢复的只在工具栏 🐞 上计数。原始错误全在日志里（产品上架前切回静默自愈）。
-                IssueBanner()
-
-                // 新鲜度徽标（0.24 C2 → v2 两边再选）：中性、不打断——底层变了，
-                // 三个显式出路：对比两版 / 载入最新 / 继续编辑。绝不弹窗打断、绝不自动合并。
-                if model.freshness {
-                    MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.actualTint,
-                                 text: "这天有更新：\(model.freshnessSource.label)") {
-                        HStack(spacing: 6) {
-                            if model.freshBase != nil {
-                                Button("对比两版…") { BehaviorLog.record("徽标", "打开对比两版"); showFreshCompare = true }
-                                    .buttonStyle(.plain).underline()
-                            }
-                            Button("载入最新") { model.reloadFreshBase() }
-                                .buttonStyle(.plain).underline()
-                            Text("· 或继续编辑，确认时以本页为准")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        .font(.caption)
-                    }
-                    .sheet(isPresented: $showFreshCompare) {
-                        FreshCompareSheet(mine: model.blocks,
-                                          fresh: model.freshBase ?? [],
-                                          sourceLabel: model.freshnessSource.label,
-                                          onAdoptFresh: { model.adoptFreshBase(); showFreshCompare = false },
-                                          onKeepMine: { model.keepMyDraft(); showFreshCompare = false })
-                    }
-                    .sheet(isPresented: $showTraceSheet) {
-                        // E5d 变更痕迹二层：清单 + 一键撤（deps.timeline 为 nil 时提示条根本不显示，进不来）
-                        if let timeline = deps.timeline { ChangeTraceSheet(timeline: timeline) }
-                    }
-                }
-
-                // 实时态标识已升级为顶栏胶囊（1b 方案 A，批次3）——原橙色说明行退役，语义并入胶囊 help
-
-                // 有块、或有未保存修改（含"删到空"）都保留写入区——否则删掉最后一件就没法确认保存
-                if !model.blocks.isEmpty || model.hasUnsavedChanges {
-                    Divider()
-                    HStack {
-                        // 状态陈述已迁区域底部弱字行（U3 落地，批次3）；「加一项」融进列表尾行（#37/S3）
-                        Spacer()
-                        // S3 归位（2026-07-14）：草稿低中频动作（放大/挪日/导出/放弃）从三处散排
-                        // 收进一个 ⋯（U2 第二层；破坏性「放弃修改」菜单内隔开，U10）
-                        Menu {
-                            #if !os(macOS)
-                            Button { showDraftExpanded = true } label: {
-                                Label("放大编辑", systemImage: "arrow.up.left.and.arrow.down.right")
-                            }
-                            #endif
-                            // 0.23 C：整份草稿显式挪日（取代退役的"切日自动平移"）
-                            if !model.blocks.isEmpty {
-                                Menu("挪到…") {
-                                    Button("挪到今天") { model.moveDraft(to: DayContext.logicalDay(offset: 0)) }
-                                    Button("挪到明天") { model.moveDraft(to: DayContext.logicalDay(offset: 1)) }
-                                    Button("挪到后天") { model.moveDraft(to: DayContext.logicalDay(offset: 2)) }
-                                }
-                            }
-                            // ICS 导出归"看的时刻"、仅高密皮肤露（渐进披露 v2）
-                            if DisclosureSettings.showsDeepFeatures {
-                                #if os(macOS)
-                                Button { exportICS() } label: {
-                                    Label("导出 ICS", systemImage: "square.and.arrow.up")
-                                }
-                                #else
-                                ShareLink(item: ICSDocument(text: model.currentICS()),
-                                          preview: SharePreview("BetterCalendar 计划.ics")) {
-                                    Label("导出 ICS", systemImage: "square.and.arrow.up")
-                                }
-                                #endif
-                            }
-                            if model.hasUnsavedChanges {
-                                Divider()
-                                Button("放弃修改", role: .destructive) { model.discardDraft() }
-                            }
-                        } label: {
-                            Label("更多", systemImage: "ellipsis.circle")
-                        }
-                        .font(.caption)
-                        .tint(.primary)   // 修正批 D：次要控件收中性（条文 2）
-                        .help("草稿与列表的更多操作")
-                    }
-
-                    if model.blocks.isEmpty {
-                        Label("这天已清空 · 点「确认写入」保存为没有安排的一天，或再加一项",
-                              systemImage: "calendar.badge.minus")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .padding(.vertical, 8)
-                        addTailRow   // E5e：空态也留「加一件」入口（此前只有 List 尾行有）
-                    } else {
-                        List {
-                            ForEach(model.blocks) { item in
-                                EditableRow(block: model.binding(for: item.id),
-                                            poolTasks: deps.longTasks.items,
-                                            referenceDay: model.targetDay,
-                                            parallelCandidates: model.blocks
-                                                .filter { $0.id != item.id && !$0.isAnchor }
-                                                .map { ($0.id, $0.title,
-                                                        $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
-                                            parallelPeers: model.parallelPeerTitles(of: item.id),
-                                            onToggleParallel: { model.toggleParallel(item.id, with: $0) },
-                                            onDelete: { model.delete(id: item.id) })
-                                // 右键菜单已由 EditableRow 内部统一挂载（P4-3：与 ⋯ 同一份内容）
-                            }
-                            .onMove { model.move($0, $1) }
-                            // 「加一项」融进列表（#37/S3 裁决）：最后一行 +，就地输入——
-                            // 一句话=AI 定名字/时长/排位（addBlockSmart）；留空回车=空白项（老路保留）
-                            addTailRow
-                        }
-                        .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 60, 480)))
-                    }
-
-                    // 「尽早」软限（≤2）：只温和提示、不硬挡——稀缺才是意义，什么都尽早=什么都不尽早
-                    let mitCount = model.blocks.filter { $0.priority == .important }.count
-                    if mitCount > 2 {
-                        Label("「尽早」贵在少（已标 \(mitCount) 件）——越多越稀释，真正想优先的留 1–2 件就好",
-                              systemImage: "sparkles")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-
-                    // AI 调整已移到输入区上方（改/看的时刻·原位替换排今天）——此处不再重复
-
-                    HStack {
-                        Button {
-                            Task {
-                                // 合一（Jason 2026-07-09）：确认写入绿计划（push，有改动才）+ 实时日同步蓝色实际改动（pull）。
-                                // 主动点=用户此刻本机日历最新 → 对账直接信任日历、不弹窗。
-                                if model.hasUnsavedChanges { await model.confirm() }
-                                if model.isLiveTargetDay { await deps.execution.reconcileCalendarActuals() }
-                            }
-                        } label: {
-                            Label(confirmSyncButtonTitle, systemImage: "checkmark.circle")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isWorking || (!model.hasUnsavedChanges && !model.isLiveTargetDay))
-                    }
-
-                    // U3 状态行落地（批次3）：陈述句一律住区域底部弱字行，不混操作区
-                    Group {
-                        if model.hasUnsavedChanges {
-                            Label("未保存修改 · 点上方「确认写入」保存", systemImage: "pencil.circle")
-                        } else if let c = model.committedCount {
-                            Label("已写入日历 \(c) 项 · 系统日历可见", systemImage: "checkmark.seal")
-                        } else {
-                            Label("已保存 · 与日历一致", systemImage: "checkmark.seal")
-                        }
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding()
+                Divider()
+                sayBar
             }
             // 换装批次A：微暖中性阶页底（条文 1B，令牌 bg）
             .background(theme.bg.ignoresSafeArea())
-            .navigationTitle("BetterCalendar")
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    // 「预览（假日历）」入口退役（2026-07-11 Jason 定）：假日历 0.19.1 起已无写入路径，
-                    // 观察页失去意义；CalendarPreviewView 代码保留（单测/开发排查可用），只撤 UI 入口。
-                    // W16：🐞 日志入口常驻（失败可见与「开发者选项」无关）；短暂问题只在这里计数
-                    IssueLogButton(isPresented: $showDevLog)
-                    #if os(macOS)
-                    if developerOptions {
-                        // 开发期：算法试验台（W16 起收在「开发者选项」后）
-                        Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
-                            .help("算法试验台（开发期）：解析/微调/reflow 各变体跑分对比")
-                        // 开发期：皮肤试衣间（美术样品阶段；W16 起收在「开发者选项」后）
-                        Button { openWindow(id: "skin-fitting") } label: { Label("皮肤试衣间", systemImage: "paintpalette") }
-                            .help("皮肤试衣间（开发期）：语义色 4 案 × 数字 2 案 × 明暗并排——样品评审")
-                    }
-                    #else
-                    Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
-                    #endif
-                }
-            }
+            .navigationTitle("今天")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar { toolbarItems }
             .sheet(isPresented: $showDevLog) { DevLogSheet(isPresented: $showDevLog) }
-            #if !os(macOS)
-            // 草稿全屏浏览/编辑（同一份数据，改动即生效；小窗只是入口）
-            .sheet(isPresented: $showDraftExpanded) {
-                NavigationStack {
-                    List {
-                        ForEach(model.blocks) { item in
-                            EditableRow(block: model.binding(for: item.id),
-                                        poolTasks: deps.longTasks.items,
-                                        referenceDay: model.targetDay,
-                                        parallelCandidates: model.blocks
-                                            .filter { $0.id != item.id && !$0.isAnchor }
-                                            .map { ($0.id, $0.title,
-                                                    $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
-                                        parallelPeers: model.parallelPeerTitles(of: item.id),
-                                        onToggleParallel: { model.toggleParallel(item.id, with: $0) },
-                                        onDelete: { model.delete(id: item.id) })
-                            // 右键菜单已由 EditableRow 内部统一挂载（P4-3）
-                        }
-                        .onMove { model.move($0, $1) }
-                    }
-                    .navigationTitle("草稿 · \(model.blocks.count) 块")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button { model.addBlock() } label: { Image(systemName: "plus") }
-                                .accessibilityLabel("加一项")
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showDraftExpanded = false }
-                        }
-                    }
-                }
+            .sheet(isPresented: $showTraceSheet) {
+                // E5d 变更痕迹二层：清单 + 一键撤（deps.timeline 为 nil 时提示条根本不显示，进不来）
+                if let timeline = deps.timeline { ChangeTraceSheet(timeline: timeline) }
             }
+            #if !os(macOS)
+            .sheet(isPresented: $showDraftExpanded) { expandedEditor }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
                     SettingsView(trash: deps.trash, nativeActions: deps.nativeActions,
@@ -597,17 +170,12 @@ struct HomeView: View {
             .onChange(of: deps.router.scheduleRequest) { _, req in
                 guard let req else { return }
                 switch req {
-                case .arrangeToday(let text):
-                    if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        model.inputText = text
-                        Task { await model.arrange() }
-                    }
-                case .planTomorrow:   // 0.38（#33）：收尾章后「顺手排一下明天」
-                    model.targetDay = DayContext.logicalDay(offset: 1)
-                    model.autoLoadOnAppear()
+                case .arrangeToday:
+                    // W19：老排程链退役——这条请求不再从这里进（App 级入口直接交给智能体），只回到今天
+                    Task { await model.selectDay(DayContext.logicalDay(offset: 0)) }
+                case .planTomorrow:   // 0.38（#33）：收尾章后「顺手排一下明天」→ 切到明天的时间线
+                    Task { await model.selectDay(DayContext.logicalDay(offset: 1)) }
                 case .insertLongTask(let id):   // #40 批1：长期页「排进今天」→ 智能插空档
-                    // E5a：待办区条目同走这条路；E5e 入口分流统一：草稿编辑中 → 进草稿；
-                    // 已确认/空态 → 单件入线直写（微投放）
                     if let t = deps.longTasks.items.first(where: { $0.id == id })
                         ?? deps.longTasks.todoItems().first(where: { $0.id == id }) {
                         if model.hasUnsavedChanges || model.draftSource == .arranged {
@@ -619,132 +187,367 @@ struct HomeView: View {
                 }
                 deps.router.scheduleRequest = nil   // 消费掉
             }
-            .onAppear { model.autoLoadOnAppear() }   // 进页自动加载目标日已确认计划（不覆盖未确认草稿）
-            // 双向同步回流后（0.22.2→0.24 C2）：干净视图直接刷新；编辑中亮新鲜度徽标（不打扰、不弹窗）
+            .onAppear { model.autoLoadOnAppear() }   // 进页自动加载所选那天的计划
+            .onDisappear { Task { await model.flushAutosave() } }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { Task { await model.flushAutosave() } }   // 回后台前把等着的改动存掉
+            }
+            // 双向同步回流 / 智能体批准的改动执行后 / 协调器重排后：干净视图直接刷新；编辑中 → 保存时只叠你的改动（commitEdits）
             .onReceive(NotificationCenter.default.publisher(for: ReconcileService.planChangedExternally)) { _ in
                 model.noteExternalPlanChange()
             }
-            // 执行进展（开始/完成/换件）→ 实时日精修台跟着现实走；编辑中亮徽标（0.24 C2）
+            // 执行进展（开始/完成/换件）→ 今天的时间线跟着现实走
             .onReceive(NotificationCenter.default.publisher(for: ExecutionProgressSignal.changed)) { _ in
                 model.noteExecutionProgress()
             }
-            // P4 Q3（2026-10-18）：日历改动不再弹窗询问——你在苹果日历里的操作直接生效（删了=收进待办区，可找回）。
-            .onChange(of: model.inputText) { _, _ in model.persistDraft() }   // 输入框逐字落盘（崩溃可还原）
-            // 0.23 C：切目标日 = 切草稿本（每天一页；"平移跟人走"已退役，挪日走显式「挪到…」菜单）
+            // 另一台设备点了提示上的「知道了」→ 本机也收起（W19）
+            .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
+                deps.reconcile.refreshNoticeAfterSync()
+            }
+            // 切天 = 换一页（每天一页）
             .onChange(of: model.targetDay) { _, _ in
                 model.targetDayDidChange()
             }
         }
     }
 
-    // MARK: 渐进披露 v2 抽出的子视图（0.26）
+    // MARK: ① 现在 / 下一件
 
-    /// 统一输入组件（S2 附录A，批次3 落地）：同一个框、意图随时刻自动切换——
-    /// 「说的时刻」（无计划 / ↺ 重说模式）提交=整排；「改/看的时刻」提交=AI 微调（可含「再加一项…」）。
-    /// 内嵌提交钮（右下）+ ↺ 重说切换（左下，仅改/看时刻出现）+ 拖高把手照旧。文本双仓不丢字：
-    /// 整排走 model.inputText、微调走 model.refineText——切模式互不覆盖。
-    private var arrangeMode: Bool { !showingPlanArea || reSayExpanded }
-
-    private var unifiedText: Binding<String> {
-        arrangeMode ? $model.inputText : $model.refineText
+    @ViewBuilder private var nowNextCard: some View {
+        ExecutionPanel(model: deps.execution,
+                       onOpenJournal: {
+                           deps.router.selectedTab = .journal
+                           deps.router.journalRequest = .now
+                       },
+                       compactCapable: true, fillsWidth: true)
+            .background(theme.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary.opacity(0.6)))
+            .accessibilityIdentifier("bc.today.nowNext")
     }
 
-    @ViewBuilder private var unifiedInput: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: unifiedText)
-                .font(.callout)   // 字阶收敛（C）：正文档=callout（body 档值）
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .padding(.bottom, 24)   // 给底部内嵌控件行让位
-            if unifiedText.wrappedValue.isEmpty {
-                Text(arrangeMode
-                     ? (reSayExpanded ? "重新说一遍这一天——排出的新计划会替换当前草稿" : PlaceholderSettings.currentText())
-                     : "想怎么调？例：把健身挪到上午10点 · 再加一项背单词45分钟")
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 11).padding(.vertical, 14)
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(height: CGFloat(inputHeight))
-        .background(RoundedRectangle(cornerRadius: 12).fill(theme.surface))   // 换装 C：输入区=surface 纸面；D：大容器档=12（条文 5）
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
-        .overlay(alignment: .bottomLeading) {
-            if showingPlanArea {
-                Button { reSayExpanded.toggle() } label: {
-                    Label(reSayExpanded ? "回到微调" : "重说一遍",
-                          systemImage: "arrow.uturn.backward")
-                        .labelStyle(.iconOnly).font(.caption)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(reSayExpanded ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                .padding(8)
-                .help(reSayExpanded ? "回到微调模式（当前草稿原样保留）" : "重新说一遍这一天（排出后替换当前草稿）")
-            }
-        }
-        .overlay(alignment: .bottomTrailing) {
-            HStack(spacing: 6) {
-                if model.isWorking {
-                    ProgressView().controlSize(.small)
-                    Text("模型思考中…").font(.caption2).foregroundStyle(.secondary)
-                }
-                // 批次6（Jason 反馈）：提交钮从裸文字升级为有容器的小按钮——一眼可辨「这能点」
-                Button { submitUnified() } label: {
-                    Label(arrangeMode ? "排\(Self.relativeDayWord(model.targetDay))" : "AI 调整",
-                          systemImage: arrangeMode ? "wand.and.stars" : "sparkles")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered).controlSize(.small)
-                // 体检 #11（条文2）：说的时刻=事实主键（确认写入不在屏）保留 accent；
-                // 改/看时刻与「确认写入」主键同屏 → 收中性，全页 accent 恒 ≤1
-                .tint(arrangeMode ? ThemeSettings.current.accent : Color.primary)
-                .disabled(model.isWorking)
-            }
-            .padding(6)
-        }
-        Capsule().fill(.quaternary)
-            .frame(width: 44, height: 5)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle().inset(by: -8))
-            .gesture(
-                DragGesture()
-                    .onChanged { v in
-                        if dragBaseHeight == nil { dragBaseHeight = inputHeight }
-                        inputHeight = min(max(72, (dragBaseHeight ?? inputHeight) + v.translation.height), 420)
+    // MARK: ② 选哪天
+
+    private static let dayOffsets = Array(0..<7)
+
+    @ViewBuilder private var dayStrip: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Self.dayOffsets, id: \.self) { offset in
+                        let day = DayContext.logicalDay(offset: offset)
+                        let selected = Calendar.current.isDate(day, inSameDayAs: model.targetDay)
+                        Button {
+                            Task { await model.selectDay(day) }
+                        } label: {
+                            Text(Self.chipLabel(day, offset: offset))
+                                .font(.callout)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(Capsule().fill(selected ? AnyShapeStyle(theme.accent.opacity(0.18))
+                                                                    : AnyShapeStyle(.quaternary.opacity(0.5))))
+                                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Self.relativeDayWord(day) + " " + Self.dayLabel(day))
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
-                    .onEnded { _ in dragBaseHeight = nil }
-            )
-            .help("拖动调整输入框高度")
-    }
-
-    private func submitUnified() {
-        if arrangeMode {
-            reSayExpanded = false
-            Task { await model.arrange() }
-        } else {
-            Task { await model.refine() }
+                }
+            }
+            dayMenu
+        }
+        let hint = Self.smallHoursHint(for: model.targetDay)
+        if !hint.isEmpty {
+            Text(Self.dayLabel(model.targetDay) + hint).font(.caption2).foregroundStyle(.secondary)
         }
     }
 
-    /// 列表尾行「+ 加一项」（#37/S3 裁决：不做独立按钮，融进列表交互）。
+    /// 这一天的低频动作（U2 第二层）：松散一下 / 全屏编辑（iPhone）/ 按日历更新做成的事 / 导出 ICS。
+    private var dayMenu: some View {
+        Menu {
+            Button {
+                model.toggleLoose()
+            } label: {
+                let loose = deps.looseDays.isLoose(model.targetDay)
+                Label(loose ? "结束松散" : "这天松散一下", systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
+            }
+            #if !os(macOS)
+            if !model.blocks.isEmpty {
+                Button { showDraftExpanded = true } label: {
+                    Label("全屏编辑这一天", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+            }
+            #endif
+            if isTodaySelected {
+                // 原「同步日历改动」：你在系统日历里删改了今天的蓝色实际 → 按日历更新（低频，收进这里）
+                Button { Task { await deps.execution.reconcileCalendarActuals() } } label: {
+                    Label("按系统日历更新今天做成的事", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            if DisclosureSettings.showsDeepFeatures, !model.blocks.isEmpty {
+                #if os(macOS)
+                Button { exportICS() } label: { Label("导出 ICS", systemImage: "square.and.arrow.up") }
+                #else
+                ShareLink(item: ICSDocument(text: model.currentICS()),
+                          preview: SharePreview("BetterCalendar 计划.ics")) {
+                    Label("导出 ICS", systemImage: "square.and.arrow.up")
+                }
+                #endif
+            }
+        } label: {
+            Label("这一天", systemImage: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .tint(.primary)
+        .help("这一天的更多操作")
+    }
+
+    static func chipLabel(_ day: Date, offset: Int) -> String {
+        switch offset {
+        case 0: return "今天"
+        case 1: return "明天"
+        case 2: return "后天"
+        default: return day.formatted(.dateTime.weekday(.abbreviated)) + " " + day.formatted(.dateTime.day())
+        }
+    }
+
+    // MARK: 提示（P2：每条都从注意力预算里扣——只留做成的、要你动手的、自动做过要你看得见的）
+
+    @ViewBuilder private var notices: some View {
+        // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你；点 ✕ 只收当天
+        if isTodaySelected, let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
+            MessageStrip(icon: "sunrise", tint: theme.looseTint, text: "昨晚的你说：\(tn)") {
+                Button { TomorrowNote.dismiss(); tnDismissTick = true } label: {
+                    Image(systemName: "xmark").font(.caption2)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityLabel("今天先收起")
+            }
+        }
+
+        // 晨间摘要（E5d）：昨日收池露脸 + 一键入线；当天可收
+        let _ = briefDismissTick
+        if isTodaySelected, !MorningBrief.isDismissedToday {
+            MorningBriefStrip(longTasks: deps.longTasks, router: deps.router,
+                              onDismiss: { briefDismissTick += 1 })
+        }
+
+        // 自动调整事后可见、可撤（P4）：一行计数 → 点开清单，逐条或一键撤
+        if isTodaySelected, let timeline = deps.timeline, timeline.todayTraceCount() > 0 {
+            MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.looseTint,
+                         text: "今天的计划自动调整过 \(timeline.todayTraceCount()) 处") {
+                Button("查看 / 撤销") { showTraceSheet = true }
+                    .buttonStyle(.plain).font(.caption).foregroundStyle(theme.accent)
+            }
+        }
+
+        // P4 Q1：BetterCalendar 自家日历里有你的事件——提示一次，点「知道了」后不再出现（随 iCloud 同步）
+        if let notice = deps.reconcile.calendarNotice {
+            MessageStrip(icon: "calendar.badge.exclamationmark", tint: .secondary, text: notice) {
+                Button("知道了") { deps.reconcile.dismissCalendarNotice() }
+                    .buttonStyle(.plain).font(.caption).foregroundStyle(theme.accent)
+                    .accessibilityIdentifier("bc.today.calendarNotice.dismiss")
+            }
+        }
+
+        // 松散日：退场 + 见证的姿态横幅
+        if deps.looseDays.isLoose(model.targetDay) {
+            MessageStrip(icon: "moon.stars.fill", tint: theme.looseTint,
+                         text: "松散日 · 已经退场陪你了——不催、不算账。想排还是能排，也可以就好好休息。")
+        }
+
+        // L3 主动建议（唯一主动·一行）：休息日全静音、可"别再提"永久静音、强度可调
+        let _ = l3Tick
+        let l3 = isTodaySelected ? deps.longTasks.l3Suggestions(
+            loose: deps.looseDays.isLoose(model.targetDay),
+            intensity: SuggestionSettings.intensity.cap,
+            muted: SuggestionSettings.mutedTaskIDs) : []
+        ForEach(l3) { s in
+            MessageStrip(icon: "lightbulb", tint: theme.previewTint, text: s.text) {
+                if s.kind == .shelve {
+                    Button("先放下") {
+                        BehaviorLog.record("L3建议", "点「先放下」")
+                        if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
+                            deps.longTasks.shelve(t)
+                        }
+                    }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                    .tint(.primary)
+                } else {
+                    Button {
+                        BehaviorLog.record("L3建议", "点「排进今天」")
+                        if let t = deps.longTasks.items.first(where: { $0.id == s.id }) {
+                            Task { await model.admitFromPool(t) }
+                        }
+                    } label: {
+                        Label("排进今天", systemImage: "calendar.badge.plus")   // 审计 #13：同动作同文案同图标（U7）
+                    }.font(.caption2).buttonStyle(.bordered).controlSize(.mini)
+                    .tint(.primary)
+                }
+                Button {
+                    BehaviorLog.record("L3建议", "静音（别再提）")
+                    SuggestionSettings.mute(s.id); l3Tick += 1
+                } label: {
+                    Image(systemName: "xmark").font(.caption2)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("别再提这件")
+                .accessibilityLabel("别再提这件")
+            }
+            .onAppear { BehaviorLog.recordOncePerDay(key: "L3-\(s.id)", "L3建议", "出现") }
+        }
+
+        // 结果上的话（中性、前向）：例「2 件在你编辑期间已完成，保持原样」
+        if let note = model.note, note.trimmingCharacters(in: .whitespacesAndNewlines).count >= 4 {
+            MessageStrip(icon: "quote.opening", tint: theme.actualTint, text: note)
+        }
+        // 保存失败必须在结果上说（P4）
+        if let err = model.errorText {
+            MessageStrip(icon: "exclamationmark.triangle.fill", tint: .orange, text: err, textStyle: .primary) {
+                Button("知道了") { model.errorText = nil }.buttonStyle(.plain).font(.caption)
+            }
+        }
+        if let snap = model.pendingRestore {
+            MessageStrip(icon: "clock.arrow.circlepath", tint: theme.actualTint,
+                         text: "上次退出前有一处改动没来得及保存（\(Self.dayLabel(snap.targetDay)) · \(snap.savedAt.formatted(date: .omitted, time: .shortened))）") {
+                Button("恢复") { model.applyPendingRestore() }
+                    .font(.caption).buttonStyle(.plain).foregroundStyle(theme.actualTint)
+                Button("不要了") { model.dismissPendingRestore() }
+                    .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+            }
+        }
+
+        // 收尾卡 v2（0.38）：强信号 ∨ 傍晚线后空档 ≥45 分钟；「先不收尾」一键当天收起
+        if wrapUpCardVisible { wrapUpCard }
+
+        // 开发期失败横幅（W16「安静但可见」）：判定统一在 IssueTriage
+        IssueBanner()
+    }
+
+    private var wrapUpCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "sunset.fill").font(.title3).foregroundStyle(theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("今天的工作差不多了").font(.headline)
+                    Text("花 30 秒收个尾——看看做成了什么，给今天写一句话。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Button("先不收尾") { WrapUpSeal.dismissToday(); wrapUpDismissTick += 1 }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).font(.callout)
+                Spacer()
+                Button {
+                    BehaviorLog.record("收口卡", "点击进收尾流程")
+                    deps.router.selectedTab = .journal
+                    deps.router.journalRequest = .now
+                    deps.router.wrapUpRequest = true
+                } label: {
+                    Label("进入收尾", systemImage: "arrow.right.circle.fill").font(.callout)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(16)
+        .background(LinearGradient(colors: [theme.accent.opacity(0.16), Color.pink.opacity(0.10)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 14))
+        .onAppear {
+            BehaviorLog.recordOncePerDay(key: "收口卡",
+                "收口卡", "出现·信号=\(model.blocks.isEmpty ? "剩余空" : (Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) ? "过收工线" : "傍晚空档"))")
+        }
+    }
+
+    // MARK: ③ 时间线（今天 = 做成了的 + 接下来的；其他天 = 那天的计划）
+
+    /// 今天做成的事（蓝色实际，只读）：做成的事拿音量（U5），缺口不出现。
+    private var doneToday: [ExecutionViewModel.ActualRecord] {
+        guard isTodaySelected else { return [] }
+        return deps.execution.done.sorted { $0.start < $1.start }
+    }
+
+    @ViewBuilder private var timeline: some View {
+        if !doneToday.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("做成了 \(doneToday.count) 件", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(theme.actualTint)
+                ForEach(doneToday) { r in
+                    HStack(spacing: 8) {
+                        Text(Self.hm(r.start) + "–" + Self.hm(r.end))
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        Text(r.title).font(.callout).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 3).padding(.horizontal, 8)
+                    .background(theme.actualTint.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            .accessibilityIdentifier("bc.today.done")
+        }
+
+        HStack {
+            Text(isTodaySelected ? (doneToday.isEmpty ? "今天的安排" : "接下来") : "\(Self.relativeDayWord(model.targetDay))的安排")
+                .font(.subheadline.weight(.semibold))
+            if let terrain = model.terrainLine {
+                Text("· " + terrain).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if model.isWorking { ProgressView().controlSize(.small) }
+        }
+
+        if model.blocks.isEmpty {
+            Label(isTodaySelected && !doneToday.isEmpty
+                  ? "接下来没有安排了——想加什么，跟智能体说一句，或在下面加一项"
+                  : "这天还没有安排——跟智能体说一句，或在下面加一项",
+                  systemImage: "calendar")
+                .font(.callout).foregroundStyle(.secondary)
+                .padding(.vertical, 6)
+            addTailRow
+        } else {
+            List {
+                ForEach(model.blocks) { item in
+                    editableRow(item)
+                }
+                .onMove { model.move($0, $1) }   // 拖动 = 按新位置自动填时间（保时长），保存后成为图钉
+                addTailRow
+            }
+            .scrollContentBackground(.hidden)
+            .frame(height: max(140, min(CGFloat(model.blocks.count) * 84 + 60, 480)))
+            .accessibilityIdentifier("bc.today.timeline")
+        }
+
+        // 「尽早」软限（≤2）：只温和提示、不硬挡
+        let mitCount = model.blocks.filter { $0.priority == .important }.count
+        if mitCount > 2 {
+            Label("「尽早」贵在少（已标 \(mitCount) 件）——越多越稀释，真正想优先的留 1–2 件就好",
+                  systemImage: "sparkles")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func editableRow(_ item: EditableBlock) -> some View {
+        EditableRow(block: model.binding(for: item.id),
+                    poolTasks: deps.longTasks.items,
+                    referenceDay: model.targetDay,
+                    parallelCandidates: model.blocks
+                        .filter { $0.id != item.id && !$0.isAnchor }
+                        .map { ($0.id, $0.title,
+                                $0.parallelGroup != nil && $0.parallelGroup == item.parallelGroup) },
+                    parallelPeers: model.parallelPeerTitles(of: item.id),
+                    onToggleParallel: { model.toggleParallel(item.id, with: $0) },
+                    onDelete: { model.delete(id: item.id) })
+    }
+
+    /// 列表尾行「＋ 加一项」：写个标题回车，放进这天的空档（一小时，时间在列表里直接改）。
     @ViewBuilder private var addTailRow: some View {
         if addRowActive {
             HStack(spacing: 6) {
-                TextField("一句话加一项（回车确认；留空回车=空白项）", text: $smartAddText)
+                TextField("写个标题，回车加进空档", text: $addRowText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit {
-                        let t = smartAddText.trimmingCharacters(in: .whitespaces)
-                        addRowActive = false; smartAddText = ""
-                        // E5e 入口分流（三入口统一）：有未确认草稿 → 进草稿（照旧确认制）；
-                        // 已确认/空态 → 单件入线直写真相（微投放，不惊动其他块）
-                        if t.isEmpty {
-                            model.addBlock()
-                        } else if model.hasUnsavedChanges || model.draftSource == .arranged {
-                            Task { await model.addBlockSmart(t) }
-                        } else {
-                            Task { await model.admitOne(t) }
-                        }
+                        let t = addRowText.trimmingCharacters(in: .whitespaces)
+                        addRowActive = false; addRowText = ""
+                        if !t.isEmpty { Task { await model.admitPlain(t) } }
                     }
-                Button("取消") { addRowActive = false; smartAddText = "" }
+                Button("取消") { addRowActive = false; addRowText = "" }
                     .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
             }
         } else {
@@ -757,69 +560,85 @@ struct HomeView: View {
         }
     }
 
-    // MARK: 「在途」（M10 → #40 批2 降级）：管理已搬进「长期」tab，这里只留**决策现场的入口**——
-    // 一行状态（几件 + 最近 DDL）+ 点击跳长期页。排日程页的主务是排今天，长期任务的管理不该在这里争地盘（U1）。
-
-    @ViewBuilder private var ongoingSection: some View {
-        let store = deps.longTasks
-        Button {
-            deps.router.selectedTab = .longterm
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "tray.full").foregroundStyle(theme.looseTint)
-                if store.items.isEmpty {
-                    Text("未来任务 · 空").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Text("未来任务 \(store.items.count) 件"
-                         + nearestDDLLabel(store.items)).font(.caption)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
+    /// 页底弱字：版本标签（点开看更新日志）。
+    private var footerTag: some View {
+        NavigationLink { ChangelogView() } label: {
+            Text(BuildInfo.tag).font(.caption2).foregroundStyle(.tertiary)
         }
         .buttonStyle(.plain)
-        .help("到「长期」页管理：分阶段、时间设定、捞回放下的")
+        .padding(.top, 8)
     }
 
-    private func nearestDDLLabel(_ items: [LongTask]) -> String {
-        // 体检 #1（U5）：只报未来的 DDL——过期的属「债务」，不进首页默认视图（逾期处理在长期页温和三选）
-        guard let next = items.compactMap(\.deadline)
-            .filter({ $0 >= DayContext.logicalStartOfDay(.now) }).min() else { return "" }
-        return " · 最近：\(next.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated)))"
-    }
+    // MARK: ④ 跟智能体说一句
 
-
-    // 目标日期标签：默认无感（晚上→明天/白天→今天），点开可改。
-    // 用**逻辑日**（凌晨 0–4 点「今天」=心智上的今天=日历昨天），与 PlanStore 归桶/defaultTargetDay 一致。
-    private var targetDayMenu: some View {
-        Menu {
-            Button("今天") { model.targetDay = DayContext.logicalDay(offset: 0) }
-            Button("明天") { model.targetDay = DayContext.logicalDay(offset: 1) }
-            Button("后天") { model.targetDay = DayContext.logicalDay(offset: 2) }
-            // 「昨天（不建议）」已删（S3-P3，2026-07-14）：回填过去的正道=日记页复盘「补一笔」；
-            // 判例登记兜底——真有直排昨天的需求再按判例复活。
-            Divider()
-            // 松散=这一天的属性（批次6 从顶栏挪入）：App 退场陪你——不催、不算落后；随时可结束
-            Button {
-                model.toggleLoose()
-            } label: {
-                let loose = deps.looseDays.isLoose(model.targetDay)
-                Label(loose ? "结束松散" : "松散一下",
-                      systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
+    private var sayBar: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(deps.agentChat == nil ? "智能体还没接上" : "跟智能体说一句（比如：明天上午排三小时写论文）",
+                      text: $sayText, axis: .vertical)
+                .lineLimit(1...4)
+                .textFieldStyle(.roundedBorder)
+                .focused($sayFocused)
+                .onSubmit(sendToAgent)
+                .disabled(deps.agentChat == nil)
+                .accessibilityIdentifier("bc.today.say")
+            Button(action: sendToAgent) {
+                Label("发给智能体", systemImage: "arrow.up.circle.fill").labelStyle(.iconOnly).font(.title2)
             }
-        } label: {
-            // 口语词 + 具体日期（2026-07-09 Jason 要求「为今天安排」标上是哪天）
-            // #28（2026-07-11 审核定稿）：凌晨窗口给一句口径澄清——逻辑日语义不开开关（口径分叉否决），
-            // 但「今天=昨天的日期」要向真实日心智的人解释清楚（困惑的解药是标注，不是语义分叉）。
-            Label("为 \(Self.relativeDayWord(model.targetDay))（\(Self.dayLabel(model.targetDay))\(Self.smallHoursHint(for: model.targetDay))）安排",
-                  systemImage: "calendar")
-                .font(.caption)
+            .buttonStyle(.borderless)
+            .disabled(deps.agentChat == nil || sayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityIdentifier("bc.today.say.send")
         }
-        .menuStyle(.borderlessButton)
-        .tint(.primary)   // 修正批 D：次要控件收中性（条文 2）
-        .fixedSize()
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(theme.bg)
     }
+
+    private func sendToAgent() {
+        let text = sayText
+        guard let chat = deps.agentChat, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sayText = ""
+        sayFocused = false
+        deps.router.selectedTab = .chat   // 回复与提案都在「智能体」页
+        Task { await chat.send(text) }
+    }
+
+    // MARK: 工具栏（U6：只放本页主务需要的；无字图标只留强约定的设置齿轮）
+
+    @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            // W16：🐞 日志入口常驻（开发期失败可见，U13 豁免）；短暂问题只在这里计数
+            IssueLogButton(isPresented: $showDevLog)
+            #if os(macOS)
+            if developerOptions {
+                Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }
+                    .help("算法试验台（开发期）")
+                Button { openWindow(id: "skin-fitting") } label: { Label("皮肤试衣间", systemImage: "paintpalette") }
+                    .help("皮肤试衣间（开发期）")
+            }
+            #else
+            Button { showSettings = true } label: { Label("设置", systemImage: "gearshape") }
+                .accessibilityIdentifier("bc.settings.open")
+            #endif
+        }
+    }
+
+    #if !os(macOS)
+    /// iPhone 全屏编辑这一天（同一份数据，改动即保存；小屏只是入口）。
+    private var expandedEditor: some View {
+        NavigationStack {
+            List {
+                ForEach(model.blocks) { item in editableRow(item) }
+                    .onMove { model.move($0, $1) }
+            }
+            .navigationTitle("\(Self.relativeDayWord(model.targetDay)) · \(model.blocks.count) 件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showDraftExpanded = false }
+                }
+            }
+        }
+    }
+    #endif
 
     /// 凌晨口径澄清（#28）：0–4 点且目标日=逻辑今天时，标注「已过午夜·仍算今天」；其余时段为空。
     static func smallHoursHint(for target: Date, now: Date = .now) -> String {
@@ -833,8 +652,11 @@ struct HomeView: View {
         d.formatted(.dateTime.month(.defaultDigits).day().weekday(.abbreviated))
     }
 
-    /// 目标日的口语词（按钮文案随所选日变）：今天/明天/后天/昨天，再远显日期。
-    /// 以**逻辑今天**为基准（凌晨 0–4 点"今天"=日历昨天）——否则凌晨会把逻辑今天叫成"昨天"（2026-07-08 Jason 报）。
+    private static func hm(_ d: Date) -> String {
+        d.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
+
+    /// 目标日的口语词：今天/明天/后天/昨天，再远显日期。以**逻辑今天**为基准（凌晨 0–4 点"今天"=日历昨天）。
     static func relativeDayWord(_ d: Date, from now: Date = .now) -> String {
         let cal = Calendar.current
         let days = cal.dateComponents([.day], from: DayContext.logicalStartOfDay(now),
@@ -1117,73 +939,5 @@ struct EditableRow: View {
         case .pomodoro: return "番茄"
         case .none: return "不计时"
         }
-    }
-}
-
-// MARK: - 徽标 v2「预览两边再选」（2026-07-10）：两版只读对比，用户看清差异再拍板。
-// 原则7：不自动合并、不替用户选——左=你的编辑（确认时生效），右=最新的底（reflow/日历改动后的现实）。
-
-struct FreshCompareSheet: View {
-    var mine: [EditableBlock]
-    var fresh: [EditableBlock]
-    var sourceLabel: String
-    var onAdoptFresh: () -> Void
-    var onKeepMine: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.appTheme) private var theme   // 令牌表 v1（换装批次 B）
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("两个版本，选一个继续").font(.headline)
-            Text("最新的底来自：\(sourceLabel)。只读对比——选哪版都不丢另一版的事实（真相源只在你确认时改）。")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack(alignment: .top, spacing: 12) {
-                // 换装 B：按 App 通用色语言重映射——本页未确认的编辑=预览橙、日历里的计划事实=计划绿
-                column(title: "我的编辑（本页）", blocks: mine, accent: theme.previewTint)
-                column(title: "最新的底", blocks: fresh, accent: theme.plannedTint)
-            }
-            HStack {
-                Spacer()
-                Button("保留我的编辑") { onKeepMine() }
-                Button("用最新的底") { onAdoptFresh() }
-                    .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(16)
-        .frame(minWidth: 560, minHeight: 380)
-    }
-
-    @ViewBuilder private func column(title: String, blocks: [EditableBlock], accent: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: "list.bullet.rectangle")
-                .font(.headline).foregroundStyle(accent)   // 字阶收敛（C）：列标题→headline 档
-            if blocks.isEmpty {
-                Text("（空）").font(.caption).foregroundStyle(.secondary)
-            }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(blocks) { b in
-                        HStack(spacing: 6) {
-                            Text(Self.hm(b.start) + "–" + Self.hm(b.end))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            Text(b.title).font(.caption).lineLimit(1)
-                            if b.isFixed { Text("固定").font(.caption2).foregroundStyle(.secondary) }   // U7：同行内「固定」tag 同款（灰）
-                            if b.isAnchor { Text("锚").font(.caption2).foregroundStyle(.brown) }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.vertical, 2).padding(.horizontal, 6)
-                        .background(accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private static func hm(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm"
-        return f.string(from: d)
     }
 }

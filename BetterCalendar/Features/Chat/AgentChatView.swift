@@ -2,9 +2,10 @@
 //  AgentChatView.swift
 //  BetterCalendar
 //
-//  SPEC §19 A1：跟 BetterCalendar 智能体说话的对话页（iPhone = 「智能体」标签页；Mac = 独立窗口）。
-//  智能体在对话里提出的改动以卡片呈现，卡片状态与按钮都直接走 ProposalCenter（B3：与通知、多端审批面板同一份）。
-//  F1 晚间复盘的开关与时刻在右上角「对话设置」里（默认关）。
+//  SPEC §19 A1：跟 BetterCalendar 智能体说话的对话页（两端主窗口的「智能体」页；Mac 另有同一视图的独立窗口）。
+//  智能体在对话里提出的改动以卡片呈现，卡片状态与按钮都直接走 ProposalCenter（B3：与通知、设置里的审批记录同一份）。
+//  W19：等你拍板的提案卡置顶在本页（ProposalCard，与对话气泡里同一张卡）；审批记录与预授权规则、
+//  F1 晚间复盘的开关与时刻都在 设置 → 智能体 里。
 //
 
 import SwiftUI
@@ -23,8 +24,9 @@ struct AgentChatView: View {
     @Bindable var chat: AgentChatCenter
     @Bindable var proposals: ProposalCenter
     var bridge: AgentBridge? = nil
+    /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
+    var focusId: UUID? = nil
     @State private var draft = ""
-    @State private var showSettings = false
     @State private var visible = false
     @FocusState private var inputFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
@@ -32,6 +34,7 @@ struct AgentChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             banners
+            pinnedPending
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
@@ -48,19 +51,7 @@ struct AgentChatView: View {
             Divider()
             inputBar
         }
-        .navigationTitle("BetterCalendar 智能体")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { showSettings = true } label: { Label("对话设置", systemImage: "gearshape") }
-                    .accessibilityIdentifier("bc.chat.settings")
-            }
-        }
-        .sheet(isPresented: $showSettings) {
-            NavigationStack { AgentChatSettingsView() }
-            #if os(macOS)
-                .frame(minWidth: 380, minHeight: 300)
-            #endif
-        }
+        .navigationTitle("智能体")
         .task {
             visible = true
             await chat.setViewing(scenePhase == .active)
@@ -110,6 +101,31 @@ struct AgentChatView: View {
             Button("知道了", action: dismiss).font(.callout)
         }
         .padding(10).background(Color.orange.opacity(0.12))
+    }
+
+    // MARK: 置顶：等你拍板的提案（W19，S-v2「待确认卡置顶在这里」）
+
+    @ViewBuilder private var pinnedPending: some View {
+        let pending = proposals.pending
+        if !pending.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("等你拍板（\(pending.count)）", systemImage: "checkmark.seal")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 16).padding(.top, 8)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(pending) { p in ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId) }
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+                }
+                // 小窗口也不把对话挤出屏幕：置顶区最多占一截，多了在里面滚
+                .frame(maxHeight: 340)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .background(Color.secondary.opacity(0.05))
+            .accessibilityIdentifier("bc.chat.pinnedPending")
+            Divider()
+        }
     }
 
     private var emptyHint: some View {
@@ -171,28 +187,14 @@ struct AgentChatView: View {
     }
 
     @ViewBuilder private func proposalCard(_ card: AgentChatCard) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let p = card.proposal {
-                let state = p.effectiveState(at: .now)
-                if let e = p.escalation, state == .pending { ProposalEscalationBanner(reason: e) }
-                Text(p.title).font(.subheadline.bold())
-                if state == .pending {
-                    if p.hasAlternatives { Text("理由：\(p.reason)").font(.caption) }
-                    else { Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix) }.joined(separator: "\n")).font(.caption) }
-                    ProposalCardControls(center: proposals, proposal: p)   // W10：与面板、通知同一套回应
-                } else {
-                    Text(p.notificationBody).font(.caption)
-                    Text([state.label, p.resultNote].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
-                    ProposalOutcomeNotes(proposal: p)
-                }
-            } else {
-                Label("提案同步中…（如果一直不出现，到「多端审批」里刷新）", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+        if let p = card.proposal {
+            ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId)   // W19：与顶部置顶卡同一张
+        } else {
+            Label("提案同步中…（会自动刷新）", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.3)))
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.3)))
     }
 
     // MARK: 输入
@@ -226,8 +228,6 @@ struct AgentChatView: View {
 struct AgentChatSettingsView: View {
     @AppStorage(EveningReviewSettings.enabledKey) private var reviewOn = EveningReviewSettings.defaultEnabled   // W8：从没设过 = 开
     @AppStorage(EveningReviewSettings.minuteKey) private var reviewMinute = EveningReviewSettings.defaultMinute
-    @Environment(\.dismiss) private var dismiss
-
     var body: some View {
         Form {
             Section {
@@ -239,13 +239,12 @@ struct AgentChatSettingsView: View {
                 Text("到点后智能体在这里写「今天做成了什么」，只说做成的事；你可以回一句补充。需要 Mac 开着并连接智能体 bridge 文件夹；每次复盘会消耗一次 Claude 订阅额度。错过时间 3 小时内会补上，之后当天不再发。")
             }
             Section {
-                Text("回复你刚说的话、你设了时间的复盘：会弹通知（静音时不弹）。智能体自己开口的消息：按「多端审批 → 智能体主动找你」里的打扰规则决定。")
+                Text("回复你刚说的话、你设了时间的复盘：会弹通知（静音时不弹）。智能体自己开口的消息：按 设置 →「审批记录与规则」→「智能体主动找你」里的打扰规则决定。")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("通知") }
         }
         .formStyle(.grouped)
-        .navigationTitle("对话设置")
-        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+        .navigationTitle("晚间复盘")
     }
 
     private var timeOfDay: Date {

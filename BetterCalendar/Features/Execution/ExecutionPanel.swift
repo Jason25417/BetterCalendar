@@ -25,6 +25,8 @@ struct ExecutionPanel: View {
     /// 展开层裁剪（S3-P1，2026-07-14 Jason 修订版）：menu bar 宿主传 true → 默认精简子集
     /// （当前件+主键+同时做+边缘行），底部 chevron 就地展开为全量、再点收回；展开态记住上次选择。
     var compactCapable: Bool = false
+    /// W19：嵌进「今天」页顶部时铺满宽度（menu bar 弹窗仍是固定 280 宽）。
+    var fillsWidth: Bool = false
     @AppStorage("execPanelExpanded") private var panelExpanded = false
     private var isCompact: Bool { compactCapable && !panelExpanded }
     @State private var earlyBreakConfirming = false   // 「提前休息」的小摩擦确认（0.20.5）
@@ -79,8 +81,9 @@ struct ExecutionPanel: View {
         }
         .padding(12)
         #if os(macOS)
-        .frame(width: 280)
+        .frame(width: fillsWidth ? nil : 280)
         #endif
+        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
         .task { await model.loadToday() }
         #if os(macOS)
         // 弹窗重新打开 → 清掉遗留的「新事项」输入态（防 hold 卡死导致点外面关不掉，0.26.19）
@@ -251,7 +254,7 @@ struct ExecutionPanel: View {
                 Text("下一件：\(next.title)").font(.caption).foregroundStyle(.secondary)
             } else if model.loaded {
                 // 体检 #14：四页唯一无前向指引的空态 → 补「现状+下一步」句式；#15：文案 emoji 按 0.60 先例清理
-                Text(model.planned.isEmpty ? "今天还没排计划——去排日程页说说今天" : "今天的计划都做完了")
+                Text(model.planned.isEmpty ? "今天还没排计划——跟智能体说一句就能排" : "今天的计划都做完了")
                     .font(.caption).foregroundStyle(.secondary)
                 // 收口轻入口（0.28 → 批次7 跨端化）：做完即回看=最顺的时机；信号与收口卡同源（全完成）
                 if !model.planned.isEmpty, let onOpenJournal {

@@ -205,7 +205,7 @@ struct JevSentinelJudge: SentinelJudge {
     }
 
     func unavailableReason() -> String? {
-        guard let key = apiKey(), !key.isEmpty else { return "没有 OpenRouter API key（多端审批面板 → 哨兵里填写）" }
+        guard let key = apiKey(), !key.isEmpty else { return "没有 OpenRouter API key（设置 → 审批记录与规则 → 哨兵里填写）" }
         return nil
     }
 
@@ -263,7 +263,7 @@ struct OpenAIDecisionsSentinelJudge: SentinelJudge {
     }
 
     func unavailableReason() -> String? {
-        guard let key = apiKey(), !key.isEmpty else { return "没有 OpenAI API key（多端审批面板 → 哨兵里填写）" }
+        guard let key = apiKey(), !key.isEmpty else { return "没有 OpenAI API key（设置 → 审批记录与规则 → 哨兵里填写）" }
         return nil
     }
 

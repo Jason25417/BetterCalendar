@@ -61,7 +61,7 @@ enum BetterCalendarHandoff {
     private static func title(for tab: AppRouter.Tab, activeTitle: String?) -> String {
         switch tab {
         case .schedule:
-            return "BetterCalendar - 排日程"
+            return "BetterCalendar - 今天"
         case .today:
             if let activeTitle, !activeTitle.isEmpty {
                 return "BetterCalendar - 正在做：\(activeTitle)"

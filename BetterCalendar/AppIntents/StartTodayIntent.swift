@@ -11,7 +11,7 @@ import AppIntents
 
 struct ArrangeTodayIntent: AppIntent {
     static var title: LocalizedStringResource = "排今天"
-    static var description = IntentDescription("用一句自然语言安排今天；BetterCalendar 会打开排日程页并开始生成草稿。")
+    static var description = IntentDescription("把你想怎么过今天说给 BetterCalendar 智能体：打开 App 交给它，它提出的安排等你批准。")
     static var openAppWhenRun = true
 
     @Parameter(title: "今天安排", requestValueDialog: "今天想安排什么？")
@@ -31,7 +31,7 @@ struct ArrangeTodayIntent: AppIntent {
 
 struct OpenScheduleIntent: AppIntent {
     static var title: LocalizedStringResource = "打开排日程"
-    static var description = IntentDescription("打开 BetterCalendar 的排日程页面。")
+    static var description = IntentDescription("打开 BetterCalendar 的今天页面。")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -42,7 +42,7 @@ struct OpenScheduleIntent: AppIntent {
 
 struct OpenTodayIntent: AppIntent {
     static var title: LocalizedStringResource = "打开今天"
-    static var description = IntentDescription("打开 BetterCalendar 的今天执行页面。")
+    static var description = IntentDescription("打开 BetterCalendar 的今天页面。")
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {

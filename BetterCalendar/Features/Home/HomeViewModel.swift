@@ -151,6 +151,7 @@ final class HomeViewModel {
         }
         hasUnsavedChanges = true
         pendingRestore = nil
+        scheduleAutosave()   // W19：恢复回来的改动照样自动保存
     }
 
     /// 用户点「丢弃」：清掉恢复入口并以当前（已保存）状态覆盖快照。
@@ -195,18 +196,93 @@ final class HomeViewModel {
         guard let base = computeFreshBase() else {
             // 这天没有已确认计划：之前显示的是别天加载来的就清掉；别动用户排的新草稿
             if draftSource == .loaded { blocks = []; draftSource = .empty }
+            loadedBase = []
             return
         }
         guard !base.isEmpty else {
             // 实时日剩余为空（都做完/都流逝）
             if draftSource == .loaded { blocks = []; draftSource = .empty }
             hasUnsavedChanges = false
+            loadedBase = []
             return
         }
         blocks = base
+        loadedBase = base
         draftSource = .loaded
         hasUnsavedChanges = false
         committedCount = nil
+    }
+
+    // MARK: - W19 今天页：直接操作即保存（2026-10-19，S-v2 老排程链退役——「确认写入」按钮不再出现在日用界面）
+
+    /// 你看到的那一版（加载/保存后的列表）。两个用途：
+    /// ① 图钉只钉「你亲手改了时间」的块——对比的是你眼前那一版，不是库里的版本
+    ///   （实时日列表是「从现在起」重新铺排过的，库里的时间本来就和眼前不同，那不是你改的）；
+    /// ② 保存前底层被别处改过（智能体批准的改动 / 日历回流 / 另一台设备）→ 只把你的改动叠到最新版上，不整天覆盖。
+    private(set) var loadedBase: [EditableBlock] = []
+
+    /// 打开 = 编辑后自动保存（今天页设 true）；关着 = 旧「文件模型」（编辑只标未保存，confirm 才落库；单测沿用）。
+    var autoCommit = false
+    /// 自动保存的等待时长（打字时不逐字写库）。
+    var autosaveDelay: Duration = .milliseconds(1200)
+    private var autosaveTask: Task<Void, Never>?
+
+    private func scheduleAutosave() {
+        guard autoCommit else { return }
+        autosaveTask?.cancel()
+        let delay = autosaveDelay
+        autosaveTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.commitEdits()
+        }
+    }
+
+    /// 等着的自动保存立刻做完（切日 / 回后台 / 离开页面前调）。没有待保存的改动 = 什么都不做。
+    func flushAutosave() async {
+        autosaveTask?.cancel()
+        autosaveTask = nil
+        await commitEdits()
+    }
+
+    /// 切到另一天：先把这一天没来得及保存的改动保存掉，再切（防止改动被丢、或被写到别的日子）。
+    func selectDay(_ day: Date) async {
+        await flushAutosave()
+        targetDay = day
+    }
+
+    /// 保存你的改动。底层在你编辑期间变过 → 先把你的改动叠到最新版上（你的改动赢，别处的改动也保留）。
+    func commitEdits() async {
+        guard hasUnsavedChanges else { return }
+        if isWorking { scheduleAutosave(); return }
+        if freshness, let fresh = freshBase {
+            blocks = Self.overlay(mine: blocks, shown: loadedBase, onto: fresh)
+            DevLog.shared.info("今天页", "保存时底层已更新（\(freshnessSource.label)）：只把你的改动叠到最新版上")
+            freshness = false
+            freshBase = nil
+        }
+        await confirm(celebrate: false)
+    }
+
+    /// 你的改动 = 眼前列表相对「你看到的那一版」的差：新加的、改过的、删掉的。纯函数、可单测。
+    static func overlay(mine: [EditableBlock], shown: [EditableBlock], onto fresh: [EditableBlock]) -> [EditableBlock] {
+        let shownByID = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let mineIDs = Set(mine.map(\.id))
+        let deleted = Set(shown.map(\.id)).subtracting(mineIDs)
+        let edited = mine.filter { shownByID[$0.id] != $0 }
+        let editedIDs = Set(edited.map(\.id))
+        var out = fresh.filter { !deleted.contains($0.id) && !editedIDs.contains($0.id) }
+        out.append(contentsOf: edited)
+        return out.sorted { $0.start < $1.start }
+    }
+
+    /// 时间线「＋ 加一项」：只用你写的标题，在空档放一小时（不经 AI、不猜时间——时间你在列表里直接改）。
+    func admitPlain(_ title: String) async {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        await flushAutosave()
+        let start = freeSlotStart(duration: 3600)
+        await admitDirect(ScheduledBlock(title: t, start: start, end: start.addingTimeInterval(3600)))
     }
 
     /// 「算最新底但不套用」（徽标 v2 重构，2026-07-10）：目标日**此刻**的最新底——
@@ -529,7 +605,7 @@ final class HomeViewModel {
         return max(added, removed)
     }
 
-    func confirm() async {
+    func confirm(celebrate: Bool = true) async {
         // 提醒重设计（2026-07-09）：只给**有具体 DDL** 的块写提醒事项——「尽早」不再发时钟提醒
         // （交给晨间/menu bar/nudge，因为它的开始时间是 reflow 的动态猜测、钉钟点=假精确+施压）。
         // 提醒响在 **p−m−N**（截止 − 时长 − 提前量）=「最迟该开始」的前向提醒（"现在做还来得及"）。
@@ -568,10 +644,12 @@ final class HomeViewModel {
             for label in byLabel.keys {
                 for b in (try? planStore.plannedBlocks(on: label)) ?? [] { storedSpans[b.id] = (b.start, b.end) }
             }
+            // W19：参照优先取「你眼前那一版」——实时日列表是从现在起重铺过的，和库里时间不同≠你改过
+            let shownSpans = Dictionary(loadedBase.map { ($0.id, ($0.start, $0.end)) }, uniquingKeysWith: { a, _ in a })
             for (label, dayBlocks) in byLabel {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
                 for b in dayBlocks.map(\.scheduled) {
-                    guard let old = storedSpans[b.id], old.0 != b.start || old.1 != b.end else { continue }
+                    guard let old = shownSpans[b.id] ?? storedSpans[b.id], old.0 != b.start || old.1 != b.end else { continue }
                     try planStore.setPinned(ids: [b.id], until: ScheduledBlock.pinExpiry(forStart: b.start))
                 }
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。
@@ -588,7 +666,7 @@ final class HomeViewModel {
                     body: "今天 \(n.ddl.formatted(.dateTime.hour().minute())) 前要完成、约需 \(n.minutes) 分，现在开始还来得及")
             }
             committedCount = sorted.count
-            BehaviorLog.record("确认写入", "\(sorted.count) 件")
+            BehaviorLog.record(celebrate ? "确认写入" : "今天页保存", "\(sorted.count) 件")
             // E4：当日「最初计划」快照——该逻辑日第一次确认写入时存一份，之后不覆盖（残差基准/复盘基线）
             LearningStore().snapshotIfFirst(dayLabel: targetDay, blocks: sorted.map(\.scheduled))
             // E5b：确认写入=计划编辑事件 → 时间线协调器重算（一行 post，不引依赖）
@@ -610,12 +688,13 @@ final class HomeViewModel {
             pendingLongTasks = []
             hasUnsavedChanges = false   // 保存完成（文件模型的「保存」时刻）
             // 第二仪式（0.38，#33 拍板③）：今天已盖收尾章 且 这次确认的是明天 → 「明天也就位了」
-            if Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 1, from: now()),
+            if celebrate, Calendar.current.startOfDay(for: targetDay) == DayContext.logicalDay(offset: 1, from: now()),
                WrapUpSeal.isSealedToday {
                 tomorrowReadyCelebration = true
             }
             freshness = false           // 本页已成为最新（最后动作赢）
             freshBase = nil
+            loadedBase = blocks         // W19：保存后的这一版 = 你眼前的那一版（下一次改动的图钉参照）
             persistDraft()
             // 松散日：静音早晚提醒（传 nil → 清掉旧的、不排新的）——退场姿态之一，不催不算账
             if looseDays?.isLoose(targetDay) ?? false {
@@ -736,6 +815,8 @@ final class HomeViewModel {
                                cadenceMinutesPerWeek: $0.cadenceMinutesPerWeek)
             }
             hasUnsavedChanges = true
+            loadedBase = []
+            scheduleAutosave()   // W19：那一天上次没来得及保存的改动，切过去就保存
         } else {
             let pageText = draftStore?.load(day: targetDay)?.inputText ?? ""
             inputText = pageText.isEmpty && !pendingSay.isEmpty ? pendingSay : pageText
@@ -769,6 +850,7 @@ final class HomeViewModel {
     private func markEditedIfLoaded() {
         hasUnsavedChanges = true
         arrangedCount = nil; refinedChangeCount = nil   // A/C 状态行仅贴合"刚完成"的瞬间——一编辑即过期
+        scheduleAutosave()   // W19：今天页 = 直接操作即保存
     }
 
     /// 第二仪式（0.38，#33）：收尾章后顺手排完明天 → 一次性庆祝（视图消费后清）。
@@ -846,7 +928,8 @@ final class HomeViewModel {
         committedCount = nil; markEditedIfLoaded()
         if draftSource == .empty { draftSource = .arranged }
         note = fit != nil
-            ? "已把「\(blockTitle)」排进空档（\(start.formatted(.dateTime.hour().minute()))）——微调后确认写入。"
+            ? (autoCommit ? "已把「\(blockTitle)」排进空档（\(start.formatted(.dateTime.hour().minute()))），时间可以直接改。"
+                          : "已把「\(blockTitle)」排进空档（\(start.formatted(.dateTime.hour().minute()))）——微调后确认写入。")
             : "今天收工前空档不够了，先接在末尾——你可以改期或挪到明天。"
         persistDraft()
     }

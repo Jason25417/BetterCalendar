@@ -35,9 +35,17 @@ struct BetterCalendarApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsView(trash: container.trash, nativeActions: container.nativeActions, calendarStore: container.calendarStore)
-                .environment(\.appTheme, ThemeSettings.current)
-                .tint(ThemeSettings.current.accent)   // 体检 #9：独立 scene 不吃主窗 tint，跨端选中态一致
+            // W19：审批记录与规则 / 晚间复盘 / 哨兵 都在设置里（子页要 NavigationStack 才推得进去）
+            NavigationStack {
+                SettingsView(trash: container.trash, nativeActions: container.nativeActions,
+                             proposals: container.proposals, agentMessages: container.agentMessages,
+                             alertPush: container.alertPush, bridge: container.agentBridge,
+                             calendarStore: container.calendarStore)
+            }
+            .environment(container.sentinel)   // SPEC §19 C1 W14 哨兵区块（在「审批记录与规则」里）
+            .environment(\.appTheme, ThemeSettings.current)
+            .tint(ThemeSettings.current.accent)   // 体检 #9：独立 scene 不吃主窗 tint，跨端选中态一致
+            .frame(minWidth: 520, idealWidth: 620, minHeight: 520, idealHeight: 720)
         }
 
         // 算法试验台（开发期）：入口=Home 工具栏烧瓶按钮 / 系统「窗口」菜单。上架前撤入口。
@@ -53,10 +61,12 @@ struct BetterCalendarApp: App {
         }
         .commandsRemoved()   // W16：同上
 
-        // SPEC §19 A1：跟 BetterCalendar 智能体说话（Mac = 独立窗口，可与主窗口并排）。入口=主窗口工具栏「对话」/ 通知 / 窗口菜单。
+        // SPEC §19 A1：跟 BetterCalendar 智能体说话。W19 起主窗口有「智能体」页；这个独立窗口只是并排用的便利（同一视图），
+        // 入口 = 系统「窗口」菜单。
         Window("BetterCalendar 智能体", id: AgentChatWindow.id) {
             NavigationStack {
-                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge)
+                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge,
+                              focusId: container.router.proposalFocusId)
             }
             .environment(\.appTheme, ThemeSettings.current)
             .tint(ThemeSettings.current.accent)
@@ -83,27 +93,23 @@ struct BetterCalendarApp: App {
             // #36 成就 toast：根级顶部浮层（8s 自动收/上划走/点进成就页；执行中由门控攒着）
             .overlay(alignment: .top) { AchievementToastView() }
             .toolbar {
-                #if os(macOS)
-                AgentChatWindow.OpenButton(router: container.router)
-                #endif
                 // 已冻结的 Dots 时代「BC 审批」入口（W16）：收在「开发者选项」后；通知点进来的路径（openNativeApprovals）不变
                 if developerOptions {
                     Button { container.router.nativeApprovalPreviewRequest = nil; container.router.openNativeApprovals = true } label: { Label("待确认（已冻结）", systemImage: "checkmark.bubble").accessibilityIdentifier("bc.approvals.open") }
                 }
-                Button { container.router.openProposals = true } label: { Label("多端审批", systemImage: "checkmark.seal").accessibilityIdentifier("bc.proposals.open") }
-            }
-            .sheet(isPresented: Binding(get: { container.router.openProposals }, set: { container.router.openProposals = $0 })) {
-                NavigationStack {
-                    ProposalPanel(center: container.proposals, focusId: container.router.proposalFocusId, bridge: container.agentBridge, alertPush: container.alertPush, messages: container.agentMessages)
-                        #if os(macOS)
-                        .environment(container.sentinel)   // SPEC §19 C1 W14 哨兵区块
-                        #endif
-                        .navigationTitle("多端审批")
-                        .toolbar { Button("关闭") { container.router.openProposals = false; container.router.proposalFocusId = nil } }
-                }
                 #if os(macOS)
-                .frame(minWidth: 480, idealWidth: 620, maxWidth: 760, minHeight: 420, idealHeight: 650)
+                // W19（U6）：工具栏只留强约定的设置齿轮；原「对话」「多端审批」两个图标退役（智能体是主窗口里的一页，
+                // 待确认卡置顶在那里，审批记录与规则在设置里）
+                SettingsLink { Label("设置", systemImage: "gearshape") }
+                    .help("设置（⌘,）")
+                    .accessibilityIdentifier("bc.settings.open")
                 #endif
+            }
+            // W19：通知「查看详情」/ 智能体消息 → 「智能体」页（待确认卡置顶在那里，按 proposalFocusId 高亮）
+            .onChange(of: container.router.openProposals) { _, want in
+                guard want else { return }
+                container.router.openProposals = false
+                container.router.selectedTab = .chat
             }
             .sheet(isPresented: Binding(get: { container.router.openNativeApprovals }, set: { container.router.openNativeApprovals = $0 })) {
                 NavigationStack {
@@ -131,30 +137,19 @@ struct BetterCalendarApp: App {
     private func mainTabs() -> some View {
             TabView(selection: Binding(get: { container.router.selectedTab },
                                        set: { container.router.selectedTab = $0 })) {
+                // W19（S-v2）：两端同一套四页——今天 / 智能体 / 长期 / 日记。
+                // 「今天」= 原「排日程」与 iPhone「今天」合并（现在 / 下一件 + 当天时间线 + 跟智能体说一句）。
                 HomeView(deps: container.homeDeps)
                     .tag(AppRouter.Tab.schedule)
-                    .tabItem { Label("排日程", systemImage: "calendar") }
-                #if !os(macOS)
-                // iOS 没 menu bar → 执行陪伴单独一个「今天」标签页
+                    .tabItem { Label("今天", systemImage: "sun.max") }
                 NavigationStack {
-                    ScrollView {
-                        ExecutionPanel(model: container.execution,
-                                       onOpenJournal: {   // 批次7 F6：帧2 承诺的收尾入口跨端补齐
-                                           container.router.selectedTab = .journal
-                                           container.router.journalRequest = .now
-                                       })
-                    }
-                    .navigationTitle("今天")
-                }
-                .tag(AppRouter.Tab.today)
-                .tabItem { Label("今天", systemImage: "play.circle") }
-                // SPEC §19 A1：跟智能体说话——iPhone 上一步可达（iOS 首页没有根工具栏，所以放标签栏）
-                NavigationStack {
-                    AgentChatView(chat: container.agentChat, proposals: container.proposals)
+                    AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge,
+                                  focusId: container.router.proposalFocusId)
                 }
                 .tag(AppRouter.Tab.chat)
                 .tabItem { Label("智能体", systemImage: "bubble.left.and.bubble.right") }
-                .badge(container.agentChat.unreadCount)
+                #if os(iOS)
+                .badge(container.agentChat.unreadCount)   // 只数智能体的新回复；待确认提案不进红点（U4：不处理就过期，零残留）
                 #endif
                 // #40 长期 tab（2026-07-15 S1 修订四 tab 终局）：第二时间尺度——跨日周期的排程态
                 LongTermView(store: container.longTasks, router: container.router,
@@ -252,8 +247,14 @@ struct BetterCalendarApp: App {
         guard let request = AppIntentRequest.consume() else { return }
         switch request {
         case .arrangeToday:
-            container.router.selectedTab = .schedule
-            container.router.scheduleRequest = .arrangeToday(payload)
+            // W19：老排程链退役——「排今天」快捷指令的那句话交给智能体（它提出的安排等你批准）；没说话 = 打开今天
+            if let text = payload, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let chat = container.agentChat
+                Task { await chat.send(text) }
+                container.router.selectedTab = .chat
+            } else {
+                container.router.selectedTab = .schedule
+            }
         case .openSchedule:
             container.router.selectedTab = .schedule
         case .openToday:
@@ -308,11 +309,7 @@ struct BetterCalendarApp: App {
 
     @MainActor
     private func selectTodayTab() {
-        #if os(macOS)
-        container.router.selectedTab = .schedule
-        #else
-        container.router.selectedTab = .today
-        #endif
+        container.router.selectedTab = .schedule   // W19：「今天」页两端都是首页（原 iPhone「今天」标签已并入）
     }
 
     @MainActor

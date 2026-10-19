@@ -15,6 +15,8 @@ struct ProposalPanel: View {
     var bridge: AgentBridge? = nil
     var alertPush: ProposalAlertPushControl? = nil
     var messages: AgentMessageCenter? = nil
+    /// W19：设置里的「审批记录与规则」不重复列待确认卡（它们置顶在「智能体」页）。
+    var showsPending = true
     #if os(macOS)
     @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // W14 哨兵（组装点经 environment 注入；没有就不显示）
     #endif
@@ -33,11 +35,17 @@ struct ProposalPanel: View {
                     Button("知道了") { center.clearError() }
                 }
             }
-            Section("待你确认（\(center.pending.count)）") {
-                if center.pending.isEmpty { Text("现在没有需要你确认的改动").foregroundStyle(.secondary) }
-                ForEach(center.pending) { p in
-                    pendingCard(p).listRowBackground(p.id == focusId ? Color.accentColor.opacity(0.08) : nil)
-                        .id("\(p.id.uuidString)-\(center.replying.contains(p.id))")   // 展开「回一句」时换 id，逼 List 重新量行高
+            if showsPending {
+                Section("待你确认（\(center.pending.count)）") {
+                    if center.pending.isEmpty { Text("现在没有需要你确认的改动").foregroundStyle(.secondary) }
+                    ForEach(center.pending) { p in
+                        ProposalCard(center: center, proposal: p, highlighted: p.id == focusId)   // W19：与「智能体」页、对话气泡同一张卡
+                    }
+                }
+            } else {
+                Section {
+                    Text(center.pending.isEmpty ? "现在没有等你确认的改动。" : "有 \(center.pending.count) 件等你确认——在「智能体」页顶部。")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
             Section("最近结果") {
@@ -161,24 +169,6 @@ struct ProposalPanel: View {
             }
         }
         .task { await m.refresh() }
-    }
-
-    private func pendingCard(_ p: Proposal) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let e = p.escalation { ProposalEscalationBanner(reason: e) }
-            Text(p.title).font(.headline)
-            if p.hasAlternatives {
-                Text("智能体给了 \(p.options.count) 个方案，挑一个：").font(.callout)
-                Text("理由：\(p.reason)\n发起：\(p.originLabel)").font(.caption)
-            } else {
-                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix) }
-                    .joined(separator: "\n")).font(.callout)
-            }
-            Text("\(p.action.kindLabel) · 截止 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.caption).foregroundStyle(.secondary)
-            ProposalCardControls(center: center, proposal: p)   // W10：同意 / 拒绝 / 回一句 / 选方案 / 以后同类
-        }
-        .padding(.vertical, 4)
     }
 
     private func historyRow(_ p: Proposal) -> some View {

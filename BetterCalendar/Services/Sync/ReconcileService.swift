@@ -125,11 +125,17 @@ final class ReconcileService {
     private(set) var calendarNotice: String?
     private var previewForeign: [CalendarEventDraft] = []
     private var greenForeignCount = 0
-    func dismissCalendarNotice() { calendarNotice = nil; noticeDismissedKey = noticeKey }
-    private var noticeKey = ""
-    private var noticeDismissedKey: String {
-        get { defaults.string(forKey: "reconcile.noticeDismissed") ?? "" }
-        set { defaults.set(newValue, forKey: "reconcile.noticeDismissed") }
+    /// W19（P2）：点一次「知道了」= 这类提示以后都不再出现（不随数量变化复活），随 iCloud 设置同步到另一台设备。
+    /// 收的是「类别」：预览日历退役后留下的你的事件 / 计划日历里不是 BetterCalendar 写的事件。
+    func dismissCalendarNotice() {
+        noticeDismissedKinds = Array(Set(noticeDismissedKinds).union(currentNoticeKinds)).sorted()
+        calendarNotice = nil
+    }
+    static let noticeDismissedKindsKey = "reconcile.noticeDismissedKinds"
+    private var currentNoticeKinds: [String] = []
+    private var noticeDismissedKinds: [String] {
+        get { defaults.stringArray(forKey: Self.noticeDismissedKindsKey) ?? [] }
+        set { defaults.set(newValue, forKey: Self.noticeDismissedKindsKey) }   // plist 类型：[String]
     }
 
     /// 对账把日历手改回流进真相后发出（排日程页借此即时刷新，不用等重新进页）。
@@ -202,19 +208,24 @@ final class ReconcileService {
 
     private func refreshNotice() {
         var parts: [String] = []
-        if !previewForeign.isEmpty {
+        var kinds: [String] = []
+        let dismissed = Set(noticeDismissedKinds)
+        if !previewForeign.isEmpty, !dismissed.contains("previewRetired") {
             let names = Array(Set(previewForeign.map(\.title))).sorted().prefix(3).joined(separator: "、")
             parts.append("「BetterCalendar · 预览」这本日历已经退役，但里面还有 \(previewForeign.count) 个你的事件（如 \(names)）")
+            kinds.append("previewRetired")
         }
-        if greenForeignCount > 0 {
+        if greenForeignCount > 0, !dismissed.contains("greenForeign") {
             parts.append("「BetterCalendar · 计划」日历里有 \(greenForeignCount) 个不是 BetterCalendar 写的事件")
+            kinds.append("greenForeign")
         }
+        currentNoticeKinds = kinds
         guard !parts.isEmpty else { calendarNotice = nil; return }
-        let key = "\(previewForeign.count)|\(greenForeignCount)"
-        noticeKey = key
-        calendarNotice = noticeDismissedKey == key ? nil
-            : parts.joined(separator: "；") + "。BetterCalendar 不会删改它们，只当作你的安排来读；建议在系统日历里把它们挪到你自己的日历。"
+        calendarNotice = parts.joined(separator: "；") + "。BetterCalendar 不会删改它们，只当作你的安排来读；建议在系统日历里把它们挪到你自己的日历。"
     }
+
+    /// 另一台设备点了「知道了」（设置同步过来）→ 本机立即收起。
+    func refreshNoticeAfterSync() { refreshNotice() }
 
     private func readScan() async throws -> [CalendarEventDraft] {
         let scan = Self.scanWindow(now: now())

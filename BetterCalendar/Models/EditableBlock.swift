@@ -9,7 +9,7 @@
 
 import Foundation
 
-struct EditableBlock: Identifiable {
+struct EditableBlock: Identifiable, Equatable {
     var id: UUID
     var title: String
     var start: Date

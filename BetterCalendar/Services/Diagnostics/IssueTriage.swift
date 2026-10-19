@@ -58,7 +58,7 @@ nonisolated enum IssueTriage {
         // —— (a) 你现在能处理 ——
         Rule(id: "key.sentinel", sources: nil, patterns: ["没有 openrouter api key", "没有 openai api key"], tier: .actionable,
              headline: "哨兵的判断模型没有 key，哨兵暂停了（不会换别的判断器）",
-             action: "到 多端审批 → 哨兵 里填好 key"),
+             action: "到 设置 → 审批记录与规则 → 哨兵 里填好 key"),
         Rule(id: "key.cloud", sources: nil,
              patterns: ["未配置 api key", "未配 api key", "没有 anthropic api key", "x-api-key", "authentication_error", "http 401", "invalid api key"],
              tier: .actionable,
@@ -84,7 +84,7 @@ nonisolated enum IssueTriage {
              action: "到 系统设置 → 隐私与安全性 → 日历 / 提醒事项 允许 BetterCalendar（完全访问）"),
         Rule(id: "folder.bookmark", sources: nil, patterns: ["书签", "目录授权已失效", "重新选择"], tier: .actionable,
              headline: "文件夹授权失效了",
-             action: "重新选一次文件夹（智能体：多端审批 → 智能体桥接；聪音：设置 → 进阶设置）"),
+             action: "重新选一次文件夹（智能体：设置 → 审批记录与规则 → 智能体桥接；聪音：设置 → 进阶设置）"),
         Rule(id: "login.item", sources: ["设置"], patterns: ["开机自启"], tier: .actionable,
              headline: "开机自动启动没设上",
              action: "到 系统设置 → 通用 → 登录项 里手动添加 BetterCalendar"),
@@ -117,7 +117,7 @@ nonisolated enum IssueTriage {
              patterns: ["下次", "再试", "兜底", "补报", "待传", "轮询", "暂不", "这一轮", "没传上"], tier: .transient,
              headline: nil, action: nil),
         Rule(id: "sentinel.fallback", sources: ["哨兵"], patterns: ["没用上首选", "这一轮只看", "这一拍没判断"], tier: .transient,
-             headline: "哨兵这阵子一直判断失败、处于暂停", action: "到 多端审批 → 哨兵 看原因"),
+             headline: "哨兵这阵子一直判断失败、处于暂停", action: "到 设置 → 审批记录与规则 → 哨兵 看原因"),
 
         // —— 说明性：只进日志 ——
         Rule(id: "info.notify-past", sources: ["通知"], patterns: ["已过当前时刻"], tier: .info, headline: nil, action: nil),
