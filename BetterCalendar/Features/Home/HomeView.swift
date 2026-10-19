@@ -64,9 +64,13 @@ struct HomeView: View {
     @State private var wrapUpDismissTick = 0   // 「先不收尾」后强制重算
     private var wrapUpCardVisible: Bool {
         _ = wrapUpDismissTick
-        guard model.isLiveTargetDay, !WrapUpSeal.isSealedToday, !WrapUpSeal.dismissedToday,
+        guard axisEnabled ? deps.startedDays.isStarted(DayContext.logicalDay(offset: 0)) : model.isLiveTargetDay,
+              !WrapUpSeal.isSealedToday, !WrapUpSeal.dismissedToday,
               !deps.journalStore.hasContentToday() else { return false }
-        if model.wrapUpSignal { return true }
+        if axisEnabled {
+            // 时间轴：今天从现在起没有绿色了 ∨ 已过收工线（与 W19 的 wrapUpSignal 同口径）
+            if !axis.hasRemainingToday(in: axis.days()) || Date.now >= WorkHoursSettings.effectiveWindDown(from: .now) { return true }
+        } else if model.wrapUpSignal { return true }
         // 傍晚线后事实性收工：空档且最后一次完成已过去 ≥45 分钟
         return Date.now >= WorkHoursSettings.eveningStart(for: .now)
             && deps.execution.active == nil
@@ -89,6 +93,11 @@ struct HomeView: View {
     @State private var sayText = ""                // 底部「跟智能体说一句」
     @FocusState private var sayFocused: Bool
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」
+    /// W23：今天页用时间轴（日用版默认关；关着 = W19 卡片列表原样）。
+    @AppStorage(TimelineAxisSettings.key) private var axisEnabled = TimelineAxisSettings.defaultValue
+    @State private var axis: TimelineAxisModel
+    @State private var axisEditing: AxisEditTarget?
+    @State private var showChangelog = false
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 开发期窗口（开发者选项打开时）
     #else
@@ -114,26 +123,38 @@ struct HomeView: View {
             progress: deps.execution,
             routines: deps.routines)
         vm.autoCommit = true   // W19：直接操作即保存（没有「确认写入」这一步了）
+        vm.relayoutLiveDay = !TimelineAxisSettings.enabled   // W23：时间轴按闸门自己呈现，列表拿库里原样
         _model = State(initialValue: vm)
+        _axis = State(initialValue: TimelineAxisModel(plans: deps.planStore, actuals: deps.planStore,
+                                                      calendar: deps.calendarStore, live: deps.execution, home: vm))
     }
+
+    struct AxisEditTarget: Identifiable { let id: UUID }
 
     /// 选中的是不是逻辑今天（「现在 / 下一件」与「做成了」只属于今天）。
     private var isTodaySelected: Bool {
         Calendar.current.startOfDay(for: model.targetDay) == DayContext.logicalDay(offset: 0)
     }
 
+    /// 只属于今天的提示（晨间摘要 / 痕迹条 / 建议…）：时间轴一直是「今天为主」的一根轴，W19 列表按所选那天。
+    private var showsTodayNotices: Bool { axisEnabled || isTodaySelected }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        nowNextCard
-                        dayStrip
-                        notices
-                        timeline
-                        footerTag
+                if axisEnabled {
+                    axisPage
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            nowNextCard
+                            dayStrip
+                            notices
+                            timeline
+                            footerTag
+                        }
+                        .padding()
                     }
-                    .padding()
                 }
                 Divider()
                 sayBar
@@ -207,11 +228,72 @@ struct HomeView: View {
             .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
                 deps.reconcile.refreshNoticeAfterSync()
             }
-            // 切天 = 换一页（每天一页）
+            // 切天 = 换一页（每天一页）；时间轴 focusDay 已切过的不重复加载
             .onChange(of: model.targetDay) { _, _ in
-                model.targetDayDidChange()
+                model.targetDayDidChangeIfNeeded()
+            }
+            .onChange(of: axisEnabled) { _, on in
+                model.relayoutLiveDay = !on
+                model.autoLoadOnAppear()
+            }
+            .navigationDestination(isPresented: $showChangelog) { ChangelogView() }
+            .sheet(item: $axisEditing) { target in
+                AxisBlockEditor(block: model.binding(for: target.id),
+                                onDelete: { model.delete(id: target.id); axisEditing = nil },
+                                onDone: { axisEditing = nil; Task { await model.flushAutosave() } })
             }
         }
+    }
+
+    // MARK: W23 时间轴页
+
+    /// 时间轴版今天页：现在 / 下一件（顶上常驻）→ 提示 → 一根连续的时间轴（填满剩下的高度）。
+    private var axisPage: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            nowNextCard
+            notices
+            if addRowActive { addTailRow }
+            TimelineAxisView(axis: axis, onEdit: { item in
+                guard let id = item.blockID, let ps = item.plannedStart else { return }
+                Task {
+                    await model.focusDay(DayContext.logicalStartOfDay(ps))
+                    if model.blocks.contains(where: { $0.id == id }) { axisEditing = AxisEditTarget(id: id) }
+                }
+            }, dayMenu: { day in axisDayMenu(day) })
+        }
+        .padding(.horizontal).padding(.top, 10)
+    }
+
+    /// 时间轴的「这一天」菜单（U2 第二层）：作用于视口里正在看的那一天。
+    private func axisDayMenu(_ day: Date) -> some View {
+        let isToday = day == DayContext.logicalDay(offset: 0)
+        return Menu {
+            Button {
+                Task { await model.focusDay(day); addRowActive = true }
+            } label: {
+                Label("在\(Self.relativeDayWord(day))加一项", systemImage: "plus")
+            }
+            Button {
+                Task { await model.focusDay(day); model.toggleLoose() }
+            } label: {
+                let loose = deps.looseDays.isLoose(day)
+                Label(loose ? "结束松散" : "这天松散一下", systemImage: loose ? "moon.zzz.fill" : "moon.zzz")
+            }
+            if isToday {
+                Button { Task { await deps.execution.reconcileCalendarActuals() } } label: {
+                    Label("按系统日历更新今天做成的事", systemImage: "arrow.triangle.2.circlepath")
+                }
+            }
+            Divider()
+            Button { showChangelog = true } label: { Label("更新日志（\(BuildInfo.tag)）", systemImage: "info.circle") }
+        } label: {
+            Label("这一天", systemImage: "ellipsis.circle").labelStyle(.iconOnly)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .tint(.primary)
+        .help("这一天的更多操作")
+        .accessibilityLabel("这一天的更多操作")
     }
 
     // MARK: ① 现在 / 下一件
@@ -318,7 +400,7 @@ struct HomeView: View {
 
     @ViewBuilder private var notices: some View {
         // 「给明天的一句话」晨间面（#23）：昨晚的你留给今早的你；点 ✕ 只收当天
-        if isTodaySelected, let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
+        if showsTodayNotices, let tn = TomorrowNote.note(), !TomorrowNote.isDismissed(), !tnDismissTick {
             MessageStrip(icon: "sunrise", tint: theme.looseTint, text: "昨晚的你说：\(tn)") {
                 Button { TomorrowNote.dismiss(); tnDismissTick = true } label: {
                     Image(systemName: "xmark").font(.caption2)
@@ -330,13 +412,13 @@ struct HomeView: View {
 
         // 晨间摘要（E5d）：昨日收池露脸 + 一键入线；当天可收
         let _ = briefDismissTick
-        if isTodaySelected, !MorningBrief.isDismissedToday {
+        if showsTodayNotices, !MorningBrief.isDismissedToday {
             MorningBriefStrip(longTasks: deps.longTasks, router: deps.router,
                               onDismiss: { briefDismissTick += 1 })
         }
 
         // 自动调整事后可见、可撤（P4）：一行计数 → 点开清单，逐条或一键撤
-        if isTodaySelected, let timeline = deps.timeline, timeline.todayTraceCount() > 0 {
+        if showsTodayNotices, let timeline = deps.timeline, timeline.todayTraceCount() > 0 {
             MessageStrip(icon: "arrow.triangle.2.circlepath", tint: theme.looseTint,
                          text: "今天的计划自动调整过 \(timeline.todayTraceCount()) 处") {
                 Button("查看 / 撤销") { showTraceSheet = true }
@@ -361,7 +443,7 @@ struct HomeView: View {
 
         // L3 主动建议（唯一主动·一行）：休息日全静音、可"别再提"永久静音、强度可调
         let _ = l3Tick
-        let l3 = isTodaySelected ? deps.longTasks.l3Suggestions(
+        let l3 = showsTodayNotices ? deps.longTasks.l3Suggestions(
             loose: deps.looseDays.isLoose(model.targetDay),
             intensity: SuggestionSettings.intensity.cap,
             muted: SuggestionSettings.mutedTaskIDs) : []

@@ -92,6 +92,7 @@ actor EventKitReminderStore: ReminderListAccess {
     }
 
     func apply(_ changes: ReminderListChanges) async throws {
+        try await EventKitWriteGuard.refuseIfTestHost("提醒事项写入 \(changes.count) 处")   // W23b：测试宿主里绝不写真提醒事项
         guard !changes.isEmpty else { return }
         try await ensureAccess(request: true)
         let found = ourList()
@@ -216,4 +217,16 @@ actor EventKitReminderStore: ReminderListAccess {
             throw ReminderAccessError.notAuthorized("没有提醒事项的完整权限（系统设置 → 隐私与安全性 → 提醒事项 打开 BetterCalendar）")
         }
     }
+}
+
+/// W23b：测试宿主里 AppContainer 用的内存提醒列表（不碰真提醒事项）。只在 TestHost 下由组装点注入。
+actor TestHostReminderList: ReminderListAccess {
+    nonisolated var listName: String { "测试宿主内存列表" }
+    private var items: [ReminderSnapshot] = []
+    private(set) var appliedChanges = 0
+    func readList() async throws -> ReminderListRead {
+        .list(items: items, reach: ReminderListReach(sourceName: "测试宿主（内存）", syncsAcrossDevices: false))
+    }
+    func apply(_ changes: ReminderListChanges) async throws { appliedChanges += changes.count }
+    func readOwnOpenReminders(requestAccess: Bool) async throws -> [OwnReminder] { [] }
 }

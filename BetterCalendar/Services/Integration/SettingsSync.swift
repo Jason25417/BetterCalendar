@@ -50,6 +50,8 @@ enum SettingsSync {
         "timeline.writeLease.enabled",         // 写权租约应急总闸：两端必须一致（一端关一端开 = 半套闸）
         // —— W21（2026-10-19）——
         "featureUsage.shareWithAgent.enabled", // 让智能体参考功能使用统计（隐私偏好，两端一致；日用版默认关）
+        // —— W23（2026-10-19）——
+        "today.timelineAxis.enabled",          // 今天页用时间轴（新功能，日用版默认关）：一端打开两端都换
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

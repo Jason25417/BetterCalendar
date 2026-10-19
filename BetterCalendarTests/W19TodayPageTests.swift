@@ -190,6 +190,8 @@ import AppKit
         let dir = URL(fileURLWithPath: try #require(Self.outDir))
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let c = AppContainer()
+        // W23b：测试宿主里 AppContainer 接的是内存日历（绝不写 Jason 的真日历）；不是就别往下跑
+        try #require(c.calendarStore is TestHostCalendarStore, "测试宿主里 AppContainer 必须用内存日历")
         let today = DayContext.logicalDay(offset: 0)
         let cal = Calendar.current
         func t(_ h: Int, _ m: Int = 0) -> Date { cal.date(bySettingHour: h, minute: m, second: 0, of: today)! }

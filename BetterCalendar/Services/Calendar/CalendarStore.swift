@@ -90,3 +90,24 @@ nonisolated struct SystemCalendarEvent: Sendable, Equatable {
     /// 这件你的事件是误存在 BetterCalendar 自家日历里的（无章）。
     var inBetterCalendar: Bool = false
 }
+
+/// W23b：测试宿主里 AppContainer 用的内存日历（不碰真 EventKit——W23 截图测试曾把测试块写进 Jason 的日用版日历）。
+/// 只在 TestHost 下由组装点注入；生产恒为 EventKitCalendarStore。读你的日历一律为空（测试宿主也不读真日历）。
+final class TestHostCalendarStore: CalendarStore {
+    private(set) var events: [CalendarEventDraft] = []
+    private(set) var writeCount = 0
+
+    func read(kind: PlanCalendarKind) async throws -> [CalendarEventDraft] { events.filter { $0.kind == kind } }
+    func write(_ drafts: [CalendarEventDraft]) async throws {
+        writeCount += 1
+        let kinds = Set(drafts.map(\.kind))
+        events.removeAll { kinds.contains($0.kind) }
+        events.append(contentsOf: drafts)
+    }
+    func clear(kind: PlanCalendarKind) async throws { writeCount += 1; events.removeAll { $0.kind == kind } }
+    func apply(_ drafts: [CalendarEventDraft], kind: PlanCalendarKind, window: DateInterval) async throws {
+        writeCount += 1
+        events.removeAll { $0.kind == kind && $0.start >= window.start && $0.start < window.end }
+        events.append(contentsOf: drafts)
+    }
+}

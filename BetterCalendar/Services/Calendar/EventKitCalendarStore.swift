@@ -39,6 +39,7 @@ actor EventKitCalendarStore: CalendarStore {
     }
 
     func write(_ drafts: [CalendarEventDraft]) async throws {
+        try await EventKitWriteGuard.refuseIfTestHost("日历写入 \(drafts.count) 项")   // W23b：测试宿主里绝不写真日历
         try await ensureAccess()
         guard !drafts.isEmpty else { return }
         var changed = 0
@@ -58,6 +59,7 @@ actor EventKitCalendarStore: CalendarStore {
     }
 
     func apply(_ drafts: [CalendarEventDraft], kind: PlanCalendarKind, window: DateInterval) async throws {
+        try await EventKitWriteGuard.refuseIfTestHost("日历对齐「\(titles[kind] ?? "?")」\(drafts.count) 项")   // W23b
         try await ensureAccess()
         // 空草稿 + 日历本就不存在 → 无事可清，别为了清空去创建日历
         if drafts.isEmpty, existingCalendar(for: kind) == nil { return }
@@ -168,6 +170,7 @@ actor EventKitCalendarStore: CalendarStore {
     }
 
     func clear(kind: PlanCalendarKind) async throws {
+        try await EventKitWriteGuard.refuseIfTestHost("日历清空「\(titles[kind] ?? "?")」")   // W23b
         try await ensureAccess()
         guard let cal = existingCalendar(for: kind) else { return }
         let cal0 = Calendar.current
