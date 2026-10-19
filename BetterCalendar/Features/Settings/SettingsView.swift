@@ -54,7 +54,7 @@ struct SettingsView: View {
     @State private var testResult: String?
     @State private var showAdvanced = false
     @State private var showFrozenDots = false   // 「已冻结：Dots 时代功能」默认折叠
-    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」（随 iCloud 设置同步）
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」（随 iCloud 设置同步）
     @State private var showDevLog = false
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow

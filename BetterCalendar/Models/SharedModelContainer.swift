@@ -24,7 +24,7 @@ enum SharedModelContainer {
         do {
             let cloud = try ModelContainer(
             for: schema,
-            configurations: ModelConfiguration(schema: schema, cloudKitDatabase: .private("iCloud.com.jason.BetterCalendar")))
+            configurations: ModelConfiguration(schema: schema, cloudKitDatabase: .private(AppChannel.current.cloudKitContainerID)))
             DataSyncMonitor.shared.storageOpened(cloud: true)
             return cloud
         } catch {

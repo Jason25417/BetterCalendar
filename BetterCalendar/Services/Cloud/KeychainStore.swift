@@ -9,7 +9,7 @@ import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "com.jason.BetterCalendar"
+    private static let service = AppChannel.current.keychainService   // W17：Dev 版用自己的服务名，不碰日用版的 key
     /// 默认账户 = Anthropic（向后兼容旧调用）。硅基流动传 LLMProvider.siliconflow.keychainAccount。
     static let defaultAccount = "anthropic-api-key"
 

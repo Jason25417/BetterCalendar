@@ -9,7 +9,7 @@ import SwiftUI
 
 struct SharedTimerBackendPanel: View {
     @Bindable var control: SharedTimerBackendControl
-    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16：播种按钮只在「开发者选项」里出现
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16：播种按钮只在「开发者选项」里出现
     #if DEBUG
     @State private var seeding = false
     @State private var seedResult: String?

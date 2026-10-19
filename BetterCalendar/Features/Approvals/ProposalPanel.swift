@@ -21,7 +21,7 @@ struct ProposalPanel: View {
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var notificationAllowed: Bool?
-    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
 
     var body: some View {
         List {

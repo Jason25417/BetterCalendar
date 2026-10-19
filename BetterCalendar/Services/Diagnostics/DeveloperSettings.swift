@@ -12,8 +12,10 @@ import Foundation
 
 nonisolated enum DeveloperSettings {
     static let key = "developer.optionsEnabled"
+    /// W17：从没设过时，Dev 版默认开（开发控件就是它的用途）、日用版默认关；设过一律按设的值。@AppStorage 的默认值也用它。
+    static let defaultValue = AppChannel.current.isDev
     static var enabled: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
+        get { ExperimentDefaults.bool(key, default: defaultValue) }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
 }

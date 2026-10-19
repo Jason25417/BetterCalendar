@@ -80,7 +80,7 @@ struct HomeView: View {
     @State private var briefDismissTick = 0        // 晨间摘要「今天先不排」即时刷新（E5d，存 UserDefaults）
     @State private var showTraceSheet = false      // 变更痕迹二层 sheet（E5d）
     @State private var showDevLog = false          // W16：🐞 日志页（工具栏入口）
-    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow   // 算法试验台窗口（开发期）
     #else

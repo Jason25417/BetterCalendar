@@ -77,7 +77,7 @@ final class DataSyncMonitor {
     func checkAccount() async {
         guard !TestHost.isActive else { return }
         do {
-            let status = try await CKContainer(identifier: "iCloud.com.jason.BetterCalendar").accountStatus()
+            let status = try await CKContainer(identifier: AppChannel.current.cloudKitContainerID).accountStatus()
             account = status == .available ? "iCloud 账号可用" : "iCloud 不可用（状态 \(status.rawValue)）"
         } catch { account = "账号检查失败"; report(error.localizedDescription) }
     }

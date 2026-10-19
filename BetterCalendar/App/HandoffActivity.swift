@@ -9,7 +9,7 @@
 import Foundation
 
 enum BetterCalendarHandoff {
-    static let activityType = "com.jason.BetterCalendar.handoff"
+    static let activityType = AppChannel.current.handoffActivityType   // W17：与 Info.plist 的 $(PRODUCT_BUNDLE_IDENTIFIER).handoff 一致
 
     private enum Key {
         static let tab = "tab"

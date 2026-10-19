@@ -59,7 +59,7 @@ actor CloudKitAgentMessageStore: AgentMessageTransport {
     private var known: [CKRecord.ID: CKRecord] = [:]
     private var changeToken: CKServerChangeToken?
 
-    init(containerIdentifier: String = "iCloud.com.jason.BetterCalendar") {
+    init(containerIdentifier: String = AppChannel.current.cloudKitContainerID) {
         db = CKContainer(identifier: containerIdentifier).privateCloudDatabase
     }
 

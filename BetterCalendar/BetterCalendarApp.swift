@@ -13,7 +13,7 @@ import SwiftData
 struct BetterCalendarApp: App {
     @State private var container = AppContainer()
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage(DeveloperSettings.key) private var developerOptions = false   // W16「开发者选项」
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」
     #if os(macOS)
     // 菜单栏项改由 AppKit NSStatusItem 自管（潮汐式直显计时），不再用 MenuBarExtra。
     @State private var menuBar: MenuBarController?

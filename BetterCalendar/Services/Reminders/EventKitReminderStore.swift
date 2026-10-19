@@ -78,7 +78,10 @@ nonisolated protocol ReminderListAccess: AnyObject, Sendable {
 actor EventKitReminderStore: ReminderListAccess {
     // 懒加载（2026-07-21，同 EventKitCalendarStore）：init 不同步创建 EKEventStore（TCC 阻塞会挂 test host）。
     private lazy var store = EKEventStore()
-    static let listTitle = "BetterCalendar · 要紧事 (Dev)"
+    /// W17：列表名由 AppChannel 决定（日用版仍是历史名「BetterCalendar · 要紧事 (Dev)」，Dev 版「BetterCalendar Dev · 要紧事」）。
+    static let listTitle = AppChannel.current.remindersListTitle
+    /// 同设备上另一个通道的列表：读「你自己的提醒」时跳过。
+    static let siblingListTitles = Set(AppChannel.current.siblings.map(\.remindersListTitle))
     nonisolated var listName: String { Self.listTitle }
 
     func readList() async throws -> ReminderListRead {
@@ -129,7 +132,7 @@ actor EventKitReminderStore: ReminderListAccess {
 
     func readOwnOpenReminders(requestAccess: Bool) async throws -> [OwnReminder] {
         try await ensureAccess(request: requestAccess)
-        let others = store.calendars(for: .reminder).filter { $0.title != Self.listTitle }
+        let others = store.calendars(for: .reminder).filter { $0.title != Self.listTitle && !Self.siblingListTitles.contains($0.title) }
         guard !others.isEmpty else { return [] }
         let items = try await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: others))
         return items.filter { !$0.isCompleted }.map { r in
