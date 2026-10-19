@@ -338,6 +338,16 @@ final class AppContainer {
                 ExternalCalendarSettings.busy(try await calendarForPlan.externalEvents(in: window),
                                               excluding: ExternalCalendarSettings.excludedTitles)
             }
+            // W26b：批准的改动（含跨天挪）涉及已排早晚通知的那一天 → 按新计划重排（与今天页保存同一口径）
+            // 测试宿主不接（不往测试进程里排真通知）
+            let looseForReminders = looseDays, poolForReminders = longTasks
+            mover.reminderRefresher = TestHost.isActive ? nil : DailyReminderRefresher(
+                plans: planStore, notifier: notifier,
+                isLoose: { looseForReminders.isLoose($0) },
+                pooledFromYesterday: {
+                    poolForReminders.todoItems()
+                        .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }.count
+                })
             actionExecutor.mover = mover
         }
         // W13 设备活动记录：测试环境用临时目录、不启动任何采集（各组件单测各自注入假实现）。

@@ -10,7 +10,9 @@
 //  - 直接操作：拖绿色块挪时间（W26 起可拖进别的日子，今天到 7 天后）、拉底边改时长（5 分钟吸附；iPhone 长按后拖，
 //    Mac 直接拖）；点一下改标题 / 性质 / 删除；
 //    放不下（规则不许）就写明原因、块回到原位——绝不悄悄挤。过去的 / 做成的 / 你的日历都不能拖。
-//  - 性能：日子一段一段懒加载（LazyVStack）；闸门每分钟离散跳一次（页面内，不是菜单栏 label——那里绝不放周期刷新）。
+//  - 性能：W26b 起 11 段日子用普通 VStack（不懒加载）：拖动时自动滚过一天以上，懒加载会把被拖那块所在的一段卸掉、
+//    手势中途断掉；固定高度的 11 段一次排好，打开时滚到闸门的偏移也是精确的。滚动 / 自动滚的每帧位置不进视图状态
+//    （见 AxisAutoScroller），不会每帧重算整根轴。闸门每分钟离散跳一次（页面内，不是菜单栏 label——那里绝不放周期刷新）。
 //
 
 import SwiftUI
@@ -35,6 +37,8 @@ struct TimelineAxisView<DayMenu: View>: View {
     @State private var didInitialScroll = false
     /// W26：上次离开前台的时刻（回来时离开够久 → 重新把闸门放回视口，R10「打开即朝前」）。
     @State private var leftActiveAt: Date?
+    /// W26b：拖动贴边自动滚。
+    @State private var scroller = AxisAutoScroller()
 
     struct Viewport: Equatable {
         var visibleDay: Date?
@@ -64,11 +68,11 @@ struct TimelineAxisView<DayMenu: View>: View {
                 MessageStrip(icon: "calendar.badge.exclamationmark", tint: .orange, text: err)
             }
             ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
+                VStack(spacing: 0) {
                     ForEach(days) { day in
                         AxisDaySection(day: day, geo: geo, now: axis.now, gutter: gutter,
                                        isToday: day.label == axis.todayLabel,
-                                       busy: axis.isCommitting,
+                                       busy: axis.isCommitting, scroller: scroller,
                                        onMove: { item, start in Task { await axis.commitDrag(item, start: start) } },
                                        onResize: { item, end in Task { await axis.commitResize(item, end: end) } },
                                        onTap: onEdit)
@@ -79,17 +83,26 @@ struct TimelineAxisView<DayMenu: View>: View {
                 .scrollTargetLayout()
             }
             .scrollPosition($position)
+            .coordinateSpace(.named(AxisAutoScroller.viewportSpace))
+            // 每帧的位置只交给自动滚（不被观察的属性，不触发重算）
+            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in scroller.offsetY = y }
             .onScrollGeometryChange(for: Viewport.self, of: { g in
                 Self.viewport(offsetY: g.contentOffset.y, height: g.containerSize.height, geo: geo, now: axis.now)
             }) { _, v in viewport = v }
             .onScrollGeometryChange(for: CGFloat.self, of: { $0.containerSize.height }) { _, h in
                 viewportHeight = h
+                scroller.viewportHeight = h
                 if !didInitialScroll, h > 0 { didInitialScroll = true; scrollToGate(geo) }
             }
             .accessibilityIdentifier("bc.today.timeline")
         }
         // 过了 4:00 日界线：轴的日子整体往后挪一天（每一段的位置都变了）→ 重新对准「现在」，不让视口停在错位的地方
         .onChange(of: axis.todayLabel) { _, _ in if viewportHeight > 0 { scrollToGate(geometry) } }
+        .onAppear {
+            let binding = $position
+            scroller.scrollTo = { y in binding.wrappedValue.scrollTo(y: y) }
+        }
+        .onChange(of: geo.height, initial: true) { _, h in scroller.contentHeight = h }
         .task {
             FeatureUsage.seen(.todayAxis)
             await axis.reload()
@@ -206,6 +219,7 @@ private struct AxisDaySection: View {
     let gutter: CGFloat
     let isToday: Bool
     let busy: Bool
+    let scroller: AxisAutoScroller
     let onMove: (AxisItem, Date) -> Void
     let onResize: (AxisItem, Date) -> Void
     let onTap: (AxisItem) -> Void
@@ -338,12 +352,13 @@ private struct AxisDaySection: View {
         let x = trackX + laneW * CGFloat(item.lane)
         var start = item.start, end = item.end
         if let d = drag, d.itemID == item.id {
+            let dy = d.dy + scroller.delta   // 手指位移 + 这次拖动期间自动滚过的距离
             switch d.mode {
             case .move:
-                let ns = AxisGeometry.snap(geo.time(atY: geo.y(item.start) + d.dy))
+                let ns = AxisGeometry.snap(geo.time(atY: geo.y(item.start) + dy))
                 end = ns.addingTimeInterval(item.end.timeIntervalSince(item.start)); start = ns
             case .resize:
-                let ne = AxisGeometry.snap(geo.time(atY: geo.y(item.end) + d.dy))
+                let ne = AxisGeometry.snap(geo.time(atY: geo.y(item.end) + dy))
                 end = max(ne, item.start.addingTimeInterval(5 * 60))
             }
         }
@@ -355,35 +370,74 @@ private struct AxisDaySection: View {
         return AxisBlockView(item: item, start: start, end: end, height: h, dragging: dragging, dayHint: dayHint)
             .frame(width: max(10, laneW - 3), height: h, alignment: .topLeading)
             .overlay(alignment: .bottom) {
-                if item.isDraggable { resizeHandle(item) }
+                if item.isDraggable { resizeHandle(item, height: h) }
             }
             .offset(x: x, y: localY(start))
             .zIndex(dragging ? 2 : (item.kind == .plan ? 1 : 0))
-            .modifier(MoveGesture(enabled: item.isDraggable && !busy, onChange: { dy in
-                drag = AxisDrag(itemID: item.id, mode: .move, dy: dy)
+            .modifier(MoveGesture(enabled: item.isDraggable && !busy, onChange: { dy, fingerY in
+                track(item, .move, dy: dy, fingerY: fingerY)
             }, onEnd: { dy in
-                drag = nil
-                onMove(item, geo.time(atY: geo.y(item.start) + dy))
-            }))
+                let total = dy + finish()
+                onMove(item, geo.time(atY: geo.y(item.start) + total))
+            }, onCancel: cancel))
             .onTapGesture { if item.kind == .plan, item.blockID != nil { onTap(item) } }
     }
 
+    // MARK: 拖动 + 贴边自动滚
+
+    private func track(_ item: AxisItem, _ mode: AxisDrag.Mode, dy: CGFloat, fingerY: CGFloat?) {
+        if drag == nil { scroller.begin() }
+        drag = AxisDrag(itemID: item.id, mode: mode, dy: dy)
+        if let fingerY { scroller.update(fingerY: fingerY) }
+    }
+
+    /// 松手：停住自动滚，返回这次滚过的距离（加到落点上）。
+    private func finish() -> CGFloat {
+        drag = nil
+        return scroller.end()
+    }
+
+    /// 手势被系统打断（来电、切走）：什么都不改，块回原位。
+    private func cancel() {
+        guard drag != nil else { return }
+        drag = nil
+        scroller.end()
+    }
+
+    /// 这一块下面到下一个东西（任一块 / 这一天的日界线）之间的空档（pt）。保守：不看并排的列，只要时间上后面有东西就算。
+    private func gapBelow(_ item: AxisItem) -> CGFloat {
+        let next = day.items.filter { $0.id != item.id && $0.start >= item.end }.map(\.start).min()
+        let limit = min(next ?? day.window.end, day.window.end)
+        return max(0, geo.y(limit) - geo.y(item.end))
+    }
+
     /// 底边把手：拉它改结束时刻（开始不动）。
-    private func resizeHandle(_ item: AxisItem) -> some View {
-        Capsule().fill(.secondary.opacity(drag?.itemID == item.id && drag?.mode == .resize ? 0.6 : 0.25))
-            .frame(width: 28, height: 4)
-            .padding(.vertical, 3).padding(.horizontal, 24)
-            .contentShape(Rectangle())
-            #if os(macOS)
-            .pointerStyle(.frameResize(position: .bottom))
-            #endif
-            .modifier(MoveGesture(enabled: !busy, highPriority: true, pressDuration: 0.2, onChange: { dy in
-                drag = AxisDrag(itemID: item.id, mode: .resize, dy: dy)
-            }, onEnd: { dy in
-                drag = nil
-                onResize(item, geo.time(atY: geo.y(item.end) + dy))
-            }))
-            .accessibilityLabel("拉动改「\(item.title)」的结束时间")
+    private func resizeHandle(_ item: AxisItem, height h: CGFloat) -> some View {
+        #if os(macOS)
+        let area = (inside: CGFloat(10), outside: CGFloat(0))   // 鼠标指得准，范围照旧
+        #else
+        let area = AxisHitArea.resize(blockHeight: h, gapBelow: gapBelow(item), target: 44)
+        #endif
+        let active = drag?.itemID == item.id && drag?.mode == .resize
+        return ZStack(alignment: .top) {
+            Color.clear
+            Capsule().fill(.secondary.opacity(active ? 0.6 : 0.25))
+                .frame(width: 28, height: 4)
+                .offset(y: max(0, area.inside - 7))   // 细条仍贴在块的底边里面（视觉不变）
+        }
+        .frame(width: 76, height: area.inside + area.outside)
+        .contentShape(Rectangle())
+        .offset(y: area.outside)   // 触控范围往块下伸进空档
+        #if os(macOS)
+        .pointerStyle(.frameResize(position: .bottom))
+        #endif
+        .modifier(MoveGesture(enabled: !busy, highPriority: true, pressDuration: 0.2, onChange: { dy, fingerY in
+            track(item, .resize, dy: dy, fingerY: fingerY)
+        }, onEnd: { dy in
+            let total = dy + finish()
+            onResize(item, geo.time(atY: geo.y(item.end) + total))
+        }, onCancel: cancel))
+        .accessibilityLabel("拉动改「\(item.title)」的结束时间")
     }
 }
 
@@ -394,34 +448,45 @@ private struct AxisDrag: Equatable {
     var dy: CGFloat
 }
 
-/// 拖动手势：Mac = 鼠标直接拖；iPhone = 长按后拖（不和滚动抢）。只报纵向位移。
+/// 拖动手势：Mac = 鼠标直接拖；iPhone = 长按后拖（不和滚动抢）。报纵向位移 + 手指在视口里的位置（贴边自动滚用）。
+/// 位移按视口坐标量：自动滚时手指不动、内容在动，位移不变，滚过的距离由 AxisAutoScroller 另算再加上。
 private struct MoveGesture: ViewModifier {
     var enabled: Bool
     var highPriority = false
     var pressDuration: Double = 0.3
-    var onChange: (CGFloat) -> Void
+    /// fingerY = nil：iPhone 长按刚成立、手指还没动（块先浮起来，还不知道位置）。
+    var onChange: (_ dy: CGFloat, _ fingerY: CGFloat?) -> Void
     var onEnd: (CGFloat) -> Void
+    /// 手势没走到 onEnded 就没了（被系统打断）。
+    var onCancel: () -> Void = {}
+    @GestureState private var live = false
+
+    private var space: CoordinateSpace { .named(AxisAutoScroller.viewportSpace) }
 
     func body(content: Content) -> some View {
         if !enabled {
             content
         } else {
             #if os(macOS)
-            let g = DragGesture(minimumDistance: 3)
-                .onChanged { onChange($0.translation.height) }
+            let g = DragGesture(minimumDistance: 3, coordinateSpace: space)
+                .updating($live) { _, s, _ in s = true }
+                .onChanged { onChange($0.translation.height, $0.location.y) }
                 .onEnded { onEnd($0.translation.height) }
-            if highPriority { content.highPriorityGesture(g) } else { content.gesture(g).pointerStyle(.grabIdle) }
+            let c = content.onChange(of: live) { was, now in if was, !now { onCancel() } }
+            if highPriority { c.highPriorityGesture(g) } else { c.gesture(g).pointerStyle(.grabIdle) }
             #else
             let g = LongPressGesture(minimumDuration: pressDuration)
-                .sequenced(before: DragGesture(minimumDistance: 0))
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: space))
+                .updating($live) { v, s, _ in if case .second(true, _) = v { s = true } }
                 .onChanged { v in
-                    if case .second(true, let d?) = v { onChange(d.translation.height) }
-                    else if case .second(true, nil) = v { onChange(0) }
+                    if case .second(true, let d?) = v { onChange(d.translation.height, d.location.y) }
+                    else if case .second(true, nil) = v { onChange(0, nil) }
                 }
                 .onEnded { v in
-                    if case .second(true, let d?) = v { onEnd(d.translation.height) } else { onEnd(0) }
+                    if case .second(true, let d?) = v { onEnd(d.translation.height) } else { onCancel() }
                 }
-            if highPriority { content.highPriorityGesture(g) } else { content.gesture(g) }
+            let c = content.onChange(of: live) { was, now in if was, !now { onCancel() } }
+            if highPriority { c.highPriorityGesture(g) } else { c.gesture(g) }
             #endif
         }
     }
