@@ -46,6 +46,8 @@ enum SettingsSync {
         "agent.planEditing.enabled",           // 智能体排时间线（加 / 改 / 删块、跨天挪、排一天）：一端关了两端都关
         // —— W19（2026-10-19）——
         "reconcile.noticeDismissedKinds",      // 今天页「日历里有你的事件」提示：一端点「知道了」两端都不再出现
+        // —— W21（2026-10-19）——
+        "featureUsage.shareWithAgent.enabled", // 让智能体参考功能使用统计（隐私偏好，两端一致；日用版默认关）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

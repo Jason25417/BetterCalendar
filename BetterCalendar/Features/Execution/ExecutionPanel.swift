@@ -27,6 +27,9 @@ struct ExecutionPanel: View {
     var compactCapable: Bool = false
     /// W19：嵌进「今天」页顶部时铺满宽度（menu bar 弹窗仍是固定 280 宽）。
     var fillsWidth: Bool = false
+    /// W21 功能使用探针：这块面板在哪个界面（今天页 / 菜单栏），记进 detail。
+    var usageSurface: String = "今天页"
+    private func used(_ f: FeatureID) { FeatureUsage.used(f, usageSurface) }
     @AppStorage("execPanelExpanded") private var panelExpanded = false
     private var isCompact: Bool { compactCapable && !panelExpanded }
     @State private var earlyBreakConfirming = false   // 「提前休息」的小摩擦确认（0.20.5）
@@ -85,6 +88,7 @@ struct ExecutionPanel: View {
         #endif
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
         .task { await model.loadToday() }
+        .onAppear { FeatureUsage.seen(.nowNextPanel, usageSurface) }
         #if os(macOS)
         // 弹窗重新打开 → 清掉遗留的「新事项」输入态（防 hold 卡死导致点外面关不掉，0.26.19）
         .onReceive(NotificationCenter.default.publisher(for: MenuBarPopoverHold.resetAdHocNotice)) { _ in
@@ -172,6 +176,7 @@ struct ExecutionPanel: View {
 
     private func openAdHoc(_ kind: AdHocKind) {
         adHocKind = kind; adHocTitle = ""; adHocStyle = .light
+        FeatureUsage.begin(.nowNextAdHoc)   // W21：开了「新事项」输入；开始了 = 做完，取消 = 没做完
         setPopoverHold(true)   // 输入期间挂起弹窗自动关闭（中文空格选字不误关）
         DispatchQueue.main.async { adHocFocused = true }
     }
@@ -186,6 +191,7 @@ struct ExecutionPanel: View {
     private func commitAdHoc(_ kind: AdHocKind) {
         let t = adHocTitle
         guard !t.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        FeatureUsage.complete(.nowNextAdHoc, usageSurface + (kind == .parallel ? "·同时做" : ""))
         switch kind {
         case .foreground: Task { await model.startAdHoc(title: t, timingStyle: adHocStyle) }
         case .parallel: model.startAlsoAdHoc(title: t)
@@ -193,7 +199,7 @@ struct ExecutionPanel: View {
         resetAdHoc()
     }
 
-    private func resetAdHoc() { adHocKind = nil; adHocTitle = ""; adHocStyle = .light; setPopoverHold(false) }
+    private func resetAdHoc() { FeatureUsage.abandonIfOpen(.nowNextAdHoc); adHocKind = nil; adHocTitle = ""; adHocStyle = .light; setPopoverHold(false) }
 
     static func styleLabel(_ s: TimingStyle) -> String {
         switch s { case .pomodoro: "番茄"; case .light: "轻计时"; case .none: "不计时" }
@@ -219,7 +225,7 @@ struct ExecutionPanel: View {
                 if !model.remaining.isEmpty {
                     Section("换一件（这件的投入会保留）") {
                         ForEach(model.remaining) { item in
-                            Button(item.title) { Task { await model.startBlock(item) } }
+                            Button(item.title) { used(.nowNextSwitch); Task { await model.startBlock(item) } }
                         }
                     }
                 }
@@ -227,7 +233,7 @@ struct ExecutionPanel: View {
                 if !redoable.isEmpty {
                     Section("已完成 · 再来一段") {
                         ForEach(redoable) { item in
-                            Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
+                            Button("✓ \(item.title)") { used(.nowNextSwitch); Task { await model.startBlock(item) } }
                         }
                     }
                 }
@@ -258,7 +264,7 @@ struct ExecutionPanel: View {
                     .font(.caption).foregroundStyle(.secondary)
                 // 收口轻入口（0.28 → 批次7 跨端化）：做完即回看=最顺的时机；信号与收口卡同源（全完成）
                 if !model.planned.isEmpty, let onOpenJournal {
-                    Button("回看今天 →") { onOpenJournal() }
+                    Button("回看今天 →") { used(.nowNextOpenJournal); onOpenJournal() }
                         .font(.caption).buttonStyle(.plain).underline().foregroundStyle(theme.accent)   // 收尾入口=情感时刻族
                 }
             }
@@ -275,10 +281,10 @@ struct ExecutionPanel: View {
                         // 工作段满：两选（顶替原「开始休息」）——继续=转不计时逃生舱、再来一段=休息+专注循环
                         Text("专注完成").font(.callout).foregroundStyle(theme.actualTint)   // 体检 #15：emoji 清理（庆祝感由段间卡与星光承载）
                         HStack(spacing: 8) {
-                            Button("继续计时") { model.continueUntimed() }
+                            Button("继续计时") { used(.nowNextPomodoroStep); model.continueUntimed() }
                                 .buttonStyle(.bordered).controlSize(.small)
                                 .help("不休息、接着做——转成往上记的计时（从已专注时长起），从此不再打断")
-                            Button("再来一段") { model.confirmPomodoroNext() }
+                            Button("再来一段") { used(.nowNextPomodoroStep); model.confirmPomodoroNext() }
                                 .buttonStyle(.borderedProminent).controlSize(.small)
                                 .help("先休息一小段，再来一段专注")
                         }
@@ -286,9 +292,9 @@ struct ExecutionPanel: View {
                         // 休息段满：回到专注 / 转轻计时（段间=可改计时方式的窗口，工作段中锁定——Jason 定 2026-07-08）
                         Text("休息好了，回到专注？").font(.callout).foregroundStyle(theme.positiveTint)   // 休息绿归队（D，Jason 裁）
                         HStack(spacing: 8) {
-                            Button("回到专注") { model.confirmPomodoroNext() }
+                            Button("回到专注") { used(.nowNextPomodoroStep); model.confirmPomodoroNext() }
                                 .buttonStyle(.borderedProminent).controlSize(.small)
-                            Button("继续计时") { model.continueUntimed() }
+                            Button("继续计时") { used(.nowNextPomodoroStep); model.continueUntimed() }
                                 .buttonStyle(.bordered).controlSize(.small)
                                 .help("不再来一段——转成往上记的计时（净专注续走）")
                         }
@@ -320,16 +326,17 @@ struct ExecutionPanel: View {
                             ) {
                                 Button(remaining.map { "休息（之后本周还可 \($0 - 1) 次）" } ?? "休息") {
                                     PomodoroDiscipline.consume()
+                                    used(.nowNextPomodoroStep)
                                     model.confirmPomodoroNext()
                                 }
                                 Button("继续专注", role: .cancel) {}
                             }
                         }
                     } else {
-                        Button("提前结束") { model.confirmPomodoroNext() }
+                        Button("提前结束") { used(.nowNextPomodoroStep); model.confirmPomodoroNext() }
                             .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
                             .help("不必等满，现在就回到专注")
-                        Button("继续计时") { model.continueUntimed() }
+                        Button("继续计时") { used(.nowNextPomodoroStep); model.continueUntimed() }
                             .font(.caption2).buttonStyle(.plain).foregroundStyle(.secondary).underline()
                             .help("休息段中改主意——转成往上记的计时（净专注续走）")
                     }
@@ -346,7 +353,7 @@ struct ExecutionPanel: View {
 
     @ViewBuilder private func actions(compact: Bool) -> some View {
         if model.isOnBreak {
-            Button { Task { await model.toggleBreak() } } label: {
+            Button { used(.nowNextBreak); Task { await model.toggleBreak() } } label: {
                 Label("结束休息，回来", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -356,12 +363,12 @@ struct ExecutionPanel: View {
             // 体检 #7（U1）：番茄段间确认态时，段间卡的「再来一段/回到专注」才是当刻主键——
             // 「完成这件」降为 bordered，六态「互斥各持一颗 prominent」在渲染层真实成立
             if model.pomodoroPhase?.pendingConfirm == true {
-                Button { Task { await model.completeCurrent() } } label: {
+                Button { used(.nowNextFinish); Task { await model.completeCurrent() } } label: {
                     Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered).tint(.primary)
             } else {
-                Button { Task { await model.completeCurrent() } } label: {
+                Button { used(.nowNextFinish); Task { await model.completeCurrent() } } label: {
                     Label("完成这件", systemImage: "checkmark.circle.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -372,14 +379,17 @@ struct ExecutionPanel: View {
             // 分心自动休息的撤销口（#26 红线④）：感知误判（其实在查资料）→ 一键把那段算回投入。
             // 只在自动休息刚结束的 10 分钟内出现；判定权在用户——安全阀，compact 也保留。
             if model.canUndoAutoBreak {
-                Button { model.undoLastAutoBreak() } label: {
+                Button {
+                    FeatureUsage.record(.autoBreak, .undone)   // W21：自动休息的判定被你撤销
+                    model.undoLastAutoBreak()
+                } label: {
                     Label("刚才不算休息（算回投入）", systemImage: "arrow.uturn.backward")
                 }
                 .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).underline()
             }
         } else if model.selected != nil {
             // 标题展示归 header「待开始」区（语义去重，批次6）
-            Button { Task { await model.startSelected() } } label: {
+            Button { used(.nowNextStart); Task { await model.startSelected() } } label: {
                 Label("开始这件", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -387,7 +397,7 @@ struct ExecutionPanel: View {
         } else {
             if let next = model.nextSuggested {
                 // 标题展示归 header「下一件：X」（语义去重，批次6）
-                Button { Task { await model.startBlock(next) } } label: {
+                Button { used(.nowNextStart); Task { await model.startBlock(next) } } label: {
                     Label("开始下一件", systemImage: "play.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -400,13 +410,13 @@ struct ExecutionPanel: View {
     /// 转番茄可选段数（做满自动转轻计时续走）；只改运行态，块存的风格不动。
     /// 菜单内容抽出（S3-P1）：常规排与 compact ⋯ 溢出共用同一份内容，不复制逻辑。
     @ViewBuilder private var timingMenuItems: some View {
-        Button("轻计时") { model.changeTiming(to: .light) }
-        Button("不计时") { model.changeTiming(to: TimingStyle.none) }
+        Button("轻计时") { used(.nowNextTiming); model.changeTiming(to: .light) }
+        Button("不计时") { used(.nowNextTiming); model.changeTiming(to: TimingStyle.none) }
         Menu("番茄钟") {
-            Button("1 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
-            Button("2 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
-            Button("3 段") { model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
-            Button("不限段") { model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
+            Button("1 段") { used(.nowNextTiming); model.changeTiming(to: .pomodoro, pomodoroSegments: 1) }
+            Button("2 段") { used(.nowNextTiming); model.changeTiming(to: .pomodoro, pomodoroSegments: 2) }
+            Button("3 段") { used(.nowNextTiming); model.changeTiming(to: .pomodoro, pomodoroSegments: 3) }
+            Button("不限段") { used(.nowNextTiming); model.changeTiming(to: .pomodoro, pomodoroSegments: nil) }
         }
     }
 
@@ -434,13 +444,13 @@ struct ExecutionPanel: View {
             Text("没有其它待做的事")
         } else {
             ForEach(model.remaining) { item in
-                Button(item.title) { Task { await model.switchTo(item) } }
+                Button(item.title) { used(.nowNextSwitch); Task { await model.switchTo(item) } }
             }
         }
         if !redoable.isEmpty {
             Section("已完成 · 再来一段") {
                 ForEach(redoable) { item in
-                    Button("✓ \(item.title)") { Task { await model.startBlock(item) } }
+                    Button("✓ \(item.title)") { used(.nowNextSwitch); Task { await model.startBlock(item) } }
                 }
             }
         }
@@ -463,13 +473,13 @@ struct ExecutionPanel: View {
             Text("没有其它待做的事")
         } else {
             ForEach(model.remaining) { item in
-                Button(item.title) { model.startAlso(item) }
+                Button(item.title) { used(.nowNextParallel); model.startAlso(item) }
             }
         }
         if !redoable.isEmpty {
             Section("已完成 · 再来一段") {
                 ForEach(redoable) { item in
-                    Button("✓ \(item.title)") { model.startAlso(item) }
+                    Button("✓ \(item.title)") { used(.nowNextParallel); model.startAlso(item) }
                 }
             }
         }
@@ -488,7 +498,7 @@ struct ExecutionPanel: View {
     }
 
     private var breakButton: some View {
-        Button { Task { await model.toggleBreak() } } label: {
+        Button { used(.nowNextBreak); Task { await model.toggleBreak() } } label: {
             Label("开始休息", systemImage: "cup.and.saucer")
         }
     }
@@ -531,7 +541,7 @@ struct ExecutionPanel: View {
                         }
                     }
                     Spacer()
-                    Button { Task { await model.completeBackground(run.id) } } label: {
+                    Button { used(.nowNextBackgroundFinish); Task { await model.completeBackground(run.id) } } label: {
                         Image(systemName: "checkmark.circle")
                     }
                     .buttonStyle(.plain).foregroundStyle(theme.positiveTint)
@@ -580,7 +590,7 @@ struct ExecutionPanel: View {
             breakButton
             if let onOpenJournal {
                 Divider()
-                Button("回看今天") { onOpenJournal() }
+                Button("回看今天") { used(.nowNextOpenJournal); onOpenJournal() }
             }
             #if os(macOS)
             Button { AppLifecycle.shared?.reallyQuit() } label: { Label("退出", systemImage: "power") }

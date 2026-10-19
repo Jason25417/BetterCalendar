@@ -62,7 +62,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 AppLifecycle.shared?.showMainWindow()
                 NotificationCenter.default.post(name: MenuBarPopoverHold.openJournalNotice, object: nil)
             },
-            compactCapable: true)
+            compactCapable: true,
+            usageSurface: "菜单栏")
             .environment(\.appTheme, ThemeSettings.current)
             .tint(ThemeSettings.current.accent))
 
@@ -160,7 +161,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         }
     }
 
-    @objc private func openMain() { AppLifecycle.shared?.showMainWindow() }
+    @objc private func openMain() { FeatureUsage.used(.menubarOpenMain); AppLifecycle.shared?.showMainWindow() }
     @objc private func quitApp() { AppLifecycle.shared?.reallyQuit() }
 
     /// 空格误关的正解（0.27.1）：behavior 在弹窗已显示后改动**不生效**（transient 监听 show 时装好）——
@@ -185,6 +186,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             popover.close()   // 强制关（不经 popoverShouldClose）：图标点击永远能关，即使输入进行中
         } else {
             Task { await model.loadToday() }   // 打开即刷新今日
+            FeatureUsage.used(.menubarPopover)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             // 让弹窗能出现在任何 Space / 全屏 App 之上：
             // 弹窗窗口默认只属于本 App 的 Space（桌面）——在别的 App/全屏页点图标时会"看不见"。

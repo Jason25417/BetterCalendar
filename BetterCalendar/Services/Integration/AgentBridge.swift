@@ -594,6 +594,8 @@ nonisolated struct AgentBridgeIO: Sendable {
     var eveningFacts: () -> [String: Any] = { [:] }
     /// W13：设备活动镜像（本机日文件 → bridge/activity/YYYY-MM-DD.jsonl），每轮同步时跑；失败由它自己记 DevLog，不打断同步。
     var activityMirror: ((AgentBridgeIO) async -> Void)?
+    /// W21：功能使用汇总镜像（bridge/usage.json，开关关着时组装点不写）；失败由它自己记 DevLog，不打断同步。
+    var usageMirror: ((AgentBridgeIO) -> Void)?
     /// 同步互斥：推送唤醒与定时轮询可能撞在一起；进行中再来的请求合并成「做完再跑一轮」，避免重复转交。
     private var syncing = false
     private var resyncRequested = false
@@ -706,6 +708,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             }
             try emitResolvedProposals(io: io)
             await activityMirror?(io)
+            usageMirror?(io)
             lastSync = .now
         } catch { report("桥接同步失败", error) }
         refreshRuntime(io: io)

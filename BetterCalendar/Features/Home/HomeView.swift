@@ -187,7 +187,10 @@ struct HomeView: View {
                 }
                 deps.router.scheduleRequest = nil   // 消费掉
             }
-            .onAppear { model.autoLoadOnAppear() }   // 进页自动加载所选那天的计划
+            .onAppear {
+                model.autoLoadOnAppear()   // 进页自动加载所选那天的计划
+                FeatureUsage.seen(.todayPage)
+            }
             .onDisappear { Task { await model.flushAutosave() } }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { Task { await model.flushAutosave() } }   // 回后台前把等着的改动存掉
@@ -237,6 +240,7 @@ struct HomeView: View {
                         let day = DayContext.logicalDay(offset: offset)
                         let selected = Calendar.current.isDate(day, inSameDayAs: model.targetDay)
                         Button {
+                            if !selected { FeatureUsage.used(.todayDaySwitch, offset == 0 ? "回今天" : "+\(offset)天") }
                             Task { await model.selectDay(day) }
                         } label: {
                             Text(Self.chipLabel(day, offset: offset))
@@ -590,6 +594,13 @@ struct HomeView: View {
                 .onSubmit(sendToAgent)
                 .disabled(deps.agentChat == nil)
                 .accessibilityIdentifier("bc.today.say")
+                // W21：打了字 = 开了头；清空没发 = 没做完（发出去 = 做完，见 sendToAgent）
+                .onChange(of: sayText) { old, new in
+                    let wasEmpty = old.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let isEmpty = new.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if wasEmpty, !isEmpty { FeatureUsage.begin(.todaySayToAgent) }
+                    if !wasEmpty, isEmpty { FeatureUsage.abandonIfOpen(.todaySayToAgent) }
+                }
             Button(action: sendToAgent) {
                 Label("发给智能体", systemImage: "arrow.up.circle.fill").labelStyle(.iconOnly).font(.title2)
             }
@@ -604,6 +615,7 @@ struct HomeView: View {
     private func sendToAgent() {
         let text = sayText
         guard let chat = deps.agentChat, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        FeatureUsage.complete(.todaySayToAgent)   // 先关开头，下面清空输入框不算没做完
         sayText = ""
         sayFocused = false
         deps.router.selectedTab = .chat   // 回复与提案都在「智能体」页

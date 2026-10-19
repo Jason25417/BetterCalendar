@@ -61,6 +61,13 @@ struct SettingsView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
     @State private var showFeedback = false
+    /// W21：另一台设备同步过来的设置会重写 @State、触发 onChange——那不是你在这台改的，不记「用过」。
+    @State private var remoteReloadAt: Date?
+    @State private var shareUsage = FeatureUsageSettings.shareWithAgent
+    private func usedSetting(_ f: FeatureID, _ detail: String? = nil) {
+        if let t = remoteReloadAt, Date.now.timeIntervalSince(t) < 2 { return }
+        FeatureUsage.used(f, detail)
+    }
     @State private var focusFollowOn = FocusFollowSettings.enabled
     #if os(macOS)
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -76,15 +83,22 @@ struct SettingsView: View {
                         ProposalPanel(center: proposals, bridge: bridge, alertPush: alertPush, messages: agentMessages,
                                       showsPending: false)
                             .navigationTitle("审批记录与规则")
+                            .onAppear { FeatureUsage.used(.settingsApprovalRecords) }
                     } label: {
                         Label("审批记录与规则", systemImage: "checkmark.seal")
                     }
                     .accessibilityIdentifier("bc.settings.approvals")
                     NavigationLink {
                         AgentChatSettingsView()
+                            .onAppear { FeatureUsage.used(.settingsEveningReview) }
                     } label: {
                         Label("晚间复盘", systemImage: "moon.stars")
                     }
+                    // W21（W17 新功能约定：日用版默认关）：让智能体参考功能使用统计
+                    Toggle("让智能体参考功能使用", isOn: $shareUsage)
+                        .onChange(of: shareUsage) { _, v in FeatureUsageSettings.shareWithAgent = v }
+                    Text("BetterCalendar 只在这台设备上记「哪个功能、用过 / 看见 / 没做完 / 撤销」，不记标题、内容、App 或网站名，从不上传。打开后，Mac 会把汇总写给智能体（context.json 与 bridge/usage.json），它偶尔会以提议的口吻建议你试试某个功能——可以不理，它不会追问。关掉 = 智能体看不到这些统计（已写的汇总会删掉），本机记录照旧。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
@@ -94,6 +108,7 @@ struct SettingsView: View {
             }
             Section("云端排程大脑") {
                 Toggle("启用云端", isOn: $useCloud)
+                    .onChange(of: useCloud) { _, v in usedSetting(.settingsCloudBrain, v ? "开" : "关") }
 
                 Picker("服务商", selection: $provider) {
                     ForEach(LLMProvider.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -145,7 +160,7 @@ struct SettingsView: View {
             // 假日历仅存于单测/预览页，不再暴露给用户。
 
             Section("反馈") {
-                Button("发送反馈…") { showFeedback = true }
+                Button("发送反馈…") { FeatureUsage.used(.settingsFeedback); showFeedback = true }
                 Text("一段话说清问题或想法；「附诊断信息」全文可预览（剔除行为通道，日记/日历内容不会进入）。内测期也可直接在 TestFlight 里截图反馈。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -153,7 +168,7 @@ struct SettingsView: View {
 
             Section("日记") {
                 Toggle("隐私锁（Face ID / Touch ID / 密码）", isOn: $journalLock)
-                    .onChange(of: journalLock) { _, v in JournalSettings.privacyLock = v }
+                    .onChange(of: journalLock) { _, v in JournalSettings.privacyLock = v; usedSetting(.settingsJournalLock, v ? "开" : "关") }
                 Text("开启后进入日记页需解锁；退后台自动重新上锁。设备没设密码时不拦。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -173,7 +188,10 @@ struct SettingsView: View {
 
             // 进阶设置（渐进披露，§5.9）：手动折叠（DisclosureGroup 在 macOS Form 里收不回）
             Section("进阶设置") {
-                Button { withAnimation(Motion.standard) { showAdvanced.toggle() } } label: {   // 动效令牌（条文10）
+                Button {
+                    if !showAdvanced { FeatureUsage.used(.settingsAdvanced) }
+                    withAnimation(Motion.standard) { showAdvanced.toggle() }
+                } label: {   // 动效令牌（条文10）
                     HStack {
                         Text(showAdvanced ? "收起" : "展开进阶设置")
                         Spacer()
@@ -202,7 +220,7 @@ struct SettingsView: View {
 
                     // 分心自动休息（#26 V1，2026-07-11）：默认关；名单自建；检测到=静默转休息（菜单栏 ☕）
                     Toggle("自动休息感知（去休息了就帮你记休息）", isOn: $distractionOn)
-                        .onChange(of: distractionOn) { _, v in DistractionSettings.enabled = v }
+                        .onChange(of: distractionOn) { _, v in DistractionSettings.enabled = v; usedSetting(.settingsDistraction, v ? "开" : "关") }
                     if distractionOn {
                         TextField("休息信号（逗号分隔）：如 bilibili, youtube, 小红书",
                                   text: Binding(get: { DistractionSettings.keywordsText },
@@ -274,6 +292,7 @@ struct SettingsView: View {
                     Toggle("多端跟随专注（Beta）", isOn: $focusFollowOn)
                         .onChange(of: focusFollowOn) { _, v in
                             FocusFollowSettings.enabled = v
+                            usedSetting(.settingsFocusFollow, v ? "开" : "关")
                             FocusFollow.settingsChanged()
                         }
                     Text("同一 iCloud 的另一台设备开始专注时，这台自动跟随显示同任务计时；动作立即发送，推送优先，活动中每 5 秒补查，空闲时每 15 秒补查，实际到达受网络与系统调度影响；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
@@ -357,7 +376,9 @@ struct SettingsView: View {
 
                     Picker("皮肤", selection: Binding(
                         get: { ThemeSettings.current.id },
-                        set: { id in if let t = ThemeSettings.all.first(where: { $0.id == id }) { ThemeSettings.current = t } })) {
+                        set: { id in
+                            if let t = ThemeSettings.all.first(where: { $0.id == id }) { ThemeSettings.current = t; FeatureUsage.used(.settingsSkin) }
+                        })) {
                         ForEach(ThemeSettings.all) { Text($0.name).tag($0.id) }
                     }
                     Text("皮肤系统接口已就绪（§5.9）：新皮肤设计定稿后会出现在这里，选择后随视图迁移逐步生效。")
@@ -382,6 +403,7 @@ struct SettingsView: View {
                                     set: { on in
                                         if on { busyExcluded.remove(title) } else { busyExcluded.insert(title) }
                                         ExternalCalendarSettings.excludedTitles = Array(busyExcluded)
+                                        FeatureUsage.used(.settingsBusyCalendars)
                                     }))
                             }
                             Text("默认全部算：时间线自动调整时绕开这些日历里的事件（只读，不改你的日历）。")
@@ -412,14 +434,14 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                     Stepper("最晚工作到 \(windDownHour):00", value: $windDownHour, in: 18...24)
-                        .onChange(of: windDownHour) { _, v in WorkHoursSettings.windDownHour = v }
+                        .onChange(of: windDownHour) { _, v in WorkHoursSettings.windDownHour = v; usedSetting(.settingsWindDown) }
                     Text("软收工：AI 排/重排时尽量别把事排到这个点之后（略超一点点能多做完一件大事则可以）；你明确说的晚间事不受限。当天想早睡/晚睡，直接在排日程里说一句即可。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     Picker("主动建议强度", selection: $pushIntensity) {
                         ForEach(PushIntensity.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
-                    .onChange(of: pushIntensity) { _, v in SuggestionSettings.intensity = v }
+                    .onChange(of: pushIntensity) { _, v in SuggestionSettings.intensity = v; usedSetting(.settingsPushIntensity, v.rawValue) }
                     Text("今天页顶部偶尔提醒一句临近 DDL / 久放的未来任务（休息日全静音、可「别再提」永久静音某件）。默认温和。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -428,6 +450,7 @@ struct SettingsView: View {
             frozenDotsSections
         }
         .formStyle(.grouped)   // System-Settings 风格分组卡片（修「排版不好看」）
+        .onAppear { FeatureUsage.seen(.settingsPage) }
         // #35：另一台设备改了设置 → iCloud 同步到本地后重读 @State，面板即时反映（面板通常没开着，主要保开着时不显示旧值）
         .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
             reloadSyncedState()
@@ -449,6 +472,9 @@ struct SettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Button("打开错误日志") { showDevLog = true }
                 .sheet(isPresented: $showDevLog) { DevLogSheet(isPresented: $showDevLog) }
+            if developerOptions {
+                NavigationLink { FeatureUsageView() } label: { Label("功能使用（只读）", systemImage: "chart.bar.doc.horizontal") }
+            }
         }
         if developerOptions {
             #if os(macOS)
@@ -535,6 +561,8 @@ struct SettingsView: View {
 
     /// 远程设置同步到本地后重读 @State（#35）：只覆盖白名单同步项，本地未同步项（key/名单等）不动。
     private func reloadSyncedState() {
+        remoteReloadAt = .now
+        shareUsage = FeatureUsageSettings.shareWithAgent
         model = CloudSettings.model
         provider = CloudSettings.provider
         sfModel = CloudSettings.siliconflowModel
@@ -575,7 +603,7 @@ struct RoutineTemplateRows: View {
             HStack {
                 Toggle(t.name, isOn: Binding(
                     get: { store.templates.first { $0.id == t.id }?.enabled ?? false },
-                    set: { var nt = t; nt.enabled = $0; store.update(nt) }))
+                    set: { var nt = t; nt.enabled = $0; store.update(nt); FeatureUsage.used(.settingsRoutines, $0 ? "开" : "关") }))
                 Spacer()
                 DatePicker("", selection: Binding(
                     get: {

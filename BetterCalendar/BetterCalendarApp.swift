@@ -244,7 +244,9 @@ struct BetterCalendarApp: App {
     @MainActor
     private func handlePendingAppIntent() {
         let payload = AppIntentRequest.payload()
+        let source = AppIntentRequest.source()
         guard let request = AppIntentRequest.consume() else { return }
+        if let f = FeatureID.intent(request.rawValue, source: source) { FeatureUsage.used(f) }   // W21 功能使用探针
         switch request {
         case .arrangeToday:
             // W19：老排程链退役——「排今天」快捷指令的那句话交给智能体（它提出的安排等你批准）；没说话 = 打开今天

@@ -93,7 +93,9 @@ struct JournalView: View {
                 if !locked {
                     ToolbarItem(placement: .primaryAction) { exportButton }
                     ToolbarItem(placement: .primaryAction) {
-                        NavigationLink { AchievementsView(store: deps.milestones) } label: {
+                        NavigationLink {
+                            AchievementsView(store: deps.milestones).onAppear { FeatureUsage.used(.journalAchievements) }
+                        } label: {
                             Label("成就", systemImage: "seal")
                         }
                         .help("累计里程碑——只做加法，没有断签")
@@ -102,10 +104,12 @@ struct JournalView: View {
             }
             .navigationDestination(for: JournalEntry.self) { e in
                 JournalDetailView(entry: e, model: model, photoStore: deps.photoStore)
+                    .onAppear { FeatureUsage.used(.journalHistory) }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: DataSyncMonitor.dataChanged)) { _ in model.reload() }
         .onAppear {
+            FeatureUsage.seen(.journalPage)
             if locked { unlock() }
             openTodayIfNeeded()
             deps.milestones.refresh()   // 成就检查（天级节奏：进日记页时看看有没有新点亮）
@@ -124,6 +128,7 @@ struct JournalView: View {
                 deps.router.wrapUpRequest = false
                 wrapUpStage = .review
                 showReviewNow = true
+                FeatureUsage.begin(.journalWrapUp)   // W21：进了收尾流程；盖章 = 做完，「先不收尾」= 没做完
             }
         }
         .onChange(of: deps.router.openAchievements) { _, want in
@@ -148,6 +153,7 @@ struct JournalView: View {
                     .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
                 Spacer()
                 Button {
+                    FeatureUsage.used(.journalPlanTomorrow)
                     wrapUpJustSealed = false
                     deps.router.selectedTab = .schedule
                     deps.router.scheduleRequest = .planTomorrow
@@ -158,16 +164,18 @@ struct JournalView: View {
         .frame(maxWidth: .infinity)
         .padding(16)   // 体检 #24：情感时刻族统一 16/14（与首页收口卡/就位卡同档）
         .background(theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .onAppear { FeatureUsage.seen(.journalPlanTomorrow) }
     }
 
     /// 「先不收尾」——全程常驻、任一步可退、零痕迹（红线①）。
     private var notNowButton: some View {
-        Button("先不收尾 ✕") { wrapUpStage = nil }
+        Button("先不收尾 ✕") { FeatureUsage.abandonIfOpen(.journalWrapUp); wrapUpStage = nil }
             .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
     }
 
     private func sealWrapUp() {
         WrapUpSeal.seal()
+        FeatureUsage.complete(.journalWrapUp)
         // E5c 两阶段溢出的硬执行时刻：「今天到此为止」的承诺一起结算没排下的块
         // （默认静默收待办区+明早露脸；复盘区逐件覆写在此消费；幂等闸按日一次）
         deps.timeline?.executeSpills(day: DayContext.logicalStartOfDay(.now))
@@ -247,9 +255,10 @@ struct JournalView: View {
                     Spacer()
                     // 自动日记（0.28，Jason 设想）：15–30 秒最低闭环——本地模板生成简短鼓励型正文
                     //（不出云、瞬时）；与手写明显区分（首行 🤖 标记 + 「自动日记」标签）。
-                    Button { Task { await applyAutoJournal() } } label: {
+                    Button { FeatureUsage.used(.journalAutoJournal); Task { await applyAutoJournal() } } label: {
                         Label("自动日记", systemImage: "wand.and.stars")
                     }
+                    .onAppear { FeatureUsage.seen(.journalAutoJournal) }
                     .tint(.primary)   // 修正批 D：次要工具收中性（条文 2）
                     .help("用今天的做成记录自动生成一篇简短日记（可再编辑；与手写内容明显区分）")
                     if wrapUpStage == .review { notNowButton }
@@ -276,7 +285,7 @@ struct JournalView: View {
                 Image(systemName: "sun.max").foregroundStyle(.secondary)
                 Text("今天还在进行——晚上回来回看这一天").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("现在就回看") { showReviewNow = true }
+                Button("现在就回看") { FeatureUsage.used(.journalReviewNow); showReviewNow = true }
                     .font(.caption).buttonStyle(.plain).underline().foregroundStyle(.secondary)
             }
         }
@@ -415,7 +424,7 @@ struct JournalView: View {
     /// 导出全部日记为 markdown（R5）：macOS 存盘 / iOS 分享。
     @ViewBuilder private var exportButton: some View {
         #if os(macOS)
-        Button { exportMarkdown() } label: { Label("导出日记", systemImage: "square.and.arrow.up") }
+        Button { FeatureUsage.used(.journalExport); exportMarkdown() } label: { Label("导出日记", systemImage: "square.and.arrow.up") }
             .help("把全部日记导出为 Markdown 文件")
         #else
         ShareLink(item: MarkdownDocument(text: model.exportMarkdown()),

@@ -56,9 +56,15 @@ struct ProposalCardControls: View {
         }
         HStack(spacing: 8) {
             if primary.parameters.isEmpty {
-                Button("同意") { Task { await center.decide(proposal.id, .approve) } }.buttonStyle(.borderedProminent)
+                Button("同意") {
+                    FeatureUsage.used(.proposalApprove)
+                    Task { await center.decide(proposal.id, .approve) }
+                }.buttonStyle(.borderedProminent)
             }
-            Button("拒绝", role: .destructive) { Task { await center.decide(proposal.id, .decline) } }.buttonStyle(.bordered)
+            Button("拒绝", role: .destructive) {
+                FeatureUsage.used(.proposalDecline)
+                Task { await center.decide(proposal.id, .decline) }
+            }.buttonStyle(.bordered)
             Button("回一句") { center.toggleReplying(proposal.id) }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
             rememberMenu
         }
@@ -75,13 +81,16 @@ struct ProposalCardControls: View {
                     Text("不能放行：\(why)")
                 } else {
                     Button("同意，以后「\(proposal.action.ruleKindLabel)」都直接做，做完告诉你") {
+                        FeatureUsage.used(.proposalRememberRule, "放行·告诉我"); FeatureUsage.used(.proposalApprove)
                         Task { await center.decide(proposal.id, .approve, remember: (scope, .allowAndInform)) }
                     }
                     Button("同意，以后都直接做，不用告诉我") {
+                        FeatureUsage.used(.proposalRememberRule, "放行·不告诉"); FeatureUsage.used(.proposalApprove)
                         Task { await center.decide(proposal.id, .approve, remember: (scope, .allow)) }
                     }
                 }
                 Button("拒绝，以后这类都不要提", role: .destructive) {
+                    FeatureUsage.used(.proposalRememberRule, "拒绝"); FeatureUsage.used(.proposalDecline)
                     Task { await center.decide(proposal.id, .decline, remember: (scope, .deny)) }
                 }
             }
@@ -99,7 +108,10 @@ struct ProposalCardControls: View {
                     Text("\(o.index + 1). \(o.label)").font(.subheadline.bold())
                     ForEach(Array(o.changes.enumerated()), id: \.offset) { _, c in Text(Proposal.line(c)).font(.caption) }
                     if o.parameters.isEmpty {
-                        Button("选这个") { Task { await center.decide(proposal.id, .approve, choice: o.index) } }
+                        Button("选这个") {
+                            FeatureUsage.used(.proposalChooseOption); FeatureUsage.used(.proposalApprove)
+                            Task { await center.decide(proposal.id, .approve, choice: o.index) }
+                        }
                             .buttonStyle(.borderedProminent).controlSize(.small)
                             .accessibilityIdentifier("bc.proposal.pick.\(o.index)")
                     } else {
@@ -111,11 +123,15 @@ struct ProposalCardControls: View {
                 .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.3)))
             }
             HStack(spacing: 8) {
-                Button("都不要", role: .destructive) { Task { await center.decide(proposal.id, .decline) } }.buttonStyle(.bordered)
+                Button("都不要", role: .destructive) {
+                    FeatureUsage.used(.proposalDecline)
+                    Task { await center.decide(proposal.id, .decline) }
+                }.buttonStyle(.bordered)
                 Button("回一句") { center.toggleReplying(proposal.id) }.buttonStyle(.bordered).accessibilityIdentifier("bc.proposal.reply")
             }
             .controlSize(.small)
         }
+        .onAppear { FeatureUsage.seen(.proposalChooseOption) }
     }
 
     // MARK: 回一句
@@ -186,6 +202,8 @@ struct ProposalTuner: View {
                     .accessibilityIdentifier("bc.proposal.tuned.invalid")
             }
             Button(approveTitle) {
+                FeatureUsage.used(.proposalApprove)
+                if proposal.hasAlternatives { FeatureUsage.used(.proposalChooseOption) }
                 let picked = current
                 Task { await center.decide(proposal.id, .approve, choice: proposal.hasAlternatives ? option.index : nil, values: picked) }
             }
@@ -195,6 +213,9 @@ struct ProposalTuner: View {
         }
         .padding(8)
         .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .onAppear { FeatureUsage.seen(.proposalTune) }
+        // W21：第一次改值 = 开始调数值（批准这个方案 = 做完；拒绝 / 作废 = 没做完，见 ProposalCenter）
+        .onChange(of: values) { _, v in if !v.isEmpty { center.noteTuningStarted(proposal.id, option: option.index) } }
         .task(id: values) {
             // 拖滑块时稍等一下再算（被下一次改动取消 = 只算最后那个值）。
             if !values.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }

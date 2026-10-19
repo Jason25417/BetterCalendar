@@ -197,5 +197,8 @@ struct JournalEditor: View {
         #endif
         return nil
     }
-    private func touch() { entry.modifiedAt = .now; model.save() }
+    private func touch() {
+        entry.modifiedAt = .now; model.save()
+        FeatureUsage.usedThrottled(.journalWrite)   // W21：写 / 改日记（打字逐字触发 → 2 分钟内只记一次；不记内容）
+    }
 }

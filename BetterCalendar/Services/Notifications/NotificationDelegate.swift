@@ -32,6 +32,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         if let route = LocalAgentChatNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier,
                                                     typedText: (response as? UNTextInputNotificationResponse)?.userText) {
+            FeatureUsage.used(route.text == nil ? .notificationChatOpen : .notificationChatReply)   // W21
             if route.text == nil {
                 router.openChat()
                 #if os(macOS)
@@ -42,6 +43,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         if let route = LocalAgentMessageNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            FeatureUsage.used(route.reaction == nil ? .notificationMessageOpen : .notificationMessageReact, route.reaction?.rawValue)   // W21
             if route.reaction == nil {
                 router.openProposals = true
                 #if os(macOS)
@@ -53,6 +55,7 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         }
         if let route = LocalProposalNotifier.response(userInfo: info, actionIdentifier: response.actionIdentifier,
                                                       typedText: (response as? UNTextInputNotificationResponse)?.userText) {
+            FeatureUsage.used(Self.usageFeature(route.response))   // W21
             if route.response == .open {
                 router.proposalFocusId = route.id
                 router.openProposals = true
@@ -81,16 +84,28 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         }
         switch response.notification.request.identifier {
         case "bc.reminder.morning":
+            FeatureUsage.used(.notificationMorning)   // W21
             // 0.23 A：开始今天已退役——早通知改为打开执行界面、第一件「待开始」（不自动计时）
             router.selectedTab = .schedule
             router.primeNextStart = true
         case "bc.reminder.evening":
+            FeatureUsage.used(.notificationEvening)   // W21
             // 0.38（#33）：晚通知直达日记页并进入分步收尾流程（明确的收尾入口）
             router.selectedTab = .journal
             router.journalRequest = .now
             router.wrapUpRequest = true
         default:
             break
+        }
+    }
+
+    /// W21：提案通知上的回应 → 功能（批准 / 选方案都算批准）。
+    static func usageFeature(_ r: LocalProposalNotifier.Response) -> FeatureID {
+        switch r {
+        case .open: .notificationProposalOpen
+        case let .decide(d, _): d == .approve ? .notificationProposalApprove : .notificationProposalDecline
+        case .reply: .notificationProposalReply
+        case .undo: .notificationProposalUndo
         }
     }
 
