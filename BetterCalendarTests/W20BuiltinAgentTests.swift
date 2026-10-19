@@ -46,7 +46,8 @@ import Testing
         var active = true
         func emit(kind: String, summary: String, payload: [String: Any]) { emitted.append(kind) }
         func activate() { active = true }
-        func deactivate() { active = false }
+        var deactivatedFor: [AgentKind] = []
+        func deactivate(active: AgentKind) { self.active = false; deactivatedFor.append(active) }
     }
 
     struct Env {
@@ -132,6 +133,7 @@ import Testing
         let e = env()
         e.selection.select(.builtin)
         #expect(e.claude.active == false)
+        #expect(e.claude.deactivatedFor == [.builtin])   // W24：告诉通道「现在接通的是内置」（桥接据此写状态标记给心跳）
         e.hub.emit(kind: "block_finished", summary: "做完了")
         #expect(e.claude.emitted.isEmpty)
         #expect(e.runtime.queuedCount == 1)

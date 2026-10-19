@@ -87,6 +87,25 @@ nonisolated struct AgentBridgeIO: Sendable {
         return eventId
     }
 
+    // MARK: 当前智能体状态标记（W24）
+
+    /// 桥接目录里的「当前智能体」状态标记（相对路径）。读者 = 智能体工作区的心跳 heartbeat/heartbeat.mjs。
+    static let activeAgentMarkerPath = "runtime/active-agent.json"
+
+    /// 标记内容：只说现在接通的是哪个实现、哪个通道、何时写的。**不是通道**（产品原则 9）：不带上下文、不带事件，App 从不读回。
+    static func activeAgentMarkerObject(_ kind: AgentKind, channel: AppChannel, at now: Date) -> [String: Any] {
+        ["schemaVersion": 1, "app": "BetterCalendar", "channel": channel.rawValue, "activeAgent": kind.rawValue,
+         "writtenAt": ISO8601DateFormatter().string(from: now),
+         "note": "状态标记：App 在切换当前智能体时与启动时各写一次；不是通道（不带上下文 / 事件，App 不读回）。供心跳区分「切到内置智能体」与「App 没在运行」"]
+    }
+
+    /// 只写这一个文件（只建 runtime/，不建 events/ 等通道目录）。
+    func writeActiveAgentMarker(_ kind: AgentKind, channel: AppChannel = .current, at now: Date) throws {
+        try fm.createDirectory(at: root.appendingPathComponent("runtime"), withIntermediateDirectories: true)
+        try writeAtomic(JSONSerialization.data(withJSONObject: Self.activeAgentMarkerObject(kind, channel: channel, at: now),
+                                               options: [.prettyPrinted, .sortedKeys]), to: Self.activeAgentMarkerPath)
+    }
+
     private static let eventStamp: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyyMMddHHmmss"; return f
     }()
@@ -784,6 +803,26 @@ nonisolated struct AgentBridgeIO: Sendable {
         let io = AgentBridgeIO(root: url)
         do { try body(io) } catch { report(what, error) }
         refreshRuntime(io: io)
+    }
+
+    // MARK: 当前智能体状态标记（W24）
+
+    /// 切换「当前智能体」时 / 启动时调用（AgentHub.apply）。**有意不受 isActive() 管**：切到内置智能体后桥接不是通道，
+    /// 但心跳（独立于 App 的健康检查）需要知道「不写 context.json 是按设计」，否则会误报「App 没在运行」。
+    /// 只写 runtime/active-agent.json 这一个文件：不同步、不导入、不写上下文 / 事件，不轮询（一次切换写一次）。
+    /// 没连桥接目录 → 什么都不做（心跳那边会如实报「从没连上」）；通道标记不符 / 写失败 → 醒目报错（失败可见）。
+    func markActiveAgent(_ kind: AgentKind) {
+        guard let url = resolveFolder() else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do { try markActiveAgent(kind, io: AgentBridgeIO(root: url), at: .now) } catch { report("写当前智能体状态标记失败", error) }
+    }
+
+    /// 可直接用临时目录测试。通道不符（日用版 App 对着 Dev 工作区，或反之）→ 抛出，什么都不写。
+    func markActiveAgent(_ kind: AgentKind, io: AgentBridgeIO, at now: Date) throws {
+        if let mismatch = AppChannel.current.bridgeMismatch(io.root) { throw AgentBridgeError.invalid(mismatch) }
+        try io.writeActiveAgentMarker(kind, at: now)
+        DevLog.shared.info("智能体桥接", "已写当前智能体状态标记：\(kind.shortLabel)")
     }
 
     // MARK: 事件（SPEC §19 C1，默认关）
