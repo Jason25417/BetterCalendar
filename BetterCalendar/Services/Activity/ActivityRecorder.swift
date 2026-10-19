@@ -151,7 +151,7 @@ nonisolated enum ActivitySystemSignal: Sendable {
             case .sessionResigned: "sessionResigned"; default: "sessionActivated" }
             if core.recording == true {
                 out = [ActivityEvent(at: at, kind: .other, deviceId: core.deviceId, platform: core.platform,
-                                     detail: ["signal": "session", "state": name])]
+                                     detail: ["signal": "session", "state": name], deviceKind: ActivityDeviceKind.mac.rawValue)]
             }
         }
         if core.recording == true { status.working(.lockSleep, at: at) }

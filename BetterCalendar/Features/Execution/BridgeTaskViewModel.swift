@@ -214,7 +214,7 @@ import Observation
         [stateBridgeRejectionDomain, SharedTimerRejection.domain].contains(e.domain) && [400,401,403,404,409,422].contains(e.code)
     }
     private nonisolated static let stateBridgeRejectionDomain = "StateBridge.HTTP"
-    var syncedMessage: String { backend == .icloud ? "已同步；两端共用 iCloud 计时" : "已同步；与 Dots 共用 BC 计时" }
+    var syncedMessage: String { backend == .icloud ? "已同步；各台设备共用 iCloud 计时" : "已同步；与 Dots 共用 BC 计时" }
     private func report(_ text: String) {
         if lastError != text, !TestHost.isActive { DevLog.shared.warn("BC计时", text) }
         lastError = text; message = text

@@ -2,8 +2,9 @@
 //  ActivityPhoneSink.swift
 //  BetterCalendar
 //
-//  W13：「记一条」的统一入口（快捷指令、iPhone 运动/健康回填、iPhone 网络变化都走这里）：
-//    先写本机日文件 → iPhone 再进待上传队列并尽力传 iCloud（传不上留在队列里，下次再传）。
+//  W13：「记一条」的统一入口（快捷指令、iPhone / iPad 运动/健康回填、网络变化都走这里）：
+//    先写本机日文件 → iOS 设备再进待上传队列并尽力传 iCloud（传不上留在队列里，下次再传）。
+//  W28：这里是给每条记录盖「设备类别」章（iphone / ipad / mac）的唯一位置——调用方不用各自判断。
 //  Mac 上同一入口只写本机（Mac 的记录本来就在本机，智能体就在这台 Mac 上）。
 //  不依赖 AppContainer：快捷指令可能在 App 没开时把进程在后台拉起来，只做这一件事就走。
 //
@@ -18,18 +19,21 @@ actor ActivityPhoneSink {
     nonisolated let log: FileActivityLog
     nonisolated let outbox: ActivityOutbox?
     nonisolated let transport: (any ActivityCloudTransport)?
+    /// W28：本机设备类别；记下时给没有类别的记录补上。nil = 不补（测试按需显式传）。
+    nonisolated let deviceKind: ActivityDeviceKind?
 
-    init(log: FileActivityLog, outbox: ActivityOutbox?, transport: (any ActivityCloudTransport)?) {
-        self.log = log; self.outbox = outbox; self.transport = transport
+    init(log: FileActivityLog, outbox: ActivityOutbox?, transport: (any ActivityCloudTransport)?, deviceKind: ActivityDeviceKind? = nil) {
+        self.log = log; self.outbox = outbox; self.transport = transport; self.deviceKind = deviceKind
     }
 
     /// 生产单例（测试绝不碰：测试各自构造内存版）。
     static let shared: ActivityPhoneSink = {
         let log = FileActivityLog(root: FileActivityLog.defaultRoot)
         #if os(iOS)
-        return ActivityPhoneSink(log: log, outbox: ActivityOutbox(url: ActivityOutbox.defaultURL), transport: CloudKitActivityStore())
+        return ActivityPhoneSink(log: log, outbox: ActivityOutbox(url: ActivityOutbox.defaultURL), transport: CloudKitActivityStore(),
+                                 deviceKind: .current)
         #else
-        return ActivityPhoneSink(log: log, outbox: nil, transport: nil)
+        return ActivityPhoneSink(log: log, outbox: nil, transport: nil, deviceKind: .current)
         #endif
     }()
 
@@ -42,7 +46,8 @@ actor ActivityPhoneSink {
 
     /// 记下（按 id 去重：回填可重放）并尽力上传。写本机失败直接抛出（调用方要让失败可见）。
     func record(_ events: [ActivityEvent]) async throws -> Outcome {
-        let fresh = try await log.appendNew(events)
+        let stamped = deviceKind.map { kind in events.map { e in var e = e; if e.deviceKind == nil { e.deviceKind = kind.rawValue }; return e } } ?? events
+        let fresh = try await log.appendNew(stamped)
         var o = Outcome(written: fresh.count)
         if let outbox, !fresh.isEmpty { try await outbox.enqueue(fresh) }
         let f = await flush()
@@ -109,7 +114,7 @@ enum ActivityShortcutRecorder {
         #endif
     }
 
-    /// iPhone：顺手记下电量与是否在充电（不需要权限；读不到就不写）。
+    /// iPhone / iPad：顺手记下电量与是否在充电（不需要权限；读不到就不写）。
     static func deviceExtras() -> [String: String] {
         #if os(iOS)
         let d = UIDevice.current

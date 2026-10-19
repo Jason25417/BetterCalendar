@@ -2,14 +2,15 @@
 //  ActivityCloudSync.swift
 //  BetterCalendar
 //
-//  W13：iPhone 活动记录 → iCloud 私有库 → Mac 导入本机 ActivityLog（智能体住在 Mac 上）。
+//  W13：iPhone / iPad 活动记录 → iCloud 私有库 → Mac 导入本机 ActivityLog（智能体住在 Mac 上）。
+//  W28：iPad 与 iPhone 走同一条通道；设备类别在 payload JSON 的 deviceKind 字段里（不加 CloudKit 字段，不改 schema）。
 //  - 独立 zone「BCActivity」（不放进 BCApprovals：那个 zone 有推送订阅，每次打开 App 都会推一遍、唤醒两端刷新提案，
 //    且提案/对话/消息的增量拉取都会被几百条活动记录拖慢）。本 zone 不建订阅：Mac 每 2 分钟拉一次增量即可。
 //  - 记录类型 BCActivityEvent（一条事件一条记录，记录名 act-<uuid>，内容不可变，重传幂等）：
 //      payload String（整条 ActivityEvent 的 JSON，唯一真相）+ 镜像字段 at Date、kind String、deviceId String、platform String、
 //      appName String（可空）——镜像只便于在 CloudKit 控制台排查，不参与判断。
 //    ⚠️ 新记录类型：须由协调者在 Development 建出（BC_DEV_SEED_ACTIVITY=1 启动 Debug 版）并 Deploy 到 Production。
-//  - iPhone：先写本机日文件 + 待上传队列（ActivityOutbox），再尽力上传；传不上留在队列里，下次快捷指令 / 打开 App 再传。
+//  - iPhone / iPad：先写本机日文件 + 待上传队列（ActivityOutbox），再尽力上传；传不上留在队列里，下次快捷指令 / 打开 App 再传。
 //  - Mac：增量拉取（变更令牌存 UserDefaults，Data 是 plist 类型）→ 按 id 去重写入本机日志 → 记下 (记录名, 时刻) 索引，
 //    超过 14 天的云端记录删掉（只是传输通道的清理，Mac 本机已有一份；14 天 = 稳定性边界，防 zone 无限变大）。
 //
@@ -87,7 +88,7 @@ actor CloudKitActivityStore: ActivityCloudTransport {
             } catch let error as CKError where error.code == .changeTokenExpired {
                 current = nil; continue   // 令牌过期：从头拉，导入端按 id 去重
             } catch let error as CKError where error.code == .zoneNotFound {
-                return ([], 0, token)     // iPhone 还没传过任何一条
+                return ([], 0, token)     // iOS 设备还没传过任何一条
             }
             for (_, result) in changes.modificationResultsByID {
                 guard case let .success(m) = result else { bad += 1; continue }
@@ -124,7 +125,7 @@ actor MemoryActivityCloud: ActivityCloudTransport {
     func delete(_ ids: [UUID]) async throws { for id in ids { stored[id] = nil } }
 }
 
-/// iPhone 待上传队列（本机文件）。上限 5000 条 = 稳定性边界（长期离线时丢最旧的，并记 DevLog）。
+/// iOS 设备（iPhone / iPad）待上传队列（本机文件）。上限 5000 条 = 稳定性边界（长期离线时丢最旧的，并记 DevLog）。
 actor ActivityOutbox {
     static let limit = 5000
     private let url: URL?
@@ -171,7 +172,7 @@ actor ActivityOutbox {
     }
 }
 
-/// Mac：从 iCloud 导入 iPhone 记录（增量 + 去重 + 云端 14 天清理）。
+/// Mac：从 iCloud 导入 iPhone / iPad 记录（增量 + 去重 + 云端 14 天清理）。
 @MainActor final class ActivityCloudImporter {
     static let tokenKey = "activity.cloud.changeToken"
     static let indexKey = "activity.cloud.index.v1"      // [recordUUID: at(秒)]，只为清理用
@@ -184,6 +185,7 @@ actor ActivityOutbox {
     private let status: ActivityStatusBoard
     private let defaults: UserDefaults
     private var running = false
+    private var seededRemote = false
     private(set) var lastImported: Date?
 
     init(transport: any ActivityCloudTransport, log: FileActivityLog, status: ActivityStatusBoard, defaults: UserDefaults = .standard) {
@@ -199,6 +201,13 @@ actor ActivityOutbox {
             let (events, bad, token) = try await transport.fetchChanges(since: defaults.data(forKey: Self.tokenKey))
             let incoming = events.filter { $0.platform != "macOS" }   // Mac 自己的不经云端；防御性过滤
             let written = try await log.appendNew(incoming).count
+            // W28：每台 iOS 设备一行状态。启动后第一轮先从本机日志补最近 7 天（变更令牌是持久的，重启后只会拉到新的）。
+            if !seededRemote {
+                seededRemote = true
+                do { status.noteRemote(try await log.events(in: DateInterval(start: now.addingTimeInterval(-7 * 86_400), end: now))) }
+                catch { DevLog.shared.warn("设备活动", "读本机日志补各台设备状态失败（只显示这次启动后收到的）：\(error.localizedDescription)") }
+            }
+            status.noteRemote(incoming)
             if let token { defaults.set(token, forKey: Self.tokenKey) }
             var index = defaults.dictionary(forKey: Self.indexKey) as? [String: Double] ?? [:]
             for e in events { index[e.id.uuidString] = e.at.timeIntervalSince1970 }
@@ -207,7 +216,8 @@ actor ActivityOutbox {
             else { status.working(.cloudImport, at: now) }
             if let last = incoming.map(\.at).max() {
                 lastImported = last
-                // 冒烟 2026-10-19：只有真正的快捷指令记录才算「快捷指令正常」（以前任何 iPhone 记录都会刷新这一行，网络探测也算）
+                // 冒烟 2026-10-19：只有真正的快捷指令记录才算「快捷指令正常」（以前任何 iOS 记录都会刷新这一行，网络探测也算）；
+                // W28：这一行是「任一台」的汇总，各台设备分别看 status.remoteDevices（设置页逐台显示）
                 if let s = incoming.filter({ $0.source == .shortcut }).map(\.at).max() { status.working(.shortcut, at: s) }
             }
             await pruneIfDue(now: now, index: index)

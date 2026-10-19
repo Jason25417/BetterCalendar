@@ -398,14 +398,14 @@ final class AppContainer {
         if TestHost.isActive {
             self.agentBridge = nil
             self.sentinel = nil
-            hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: false)
+            hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, deviceKind: .mac)
         } else {
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
             // W20：桥接只在「当前智能体 = Claude Code」时是通道；共享记忆经桥接给 Claude Code 读写。
             bridge.isActive = { [weak agentSelection] in agentSelection?.kind == .claudeCode }
             bridge.sharedMemory = agentMemory
-            let hub = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: bridge, isPhone: false)
+            let hub = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: bridge, deviceKind: .mac)
             hubLocal = hub
             bridge.activityMirror = { [weak activity] io in await activity?.mirror(to: io) }
             bridge.usageMirror = { io in FeatureUsageBridgeMirror.shared.mirror(to: io) }
@@ -451,7 +451,7 @@ final class AppContainer {
         }
         #else
         self.agentBridge = nil
-        hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: true)
+        hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, deviceKind: .current)
         // W20：iPhone 上只有内置智能体有通道（Claude Code 的删块事件仍由 Mac 的中继补发，见下方 deletionRelay）。
         reconcile.onUserDeleted = { [weak hub = hubLocal] deletions in
             hub?.emit(kind: "calendar_user_deleted", summary: AgentCalendarEvents.deletionSummary(deletions),

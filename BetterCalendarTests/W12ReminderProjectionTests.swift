@@ -256,11 +256,11 @@ actor Collector {
         let rid = UUID(), fire = at(21, 8)
         let prepared = try await e.prepare(.reminder(id: rid, title: "赶大巴", body: "带学生卡", fireAt: fire, deviceId: "mac"))
         #expect(prepared.requiredDeviceId == nil)   // device 只为兼容保留，不再固定执行设备
-        #expect(prepared.changes?.contains { $0.field.contains("会出现在提醒事项里，iPhone 和 Mac 都会响") } == true)
+        #expect(prepared.changes?.contains { $0.field.contains("会出现在提醒事项里，各台设备（iPhone / iPad / Mac）都会响") } == true)
         let outcome = try await e.perform(prepared.action)
         let r = try #require(await list.item(ReminderStamp.key(ReminderStamp.askURL(rid))!))
         #expect(r.url == ReminderStamp.askURL(rid) && r.due == fire && r.leadMinutes == 0 && r.notes == "带学生卡")
-        #expect(outcome.note.contains("iPhone 和 Mac 都会响") && scheduler.scheduled.isEmpty)
+        #expect(outcome.note.contains("各台设备（iPhone / iPad / Mac）都会响") && scheduler.scheduled.isEmpty)
         let undo = try #require(outcome.undo?.action)
         #expect(outcome.undo?.deviceId == nil)       // 任一台有提醒事项的设备都能撤
         _ = try await e.perform(undo)
