@@ -43,4 +43,18 @@ final class JournalEntry: RetainedRecord {
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
     }
+
+    /// W28b：算不算「写下了一篇」（成就计数 / 收口卡 / 历史列表的唯一口径，P4 不虚报）：
+    /// 有非空白正文、选了心情或放了照片才算；只打开页面留下的空条目、只有标签的都不算。
+    var hasRealContent: Bool {
+        !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || mood != nil || !photoRefs.isEmpty
+    }
+
+    /// 有任何用户输入（含只打了标签）——值得落库；全空的草稿不落库。
+    var hasAnyInput: Bool { hasRealContent || !tags.isEmpty }
+
+    /// 成就「写下 N 篇」的计数：只数有真实内容、且不在回收站的条目。
+    static func writtenCount(_ entries: [JournalEntry]) -> Int {
+        entries.filter { !$0.isInTrash && $0.hasRealContent }.count
+    }
 }
