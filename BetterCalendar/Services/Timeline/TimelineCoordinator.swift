@@ -17,6 +17,9 @@
 //  · Q6 图钉：你亲手改过时间的块（PlanBlock.pinnedUntil，当天有效、随 iCloud 同步）映射为钉死，活动预报也不改写它；
 //  · Q4 已占用：你自己日历里的事件（只读）作为钉死的障碍喂给引擎，绕开它排；关联上的块（同一件事）钉在原位。
 //    不接 externalBusy（nil）时与改动前逐字等价（影子期等价测试锁住）。
+//  W22 写权租约（TimelineWriteLease）：两台设备都跑协调器，但**自动调整**（活动预报 / 顺延 / 启动补结算）只由持有写权的设备写；
+//  另一台照算（软标等派生态照常更新、用于显示），不写真相。你的动作（一键撤、收尾盖章硬执行、手改冷却登记）不经此闸。
+//  不接 writeLease（nil）= 永远可写，与改动前逐字等价（单测默认如此）。
 //
 
 import Foundation
@@ -67,6 +70,12 @@ final class TimelineCoordinator {
     /// 重算串行化：读你的日历要 await，期间再来的触发只记一笔、本轮结束后补跑一次（不并发写真相）。
     private var computing = false
     private var rerunReason: String?
+    /// W22：写权租约。nil = 不分写权（单测 / 旧行为）。
+    var writeLease: TimelineWriteLease?
+    /// 启动补结算轮到本机时没有写权 → 记下，拿到写权的那一轮补跑（否则 Mac 常驻多日时永远轮不到）。
+    private(set) var pendingBackstop = false
+    /// 最近一轮因为没有写权而只算不写的调整数（观察窗 / 测试用）。
+    private(set) var lastSkippedWrites = 0
 
     init(planStore: PlanReading & PlanWriting & ActualReading,
          startedDays: StartedDayStore,
@@ -267,6 +276,13 @@ final class TimelineCoordinator {
     /// 祖父条款：首次启用只把过去日全部标记为已结算、不动数据——E5c 之前的历史遗留块
     /// 不搞一次性洪水入池（追溯式收池会把旧账突然堆进待办区，违背无维护义务的池铁律）。
     func executePendingSpills() {
+        // W22：启动补结算是自动写——没有写权就记下，等本机拿到写权的那一轮再补（写权在另一台时由它负责）
+        if let writeLease, !writeLease.mayWriteAutomatically() {
+            pendingBackstop = true
+            DevLog.shared.info("时间线", "启动补结算先不做：写权在另一台设备，本机拿到写权时再补")
+            return
+        }
+        pendingBackstop = false
         let today = DayContext.logicalStartOfDay(now())
         let initKey = "bc.spill.backstop.initialized"
         let initialized = markerDefaults.bool(forKey: initKey)
@@ -299,6 +315,9 @@ final class TimelineCoordinator {
     private func recomputeOnce(reason: String) async -> Int {
         let now0 = now()
         let today = DayContext.logicalStartOfDay(now0)
+        // W22 写权：每轮先判（顺手续约 / 计时抢 / 到期接手）；没写权照样算，只是下面不写真相
+        let mayWrite = writeLease?.mayWriteAutomatically() ?? true
+        if mayWrite, pendingBackstop { executePendingSpills() }
         // 影子闸（D7）：只在已开工的实时日动真相；E5f 翻闸时移除此 guard
         guard startedDays.isStarted(today) else {
             softSpilledIDs = []
@@ -352,19 +371,24 @@ final class TimelineCoordinator {
         lastComputeAt = now0
         let threshold = TimeInterval(Self.writeThresholdMinutes * 60)
         var wrote = 0
+        var skipped = 0
 
         // 活动块行维护（D-2「绿=活预报」）：[实际开始, 预测结束]——同受阈值节流；图钉不改写（Q6）
         if let pr = prediction, let row = blocks.first(where: { $0.id == pr.id }), !row.isPinned(at: now0),
            abs(row.start.timeIntervalSince(pr.start)) >= threshold
             || abs(row.end.timeIntervalSince(pr.end)) >= threshold {
-            try? planStore.updatePlanned(id: pr.id, start: pr.start, end: pr.end, title: row.title,
-                                         reason: .timelineCoordinator)
-            traces.append(ChangeTraceEntry(time: now0, blockID: pr.id, title: row.title, kind: "活动预报",
-                                           beforeStart: row.start, beforeEnd: row.end,
-                                           afterStart: pr.start, afterEnd: pr.end,
-                                           reason: "进行中的事按实际节奏更新预报"),
-                          day: today)
-            wrote += 1
+            if !mayWrite {
+                skipped += 1   // W22：写权在另一台——只算不写
+            } else {
+                try? planStore.updatePlanned(id: pr.id, start: pr.start, end: pr.end, title: row.title,
+                                             reason: .timelineCoordinator)
+                traces.append(ChangeTraceEntry(time: now0, blockID: pr.id, title: row.title, kind: "活动预报",
+                                               beforeStart: row.start, beforeEnd: row.end,
+                                               afterStart: pr.start, afterEnd: pr.end,
+                                               reason: "进行中的事按实际节奏更新预报"),
+                              day: today)
+                wrote += 1
+            }
         }
 
         // 执行层节流（写回判据）：任一位移 ≥ 阈值 或 顺序变化 才落库；否则内存态而已
@@ -380,7 +404,10 @@ final class TimelineCoordinator {
         let newOrder = result.placed.filter { candidateIDs.contains($0.id) }.sorted { $0.start < $1.start }.map(\.id)
         let orderChanged = currentOrder != newOrder
 
-        if bigMove || (orderChanged && !moves.isEmpty) {
+        let shouldWriteMoves = bigMove || (orderChanged && !moves.isEmpty)
+        if shouldWriteMoves && !mayWrite {
+            skipped += moves.count   // W22：写权在另一台——只算不写
+        } else if shouldWriteMoves {
             for (b, p) in moves {
                 try? planStore.updatePlanned(id: b.id, start: p.start, end: p.end, title: b.title,
                                              reason: .timelineCoordinator)
@@ -393,6 +420,11 @@ final class TimelineCoordinator {
             wrote += moves.count
         }
 
+        lastSkippedWrites = skipped
+        if skipped > 0 {
+            lastWriteNote = "\(reason)：\(skipped) 处调整只显示不写（写权在另一台设备）"
+            SmokeLog.hit("写权租约", "非持有者只算不写·\(skipped)")
+        }
         guard wrote > 0 else { return 0 }
         lastWriteNote = "\(reason)：写回 \(wrote) 块（软标 \(softSpilledIDs.count)）"
         DevLog.shared.info("时间线", lastWriteNote)

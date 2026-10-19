@@ -193,6 +193,10 @@ struct BetterCalendarApp: App {
                 container.proposals.isForeground = phase == .active
                 FocusFollow.setForeground(phase == .active)
             }
+            // W22 写权租约：回前台那一刻抢写权（最近在前台的设备写自动调整）；iPhone 回后台且没计时 → 交出。initial：启动即判
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                container.timeline.writeLease?.setForeground(phase == .active)
+            }
             // 早通知 deep-link（0.23 A）：打开执行界面 + 第一件「待开始」（不自动计时）
             .onChange(of: container.router.primeNextStart) { _, want in
                 if want { consumePrimeNextStart() }

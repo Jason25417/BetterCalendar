@@ -440,6 +440,23 @@ final class AppContainer {
                                             traces: changeTraces)
         timeline.progress = execution
         timeline.longTasks = longTasks   // E5c：溢出硬执行 → 收待办区/回长期池
+        // W22 写权租约：两台设备只让一台写自动调整（计时中的设备 > 最近回前台的 > 到期后先续约的）；租约存 iCloud KV。
+        // 测试 host 不建（不碰真实 KV；协调器 writeLease=nil 即旧行为）
+        if !TestHost.isActive {
+            #if os(iOS)
+            let releasesOnBackground = true    // iPhone 回后台会被挂起：没在计时就主动交出
+            #else
+            let releasesOnBackground = false   // Mac 后台照常运行
+            #endif
+            let lease = TimelineWriteLease(store: ICloudKVWriteLeaseStore(), deviceID: ProposalDevice.id,
+                                           deviceLabel: ProposalDevice.label, releasesOnBackground: releasesOnBackground)
+            lease.timing = { [weak execution] in
+                guard let execution else { return (false, nil) }
+                return (execution.active != nil || !execution.background.isEmpty, execution.activePrediction?.end)
+            }
+            timeline.writeLease = lease
+            TimelineWriteLease.sharedForDev = lease
+        }
         // P4 Q4：你的日历事件作为「已占用」参与排布（只读；按设置挑日历，默认全部）。读失败 = 不看（记日志）
         let calendarForBusy = calendarStore
         timeline.externalBusy = { window in
