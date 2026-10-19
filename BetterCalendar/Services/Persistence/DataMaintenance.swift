@@ -149,12 +149,7 @@ final class DataMaintenance {
                 }
             }
         }
-        for key in SettingsSync.syncedKeys.union(["looseDays"]) {
-            if let value = UserDefaults.standard.object(forKey: key) {
-                archive.preferences["local:" + key] = try ArchiveCodec.decoder().decode(ArchiveValue.self,
-                    from: JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]))
-            }
-        }
+        try Self.captureLocalPreferences(from: .standard, keys: SettingsSync.syncedKeys.union(["looseDays"]), into: &archive)
         // Capture all KVS property-list state as opaque plist, including routines/achievements/started days.
         let kv = NSUbiquitousKeyValueStore.default.dictionaryRepresentation
         archive.localFiles["icloud-kv.plist"] = try PropertyListSerialization.data(fromPropertyList: kv, format: .xml, options: 0)
@@ -164,6 +159,33 @@ final class DataMaintenance {
         try data.write(to: url, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return (url, archive.records.count, unsavedNote)
+    }
+
+    /// 本机偏好（UserDefaults）进档案。JSON 能表达的进 `preferences["local:<key>"]`；Data / Date 等 JSON 表达不了的
+    /// plist 值整份原样存 `localFiles["local-defaults/<key>.plist"]`（同 icloud-kv.plist 的做法）。
+    ///
+    /// 修复（2026-10-19）：旧实现对每个值直接 `JSONSerialization.data(withJSONObject:)`——遇到 Data（如
+    /// approvals.preauthRules.v1，PreauthRules 存的是编码后的 Data）它抛的是 **ObjC 异常**（NSInvalidArgumentException），
+    /// Swift 的 try/catch 接不住：异常越过 Swift 帧被 AppKit runloop 吞掉 → 导出/自动快照的主 actor 任务半路消失，
+    /// 既不成功也不报错（又一次「点导出没反应」），单测 host 则无限挂起；之后主线程还可能因被撕裂的执行器状态 SIGSEGV。
+    /// 所以先用 `isValidJSONObject` 判定（它不抛异常），再走 JSON；否则走 plist；连 plist 都不是的值才 throw（可见失败）。
+    nonisolated static func captureLocalPreferences(from defaults: UserDefaults, keys: Set<String>,
+                                                    into archive: inout DataArchive) throws {
+        for key in keys.sorted() {
+            guard let value = defaults.object(forKey: key) else { continue }
+            if JSONSerialization.isValidJSONObject([value]) {
+                let json = try JSONSerialization.data(withJSONObject: [value], options: [.sortedKeys])
+                if case .array(let wrapped) = try ArchiveCodec.decoder().decode(ArchiveValue.self, from: json), let v = wrapped.first {
+                    archive.preferences["local:" + key] = v
+                    continue
+                }
+            }
+            guard PropertyListSerialization.propertyList(value, isValidFor: .xml) else {
+                throw DataArchiveError.invalid("本机偏好 \(key) 不是属性列表类型（\(type(of: value))），无法存进档案")
+            }
+            archive.localFiles["local-defaults/\(key).plist"] = try PropertyListSerialization.data(
+                fromPropertyList: [key: value], format: .xml, options: 0)
+        }
     }
 
     func validate(_ url: URL) throws {
