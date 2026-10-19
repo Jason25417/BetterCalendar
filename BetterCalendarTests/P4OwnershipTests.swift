@@ -486,12 +486,13 @@ private func at(_ day: Int, _ h: Int, _ m: Int = 0) -> Date {
     }
 
     /// 你批准的挪动 = 你亲手放的：执行后钉住（当天自动调整绕开）。
-    @Test func approvedMovePinsTheBlock() async throws {
+    /// Jason 2026-10-19 改：只钉你亲手拖的——批准智能体的挪动不钉。
+    @Test func approvedAgentMoveDoesNotPinTheBlock() async throws {
         let (center, plans, _, free, keep) = try rig(); _ = keep
         let p = try #require(await center.submit(draft(.moveBlock(id: free.id, start: at(20, 20), end: nil, expectedRevision: nil))))
         await center.decide(p.id, .approve)
         await center.refresh()
         let row = try #require(try plans.plannedBlocks(on: cal.startOfDay(for: at(20, 10))).first { $0.id == free.id })
-        #expect(row.start == at(20, 20) && row.isPinned(at: at(20, 10)))
+        #expect(row.start == at(20, 20) && !row.isPinned(at: at(20, 10)))
     }
 }

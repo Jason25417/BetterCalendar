@@ -230,7 +230,7 @@ import Testing
         #expect(try blocks(r, day: 0)[notes.id] == nil)
         let moved = try #require(try blocks(r, day: 1)[notes.id])
         #expect(moved.start == at(10, day: 1, c) && moved.end == at(11, day: 1, c))
-        #expect(moved.pinnedUntil == ScheduledBlock.pinExpiry(forStart: moved.start), "你批准的位置 = 图钉，到那天结束")
+        #expect(moved.pinnedUntil == nil, "Jason 10-19：批准智能体的挪动不钉，只钉你亲手拖的")
         #expect(await r.phone.undo(p.id), "\(r.phone.lastError ?? "")")
         #expect(try blocks(r, day: 0)[notes.id]?.start == at(11, 0, c))
         // 一起挪也能跨天：把明天的健身挪到后天，杂事顺到健身原来的位置

@@ -275,20 +275,10 @@ struct PlanEditApplied {
         return b
     }
 
-    /// 写后：钉住挪过 / 改过时长的块（P4 Q6，到它那天结束）+ 通知时间线协调器 + 请日历同步引擎重投影涉及的每一天。
-    /// 返回附加说明（刷新失败时）。
+    /// 写后：通知时间线协调器 + 请日历同步引擎重投影涉及的每一天。
+    /// Jason 2026-10-19：**只钉你亲手拖的**——批准智能体的挪动 / 改时长不钉（那是智能体提议的位置，不是你亲手放的），当天照常参与自动调整；
+    /// 原来就钉着的块保持钉着（动它本来就要越级）。返回附加说明（刷新失败时）。
     private func afterWrite(_ resolved: [PlanEditRules.Resolved], restoring: Bool) async -> String {
-        var pins: [Date: [UUID]] = [:]
-        for r in resolved where r.placed {
-            switch r.step {
-            case .move, .edit: if let a = r.after { pins[ScheduledBlock.pinExpiry(forStart: a.start), default: []].append(a.id) }
-            default: break
-            }
-        }
-        for (until, ids) in pins {
-            do { try planStore.setPinned(ids: ids, until: until) }
-            catch { DevLog.shared.warn("多端审批", "改动已写入，但没能钉住（自动调整可能再挪它）：\(error.localizedDescription)") }
-        }
         let touched = resolved.compactMap { $0.after?.id }
         NotificationCenter.default.post(name: ReconcileService.planChangedExternally, object: nil,
                                         userInfo: ["updatedIDs": touched, "source": Self.notificationSource])
