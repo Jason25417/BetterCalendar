@@ -643,7 +643,7 @@ enum ProposalTimerRules {
             }
             DevLog.shared.warn("提醒", "「\(title)」没写进提醒事项（\(fallbackWhy)），改用这台设备的本机通知，只有这台会响")
             let revision = try await notificationScheduler().scheduleReminder(id: id, title: title, body: body ?? "", fireAt: fireAt)
-            return ProposalExecutionOutcome(note: "没写进提醒事项（\(fallbackWhy)），改为只在这台设备上 \(ProposalReminderRules.when(fireAt)) 弹通知「\(title)」（普通通知，不保证叫醒）",
+            return ProposalExecutionOutcome(note: ProposalExecutionOutcome.deviationMarker + "没写进提醒事项（\(fallbackWhy)），改为只在这台设备上 \(ProposalReminderRules.when(fireAt)) 弹通知「\(title)」（普通通知，不保证叫醒）",
                                             undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: revision), deviceId: self.deviceId))
 
         case let .alarm(id, title, fireAt, deviceId):
@@ -867,6 +867,27 @@ enum ProposalTimerRules {
             try journalCall { try store.discard(id: entryID, at: self.now()) }
             return ProposalExecutionOutcome(note: "这篇新建的日记已移入回收站（30 天内可恢复）", undo: ProposalUndoInfo(unavailableReason: "已撤销；要找回请到回收站恢复"))
         }
+    }
+
+    // MARK: W32d 低风险自动通过的真实数据检查
+
+    /// 时间线单块改动：块是你亲手放的位置（图钉）→ 不自动通过（哪怕只是改名）。其余种类没有额外障碍（规则见 PreauthPolicy.lowRiskReason）。
+    func autoPassBlocker(_ action: ProposalAction) async -> String? {
+        let ids: [UUID]
+        switch action {
+        case let .moveBlock(id, _, _, _): ids = [id]
+        case let .moveBlocks(moves, false): ids = moves.map(\.id)
+        case let .blockEdit(e): ids = [e.id]
+        default: return nil
+        }
+        guard let mover else { return "这台设备没有接入时间线" }
+        for id in ids {
+            do {
+                guard let b = try mover.windowBlock(id: id) else { return "找不到这块" }
+                if b.isPinned(at: now()) { return "「\(b.title)」是你亲手放的位置（图钉）" }
+            } catch { return "读不到这块：\(error.localizedDescription)" }
+        }
+        return nil
     }
 
     // MARK: W32 内部

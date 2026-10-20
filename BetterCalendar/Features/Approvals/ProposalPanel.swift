@@ -23,6 +23,7 @@ struct ProposalPanel: View {
     @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var planEditingOn = PlanEditingSettings.enabled
     @State private var journalWriteOn = AgentJournalSettings.allowWrite
+    @State private var lowRiskOn = LowRiskAutoPassSettings.enabled
     @State private var notificationAllowed: Bool?
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
 
@@ -81,6 +82,11 @@ struct ProposalPanel: View {
                 Text("默认关。打开后智能体能提议在某天的日记末尾加一段（要你批准）；它写的字用衬线斜体显示，和你的字分开——你改了其中任何一个字，那段就算你的。改你自己写的原文是越级：每次都要你亲自批、可一键撤销，而且要先允许它读日记。随设置同步到你的所有设备。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("低风险改动自动通过") {
+                Toggle("低风险改动自动通过", isOn: Binding(get: { lowRiskOn }, set: { lowRiskOn = $0; LowRiskAutoPassSettings.enabled = $0 }))
+                Text("默认开。由 BetterCalendar 的规则判定（不是智能体自己说了算）：只有它自己的计划块加一块 / 挪一块 / 改一块的时长或名字（不是你亲手放的图钉、在今天到 7 天后、不和固定安排或你的日历冲突），以及给你建一条提醒，会直接执行，对话里留一张「已自动通过」的回执，一键撤销。动你的东西、闹钟、排一天、删除、有几个方案或可调数值、智能体拿不准的，照旧先问你。关掉 = 一律先问你。随设置同步到你的所有设备。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("智能体排时间线") {
                 Toggle("允许智能体提议排时间线", isOn: Binding(get: { planEditingOn }, set: { planEditingOn = $0; PlanEditingSettings.enabled = $0 }))
                 Text("默认开。打开后智能体能提议：往今天到 7 天后加计划块、改块的标题 / 时长 / 固定 / 要紧 / 截止、删块（进回收站）、跨天挪块、一次排好一天。每一项仍要你批准，批准后可撤销；放不放得下由 BetterCalendar 按规则判（固定安排不动、不重叠、不越截止、你日历里的安排当已占用）。关掉 = 只能挪今天的块，和以前一样。随设置同步到你的所有设备。")
@@ -123,6 +129,7 @@ struct ProposalPanel: View {
             journalOn = AgentContextSettings.allowRecentJournal   // 另一台设备改了开关
             planEditingOn = PlanEditingSettings.enabled
             journalWriteOn = AgentJournalSettings.allowWrite
+            lowRiskOn = LowRiskAutoPassSettings.enabled
         }
     }
 
@@ -178,14 +185,17 @@ struct ProposalPanel: View {
         let state = p.effectiveState(at: .now)
         let who = p.decidedByDeviceId.map { $0 == center.deviceId ? "本机" : "另一台设备" }
         return VStack(alignment: .leading, spacing: 2) {
-            Text(p.title)
+            Text((p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId ? "已自动通过：" : "") + p.title)   // W32d
             if p.action.touchesRealData, !p.changes.isEmpty {
                 Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix("理由：") && !$0.hasPrefix("发起：") }
                     .joined(separator: "\n")).font(.caption)
             }
-            Text([state.label, who.map { "决定于\($0)" }, p.resultNote].compactMap { $0 }.joined(separator: " · "))
+            // W32e：已完成时结果说明只是复述改动 → 收进「详情」；失败 / 过期 / 带「注意：」的照常可见
+            let showNote = state != .applied || (p.resultNote ?? "").contains(ProposalExecutionOutcome.deviationMarker)
+            Text([state.label, who.map { "决定于\($0)" }, showNote ? p.resultNote : nil].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
-            ProposalOutcomeNotes(proposal: p)   // W10：你回的话 / 选了哪个方案 / 代你决定的规则 / 越级理由
+            if let reply = p.userReply { Text("你回了一句：「\(reply.text)」").font(.caption) }
+            ProposalDetails(proposal: p, state: state)   // 规则 id / 提案 id / 越级理由 / 完整结果说明
             undoRow(p)
             let l = center.latency(for: p.id)
             if developerOptions, l.notify != nil || l.withdraw != nil {

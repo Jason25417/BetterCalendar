@@ -107,11 +107,11 @@ import Foundation
     /// 工具参数 → 桥接提案文件（与 MCP propose_change 同一种映射）→ AgentBridgeIO.draft（同一套严格解析）→ prepare / submit。
     nonisolated static func proposalFile(_ args: [String: Any], id: UUID, eventId: String?) throws -> [String: Any] {
         let allowed: Set<String> = ["title", "reason", "action", "changes", "lifetimeMinutes", "targetDevice", "escalation",
-                                    "primaryLabel", "alternatives", "parameters"]
+                                    "primaryLabel", "alternatives", "parameters", "askFirst"]
         let unknown = Set(args.keys.filter { !(args[$0] is NSNull) }).subtracting(allowed)
         guard unknown.isEmpty else { throw AgentBridgeError.invalid("propose_change 不认识的参数：\(unknown.sorted().joined(separator: ", "))") }
         var file: [String: Any] = ["schemaVersion": 1, "id": id.uuidString, "originLabel": AgentKind.builtin.originLabel]
-        for k in ["title", "reason", "action", "changes", "targetDevice", "escalation", "primaryLabel"] where args[k] != nil && !(args[k] is NSNull) {
+        for k in ["title", "reason", "action", "changes", "targetDevice", "escalation", "primaryLabel", "askFirst"] where args[k] != nil && !(args[k] is NSNull) {
             file[k] = args[k]
         }
         if let eventId { file["parentEventId"] = eventId }

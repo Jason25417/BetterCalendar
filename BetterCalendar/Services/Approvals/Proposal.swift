@@ -450,6 +450,11 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     /// 发起者是智能体时，是哪种实现提的（AgentKind.rawValue：claudeCode / builtin）；nil = 旧记录或非智能体（按 Claude Code 理解）。
     /// 只用于追溯（留底、面板「发起」行）；Jason 2026-10-19：各实现是同一个 BetterCalendar 智能体，预授权规则不按实现分。
     var agentKey: String? = nil
+    // —— W32d（Optional：旧记录照常解码；只在 JSON 载荷里）——
+    /// 智能体标了「拿不准，先给他看一眼」：低风险自动通过不放行（一律先问你）。
+    var askFirst: Bool? = nil
+    /// 准备时 App 依据真实数据查到的「不能自动通过」原因（如动的是图钉）；nil = 没查到障碍。
+    var autoPassBlocker: String? = nil
 
     /// 备选方案上限（卡片列得下、你看得过来；通知按钮另有系统限制）。
     static let maxAlternatives = 3
@@ -588,6 +593,9 @@ nonisolated struct ProposalDraft: Sendable {
     var parameters: [ProposalParameter] = []
     /// W20：智能体的哪种实现提的（见 Proposal.agentKey）；nil = 不是智能体 / 经桥接的 Claude Code。
     var agentKey: String? = nil
+    /// W32d：见 Proposal.askFirst / autoPassBlocker（后者由 ProposalCenter.prepare 填）。
+    var askFirst = false
+    var autoPassBlocker: String? = nil
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40

@@ -147,6 +147,9 @@ nonisolated struct PreparedProposalAction: Equatable, Sendable {
 
 /// 一次执行（或撤销）的结果。
 nonisolated struct ProposalExecutionOutcome: Equatable, Sendable {
+    /// W32e：结果里「和你批准的不完全一样」（替身 / 降级 / 画面稍后同步）的那一句以它开头——审批卡把含它的结果说明
+    /// 直接显示出来（P4 不暗减）；其余结果说明只是复述改动，收进「详情」。
+    static let deviationMarker = "注意："
     /// 给人看的结果说明。
     var note: String
     var undo: ProposalUndoInfo? = nil
@@ -179,9 +182,12 @@ nonisolated enum ProposalExecutionError: Error, LocalizedError, Equatable {
     func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction
     /// 执行动作（已同意的提案，或撤销用的逆操作）；抛错 = 执行失败（不自动重试）。
     func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome
+    /// W32d：依据真实数据，这份（已准备好的）动作有没有「不能低风险自动通过」的障碍（如动的是图钉）。默认 nil。
+    func autoPassBlocker(_ action: ProposalAction) async -> String?
 }
 
 extension ProposalExecuting {
+    func autoPassBlocker(_ action: ProposalAction) async -> String? { nil }
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction { try await prepare(action) }
     func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction {
         try await prepare(action, escalation: escalation)

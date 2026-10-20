@@ -16,7 +16,7 @@
   "type": "function",
   "function": {
    "name": "propose_change",
-   "description": "向 Jason 提交一项改动提案（iPhone 与 Mac 同时推审批通知）。提交≠执行：要他批准、设备回报「已完成」才算完成。种类与规则见系统提示「提出改动」。被拒收时返回原因（rejected），看原因调整后再提，或如实告诉他放不下、为什么。",
+   "description": "向 Jason 提交一项改动提案（iPhone 与 Mac 同时推审批通知）。提交≠执行：要他批准、设备回报「已完成」才算完成。种类与规则见系统提示「提出改动」。被拒收时返回原因（rejected），看原因调整后再提，或如实告诉他放不下、为什么。 低风险改动（单块加 / 挪 / 改时长或名字、建提醒）可能被 App 规则自动通过并立即执行（结果 preauth.ruleId = 低风险规则），对话里留回执可撤销。",
    "parameters": {
     "type": "object",
     "properties": {
@@ -934,6 +934,10 @@
        "additionalProperties": false
       },
       "description": "可调参数（可选，建议 ≤2 个）：具体数值是你的判断、Jason 可能想自己微调时才挂"
+     },
+     "askFirst": {
+      "type": "boolean",
+      "description": "拿不准、想让 Jason 先看一眼再执行时写 true（低风险改动也不自动通过）"
      }
     },
     "required": [

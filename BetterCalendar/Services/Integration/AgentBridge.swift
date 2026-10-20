@@ -262,12 +262,19 @@ nonisolated struct AgentBridgeIO: Sendable {
         }
         // W11：主方案的可调参数（备选方案的挂在各自身上）。
         let parameters = try Self.parameters(from: o["parameters"], action: action, path: "parameters")
+        // W32d：智能体拿不准、想让 Jason 先看一眼 → askFirst: true（低风险自动通过不放行）。
+        var askFirst = false
+        if let raw = o["askFirst"], !(raw is NSNull) {
+            guard let flag = Self.isBool(raw) else { throw AgentBridgeError.invalid("askFirst 必须是 true / false") }
+            askFirst = flag
+        }
         let anyReal = action.touchesRealData || alternatives.contains { $0.action.touchesRealData }
         return ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
                              originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
                              targetDeviceId: o["targetDevice"] as? String, title: title, changes: changes, reason: reason,
                              action: action, experiment: !anyReal, lifetime: lifetime,
-                             escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives, parameters: parameters)
+                             escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives, parameters: parameters,
+                             askFirst: askFirst)
     }
 
     /// W11：可调参数声明（严格：每项只认这些键；类型 / 绑定字段 / 单位 / 范围都校验；绑到这种改动没有的字段 → 拒收）。

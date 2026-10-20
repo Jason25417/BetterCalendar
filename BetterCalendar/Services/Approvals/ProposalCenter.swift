@@ -194,6 +194,7 @@ import UIKit
                                                         parameters: params.isEmpty ? nil : params)
         }
         if seen.contains(where: \.touchesRealData) { draft.experiment = false }
+        draft.autoPassBlocker = await executor.autoPassBlocker(draft.action)   // W32d：依据真实数据（图钉等）
         if let required {
             if let target = draft.targetDeviceId, target != required {
                 throw ProposalExecutionError.invalid("这项改动只能在读取状态的那台设备执行（指定设备与之不符）")
@@ -226,6 +227,8 @@ import UIKit
         proposal.alternatives = draft.alternatives.isEmpty ? nil : draft.alternatives
         proposal.parameters = draft.parameters.isEmpty ? nil : draft.parameters
         proposal.agentKey = draft.agentKey   // W20：哪种实现提的（追溯用）
+        proposal.askFirst = draft.askFirst ? true : nil   // W32d
+        proposal.autoPassBlocker = draft.autoPassBlocker
         // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
         // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
         let verdict = gate.verdict(for: proposal)

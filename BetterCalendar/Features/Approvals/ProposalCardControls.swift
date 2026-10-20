@@ -275,24 +275,7 @@ struct ProposalTuner: View {
     }
 }
 
-/// 已有结论的提案上 W10 相关的一两行说明（你回的话 / 选了哪个方案 / 代你决定的规则）。
-struct ProposalOutcomeNotes: View {
-    let proposal: Proposal
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let reply = proposal.userReply {
-                Text("你回了一句：「\(reply.text)」").font(.caption)
-            }
-            if proposal.hasAlternatives, proposal.chosenOption != nil {
-                Text("你选了：\(proposal.chosen.index + 1). \(proposal.chosen.label)").font(.caption)
-            }
-            if let stamp = proposal.preauth {
-                Text("由预授权规则代你决定（\(stamp.effect.label)）：\(stamp.ruleLabel)").font(.caption2).foregroundStyle(.secondary)
-            }
-            if let e = proposal.escalation { Text("越级理由：" + e).font(.caption2).foregroundStyle(.orange) }
-        }
-    }
-}
+// W32e：原 ProposalOutcomeNotes（你回的话 / 选了哪个方案 / 规则 / 越级理由）拆开：你的操作留在卡上，追溯信息进 ProposalDetails。
 
 /// 面板里的预授权规则列表：可查看、改效果、删除；随设置同步到你所有设备。
 struct PreauthRulesSection: View {
