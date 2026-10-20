@@ -294,7 +294,7 @@ enum AgentBridgeContext {
             journal["included"] = true
             journal["window"] = window(input.recentWindow)
             journal["writeAllowed"] = input.journalWriteAllowed
-            journal["authorshipNote"] = "excerpt 是原文：<!--bc:agent:…-->…<!--/bc:agent--> 包着的是你（智能体）以前写的段落，App 用衬线斜体显示；其余是 Jason 写的"
+            journal["authorshipNote"] = "excerpt 是原文：<!--bc:agent:…-->…<!--/bc:agent--> 包着的是你（智能体）以前写的段落，App 用楷体（西文衬线斜体）显示；其余是 Jason 写的"
             context["journal"] = journal
         } else {
             context["journal"] = ["included": false, "source": "BetterCalendar 日记", "asOf": asOf, "writeAllowed": input.journalWriteAllowed,

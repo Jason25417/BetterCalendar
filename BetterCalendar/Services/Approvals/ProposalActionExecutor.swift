@@ -513,7 +513,7 @@ enum ProposalTimerRules {
             }
             let head = existing == nil ? "新建\(PlanEditRules.dayName(label))的日记，写一段" : "\(PlanEditRules.dayName(label))的日记：在末尾加一段"
             return PreparedProposalAction(action: .journalAppend(day: label, text: t, newEntryID: newEntryID, expectedRevision: revision), changes: [
-                ProposalChange(field: head + "（智能体写的，用衬线斜体显示，和你的字区分开；不改你写的任何字）", before: nil, after: t),
+                ProposalChange(field: head + "（智能体写的，用楷体显示，和你的字区分开；不改你写的任何字）", before: nil, after: t),
                 ProposalChange(field: "批准后可一键撤销（你之后又写过这篇就不撤）", before: nil, after: nil),
             ])
 
@@ -530,7 +530,7 @@ enum ProposalTimerRules {
             return PreparedProposalAction(action: .journalEdit(entryID: entryID, find: find, replace: replacement, expectedRevision: revision), changes: [
                 .escalationSubject("改的是你自己写的日记：《\(day)的日记》"),
                 ProposalChange(field: "日记原文", before: find, after: replacement.isEmpty ? nil : replacement),
-                ProposalChange(field: "改后的文字算智能体写的（衬线斜体）；你再改其中任何一个字，那段就变回你的", before: nil, after: nil),
+                ProposalChange(field: "改后的文字算智能体写的（楷体显示）；你再改其中任何一个字，那段就变回你的", before: nil, after: nil),
                 ProposalChange(field: "批准后可一键撤销：正文原样改回（你之后又写过就不撤）", before: nil, after: nil),
             ])
 
@@ -823,7 +823,7 @@ enum ProposalTimerRules {
                 try journalCall { try store.create(id: newEntryID, day: day, body: JournalAuthorship.mark(text), at: self.now()) }
                 guard let created = try store.entry(id: newEntryID) else { throw ProposalExecutionError.unavailable("新建的日记没读回来") }
                 DevLog.shared.info("多端审批", "新建\(dayName)的日记（智能体写的一段）")
-                return ProposalExecutionOutcome(note: "已新建\(dayName)的日记，写了一段（衬线斜体 = 智能体写的）",
+                return ProposalExecutionOutcome(note: "已新建\(dayName)的日记，写了一段（楷体 = 智能体写的）",
                                                 undo: ProposalUndoInfo(action: .journalRestore(entryID: newEntryID, body: nil, expectedRevision: ProposalRevision.journal(created))))
             case let (e?, nil) where e.id == newEntryID && e.body == JournalAuthorship.mark(text):
                 // 幂等：上次已新建、回报没落地
@@ -833,7 +833,7 @@ enum ProposalTimerRules {
                 let old = e.body
                 try journalCall { try store.setBody(id: e.id, body: JournalAuthorship.appending(text, to: old), at: self.now()) }
                 DevLog.shared.info("多端审批", "在\(dayName)的日记末尾加了一段（智能体写的）")
-                return ProposalExecutionOutcome(note: "已在\(dayName)的日记末尾加了一段（衬线斜体 = 智能体写的；你写的字没动）",
+                return ProposalExecutionOutcome(note: "已在\(dayName)的日记末尾加了一段（楷体 = 智能体写的；你写的字没动）",
                                                 undo: ProposalUndoInfo(action: .journalRestore(entryID: e.id, body: old, expectedRevision: ProposalRevision.journal(e))))
             default:
                 throw ProposalExecutionError.conflict("\(dayName)的日记在提案之后被改过（或新写了一篇）")
@@ -849,7 +849,7 @@ enum ProposalTimerRules {
             var body = old
             body.replaceSubrange(range, with: replace.isEmpty ? "" : JournalAuthorship.mark(replace))
             try journalCall { try store.setBody(id: entryID, body: body, at: self.now()) }
-            let note = replace.isEmpty ? "已删掉你日记里的「\(find.prefix(40))」" : "已把你日记里的「\(find.prefix(40))」改成「\(replace.prefix(40))」（衬线斜体 = 智能体写的）"
+            let note = replace.isEmpty ? "已删掉你日记里的「\(find.prefix(40))」" : "已把你日记里的「\(find.prefix(40))」改成「\(replace.prefix(40))」（楷体 = 智能体写的）"
             DevLog.shared.info("多端审批", note)
             return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .journalRestore(entryID: entryID, body: old, expectedRevision: ProposalRevision.journal(e))))
 

@@ -20,7 +20,7 @@ enum JournalBody {
                 interpretedSyntax: .inlineOnlyPreservingWhitespace)
             return JournalAuthorship.segments(body).reduce(into: AttributedString()) { out, seg in
                 var a = (try? AttributedString(markdown: seg.text, options: opts)) ?? AttributedString(seg.text)
-                if seg.byAgent { a.font = JournalAuthorship.agentFont }
+                if seg.byAgent { JournalAuthorship.applyAgentStyle(&a, style: .body, cjkFontName: AgentCJKFont.shared.name) }   // W33：中文楷体 + 西文衬线斜体
                 out += a
             }
         case .richText:

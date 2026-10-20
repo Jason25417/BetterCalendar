@@ -412,7 +412,22 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         // 渲染：智能体段落用固定字体（衬线斜体），你的不用
         let rendered = JournalBody.rendered(marked, format: "markdown")
         let fonts = rendered.runs.map(\.font)
-        #expect(fonts.contains { $0 == JournalAuthorship.agentFont } && fonts.contains { $0 == nil })
+        #expect(fonts.contains { $0 != nil } && fonts.contains { $0 == nil })
+    }
+
+    /// W33：智能体写的中文用楷体、西文和数字用衬线斜体；没有楷体时整段衬线斜体（不崩、不丢字）。
+    @Test func agentTextUsesKaitiForChineseAndSerifItalicForLatin() {
+        var a = AttributedString("专注了 95 分钟。")
+        JournalAuthorship.applyAgentStyle(&a, style: .body, cjkFontName: "STKaiti")
+        let kaiti = Font.custom("STKaiti", size: AgentCJKFont.baseSize(.body), relativeTo: .body)
+        let latin = JournalAuthorship.agentFont(.body)
+        let runs = a.runs.map { (String(a[$0.range].characters), $0.font) }
+        #expect(runs.map(\.0) == ["专注了", " 95 ", "分钟。"])
+        #expect(runs.map(\.1) == [kaiti, latin, kaiti])
+        var b = AttributedString("专注了 95 分钟。")
+        JournalAuthorship.applyAgentStyle(&b, style: .body, cjkFontName: nil)
+        #expect(b.runs.allSatisfy { $0.font == latin }, "没有楷体：整段衬线斜体")
+        #expect(AgentCJKFont.isCJK("中") && AgentCJKFont.isCJK("，") && !AgentCJKFont.isCJK("a") && !AgentCJKFont.isCJK("9"))
     }
 
     // MARK: 桥接解析 / 工具 schema / 上下文 / 架构

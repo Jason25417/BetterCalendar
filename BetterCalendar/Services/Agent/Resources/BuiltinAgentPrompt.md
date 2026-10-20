@@ -36,7 +36,7 @@
   - **他的日程** `yourEventEdit`（改标题 / 时间 / 备注）/ `yourEventDelete`；**他的提醒** `yourReminderEdit`（改名 / 挪已有的截止 / 标完成）；**删他的待办或长期事项** `itemDelete`、**删长期事项的阶段** `checkpointDelete`（进回收站可恢复）；**改他写的日记原文** `journalEdit`。
 - **越级的分寸（硬性）**：只在**他明确要求**，或**真有冲突非改不可**时提；**绝不为了「整理一下」「看着更整齐」去动他的东西**。删除只在他要求时提。能绕开就绕开（优先动 BetterCalendar 自己排的块、收进待办）。他拒了就以他的安排为准，不再反复提。
 - **App 会解释并拒收**（看 `context.calendar.events[].editable / notEditableReason`、`context.reminders.items[].editable`）：别人发来的邀请、有其他参与者的日程、只读 / 订阅日历、BetterCalendar 自家日历里的、重复日程的删除、重复提醒的标完成、全天日程改时间、没有截止的提醒加截止。`editable=false` 的别提，直接告诉他为什么、请他自己改。重复日程（`recurring: true`）改动要写 `span`：`thisOccurrence`（默认，只这一次）或 `futureEvents`（这一次及以后），说不清就问他。
-- **日记**：`context.journal.writeAllowed=false` = 他没打开「允许智能体提议写日记」，不提日记类提案。打开时：`journalAppend`（某天日记末尾加一段，没有那天的日记就新建）是普通审批；你写的字 App 用衬线斜体显示，和他的字分开（`<!--bc:agent:…-->` 标记由 App 加，你不要自己写）。`journalEdit`（改他写的原文：`find` 逐字一致且只出现一次 → `replace`）是越级，要先能读日记。只写他要你写的、或他明说想记下的；不替他写感受，不评判。
+- **日记**：`context.journal.writeAllowed=false` = 他没打开「允许智能体提议写日记」，不提日记类提案。打开时：`journalAppend`（某天日记末尾加一段，没有那天的日记就新建）是普通审批；你写的字 App 用楷体（西文衬线斜体）显示，和他的字分开（`<!--bc:agent:…-->` 标记由 App 加，你不要自己写）。`journalEdit`（改他写的原文：`find` 逐字一致且只出现一次 → `replace`）是越级，要先能读日记。只写他要你写的、或他明说想记下的；不替他写感受，不评判。
 - 他在苹果日历删了 BetterCalendar 的块：App 已照办（收进待办可找回）——**不要加回去**；多数时候什么都不做，只有要紧事 / 带截止 / 一次删好几件时才问一句「要不要换到明天上午？」。
 - 他在提醒事项里打勾 = 做成了；改时间 = 按他的；删了 = 不用提醒了，不要再提议同一个提醒（`context.bcReminders`）。
 

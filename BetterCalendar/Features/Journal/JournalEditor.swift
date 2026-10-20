@@ -35,11 +35,19 @@ struct JournalEditor: View {
             HStack {
                 Text("正文（Markdown）").font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                #if os(iOS)
+                // W33：键盘上方的 .toolbar(.keyboard) 在 iOS 26 的 TabView 里不显示——改成正文标题行里看得见的按钮（只在打字时出现）；往下拖进键盘照样能收
+                if bodyFocused {
+                    Button("收起键盘", systemImage: "keyboard.chevron.compact.down") { bodyFocused = false }
+                        .labelStyle(.titleAndIcon).font(.caption).buttonStyle(.bordered).controlSize(.small)
+                        .accessibilityIdentifier("bc.journal.dismissKeyboard")
+                }
+                #endif
                 Toggle("预览", isOn: $previewing).toggleStyle(.button).controlSize(.small)
             }
             if JournalAuthorship.hasAgentText(entry.body) {
-                // W32b：开发期编辑是纯 Markdown，作者标记以 HTML 注释原样可见；预览 / 列表里衬线斜体 = 智能体写的
-                Text("这篇有智能体写的段落：预览里用衬线斜体显示。编辑时 <!--bc:agent…--> 是作者标记——改了里面任何一个字，那段就算你的。")
+                // W32b：开发期编辑是纯 Markdown，作者标记以 HTML 注释原样可见；预览 / 列表里楷体（中文）+ 衬线斜体（西文）= 智能体写的
+                Text("这篇有智能体写的段落：预览里中文用楷体、西文用衬线斜体显示。编辑时 <!--bc:agent…--> 是作者标记——改了里面任何一个字，那段就算你的。")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if previewing {
@@ -59,14 +67,6 @@ struct JournalEditor: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary.opacity(0.4)))
                     .onChange(of: entry.body) { _, _ in touch() }
                     .focused($bodyFocused)
-                    #if os(iOS)
-                    .toolbar {
-                        ToolbarItemGroup(placement: .keyboard) {
-                            Spacer()
-                            Button("收起键盘") { bodyFocused = false }
-                        }
-                    }
-                    #endif
             }
 
             tagRow
