@@ -15,6 +15,8 @@ struct InlineAddRow: View {
     let prompt: String            // 收起态文案，如「手动加一件」
     let placeholder: String       // 输入态占位
     var keepsOpenAfterSubmit = true   // 体检 #17：true=提交后保持输入态连续加（长期页）；false=加一件即收（排日程页族）
+    /// W29：草稿键（TextDraftKey）。有 = 没加完的字重启后还在、并自动展开；「✕ / Escape」= 你清掉的，一并清。nil = 不存。
+    var draftKey: String? = nil
     let onSubmit: (String) -> Void
 
     @State private var active = false
@@ -28,6 +30,7 @@ struct InlineAddRow: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focused)
                     .onSubmit { submit() }
+                    .persistedDraft($text, key: draftKey)
                 Button("加入") { submit() }
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 Button {
@@ -50,6 +53,7 @@ struct InlineAddRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onAppear { if let draftKey, TextDraftStore.shared.has(draftKey) { active = true } }
         }
     }
 
@@ -58,6 +62,7 @@ struct InlineAddRow: View {
         guard !t.isEmpty else { return }
         onSubmit(t)
         text = ""
+        if let draftKey { TextDraftStore.shared.clear(draftKey) }
         if !keepsOpenAfterSubmit { active = false }
     }
 }

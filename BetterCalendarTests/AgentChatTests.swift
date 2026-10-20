@@ -202,6 +202,7 @@ import Testing
         let bridge = AgentBridge(center: center, defaults: defaults()) { ["schemaVersion": 1, "synthetic": true] }
         bridge.eventsEnabled = { false }   // 「关键时刻唤醒」关着也要转交你的话
         bridge.chat = mac
+        bridge.now = { clock.now }   // W29：不用真实时钟（晚上跑会多出晚间复盘事件）
 
         let said = try #require(await phone.send("N1 那个我想弄一下"))
         await bridge.sync(io: io)

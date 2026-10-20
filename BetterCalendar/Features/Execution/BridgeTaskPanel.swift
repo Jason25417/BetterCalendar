@@ -49,6 +49,7 @@ struct BridgeTaskPanel: View {
             }
             TextField("开始什么事项", text: $title)
                 .onSubmit { startNew() }
+                .persistedDraft($title, key: TextDraftKey.bridgeTaskTitle)   // W29：重启后还在；开始成功才清
             HStack {
                 Button("开始计时") { startNew() }
                     .disabled(!model.canSubmit || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -74,6 +75,7 @@ struct BridgeTaskPanel: View {
         guard model.canSubmit else { return }
         guard model.queueStart(title: submitted, mode: mode, focusMinutes: mode == .pomodoro ? focusMinutes : nil) else { return }
         title = ""
+        TextDraftStore.shared.clear(TextDraftKey.bridgeTaskTitle)
         Task { await model.refresh() }
     }
 }

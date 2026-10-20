@@ -746,7 +746,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             }
             if let chat {
                 try await AgentChatBridgeStep.run(io: io, chat: chat, proposals: center.proposals, defaults: defaults,
-                                                  eveningFacts: eveningFacts, now: .now, report: report)
+                                                  eveningFacts: eveningFacts, now: now(), report: report)
             }
             try emitResolvedProposals(io: io)
             await activityMirror?(io)
@@ -851,6 +851,9 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 测试可注入；生产读 AgentEventSettings。
     var eventsEnabled: () -> Bool = { AgentEventSettings.enabled }
+    /// W29：对话桥接一轮用的时钟（晚间复盘到没到点按它算）。测试注入固定时刻——以前用真实时钟，
+    /// 晚上 21:30 后跑测试会多写一条 evening_review 事件（深夜日期炸弹，同 vm-fire-and-forget 第二根因）。
+    var now: () -> Date = { Date() }
 
     /// SPEC §19 C1 W14 哨兵：在桥接目录里做一件事（写唤醒事件 / runtime/sentinel.json）。
     /// 不受「关键时刻唤醒」开关管——哨兵有自己的开关。refreshContext = 先刷新 context.json（唤醒前用）。
