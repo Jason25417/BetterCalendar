@@ -73,15 +73,8 @@ struct JournalEditor: View {
             photoRow
 
             // 体检 #19：保存状态=边缘信息 → 底部弱行（caption2/secondary）；positiveTint 留给「做成」语义
-            // W31 自测（P4 不虚报）：什么都没写时不显示「已保存 · 时刻」——那时并没有存下一篇（W28b 空条目不算）
-            Group {
-                if entry.hasAnyInput {
-                    Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
-                          systemImage: "checkmark.circle")
-                } else {
-                    Label("写下正文、选个心情或加张照片，就会自动保存", systemImage: "pencil")
-                }
-            }
+            Label("改动自动保存 · \(entry.modifiedAt.formatted(date: .omitted, time: .standard))",
+                  systemImage: "checkmark.circle")
             .font(.caption2).foregroundStyle(.secondary)
         }
         .tint(.primary)   // 修正批 D：编辑器工具行（预览/照片/标签）收中性（条文 2）——正文卡内无主按钮
