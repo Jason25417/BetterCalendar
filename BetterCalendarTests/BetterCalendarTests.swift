@@ -180,10 +180,10 @@ struct LogicTests {
     }
 
     // W31 自测：大字号下「现在」卡把时间轴挤没——卡最多占页面一半
-    @Test func nowCardNeverTakesMoreThanHalfThePage() {
+    @Test func nowCardNeverTakesMoreThanFortyPercentOfThePage() {
         #expect(HomeView.nowCardFrameHeight(natural: 300, page: 800) == 300)
-        #expect(HomeView.nowCardFrameHeight(natural: 1200, page: 800) == 400)
-        #expect(HomeView.nowCardFrameHeight(natural: 0, page: 800) == 400, "没量到时先给上限，不塌成 0")
+        #expect(HomeView.nowCardFrameHeight(natural: 1200, page: 800) == 320, "W31b：最多四成")
+        #expect(HomeView.nowCardFrameHeight(natural: 0, page: 800) == 320, "没量到时先给上限，不塌成 0")
         #expect(HomeView.nowCardFrameHeight(natural: 500, page: 100) == 120, "极矮也留得下一行")
     }
 

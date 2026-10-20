@@ -16,7 +16,11 @@ struct BridgeTaskPanel: View {
             }
             Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
                 .font(.caption).foregroundStyle(.secondary)
-            if model.sessions.isEmpty { Text(model.isStale ? "等待读取计时状态" : "目前没有正在计时的事项").foregroundStyle(.secondary) }
+            if model.sessions.isEmpty {
+                // W31b：读失败了就别再说「等待」——原因在下面橙字里
+                Text(!model.isStale ? "目前没有正在计时的事项" : model.lastError == nil ? "等待读取计时状态" : "还没读到计时状态")
+                    .foregroundStyle(.secondary)
+            }
             ForEach(model.sessions) { session in
                 VStack(alignment: .leading, spacing: 6) {
                     Text((session.isExperiment ? "测试 · " : "") + session.title).font(.body.weight(.medium))
@@ -33,7 +37,7 @@ struct BridgeTaskPanel: View {
                     }.disabled(!model.canSubmit)
                 }.padding(.vertical, 4)
             }
-            if model.isStale { Text("尚未取得最新状态；以上只是最后一次同步的记录。")
+            if model.isStale { Text(model.hasEverRead ? "尚未取得最新状态；以上只是最后一次同步的记录。" : "本机还没从云端读到过计时状态。")
                     .font(.caption).foregroundStyle(.orange) }
             if model.hasMore { Text("这里只展示前 100 项；其余计时记录仍保留。")
                     .font(.caption).foregroundStyle(.secondary) }
@@ -65,7 +69,12 @@ struct BridgeTaskPanel: View {
             Text(model.message).font(.caption).foregroundStyle(model.lastError == nil ? Color.secondary : Color.orange)
             if model.reviewCount > 0 { Text("\(model.reviewCount) 条冲突或未接受的请求已保留；不会自动覆盖新状态。")
                     .font(.caption).foregroundStyle(.orange) }
-            if let control = SharedTimerBackendControl.current { SharedTimerBackendPanel(control: control) }
+            // W31b：开发期通道开关默认收起（原来常驻在今天页顶部，iPhone 上把时间轴挤得只剩两三百 pt）；设置里「共享计时（开发期）」仍完整
+            if let control = SharedTimerBackendControl.current {
+                DisclosureGroup { SharedTimerBackendPanel(control: control) } label: {
+                    Text("计时通道（开发期）").font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .task { await model.refresh() }
     }

@@ -12,7 +12,6 @@
 
 import CloudKit
 import Foundation
-import os
 import Observation
 
 nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable {
@@ -262,6 +261,10 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     private var forwardedHere: Set<UUID>
 
     private static let outboxKey = "agentChat.outbox.v1"
+    /// W31b：没发出去的真实原因也存本机（原来重启后一律显示「上次没发出去」，看不出为什么）。
+    private static let outboxErrorsKey = "agentChat.outboxErrors.v1"
+    /// 发送途中 App 被关掉、没留下原因时的说法（同一 id 重试，iCloud 侧幂等，不会多出一条）。
+    nonisolated static let interruptedSendReason = "发送途中 App 被关掉了，不确定发出去没有（重试不会重复）"
     private static let shownKey = "agentChat.shownHere"
     private static let forwardedKey = "agentChat.forwardedHere"
     private static let lastReadKey = "agentChat.lastReadAt"
@@ -274,7 +277,8 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         forwardedHere = Set((defaults.stringArray(forKey: Self.forwardedKey) ?? []).compactMap(UUID.init))
         if let data = defaults.data(forKey: Self.outboxKey), let saved = try? JSONDecoder().decode([AgentChatMessage].self, from: data) {
             outbox = saved
-            for m in saved { outboxErrors[m.id] = "上次没发出去" }
+            let why = defaults.dictionary(forKey: Self.outboxErrorsKey) as? [String: String] ?? [:]
+            for m in saved { outboxErrors[m.id] = why[m.id.uuidString] ?? Self.interruptedSendReason }
         }
     }
 
@@ -321,7 +325,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         outboxErrors[m.id] = nil
         do {
             let transport = self.transport
-            try await AgentChatSendDeadline.race(seconds: sendTimeout) { try await transport.post(m) }
+            try await CloudDeadline.race(seconds: sendTimeout) { try await transport.post(m) }
             outbox.removeAll { $0.id == m.id }; persistOutbox()
             record(.user, "你", "chat.sent", m, "在 \(deviceLabel) 说：\(m.text.prefix(40))")
             await refresh()
@@ -329,6 +333,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
             return m
         } catch {
             outboxErrors[m.id] = error.localizedDescription
+            persistOutbox()
             fail("消息没发出去（已留在本机，可重试）", error)
             return nil
         }
@@ -467,6 +472,10 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     private func persistOutbox() {
         if outbox.isEmpty { defaults.removeObject(forKey: Self.outboxKey) }
         else if let data = try? JSONEncoder().encode(outbox) { defaults.set(data, forKey: Self.outboxKey) }
+        // 原因跟着发件箱一起存（只留还在发件箱里的）
+        let ids = Set(outbox.map(\.id))
+        let why = Dictionary(uniqueKeysWithValues: outboxErrors.filter { ids.contains($0.key) }.map { ($0.key.uuidString, $0.value) })
+        if why.isEmpty { defaults.removeObject(forKey: Self.outboxErrorsKey) } else { defaults.set(why, forKey: Self.outboxErrorsKey) }
     }
 
     private func record(_ actor: ProposalOrigin, _ label: String, _ event: String, _ m: AgentChatMessage, _ detail: String) {
@@ -477,28 +486,5 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     private func fail(_ what: String, _ error: Error) {
         lastError = "\(what)：\(error.localizedDescription)"
         DevLog.shared.error("智能体对话", lastError!)
-    }
-}
-
-/// W31：发送限时。不用 task group——group 要等子任务结束，而卡住的 CloudKit 写入可能根本不响应取消；这里谁先到用谁，晚到的那个被丢弃。
-nonisolated enum AgentChatSendDeadline {
-    struct Timeout: LocalizedError {
-        var seconds: TimeInterval
-        var errorDescription: String? { "\(Int(seconds)) 秒内 iCloud 没有回应（可能没登录 iCloud 或网络不通）" }
-    }
-
-    static func race(seconds: TimeInterval, _ op: @escaping @Sendable () async throws -> Void) async throws {
-        let gate = OSAllocatedUnfairLock(initialState: false)
-        let claim: @Sendable () -> Bool = { gate.withLock { done in if done { return false }; done = true; return true } }
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let work = Task {
-                do { try await op(); if claim() { cont.resume() } }
-                catch { if claim() { cont.resume(throwing: error) } }
-            }
-            Task {
-                try? await Task.sleep(for: .seconds(seconds))
-                if claim() { work.cancel(); cont.resume(throwing: Timeout(seconds: seconds)) }
-            }
-        }
     }
 }

@@ -27,7 +27,7 @@ import Testing
     // MARK: 贴边自动滚
 
     @Test func autoScrollVelocityOnlyInEdgeBands() {
-        let h: CGFloat = 600, e = AxisAutoScroller.edge
+        let h: CGFloat = 600, e = AxisAutoScroller.edge(viewport: 600)
         #expect(AxisAutoScroller.velocity(fingerY: 300, viewport: h) == 0, "中间不滚")
         #expect(AxisAutoScroller.velocity(fingerY: e + 1, viewport: h) == 0)
         #expect(AxisAutoScroller.velocity(fingerY: h - e - 1, viewport: h) == 0)
@@ -36,6 +36,15 @@ import Testing
         #expect(AxisAutoScroller.velocity(fingerY: h - 5, viewport: h) > AxisAutoScroller.velocity(fingerY: h - 30, viewport: h), "越靠边越快")
         #expect(AxisAutoScroller.velocity(fingerY: h + 80, viewport: h) == AxisAutoScroller.maxSpeed, "拖出视口 = 最快，不再加")
         #expect(AxisAutoScroller.velocity(fingerY: 5, viewport: 100) == 0, "视口太矮（小窗口）不自动滚")
+    }
+
+    // W31b：iPhone 上轴视口很矮时边缘带按比例缩、整体更慢——普通拖动不该一碰就飞走几个小时
+    @Test func autoScrollEdgeScalesWithViewportAndSpeedIsModest() {
+        #expect(AxisAutoScroller.edge(viewport: 230) < 30, "矮视口：两条边缘带加起来远小于一半")
+        #expect(AxisAutoScroller.edge(viewport: 900) == 56)
+        #expect(AxisAutoScroller.velocity(fingerY: 115, viewport: 230) == 0, "矮视口中间不滚")
+        #expect(AxisAutoScroller.maxSpeed <= 300, "最快约每秒 6 小时（52pt/小时），不再每秒 17 小时")
+        #expect(AxisAutoScroller.dwell >= 0.2, "进边缘带先停一下才滚")
     }
 
     @Test func autoScrollStopsAtTheAxisEnds() {

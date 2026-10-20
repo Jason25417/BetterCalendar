@@ -44,6 +44,14 @@ import Observation
         return receivedAt.addingTimeInterval(60)
     }
     var hasMore: Bool { file.state?.hasMore ?? false }
+    /// W31b：本机是否读到过任何一次云端计时状态（没读到过时不能说「以上是最后一次同步的记录」）。
+    var hasEverRead: Bool { file.state != nil }
+    /// W31b：iCloud 通道每次云端调用最多等这么久（没登录 iCloud 时 CloudKit 可能永远不回，界面就永远「等待读取」）。
+    var cloudTimeout: TimeInterval = 20
+    private func bounded<T: Sendable>(_ op: @escaping @MainActor () async throws -> T) async throws -> T {
+        guard backend == .icloud else { return try await op() }
+        return try await CloudDeadline.race(seconds: cloudTimeout, op)
+    }
     var lastReadReceivedAt: Date? { file.receivedAt }
     func estimatedServerDate(at localDate: Date? = nil) -> Date {
         guard let state = file.state, let midpoint = file.localMidpoint else { return localDate ?? now() }
@@ -109,7 +117,8 @@ import Observation
         do {
             while healthy && allowCommands, let queued = file.pending.first(where: { !$0.needsReview }) {
                 do {
-                    let receipt = try await service.submitTask(queued.command)
+                    let command = queued.command, service = self.service
+                    let receipt = try await bounded { try await service.submitTask(command) }
                     guard receipt.saved, receipt.commandId == queued.command.commandId else { throw URLError(.cannotParseResponse) }
                     var next = file; next.pending.removeAll { $0.command.commandId == receipt.commandId }
                     try persistence.save(next); file = next
@@ -123,7 +132,8 @@ import Observation
                     report(e.code == 409 ? "另一端已改变状态，未覆盖它的操作；请根据当前状态重新选择" : "操作未被接受；已保留请求，请检查连接或记录状态")
                 }
             }
-            let sentAt = now(), state = try await service.readTasks(), receivedAt = now()
+            let service = self.service
+            let sentAt = now(), state = try await bounded { try await service.readTasks() }, receivedAt = now()
             try state.validate()
             if let previous = file.state {
                 guard state.readAt >= previous.readAt else { throw URLError(.cannotParseResponse) }
@@ -156,7 +166,7 @@ import Observation
                 while let ids = file.pendingApplicationSnapshots, !ids.isEmpty {
                     let sent = Array(ids.prefix(10))
                     do {
-                        let accepted = try await service.reportSavedTaskSnapshots(sent)
+                        let accepted = try await bounded { try await service.reportSavedTaskSnapshots(sent) }
                         guard accepted == Set(sent) else { throw URLError(.cannotParseResponse) }
                         var applied = file; applied.pendingApplicationSnapshots = ids.filter { !accepted.contains($0) }
                         try persistence.save(applied); file = applied
@@ -167,7 +177,8 @@ import Observation
                 }
             }
         } catch {
-            report("计时同步暂未完成；保留最后状态与 \(pendingCount) 条待同步操作，连接恢复后重试")
+            // W31b：写出真实原因（原来只说「暂未完成」，没登录 iCloud 时 iPhone 甚至一直停在「等待」）
+            report("计时同步暂未完成（\(error.localizedDescription)）；保留最后状态与 \(pendingCount) 条待同步操作，连接恢复后重试")
         }
     }
     /// A confirmed remote command uses the same cloud session, then requires

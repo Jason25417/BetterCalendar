@@ -131,6 +131,27 @@ import Testing
         #expect(phone.lastError != nil)
     }
 
+    /// W31b：重启后显示当初真实的失败原因，而不是「上次没发出去」。
+    @Test func outboxFailureReasonSurvivesRelaunch() async throws {
+        let clock = Clock(at(9)), d = defaults()
+        let phone = AgentChatCenter(transport: HangingTransport(), notifier: Bell(), ledger: MemoryOperationLedger(),
+                                    deviceId: "iphone", deviceLabel: "iphone", defaults: d, now: { clock.now })
+        phone.attention = { Self.attentionOff }
+        phone.sendTimeout = 0.2
+        #expect(await phone.send("一句") == nil)
+        let failed = try #require(phone.outbox.first)
+        guard case let .failed(original) = phone.status(of: failed) else { Issue.record("应失败"); return }
+        let restarted = device("iphone", InMemoryAgentChatTransport(), Bell(), clock, defaults: d)
+        let again = try #require(restarted.outbox.first)
+        #expect(restarted.status(of: again) == .failed(original), "重启后原因不变")
+        #expect(!original.contains("上次没发出去"))
+        // 发送途中被杀（没留下原因）→ 说明是中途被关掉
+        let d2 = defaults()
+        d2.set(try JSONEncoder().encode([failed]), forKey: "agentChat.outbox.v1")
+        let reopened = device("iphone", InMemoryAgentChatTransport(), Bell(), clock, defaults: d2)
+        #expect(reopened.status(of: reopened.outbox[0]) == .failed(AgentChatCenter.interruptedSendReason))
+    }
+
     @Test func statusEscalatesWhenMacOrAgentIsSilent() async throws {
         let cloud = InMemoryAgentChatTransport(), clock = Clock(at(10))
         let phone = device("iphone", cloud, Bell(), clock), mac = device("mac", cloud, Bell(), clock)

@@ -16,11 +16,15 @@ import Observation
 @Observable @MainActor
 final class AxisAutoScroller {
     /// 边缘带多高（pt）：手指进到离视口上 / 下边这么近就开始滚。
-    nonisolated static let edge: CGFloat = 56
+    /// W31b：按视口高度定（12%，夹在 24–56pt）——iPhone 上轴视口只有两三百 pt 时，固定 56pt 两条带吃掉近一半，普通拖动就会飞走。
+    nonisolated static func edge(viewport h: CGFloat) -> CGFloat { min(56, max(24, h * 0.12)) }
+    /// 进边缘带后先停这么久才开始滚（秒）：拖动途中擦过边不会立刻跑。
+    nonisolated static let dwell: TimeInterval = 0.3
     /// 拖动手势的坐标系 = 视口（时间轴的 ScrollView 上命名）。
     nonisolated static let viewportSpace = "bc.axis.viewport"
-    /// 最快多快（pt/秒）：手指贴到最边上时。52pt/小时 → 约每秒滚过 17 小时，跨一天约一秒半。
-    nonisolated static let maxSpeed: CGFloat = 900
+    /// 最快多快（pt/秒）：手指贴到最边上时。W31b：900 → 300（52pt/小时 → 约每秒 6 小时；今晚到明早约两秒，跨天仍够得着；
+    /// 原来约每秒 17 小时，稍一贴边就跑出几个小时）。
+    nonisolated static let maxSpeed: CGFloat = 300
 
     // 每帧都会变的量：不被观察（写它不触发任何视图重算）
     @ObservationIgnored var offsetY: CGFloat = 0
@@ -68,6 +72,7 @@ final class AxisAutoScroller {
         let gen = generation
         loop = Task { [weak self] in
             var last = ContinuousClock.now
+            let entered = last   // 这一轮循环 = 手指这次进边缘带的时刻（离开就结束循环，再进来重新计停留）
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(16))
                 guard let self, !Task.isCancelled, self.active, self.generation == gen, let y = self.fingerY else { break }
@@ -76,6 +81,7 @@ final class AxisAutoScroller {
                 last = t
                 let v = Self.velocity(fingerY: y, viewport: self.viewportHeight)
                 guard v != 0 else { break }   // 离开边缘带：停
+                guard (t - entered) / .seconds(1) >= Self.dwell else { continue }   // W31b：先停一下再滚
                 let next = Self.nextOffset(current: self.offsetY, velocity: v, dt: CGFloat(dt),
                                            content: self.contentHeight, viewport: self.viewportHeight)
                 guard next != self.offsetY else { continue }   // 已到轴的一端：停在那里，手指挪回来还能接着拖
@@ -89,7 +95,8 @@ final class AxisAutoScroller {
 
     /// 滚动速度（pt/秒；往下为正，0 = 不滚）：边缘带里线性加速，越靠边越快。纯函数、可单测。
     nonisolated static func velocity(fingerY y: CGFloat, viewport h: CGFloat) -> CGFloat {
-        guard h > edge * 2 else { return 0 }   // 视口太矮（小窗口）：不自动滚，免得一按就跑
+        guard h >= 120 else { return 0 }   // 视口太矮（小窗口）：不自动滚，免得一按就跑
+        let edge = edge(viewport: h)
         if y < edge { return -maxSpeed * min(1, (edge - y) / edge) }
         if y > h - edge { return maxSpeed * min(1, (y - (h - edge)) / edge) }
         return 0
