@@ -68,6 +68,7 @@ struct FeedbackView: View {
             .pickerStyle(.segmented)
             // 体检 #25：正文输入区穿 surface 纸面卡（与日记编辑器同族，条文5大容器档12）
             TextEditor(text: $text)
+                .persistedDraft($text, key: TextDraftKey.feedback)   // W29：重启后还在（系统分享面板不告诉我们发没发，由你点「清空」）
                 .frame(minHeight: 120)
                 .padding(6)
                 .scrollContentBackground(.hidden)
@@ -96,6 +97,9 @@ struct FeedbackView: View {
                 Text("内测期更快通道：TestFlight 里对 App 截图即可直达反馈。")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                if !text.isEmpty {
+                    Button("清空") { text = ""; TextDraftStore.shared.clear(TextDraftKey.feedback) }
+                }
                 ShareLink(item: FeedbackComposer.compose(type: type, text: text, attachDiagnostics: attach),
                           subject: Text("BetterCalendar 反馈 · \(type)")) {
                     Label("发送反馈…", systemImage: "paperplane")

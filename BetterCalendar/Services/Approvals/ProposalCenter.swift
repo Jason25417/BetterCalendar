@@ -56,6 +56,14 @@ import UIKit
             usage.begin(.proposalReply, key: id.uuidString)
         }
     }
+    /// W29：这份提案上次「回一句」打了一半（App 重启过）→ 还在等你拍板就把回复框重新展开（卡片出现时调）。
+    /// 走 toggleReplying 同一条路：记一次「开了头」（上个进程的开头随进程没了，没记成没做完）；已开着 / 不在等 / 没草稿 → 什么都不做。
+    @discardableResult
+    func resumeReplyingIfDrafted(_ id: UUID, drafts: TextDraftStore = .shared) -> Bool {
+        guard !replying.contains(id), pending.contains(where: { $0.id == id }), drafts.has(TextDraftKey.proposalReply(id)) else { return false }
+        toggleReplying(id)
+        return true
+    }
     /// W21 功能使用探针（只记哪个功能、什么事件；本机）。测试注入自己的实例。
     var usage: FeatureUsageStore = FeatureUsage.shared
     /// W21：卡片上开始调某个方案的数值（第一次改值时由 ProposalTuner 调）= 开了头；批准了这个方案 = 做完；

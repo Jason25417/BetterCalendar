@@ -267,6 +267,8 @@ struct AgentChatView: View {
                 .focused($inputFocused)
                 .onSubmit(send)
                 .accessibilityIdentifier("bc.chat.input")
+                // W29：打了一半的字重启后还在（还原时只会记一次「开了头」：begin 同 key 不重复）
+                .persistedDraft($draft, key: TextDraftKey.agentChat)
                 // W21：打了字 = 开了头；清空没发 = 没做完（发出去 = 做完，见 send）
                 .onChange(of: draft) { old, new in
                     let wasEmpty = old.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -288,6 +290,9 @@ struct AgentChatView: View {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         FeatureUsage.complete(.agentChatSend, "智能体页")
         draft = ""   // complete 已关掉开头，清空不会记成没做完
+        // W29：输入框草稿此刻清掉是安全的——chat.send 第一步就把这句话存进本机发件箱（持久化），
+        // 发送失败时它留在对话里显示「没发出去」+「重试」，字不会丢。
+        TextDraftStore.shared.clear(TextDraftKey.agentChat)
         Task { await chat.send(text) }
     }
 }
