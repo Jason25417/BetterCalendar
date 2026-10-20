@@ -40,7 +40,7 @@ struct LongTermView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("长期的事放这里").font(.headline)
                             // 审计 #16：空状态指向本页主入口（下方「说一句」），不再把人引去别的页
-                            Text("考试、论文、想练的技能——不占今天的格子，但一直有人记得。在下面说一句「我要准备 GRE，10 月 8 号考」就会进来；在排日程页顺口说也一样。")
+                            Text("考试、论文、想练的技能——不占今天的格子，但一直有人记得。在下面说一句「我要准备 GRE，10 月 8 号考」就会进来。")   // W31 自测：排日程页已不在（今天 / 智能体 / 长期 / 日记），删掉指向它的半句（P4 不让你找不存在的入口）
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 6)
