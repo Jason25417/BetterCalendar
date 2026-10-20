@@ -165,6 +165,28 @@ struct LogicTests {
                                              notBefore: nine, windDown: windDown) == nil)
     }
 
+    // W31 自测：「加一项」寻空档要避开你自己日历里的课，凌晨加到今天不落进过去
+    @Test func plainSlotStartAvoidsUserCalendarAndPast() {
+        let day = at(2026,10,20,0)
+        let cls = [(start: at(2026,10,20,8), end: at(2026,10,20,9,20))]
+        // 未来日：9 点起，但 8:00–9:20 有课 → 9:20
+        #expect(HomeViewModel.plainSlotStart(targetDay: day, now: at(2026,10,19,23,44), duration: 3600,
+                                             planned: [], busy: cls, windDownHour: 23) == at(2026,10,20,9,20))
+        // 凌晨 1 点（逻辑上仍是 19 日）加到今天：从现在起，不回到 19 日 9 点
+        let lateNow = at(2026,10,20,1)
+        let got = HomeViewModel.plainSlotStart(targetDay: at(2026,10,19,0), now: lateNow, duration: 3600,
+                                               planned: [], busy: [], windDownHour: 23)
+        #expect(got >= lateNow)
+    }
+
+    // W31 自测：大字号下「现在」卡把时间轴挤没——卡最多占页面一半
+    @Test func nowCardNeverTakesMoreThanHalfThePage() {
+        #expect(HomeView.nowCardFrameHeight(natural: 300, page: 800) == 300)
+        #expect(HomeView.nowCardFrameHeight(natural: 1200, page: 800) == 400)
+        #expect(HomeView.nowCardFrameHeight(natural: 0, page: 800) == 400, "没量到时先给上限，不塌成 0")
+        #expect(HomeView.nowCardFrameHeight(natural: 500, page: 100) == 120, "极矮也留得下一行")
+    }
+
     // MARK: 本地兜底解析抽时长（0.18.23：云端失败时也给可用草稿）
 
     // MARK: JSON 尾逗号修复（0.18.22：治「JSON 解码失败」）

@@ -374,7 +374,7 @@ final class HomeViewModel {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
         await flushAutosave()
-        let start = freeSlotStart(duration: 3600)
+        let start = await freeSlotStart(duration: 3600)
         FeatureUsage.used(.todayAdd)   // W21：今天页写入路径（换成时间轴视图后照样记）
         await admitDirect(ScheduledBlock(title: t, start: start, end: start.addingTimeInterval(3600)))
     }
@@ -530,13 +530,13 @@ final class HomeViewModel {
             // 弹性块撞已排块 → 就近寻空档（用户给了明确时刻的固定/锚点块按用户说的）
             if !sb.isFixed, !sb.isAnchor, overlapsExistingTruth(sb) {
                 let dur = sb.end.timeIntervalSince(sb.start)
-                let start = freeSlotStart(duration: dur)
+                let start = await freeSlotStart(duration: dur)
                 sb.start = start; sb.end = start.addingTimeInterval(dur)
             }
         } else {
             // 解析失败/无时刻：本地兜底 60 分钟寻空档投放（用户的字绝不丢）
             let dur = TimeInterval((pb?.durationMinutes ?? 60) * 60)
-            let start = freeSlotStart(duration: dur)
+            let start = await freeSlotStart(duration: dur)
             sb = ScheduledBlock(title: pb?.title ?? t, start: start,
                                 end: start.addingTimeInterval(dur), labels: pb?.labels ?? [])
         }
@@ -547,7 +547,7 @@ final class HomeViewModel {
     func admitFromPool(_ task: LongTask) async {
         let next = task.nextCheckpoint
         let dur = TimeInterval((next?.estimatedMinutes ?? task.unitMinutes ?? 60) * 60)
-        let start = freeSlotStart(duration: dur)
+        let start = await freeSlotStart(duration: dur)
         var sb = ScheduledBlock(title: next.map { "\(task.title) · \($0.title)" } ?? task.title,
                                 start: start, end: start.addingTimeInterval(dur))
         if task.poolZone == .longterm { sb.linkedTaskID = task.id }
@@ -579,17 +579,30 @@ final class HomeViewModel {
     }
 
     /// 寻空档（今天从现在起、未来日从 9 点起，收工线为界；排不下接末尾）——smartInsert 同款口径。
-    private func freeSlotStart(duration: TimeInterval) -> Date {
-        let cal = Calendar.current
-        let dayStart = cal.startOfDay(for: targetDay)
-        let isToday = cal.isDate(targetDay, inSameDayAs: now())
-        let notBefore = isToday ? max(now(), dayStart) : dayStart.addingTimeInterval(9 * 3600)
-        let windDown = dayStart.addingTimeInterval(TimeInterval(WorkHoursSettings.windDownHour) * 3600)
-        let existing = ((try? planStore.plannedBlocks(on: targetDay)) ?? [])
+    /// W31 自测修：①避开你自己日历里的安排（原来只看本 App 的块，「加一项」会叠在你的课上——P4 说空档却撞课）；
+    /// ②「今天」按逻辑日判断（凌晨 0–4 点加到今天原来落在已过去的 9 点）。
+    private func freeSlotStart(duration: TimeInterval) async -> Date {
+        let planned = ((try? planStore.plannedBlocks(on: targetDay)) ?? [])
             .map { (start: $0.start, end: $0.end) }
-        return Self.firstFreeStart(existing: existing, duration: duration,
-                                   notBefore: notBefore, windDown: windDown)
-            ?? (existing.map(\.end).max() ?? notBefore)
+        let busy = await calendarStore.existingEvents(on: targetDay).map { (start: $0.start, end: $0.end) }
+        return Self.plainSlotStart(targetDay: targetDay, now: now(), duration: duration,
+                                   planned: planned, busy: busy,
+                                   windDownHour: WorkHoursSettings.windDownHour)
+    }
+
+    /// 纯函数（可单测）：目标日的第一个空档起点。planned + busy 都算占用；排不下 → 接在最后一块后面，
+    /// 但绝不早于 notBefore（不落进过去）。
+    static func plainSlotStart(targetDay: Date, now: Date, duration: TimeInterval,
+                               planned: [(start: Date, end: Date)], busy: [(start: Date, end: Date)],
+                               windDownHour: Int) -> Date {
+        let dayStart = Calendar.current.startOfDay(for: targetDay)
+        let isToday = DayContext.logicalStartOfDay(now) == dayStart
+        let notBefore = isToday ? max(now, dayStart) : dayStart.addingTimeInterval(9 * 3600)
+        let windDown = dayStart.addingTimeInterval(TimeInterval(windDownHour) * 3600)
+        let existing = planned + busy
+        return firstFreeStart(existing: existing, duration: duration,
+                              notBefore: notBefore, windDown: windDown)
+            ?? max(notBefore, existing.map(\.end).max() ?? notBefore)
     }
 
     private func overlapsExistingTruth(_ sb: ScheduledBlock) -> Bool {

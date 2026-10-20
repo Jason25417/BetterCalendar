@@ -107,6 +107,30 @@ import Testing
         #expect(restarted.status(of: restarted.messages[0]) == .waitingForMac(overdue: false))
     }
 
+    /// W31 自测：没登录 iCloud 的设备上 CloudKit 写入永远不回——不能一直「发送中…」。
+    nonisolated struct HangingTransport: AgentChatTransport {
+        func post(_ message: AgentChatMessage) async throws {
+            // 模拟不响应取消的卡死写入（真 CloudKit 无账号时的表现）
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { c.resume() }
+            }
+        }
+        func fetchRecent() async throws -> [AgentChatMessage] { [] }
+        func save(_ message: AgentChatMessage) async throws {}
+    }
+
+    @Test func hangingSendTimesOutVisiblyInsteadOfSendingForever() async throws {
+        let clock = Clock(at(9))
+        let phone = AgentChatCenter(transport: HangingTransport(), notifier: Bell(), ledger: MemoryOperationLedger(),
+                                    deviceId: "iphone", deviceLabel: "iphone", defaults: defaults(), now: { clock.now })
+        phone.attention = { Self.attentionOff }
+        phone.sendTimeout = 0.2
+        #expect(await phone.send("没登录 iCloud 时说一句") == nil)
+        let pending = try #require(phone.outbox.first)
+        if case .failed = phone.status(of: pending) {} else { Issue.record("超时后应显示没发出去，而不是一直发送中") }
+        #expect(phone.lastError != nil)
+    }
+
     @Test func statusEscalatesWhenMacOrAgentIsSilent() async throws {
         let cloud = InMemoryAgentChatTransport(), clock = Clock(at(10))
         let phone = device("iphone", cloud, Bell(), clock), mac = device("mac", cloud, Bell(), clock)
