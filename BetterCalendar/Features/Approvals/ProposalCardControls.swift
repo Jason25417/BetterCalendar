@@ -16,12 +16,16 @@
 import SwiftUI
 
 /// 越级提案的醒目横条（原则 8「审慎越级」）。
+/// W32：图钉 / 固定安排 / 你的东西（日程、提醒、事项、日记）是同一个越级概念、同一条横条；
+/// subjects = 改动清单里的点名行（「改的是你自己设的日程：《组会》」），放在横条里、不在正文里重复。
 struct ProposalEscalationBanner: View {
     let reason: String
+    var subjects: [String] = []
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Label("越级：这会动你亲手放的位置或你的东西", systemImage: "exclamationmark.shield.fill")
                 .font(.subheadline.bold()).foregroundStyle(.orange)
+            ForEach(Array(subjects.enumerated()), id: \.offset) { _, s in Text(s).font(.callout.bold()) }
             Text("智能体的理由：" + reason).font(.caption)
             Text("越级提案每次都要你亲自批准，预授权规则不会代你放行。").font(.caption2).foregroundStyle(.secondary)
         }

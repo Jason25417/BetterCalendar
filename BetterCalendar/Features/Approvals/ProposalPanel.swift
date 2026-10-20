@@ -22,6 +22,7 @@ struct ProposalPanel: View {
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
     @State private var planEditingOn = PlanEditingSettings.enabled
+    @State private var journalWriteOn = AgentJournalSettings.allowWrite
     @State private var notificationAllowed: Bool?
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16：测试按钮 / 内部统计只在「开发者选项」里出现
 
@@ -76,6 +77,9 @@ struct ProposalPanel: View {
                 Toggle("允许智能体读最近日记", isOn: Binding(get: { journalOn }, set: { journalOn = $0; AgentContextSettings.allowRecentJournal = $0 }))
                 Text("默认关。打开后附最近 3 天日记的摘要（每篇最多前 500 字，不含照片）；随设置同步到你的所有设备，随时可关。")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("允许智能体提议写日记", isOn: Binding(get: { journalWriteOn }, set: { journalWriteOn = $0; AgentJournalSettings.allowWrite = $0 }))
+                Text("默认关。打开后智能体能提议在某天的日记末尾加一段（要你批准）；它写的字用衬线斜体显示，和你的字分开——你改了其中任何一个字，那段就算你的。改你自己写的原文是越级：每次都要你亲自批、可一键撤销，而且要先允许它读日记。随设置同步到你的所有设备。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("智能体排时间线") {
                 Toggle("允许智能体提议排时间线", isOn: Binding(get: { planEditingOn }, set: { planEditingOn = $0; PlanEditingSettings.enabled = $0 }))
@@ -118,6 +122,7 @@ struct ProposalPanel: View {
         .onReceive(NotificationCenter.default.publisher(for: SettingsSync.didSyncRemotely)) { _ in
             journalOn = AgentContextSettings.allowRecentJournal   // 另一台设备改了开关
             planEditingOn = PlanEditingSettings.enabled
+            journalWriteOn = AgentJournalSettings.allowWrite
         }
     }
 

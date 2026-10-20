@@ -139,7 +139,8 @@ import Testing
         let item = UUID().uuidString, block = UUID().uuidString
         let bad: [[String: Any]] = [
             ["kind": "itemDiscard", "itemId": item],                                   // 只用于撤销
-            ["kind": "itemDelete", "itemId": item],                                    // 不认识的种类
+            ["kind": "itemDestroy", "itemId": item],                                   // 不认识的种类（W32 起 itemDelete 是合法种类）
+            ["kind": "itemRestore", "itemId": item],                                   // W32：只用于撤销
             ["kind": "itemCreate"],                                                    // 缺标题
             ["kind": "itemCreate", "title": "x", "deadline": "明天"],                  // 不认识的字段
             ["kind": "itemEdit", "itemId": item],                                      // 什么都不改

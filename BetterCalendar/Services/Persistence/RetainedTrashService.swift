@@ -39,7 +39,7 @@ nonisolated struct TrashItem: Identifiable {
         for r in try context.fetch(FetchDescriptor<LongTask>()) { result.append((r, r, r.title, "待办／长期事项")) }
         for r in try context.fetch(FetchDescriptor<LongTaskCheckpoint>()) { result.append((r, r, r.title, "阶段")) }
         for r in try context.fetch(FetchDescriptor<JournalEntry>()) {
-            result.append((r, r, String(r.body.prefix(50)), "日记"))
+            result.append((r, r, String(JournalAuthorship.plainText(r.body).prefix(50)), "日记"))
         }
         for r in try context.fetch(FetchDescriptor<JournalPhoto>()) { result.append((r, r, r.ref, "照片")) }
         return result

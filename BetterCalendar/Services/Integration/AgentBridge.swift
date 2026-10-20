@@ -350,6 +350,15 @@ nonisolated struct AgentBridgeIO: Sendable {
             "blockEdit": ["blockId", "title", "durationMinutes", "fixed", "important", "deadline", "clearDeadline", "expectedRevision"],
             "blockDelete": ["blockId", "expectedRevision"],
             "planDay": ["day", "steps"],
+            // W32 越级审批你的东西（必须带 escalation；永远要 Jason 亲自批）
+            "yourEventEdit": ["eventId", "occurrenceStart", "span", "title", "start", "end", "notes", "expectedRevision"],
+            "yourEventDelete": ["eventId", "occurrenceStart", "expectedRevision"],
+            "yourReminderEdit": ["reminderId", "title", "due", "done", "expectedRevision"],
+            "itemDelete": ["itemId", "expectedRevision"],
+            "checkpointDelete": ["itemId", "checkpointId", "expectedRevision"],
+            // W32b 日记（「允许智能体提议写日记」开着才收）
+            "journalAppend": ["day", "text", "expectedRevision"],
+            "journalEdit": ["entryId", "find", "replace", "expectedRevision"],
         ]
         guard let keys = allowed[kind] else {
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」（可用：\(allowed.keys.sorted().joined(separator: " / "))）")
@@ -493,6 +502,44 @@ nonisolated struct AgentBridgeIO: Sendable {
                 return step
             }
             return .planDay(day: day, steps: steps, isUndo: false)
+        case "yourEventEdit", "yourEventDelete":
+            let ref = YourEventRef(externalID: try required(string("eventId", max: 512), "eventId"),
+                                   occurrenceStart: try required(date("occurrenceStart"), "occurrenceStart"))
+            if kind == "yourEventDelete" { return .yourEventDelete(ref: ref, expectedRevision: revision) }
+            var span = YourEventSpan.thisOccurrence
+            if let raw = try string("span", max: 20) {
+                guard let s = YourEventSpan(rawValue: raw) else { throw AgentBridgeError.invalid("yourEventEdit.span 必须是 thisOccurrence / futureEvents") }
+                span = s
+            }
+            let edit = YourEventEdit(ref: ref, span: span, title: try string("title", max: 200), start: try date("start"), end: try date("end"),
+                                     notes: try string("notes", max: 2000), expectedRevision: revision)
+            guard !edit.isEmpty else { throw AgentBridgeError.invalid("yourEventEdit 至少要改 title / start / end / notes 之一") }
+            return .yourEventEdit(edit)
+        case "yourReminderEdit":
+            var done: Bool? = nil
+            if let raw = a["done"], !(raw is NSNull) {
+                guard let flag = Self.isBool(raw) else { throw AgentBridgeError.invalid("yourReminderEdit.done 必须是 true / false") }
+                done = flag
+            }
+            let edit = YourReminderEdit(externalID: try required(string("reminderId", max: 512), "reminderId"), title: try string("title", max: 200),
+                                        due: try date("due"), done: done, expectedRevision: revision)
+            guard !edit.isEmpty else { throw AgentBridgeError.invalid("yourReminderEdit 至少要改 title / due / done 之一") }
+            return .yourReminderEdit(edit)
+        case "itemDelete":
+            return .itemDelete(id: try required(uuid("itemId"), "itemId"), expectedRevision: revision)
+        case "checkpointDelete":
+            return .checkpointDelete(itemId: try required(uuid("itemId"), "itemId"), checkpointId: try required(uuid("checkpointId"), "checkpointId"),
+                                     expectedRevision: revision)
+        case "journalAppend":
+            return .journalAppend(day: try required(Self.day(a["day"], "journalAppend.day"), "day"),
+                                  text: try required(string("text", max: ProposalActionExecutor.journalTextLimit), "text"),
+                                  newEntryID: proposalId, expectedRevision: revision)
+        case "journalEdit":
+            guard let replace = try string("replace", max: ProposalActionExecutor.journalTextLimit) else {
+                throw AgentBridgeError.invalid("journalEdit 缺少 replace（改成什么；空串 = 删掉这段）")
+            }
+            return .journalEdit(entryID: try required(uuid("entryId"), "entryId"), find: try required(string("find", max: 2000), "find"),
+                                replace: replace, expectedRevision: revision)
         default:
             throw AgentBridgeError.invalid("不支持的改动种类「\(kind)」")
         }

@@ -19,7 +19,10 @@ struct ProposalCard: View {
         let p = proposal
         let state = p.effectiveState(at: .now)
         VStack(alignment: .leading, spacing: 6) {
-            if let e = p.escalation, state == .pending { ProposalEscalationBanner(reason: e) }
+            if let e = p.escalation, state == .pending {
+                ProposalEscalationBanner(reason: e, subjects: p.chosen.changes.filter(\.isEscalationSubject)
+                    .map { String($0.field.dropFirst(ProposalChange.escalationMarker.count)) })
+            }
             Text(p.title).font(.subheadline.bold())
             if state == .pending {
                 if p.hasAlternatives {
@@ -27,7 +30,8 @@ struct ProposalCard: View {
                     Text("理由：\(p.reason)").font(.caption)
                 } else {
                     Text(p.notificationBody.components(separatedBy: "\n")
-                        .filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix) }
+                        .filter { !$0.hasPrefix(Proposal.escalationHeadline) && !$0.hasPrefix(Proposal.adjustablePrefix)
+                                 && !(p.escalation != nil && $0.hasPrefix(ProposalChange.escalationMarker)) }   // 点名行已在越级横条里
                         .joined(separator: "\n")).font(.caption)
                 }
                 Text("不处理到 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened)) 就自动作废")

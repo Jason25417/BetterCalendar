@@ -171,6 +171,9 @@ final class AppContainer {
             : ProposalActionExecutor(items: longTasks, deviceId: ProposalDevice.id)
         // W8 D3：闹钟（iPhone 系统闹钟，复用 AlarmKitNativeAlarms）；提醒的本机通知兜底（复用 NativeReminderScheduler，W12 起提醒先写提醒事项）。
         actionExecutor?.askReminders = reminderProjector   // W12：「几点提醒我」写进提醒事项，两台设备都响
+        // W32：你的日程 / 提醒的唯一写者——只交给审批执行器（每次写都是你批准的提案或你点的撤销）。
+        // 测试宿主没有真执行器（actionExecutor 为 nil），这里也就不建；写者自身另有 EventKitWriteGuard。
+        actionExecutor?.yourItems = EventKitYourItemsWriter()
         if let actionExecutor, let reminders {
             actionExecutor.notifications = NativeProposalNotificationScheduler(reminders: reminders, alarms: nativeAlarms)
             actionExecutor.knownDevices = { KnownDevices.all() }
@@ -300,6 +303,7 @@ final class AppContainer {
         self.reviewStore = ReviewLocalStore()
         self.milestones = MilestoneStore(reviewStore: reviewStore)
         self.journalStore = JournalStore()
+        actionExecutor?.journal = journalStore   // W32b：审批写日记（开关「允许智能体提议写日记」默认关）
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
         self.projection = CalendarSyncEngine(planStore: planStore, calendarStore: eventKitCalendar)
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）

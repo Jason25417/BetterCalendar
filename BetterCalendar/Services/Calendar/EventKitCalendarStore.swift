@@ -213,7 +213,9 @@ actor EventKitCalendarStore: CalendarStore {
         let pred = store.predicateForEvents(withStart: window.start, end: window.end, calendars: others)
         return store.events(matching: pred)
             .map { SystemCalendarEvent(title: $0.title ?? "（无标题）", start: $0.startDate, end: $0.endDate,
-                                       isAllDay: $0.isAllDay, calendarTitle: $0.calendar?.title ?? "") }
+                                       isAllDay: $0.isAllDay, calendarTitle: $0.calendar?.title ?? "",
+                                       externalID: $0.calendarItemExternalIdentifier,   // W32：越级提案定位用（跨设备）
+                                       facts: YourEventFacts($0, inBetterCalendar: false)) }
             .sorted { $0.start < $1.start }
     }
 

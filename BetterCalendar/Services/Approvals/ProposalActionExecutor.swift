@@ -37,6 +37,10 @@ enum ProposalRevision {
     static func block(_ b: ScheduledBlock) -> String {
         hash(["block", b.id.uuidString, b.title, ms(b.start), ms(b.end), b.isFixed ? "fixed" : "flex", ms(b.deadline)])
     }
+    /// W32b：日记的版本只看正文（改心情 / 标签不算改了你写的字）。
+    static func journal(_ e: JournalEntry) -> String {
+        hash(["journal", e.id.uuidString, e.body, e.isInTrash ? "trash" : "live"])
+    }
 }
 
 // MARK: - 能力缝
@@ -46,6 +50,21 @@ enum ProposalRevision {
     func task(id: UUID) throws -> LongTask?
     func createTodo(id: UUID, title: String, note: String, at date: Date) throws
     func update(id: UUID, at date: Date, _ change: (LongTask) -> Void) throws
+    func discard(id: UUID, at date: Date) throws
+    /// W32c：删除 / 恢复事项与阶段（回收站；返回 deletionID 供撤销）。
+    func trash(id: UUID, at date: Date) throws -> UUID
+    func restore(id: UUID, deletionID: UUID, at date: Date) throws
+    func checkpoint(itemId: UUID, id: UUID) throws -> LongTaskCheckpoint?
+    func trashCheckpoint(itemId: UUID, id: UUID, at date: Date) throws -> UUID
+    func restoreCheckpoint(itemId: UUID, id: UUID, deletionID: UUID, at date: Date) throws
+}
+
+/// W32b：日记写入（唯一写者 = JournalStore）。
+@MainActor protocol ProposalJournalWriting: AnyObject {
+    func entry(id: UUID) throws -> JournalEntry?
+    func entry(onLogicalDay day: Date) throws -> JournalEntry?
+    func create(id: UUID, day: Date, body: String, at date: Date) throws
+    func setBody(id: UUID, body: String, at date: Date) throws
     func discard(id: UUID, at date: Date) throws
 }
 
@@ -123,6 +142,12 @@ enum ProposalTimerRules {
     var notifications: (any ProposalNotificationScheduling)?
     /// W12（SPEC §19.13 Q5）：「几点提醒我」写成提醒事项里的原生提醒（两台设备都响）。nil = 这台设备没接 → 改用本机通知并写明。
     var askReminders: (any AskReminderProjecting)?
+    /// W32：你的日程 / 提醒的唯一写者（生产 = EventKitYourItemsWriter；只注入给这里）。nil = 这台设备没接 → 可见地失败。
+    var yourItems: (any YourItemsWriting)?
+    /// W32b：日记写入（JournalStore）+ 两个开关（写：「允许智能体提议写日记」默认关；读：改原文要先看得到原文）。
+    var journal: (any ProposalJournalWriting)?
+    var journalWriteAllowed: () -> Bool = { AgentJournalSettings.allowWrite }
+    var journalReadAllowed: () -> Bool = { AgentContextSettings.allowRecentJournal }
     /// W8 D3：最近见过的设备名册（含本机），给闹钟 / 提醒校验目标设备、在审批卡上写设备名。
     var knownDevices: () -> [KnownDevice] = { [] }
     let deviceId: String
@@ -144,21 +169,29 @@ enum ProposalTimerRules {
     /// 提案必须带越级理由，否则拒收；带了就在改动清单最前面点名是哪几块（审批卡另有 W10 的越级横幅）。
     /// W18：删掉或取消一个**固定安排**同样算越级（那是你定下的承诺）；挪固定安排 / 改它的时长仍一律不行（规则里拒）。
     /// 越级提案永远不被预授权放行（PreauthPolicy 看 Proposal.escalation）。撤销（整组挪回 / 整组撤销）是你的动作，不查。
+    /// W32：动「你的东西」（ownership == .yours：你的日程 / 提醒 / 事项 / 你写的日记）是同一个越级概念——同样必须带越级理由，
+    /// 点名行（⚠️ …）由各自的 prepare 算好放在改动清单最前面，审批卡把它放进橙色越级横条。
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction {
         var prepared = try await prepare(action)
         let (pinned, fixed) = try escalationTargets(prepared.action)
-        guard !pinned.isEmpty || !fixed.isEmpty else { return prepared }
+        let yours = prepared.action.ownership == .yours
+        guard !pinned.isEmpty || !fixed.isEmpty || yours else { return prepared }
         let pinNames = pinned.map { "「\($0)」" }.joined(separator: "、")
         let fixedNames = fixed.map { "「\($0)」" }.joined(separator: "、")
         guard escalation != nil else {
             if !pinned.isEmpty {
                 throw ProposalExecutionError.invalid("\(pinNames)是你亲手放的位置（图钉，当天有效）；要动它，提案必须标「越级」并写明理由")
             }
-            throw ProposalExecutionError.invalid("\(fixedNames)是固定安排；要删掉它或取消固定，提案必须标「越级」并写明理由")
+            if !fixed.isEmpty {
+                throw ProposalExecutionError.invalid("\(fixedNames)是固定安排；要删掉它或取消固定，提案必须标「越级」并写明理由")
+            }
+            let subject = prepared.changes?.first(where: \.isEscalationSubject)
+                .map { String($0.field.dropFirst(ProposalChange.escalationMarker.count)) } ?? "这会动你的东西"
+            throw ProposalExecutionError.invalid("\(subject)——动你的东西，提案必须标「越级」并写明理由（你要求过，或哪里真冲突非改不可）")
         }
         var lines: [ProposalChange] = []
-        if !pinned.isEmpty { lines.append(ProposalChange(field: "⚠️ 这会动你亲手放的位置：\(pinNames)（图钉，当天自动调整都绕开它）", before: nil, after: nil)) }
-        if !fixed.isEmpty { lines.append(ProposalChange(field: "⚠️ 这会删掉或取消固定安排：\(fixedNames)", before: nil, after: nil)) }
+        if !pinned.isEmpty { lines.append(.escalationSubject("这会动你亲手放的位置：\(pinNames)（图钉，当天自动调整都绕开它）")) }
+        if !fixed.isEmpty { lines.append(.escalationSubject("这会删掉或取消固定安排：\(fixedNames)")) }
         var changes = prepared.changes ?? []
         for line in lines.reversed() where !changes.contains(line) { changes.insert(line, at: 0) }
         prepared.changes = changes
@@ -418,6 +451,91 @@ enum ProposalTimerRules {
             var changes = PlanEditRules.changes(resolved, now: now())
             changes.append(ProposalChange(field: "排\(PlanEditRules.dayName(day))：\(resolved.count) 步一起批准；事后可整组撤销", before: nil, after: nil))
             return PreparedProposalAction(action: .planDay(day: day, steps: resolved.map(\.step), isUndo: false), changes: changes)
+
+        // —— W32 你的日程 / 提醒（越级）——
+        case let .yourEventEdit(edit):
+            let snap = try await yourEvent(edit.ref)
+            var e = try YourItemRules.checkEdit(snap, edit)
+            e.ref = snap.ref
+            e.expectedRevision = try Self.baseline(edit.expectedRevision, current: snap.revision, what: "你的日程「\(snap.title)」")
+            return PreparedProposalAction(action: .yourEventEdit(e), changes: YourItemRules.eventChanges(snap, e))
+
+        case let .yourEventDelete(ref, expected):
+            let snap = try await yourEvent(ref)
+            try YourItemRules.checkDelete(snap)
+            let revision = try Self.baseline(expected, current: snap.revision, what: "你的日程「\(snap.title)」")
+            return PreparedProposalAction(action: .yourEventDelete(ref: snap.ref, expectedRevision: revision), changes: YourItemRules.deleteChanges(snap))
+
+        case let .yourReminderEdit(edit):
+            let snap = try await yourReminder(edit.externalID)
+            var e = try YourItemRules.checkEdit(snap, edit)
+            e.expectedRevision = try Self.baseline(edit.expectedRevision, current: snap.revision, what: "你的提醒「\(snap.title)」")
+            return PreparedProposalAction(action: .yourReminderEdit(e), changes: YourItemRules.reminderChanges(snap, e))
+
+        // —— W32c 删事项 / 阶段（越级，进回收站）——
+        case let .itemDelete(id, expected):
+            let task = try liveTask(id)
+            let revision = try Self.baseline(expected, current: ProposalRevision.item(task), what: "「\(task.title)」")
+            let zone = task.poolZone == .todo ? "待办" : "长期事项"
+            let cps = task.sortedCheckpoints.count
+            return PreparedProposalAction(action: .itemDelete(id: id, expectedRevision: revision), changes: [
+                .escalationSubject("删的是你的\(zone)：《\(task.title)》"),
+                ProposalChange(field: zone, before: task.title + (cps > 0 ? "（连同它的 \(cps) 个阶段）" : ""), after: nil),
+                ProposalChange(field: "进回收站，30 天内可恢复；批准后可一键撤销\(cps > 0 ? "（阶段一起回来）" : "")；已排进时间线的块不受影响", before: nil, after: nil),
+            ])
+
+        case let .checkpointDelete(itemId, checkpointId, expected):
+            let task = try liveTask(itemId)
+            guard let cp = try itemStore().checkpoint(itemId: itemId, id: checkpointId), !cp.isInTrash else {
+                throw ProposalExecutionError.invalid("「\(task.title)」里找不到这个阶段（可能已删除）")
+            }
+            let revision = try Self.baseline(expected, current: ProposalRevision.item(task), what: "「\(task.title)」")
+            return PreparedProposalAction(action: .checkpointDelete(itemId: itemId, checkpointId: checkpointId, expectedRevision: revision), changes: [
+                .escalationSubject("删的是你长期事项《\(task.title)》里的阶段：《\(cp.title)》"),
+                ProposalChange(field: "「\(task.title)」的阶段", before: cp.title + (cp.doneAt != nil ? "（已推进到）" : ""), after: nil),
+                ProposalChange(field: "进回收站，30 天内可恢复；批准后可一键撤销", before: nil, after: nil),
+            ])
+
+        // —— W32b 日记 ——
+        case let .journalAppend(day, text, newEntryID, expected):
+            try checkJournalWrite()
+            let store = try journalStore()
+            let label = Calendar.current.startOfDay(for: day)   // day 是逻辑日标签（该日零点，同 blockCreate）
+            guard label <= DayContext.logicalStartOfDay(now()) else { throw ProposalExecutionError.invalid("不能给还没到的日子写日记") }
+            let t = try Self.cleanJournalText(text, what: "要加的一段")
+            let existing = try store.entry(onLogicalDay: label)
+            let revision: String?
+            if let existing {
+                revision = try Self.baseline(expected, current: ProposalRevision.journal(existing), what: "\(PlanEditRules.dayName(label))的日记")
+            } else {
+                guard expected == nil else { throw ProposalExecutionError.conflict("提案依据的那篇日记已经不在了，请重新读取再提") }
+                revision = nil
+            }
+            let head = existing == nil ? "新建\(PlanEditRules.dayName(label))的日记，写一段" : "\(PlanEditRules.dayName(label))的日记：在末尾加一段"
+            return PreparedProposalAction(action: .journalAppend(day: label, text: t, newEntryID: newEntryID, expectedRevision: revision), changes: [
+                ProposalChange(field: head + "（智能体写的，用衬线斜体显示，和你的字区分开；不改你写的任何字）", before: nil, after: t),
+                ProposalChange(field: "批准后可一键撤销（你之后又写过这篇就不撤）", before: nil, after: nil),
+            ])
+
+        case let .journalEdit(entryID, find, replace, expected):
+            try checkJournalWrite()
+            guard journalReadAllowed() else {
+                throw ProposalExecutionError.invalid("改你写的日记原文，要先在设置里允许智能体读最近日记（它得看得到原文）")
+            }
+            let entry = try liveJournal(entryID)
+            _ = try Self.uniqueRange(find, in: entry.body)
+            let replacement = replace.isEmpty ? "" : try Self.cleanJournalText(replace, what: "改成的文字")
+            let revision = try Self.baseline(expected, current: ProposalRevision.journal(entry), what: "这篇日记")
+            let day = PlanEditRules.dayName(DayContext.logicalStartOfDay(entry.date))
+            return PreparedProposalAction(action: .journalEdit(entryID: entryID, find: find, replace: replacement, expectedRevision: revision), changes: [
+                .escalationSubject("改的是你自己写的日记：《\(day)的日记》"),
+                ProposalChange(field: "日记原文", before: find, after: replacement.isEmpty ? nil : replacement),
+                ProposalChange(field: "改后的文字算智能体写的（衬线斜体）；你再改其中任何一个字，那段就变回你的", before: nil, after: nil),
+                ProposalChange(field: "批准后可一键撤销：正文原样改回（你之后又写过就不撤）", before: nil, after: nil),
+            ])
+
+        case .yourEventRecreate, .itemRestore, .checkpointRestore, .journalRestore:
+            throw ProposalExecutionError.invalid("「\(action.kindLabel)」只用于撤销，不能单独提出")
         }
     }
 
@@ -611,7 +729,221 @@ enum ProposalTimerRules {
                 return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "已整组撤销"))
             }
             return planOutcome(result, day: day, head: "已排好\(PlanEditRules.dayName(day))（\(steps.count) 步）")
+
+        // —— W32 你的日程 / 提醒：执行前核版本（你在日历 / 提醒事项里改过 → 不覆盖），逆操作 = 执行前快照里的原值 ——
+        case let .yourEventEdit(edit):
+            guard let expected = edit.expectedRevision else { throw ProposalExecutionError.invalid("缺少你的日程的基线版本，未执行") }
+            let before = try await yourEvent(edit.ref)
+            guard before.revision == expected else { throw ProposalExecutionError.conflict("你的日程「\(before.title)」在提案之后被改过") }
+            if let why = YourItemRules.eventBlocked(before.facts, title: before.title, calendar: before.calendarTitle) { throw ProposalExecutionError.invalid(why) }
+            let after = try await yourItemsCall { try await $0.apply(edit) }
+            var back = YourEventEdit(ref: after.ref, span: edit.span, expectedRevision: after.revision)
+            if edit.title != nil { back.title = before.title }
+            if edit.start != nil || edit.end != nil { back.start = before.start; back.end = before.end }
+            if edit.notes != nil { back.notes = before.notes ?? "" }
+            var parts: [String] = []
+            if let t = edit.title { parts.append("标题「\(before.title)」→「\(t)」") }
+            if edit.start != nil { parts.append("时间 \(YourItemRules.when(before.start, before.end, allDay: false)) → \(YourItemRules.when(after.start, after.end, allDay: false))") }
+            if edit.notes != nil { parts.append("备注已更新") }
+            let split = before.facts.isRecurring && edit.span == .futureEvents ? "（重复日程从这一次起改；苹果日历会在这里把系列分成两段，撤销会改回内容、分段保留）" : ""
+            let note = "已改你的日程「\(before.title)」：" + parts.joined(separator: "，") + split
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourEventEdit(back)))
+
+        case let .yourEventDelete(ref, expected):
+            guard let expected else { throw ProposalExecutionError.invalid("缺少你的日程的基线版本，未执行") }
+            let before = try await yourEvent(ref)
+            guard before.revision == expected else { throw ProposalExecutionError.conflict("你的日程「\(before.title)」在提案之后被改过") }
+            try YourItemRules.checkDelete(before)
+            try await yourItemsCall { try await $0.delete(before.ref) }
+            let note = "已删你的日程「\(before.title)」（\(YourItemRules.when(before.start, before.end, allDay: before.isAllDay))）"
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourEventRecreate(before)))
+
+        case let .yourEventRecreate(snapshot):
+            let after = try await yourItemsCall { try await $0.recreate(snapshot) }
+            let note = "已按原样重建你的日程「\(after.title)」（\(YourItemRules.when(after.start, after.end, allDay: after.isAllDay))，日历「\(after.calendarTitle)」；苹果日历里是一条新建的同内容日程）"
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "已恢复；要删请另提"))
+
+        case let .yourReminderEdit(edit):
+            guard let expected = edit.expectedRevision else { throw ProposalExecutionError.invalid("缺少你的提醒的基线版本，未执行") }
+            let before = try await yourReminder(edit.externalID)
+            guard before.revision == expected else { throw ProposalExecutionError.conflict("你的提醒「\(before.title)」在提案之后被改过") }
+            if let why = YourItemRules.reminderBlocked(before) { throw ProposalExecutionError.invalid(why) }
+            let after = try await yourItemsCall { try await $0.apply(edit) }
+            var back = YourReminderEdit(externalID: before.externalID, expectedRevision: after.revision)
+            if edit.title != nil { back.title = before.title }
+            if edit.due != nil { back.due = before.due }
+            if edit.done != nil { back.done = before.isCompleted }
+            var parts: [String] = []
+            if let t = edit.title { parts.append("标题「\(before.title)」→「\(t)」") }
+            if edit.due != nil { parts.append("截止 \(YourItemRules.due(before.due, hasTime: before.hasTime)) → \(YourItemRules.due(after.due, hasTime: after.hasTime))") }
+            if let d = edit.done { parts.append(d ? "标完成" : "取消完成") }
+            let note = "已改你的提醒「\(before.title)」：" + parts.joined(separator: "，")
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourReminderEdit(back)))
+
+        // —— W32c 删事项 / 阶段 ——
+        case let .itemDelete(id, expected):
+            let task = try checkedTask(id, expected)
+            let title = task.title, cps = task.sortedCheckpoints.count
+            let deletion = try itemStoreCall { try $0.trash(id: id, at: self.now()) }
+            return ProposalExecutionOutcome(note: "「\(title)」已移入回收站（30 天内可恢复）" + (cps > 0 ? "，连同它的 \(cps) 个阶段" : ""),
+                                            undo: ProposalUndoInfo(action: .itemRestore(id: id, deletionID: deletion)))
+
+        case let .itemRestore(id, deletion):
+            try itemStoreCall { try $0.restore(id: id, deletionID: deletion, at: self.now()) }
+            let title = (try? itemStore().task(id: id))?.title ?? "这条事项"
+            return ProposalExecutionOutcome(note: "已从回收站恢复「\(title)」", undo: ProposalUndoInfo(unavailableReason: "已恢复；要删请另提"))
+
+        case let .checkpointDelete(itemId, checkpointId, expected):
+            let task = try checkedTask(itemId, expected)
+            guard let cp = try itemStore().checkpoint(itemId: itemId, id: checkpointId), !cp.isInTrash else {
+                throw ProposalExecutionError.conflict("「\(task.title)」里这个阶段已不在")
+            }
+            let name = cp.title, taskTitle = task.title
+            let deletion = try itemStoreCall { try $0.trashCheckpoint(itemId: itemId, id: checkpointId, at: self.now()) }
+            return ProposalExecutionOutcome(note: "已把「\(taskTitle)」的阶段「\(name)」移入回收站（30 天内可恢复）",
+                                            undo: ProposalUndoInfo(action: .checkpointRestore(itemId: itemId, checkpointId: checkpointId, deletionID: deletion)))
+
+        case let .checkpointRestore(itemId, checkpointId, deletion):
+            try itemStoreCall { try $0.restoreCheckpoint(itemId: itemId, id: checkpointId, deletionID: deletion, at: self.now()) }
+            let name = (try? itemStore().checkpoint(itemId: itemId, id: checkpointId))?.title ?? "这个阶段"
+            return ProposalExecutionOutcome(note: "已恢复阶段「\(name)」", undo: ProposalUndoInfo(unavailableReason: "已恢复；要删请另提"))
+
+        // —— W32b 日记 ——
+        case let .journalAppend(day, text, newEntryID, expected):
+            try checkJournalWrite()   // 批准后、执行前你关了开关 → 不写
+            let store = try journalStore()
+            let existing = try store.entry(onLogicalDay: day)
+            let dayName = PlanEditRules.dayName(day)
+            switch (existing, expected) {
+            case (nil, nil):
+                try journalCall { try store.create(id: newEntryID, day: day, body: JournalAuthorship.mark(text), at: self.now()) }
+                guard let created = try store.entry(id: newEntryID) else { throw ProposalExecutionError.unavailable("新建的日记没读回来") }
+                DevLog.shared.info("多端审批", "新建\(dayName)的日记（智能体写的一段）")
+                return ProposalExecutionOutcome(note: "已新建\(dayName)的日记，写了一段（衬线斜体 = 智能体写的）",
+                                                undo: ProposalUndoInfo(action: .journalRestore(entryID: newEntryID, body: nil, expectedRevision: ProposalRevision.journal(created))))
+            case let (e?, nil) where e.id == newEntryID && e.body == JournalAuthorship.mark(text):
+                // 幂等：上次已新建、回报没落地
+                return ProposalExecutionOutcome(note: "已新建\(dayName)的日记（上次已写入）",
+                                                undo: ProposalUndoInfo(action: .journalRestore(entryID: newEntryID, body: nil, expectedRevision: ProposalRevision.journal(e))))
+            case let (e?, expected?) where ProposalRevision.journal(e) == expected:
+                let old = e.body
+                try journalCall { try store.setBody(id: e.id, body: JournalAuthorship.appending(text, to: old), at: self.now()) }
+                DevLog.shared.info("多端审批", "在\(dayName)的日记末尾加了一段（智能体写的）")
+                return ProposalExecutionOutcome(note: "已在\(dayName)的日记末尾加了一段（衬线斜体 = 智能体写的；你写的字没动）",
+                                                undo: ProposalUndoInfo(action: .journalRestore(entryID: e.id, body: old, expectedRevision: ProposalRevision.journal(e))))
+            default:
+                throw ProposalExecutionError.conflict("\(dayName)的日记在提案之后被改过（或新写了一篇）")
+            }
+
+        case let .journalEdit(entryID, find, replace, expected):
+            try checkJournalWrite()
+            let store = try journalStore()
+            guard let e = try store.entry(id: entryID), !e.isInTrash else { throw ProposalExecutionError.conflict("这篇日记已不在") }
+            guard let expected, ProposalRevision.journal(e) == expected else { throw ProposalExecutionError.conflict("这篇日记在提案之后被改过") }
+            let old = e.body
+            let range = try Self.uniqueRange(find, in: old)
+            var body = old
+            body.replaceSubrange(range, with: replace.isEmpty ? "" : JournalAuthorship.mark(replace))
+            try journalCall { try store.setBody(id: entryID, body: body, at: self.now()) }
+            let note = replace.isEmpty ? "已删掉你日记里的「\(find.prefix(40))」" : "已把你日记里的「\(find.prefix(40))」改成「\(replace.prefix(40))」（衬线斜体 = 智能体写的）"
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .journalRestore(entryID: entryID, body: old, expectedRevision: ProposalRevision.journal(e))))
+
+        case let .journalRestore(entryID, body, expected):
+            // 撤销是你的动作：不看「允许智能体写日记」开关
+            let store = try journalStore()
+            guard let e = try store.entry(id: entryID), !e.isInTrash else { throw ProposalExecutionError.conflict("这篇日记已不在（可能已删除）") }
+            guard ProposalRevision.journal(e) == expected else {
+                throw ProposalExecutionError.conflict("这篇日记在那之后又被写过，不撤销（不覆盖你后来写的）")
+            }
+            if let body {
+                try journalCall { try store.setBody(id: entryID, body: body, at: self.now()) }
+                return ProposalExecutionOutcome(note: "日记正文已改回原样", undo: ProposalUndoInfo(unavailableReason: "已改回原样"))
+            }
+            try journalCall { try store.discard(id: entryID, at: self.now()) }
+            return ProposalExecutionOutcome(note: "这篇新建的日记已移入回收站（30 天内可恢复）", undo: ProposalUndoInfo(unavailableReason: "已撤销；要找回请到回收站恢复"))
         }
+    }
+
+    // MARK: W32 内部
+
+    private func yourItemsWriter() throws -> any YourItemsWriting {
+        guard let yourItems else { throw ProposalExecutionError.unavailable("这台设备没有接入「改你的日程 / 提醒」") }
+        return yourItems
+    }
+
+    /// 写者的错误 → 提案错误（找不到 = 目标变了；拒绝 = 规则；其余 = 系统失败）。失败由 ProposalCenter 记 DevLog + 写进提案结果。
+    private func yourItemsCall<T>(_ body: (any YourItemsWriting) async throws -> T) async throws -> T {
+        let w = try yourItemsWriter()
+        do { return try await body(w) }
+        catch let e as YourItemsError {
+            switch e {
+            case let .notFound(s): throw ProposalExecutionError.conflict(s)
+            case let .refused(s): throw ProposalExecutionError.invalid(s)
+            case let .failed(s): throw ProposalExecutionError.unavailable(s)
+            }
+        } catch let e as ProposalExecutionError { throw e }
+        catch { throw ProposalExecutionError.unavailable(error.localizedDescription) }
+    }
+
+    private func yourEvent(_ ref: YourEventRef) async throws -> YourEventSnapshot { try await yourItemsCall { try await $0.event(ref) } }
+    private func yourReminder(_ id: String) async throws -> YourReminderSnapshot { try await yourItemsCall { try await $0.reminder(id) } }
+
+    private func itemStoreCall<T>(_ body: (any ProposalItemStore) throws -> T) throws -> T {
+        let store = try itemStore()
+        do { return try body(store) } catch let e as DataArchiveError { throw ProposalExecutionError.conflict(e.localizedDescription) }
+    }
+
+    private func journalStore() throws -> any ProposalJournalWriting {
+        guard let journal else { throw ProposalExecutionError.unavailable("这台设备没有接入日记") }
+        return journal
+    }
+    private func journalCall(_ body: () throws -> Void) throws {
+        do { try body() } catch let e as DataArchiveError { throw ProposalExecutionError.conflict(e.localizedDescription) }
+    }
+    private func checkJournalWrite() throws {
+        guard journalWriteAllowed() else {
+            throw ProposalExecutionError.unavailable("「允许智能体提议写日记」在设置里关着（设置 → 审批记录与规则），没有写")
+        }
+    }
+    private func liveJournal(_ id: UUID) throws -> JournalEntry {
+        guard let e = try journalStore().entry(id: id) else { throw ProposalExecutionError.invalid("找不到这篇日记（可能已删除）") }
+        guard !e.isInTrash else { throw ProposalExecutionError.invalid("这篇日记在回收站里") }
+        return e
+    }
+
+    nonisolated static let journalTextLimit = 4000
+
+    /// 智能体写进日记的文字：非空、不超长、不含作者标记语法（标记只由 App 加）。
+    static func cleanJournalText(_ raw: String, what: String) throws -> String {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t.count <= journalTextLimit else { throw ProposalExecutionError.invalid("\(what)不能为空，且不超过 \(journalTextLimit) 字") }
+        guard !t.contains("bc:agent") else { throw ProposalExecutionError.invalid("\(what)里不能带作者标记（标记由 App 加）") }
+        return t
+    }
+
+    /// journalEdit 的原文：必须恰好出现一次，且不跨进 / 不落在作者标记里（改智能体以前写的段落另说）。
+    static func uniqueRange(_ find: String, in body: String) throws -> Range<String.Index> {
+        guard !find.isEmpty, find.count <= 2000 else { throw ProposalExecutionError.invalid("要改的原文不能为空，且不超过 2000 字") }
+        guard !find.contains("<!--"), !find.contains("-->") else { throw ProposalExecutionError.invalid("要改的原文里不能带作者标记") }
+        var ranges: [Range<String.Index>] = []
+        var from = body.startIndex
+        while let r = body.range(of: find, range: from..<body.endIndex) { ranges.append(r); from = r.upperBound }
+        guard ranges.count == 1, let r = ranges.first else {
+            throw ProposalExecutionError.invalid(ranges.isEmpty ? "日记原文里找不到这段文字（要逐字一致）" : "这段文字在日记里出现了 \(ranges.count) 次，请写长一点、能唯一定位")
+        }
+        // 落在智能体以前写的段落里 → 拒绝（嵌套标记会乱）
+        let ns = body as NSString
+        let target = NSRange(r, in: body)
+        let pair = try NSRegularExpression(pattern: #"<!--bc:agent:[0-9a-f]{8}-->.*?<!--/bc:agent-->"#, options: [.dotMatchesLineSeparators])
+        if pair.matches(in: body, range: NSRange(location: 0, length: ns.length)).contains(where: { NSIntersectionRange($0.range, target).length > 0 }) {
+            throw ProposalExecutionError.invalid("这段文字落在智能体以前写的段落里：那段不是你写的原文，要改请用 journalAppend 另写，或请 Jason 自己改")
+        }
+        return r
     }
 
     /// W18 加 / 改 / 删 / 排一天的结果：一句话 + 撤销 = 反向步骤逆序整组执行（带写后的版本，之后被改过就整组不撤）。

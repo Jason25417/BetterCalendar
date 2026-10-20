@@ -197,6 +197,31 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 排一天：一份提案里若干步新增 / 挪动 / 改 / 删（都围绕 day 这个逻辑日），整组校验、整组批准、整组撤销。
     /// isUndo=true 只作逆操作（智能体不能提）：放宽「不进过去 / 不越截止 / 组内原有重叠」，见 PlanEditRules。
     case planDay(day: Date, steps: [ProposalPlanStep], isUndo: Bool)
+    // —— W32 越级审批你的东西（Jason 2026-10-19/20）：你自己的日程 / 提醒 / 待办与长期事项 / 你写的日记 ——
+    // 全部 ownership = .yours：必须带越级理由、永远要你亲自批（预授权规则不放行）、撤销 = 按执行前的快照原样改回。
+    // 只有日记的「加一段」是例外（只新增智能体自己的、标了字体的文字，不碰你的字）：普通审批。
+    /// 改你的一条日程（标题 / 时间 / 备注；重复日程写明范围，默认只这一次）。写入只经 EventKitYourItemsWriter。
+    case yourEventEdit(YourEventEdit)
+    /// 删你的一条日程（只在你要求时；重复日程不删）。撤销 = 按快照原样重建。
+    case yourEventDelete(ref: YourEventRef, expectedRevision: String?)
+    /// 逆操作：按快照重建删掉的日程。只用于撤销，智能体不能提。
+    case yourEventRecreate(YourEventSnapshot)
+    /// 改你的一条提醒（改名 / 挪截止 / 标完成）。撤销 = 原样改回。
+    case yourReminderEdit(YourReminderEdit)
+    /// W32c：删一条待办 / 长期事项（进回收站，30 天内可恢复；长期事项连同它的阶段）。撤销 = 从回收站恢复。
+    case itemDelete(id: UUID, expectedRevision: String?)
+    /// 逆操作：把 itemDelete 删掉的那条从回收站恢复（deletionID 对得上才恢复）。只用于撤销。
+    case itemRestore(id: UUID, deletionID: UUID)
+    /// W32c：删长期事项里的一个阶段（检查点，进回收站）。expectedRevision = 所属事项的版本。撤销 = 恢复。
+    case checkpointDelete(itemId: UUID, checkpointId: UUID, expectedRevision: String?)
+    case checkpointRestore(itemId: UUID, checkpointId: UUID, deletionID: UUID)
+    /// W32b：在某天的日记末尾加一段智能体写的文字（没有那天的日记就新建；newEntryID 由提案 id 推出）。
+    /// 智能体的文字用固定字体显示（JournalAuthorship 标记）。expectedRevision = 提案时那天日记的版本（nil = 当时还没有）。
+    case journalAppend(day: Date, text: String, newEntryID: UUID, expectedRevision: String?)
+    /// W32b：改你写的日记里的一段原文（find 必须恰好出现一次）→ replace（智能体写的，固定字体）。越级。
+    case journalEdit(entryID: UUID, find: String, replace: String, expectedRevision: String?)
+    /// 逆操作：把那篇日记的正文原样改回（body = nil：撤销新建 = 这篇移入回收站）。只用于撤销。
+    case journalRestore(entryID: UUID, body: String?, expectedRevision: String?)
 
     var kindLabel: String {
         switch self {
@@ -216,6 +241,17 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .blockEdit: "时间线：改计划块"
         case .blockDelete: "时间线：删掉计划块（进回收站）"
         case let .planDay(day, steps, isUndo): isUndo ? "时间线：整组撤销" : "时间线：排\(PlanEditRules.dayName(day))（\(steps.count) 步）"
+        case .yourEventEdit: "你的日程：改"
+        case .yourEventDelete: "你的日程：删除"
+        case .yourEventRecreate: "你的日程：按原样重建"
+        case .yourReminderEdit: "你的提醒：改"
+        case .itemDelete: "事项：删除（进回收站）"
+        case .itemRestore: "事项：从回收站恢复"
+        case .checkpointDelete: "长期事项：删阶段（进回收站）"
+        case .checkpointRestore: "长期事项：恢复阶段"
+        case let .journalAppend(day, _, _, _): "日记：在\(PlanEditRules.dayName(Calendar.current.startOfDay(for: day)))的日记里加一段"
+        case .journalEdit: "日记：改你写的原文"
+        case .journalRestore: "日记：改回原样"
         }
     }
 
@@ -238,6 +274,17 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .blockEdit: "blockEdit"
         case .blockDelete: "blockDelete"
         case .planDay: "planDay"
+        case .yourEventEdit: "yourEventEdit"
+        case .yourEventDelete: "yourEventDelete"
+        case .yourEventRecreate: "yourEventRecreate"
+        case .yourReminderEdit: "yourReminderEdit"
+        case .itemDelete: "itemDelete"
+        case .itemRestore: "itemRestore"
+        case .checkpointDelete: "checkpointDelete"
+        case .checkpointRestore: "checkpointRestore"
+        case .journalAppend: "journalAppend"
+        case .journalEdit: "journalEdit"
+        case .journalRestore: "journalRestore"
         }
     }
 
@@ -268,14 +315,31 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         }
     }
 
-    /// 这项改动动的是谁的东西（原则 8「谁的东西谁做主」）。现有种类全部只动 BetterCalendar 自己的东西
-    /// （它的待办、计划块、计时、它排的提醒/闹钟）；将来写你的日历/提醒事项的种类在这里标 `.yours`。
-    var ownership: ProposalOwnership { .betterCalendar }
+    /// 这项改动动的是谁的东西（原则 8「谁的东西谁做主」）。`.yours` = 你的东西：提案必须带越级理由（执行器拒收没写的），
+    /// 预授权规则永远不能自动放行（PreauthPolicy）。W32：你的日程 / 提醒、删你的待办与长期事项（Jason 2026-10-20：
+    /// 你亲手建的事项算你的；智能体提、你批准建的也算——批准过就是你的决定，同 W1「批准的挪动等同亲手拖动」）、改你写的日记。
+    /// 日记「加一段」只新增智能体自己的文字（固定字体标出，不碰你的字）→ 仍算 BetterCalendar 的。
+    var ownership: ProposalOwnership {
+        switch self {
+        case .yourEventEdit, .yourEventDelete, .yourEventRecreate, .yourReminderEdit,
+             .itemDelete, .itemRestore, .checkpointDelete, .checkpointRestore, .journalEdit, .journalRestore: .yours
+        default: .betterCalendar
+        }
+    }
 
-    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天）：预授权规则永远不能自动放行。
+    /// 只作撤销用的逆操作（智能体不能提；prepare 拒收）。
+    var isUndoOnly: Bool {
+        switch self {
+        case .itemDiscard, .reminderCancel, .alarmCancel, .yourEventRecreate, .itemRestore, .checkpointRestore, .journalRestore: true
+        case .moveBlocks(_, true), .planDay(_, _, true): true
+        default: false
+        }
+    }
+
+    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天 / W32 删你的日程、事项、阶段）：预授权规则永远不能自动放行。
     var isDestructive: Bool {
         switch self {
-        case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete: true
+        case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete, .yourEventDelete, .itemDelete, .checkpointDelete: true
         case let .planDay(_, steps, _): steps.contains { if case .delete = $0 { true } else { false } }
         default: false
         }
@@ -434,6 +498,12 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
         case .alarmCancel?: "撤销 = 取消这个闹钟"
         case let .planDay(_, steps, true)?: PlanEditRules.undoHint(steps)
         case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
+        case .yourEventEdit?: "撤销 = 把你的日程按改之前的样子原样改回（你之后在日历里又改过就不撤）"
+        case .yourEventRecreate?: "撤销 = 按删之前的样子原样重建这条日程"
+        case .yourReminderEdit?: "撤销 = 把你的提醒原样改回（你之后又改过就不撤）"
+        case .itemRestore?: "撤销 = 从回收站恢复（长期事项连同它的阶段）"
+        case .checkpointRestore?: "撤销 = 从回收站恢复这个阶段"
+        case let .journalRestore(_, body, _)?: body == nil ? "撤销 = 这篇新建的日记移入回收站（你之后又写过就不撤）" : "撤销 = 日记正文改回原样（你之后又写过就不撤）"
         default: nil
         }
     }

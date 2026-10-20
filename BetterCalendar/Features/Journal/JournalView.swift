@@ -407,7 +407,7 @@ struct JournalView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("往年今天 · \(e.date.formatted(date: .abbreviated, time: .omitted)) \(e.mood ?? "")")
                             .font(.headline)   // 字阶收敛（C）：卡标题性 subheadline→headline 档
-                        Text(e.body.isEmpty ? "（只记了心情）" : e.body)
+                        Text(e.body.isEmpty ? AttributedString("（只记了心情）") : JournalAuthorship.styled(e.body, style: .caption))   // W32b：智能体写的段落用固定字体
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer()
@@ -497,7 +497,7 @@ struct JournalRow: View {
                 Text(entry.date.formatted(date: .abbreviated, time: .omitted))
                     .font(.headline)   // 字阶收敛（C）：行标题 subheadline→headline 档
                 // 批次6（Jason 反馈）：历史行降噪——摘要收为一行（识别够用，翻找不吵）
-                Text(entry.body.isEmpty ? "（只记了心情）" : entry.body)
+                Text(entry.body.isEmpty ? AttributedString("（只记了心情）") : JournalAuthorship.styled(entry.body, style: .caption))   // W32b
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()

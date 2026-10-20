@@ -93,6 +93,54 @@ final class LongTaskStore {
         reload()
     }
 
+    /// W32c：审批通过的「删除事项」——待办区或长期区都可以（Jason 2026-10-20 放开长期区：只经审批卡、进回收站可恢复）。
+    /// 长期事项的阶段随它一起不见、一起恢复（关系不动，只给事项盖删除章）。返回这次删除的 deletionID（撤销按它恢复）。
+    func trash(id: UUID, at date: Date) throws -> UUID {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let task = try task(id: id), !task.isInTrash else { throw DataArchiveError.invalid("事项不存在或已在回收站") }
+        try RetainedDeletion.save([task], in: context, at: date)
+        reload()
+        guard let deletion = task.deletionID else { throw DataArchiveError.invalid("删除没有记下回执") }
+        DevLog.shared.info("待办区", "审批删除事项（进回收站）：\(task.title)")
+        return deletion
+    }
+
+    /// W32c 撤销：恢复 trash(id:) 删掉的那条（deletionID 对不上 = 之后又被删过 / 已恢复 → 拒绝）。
+    func restore(id: UUID, deletionID: UUID, at date: Date) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let task = try task(id: id) else { throw DataArchiveError.invalid("这条事项已不存在") }
+        try task.acknowledgeRestoration(expected: deletionID)
+        do { try context.save() } catch { context.rollback(); throw error }
+        reload()
+    }
+
+    /// 按 id 找某事项下的一个阶段（含回收站里的）。
+    func checkpoint(itemId: UUID, id: UUID) throws -> LongTaskCheckpoint? {
+        guard let task = try task(id: itemId) else { return nil }
+        let found = (task.checkpoints ?? []).filter { $0.id == id }
+        guard found.count <= 1 else { throw DataArchiveError.invalid("阶段身份重复，未执行") }
+        return found.first
+    }
+
+    /// W32c：删一个阶段（进回收站）。返回 deletionID。
+    func trashCheckpoint(itemId: UUID, id: UUID, at date: Date) throws -> UUID {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let cp = try checkpoint(itemId: itemId, id: id), !cp.isInTrash else { throw DataArchiveError.invalid("阶段不存在或已在回收站") }
+        try RetainedDeletion.save([cp], in: context, at: date)
+        reload()
+        guard let deletion = cp.deletionID else { throw DataArchiveError.invalid("删除没有记下回执") }
+        return deletion
+    }
+
+    func restoreCheckpoint(itemId: UUID, id: UUID, deletionID: UUID, at date: Date) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let task = try task(id: itemId), !task.isInTrash else { throw DataArchiveError.invalid("所属事项不存在或在回收站，先恢复事项") }
+        guard let cp = try checkpoint(itemId: itemId, id: id) else { throw DataArchiveError.invalid("这个阶段已不存在") }
+        try cp.acknowledgeRestoration(expected: deletionID)
+        do { try context.save() } catch { context.rollback(); throw error }
+        reload()
+    }
+
     /// 长期区在途任务：有 DDL 的按 DDL 升序在前，无 DDL 的按创建时间。
     func active() -> [LongTask] { items }
 

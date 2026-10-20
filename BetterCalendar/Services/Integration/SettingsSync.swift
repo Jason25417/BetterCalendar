@@ -26,6 +26,7 @@ enum SettingsSync {
         "distraction.enabled", "distraction.keywords",
         "integration.focusFollow",
         "agentContext.allowRecentJournal",   // SPEC §19 A2：允许智能体读最近日记（隐私偏好，两端一致；默认关）
+        "agentJournal.allowWrite",           // W32b：允许智能体提议写日记（隐私偏好，两端一致；默认关）
         "agentChat.eveningReview.enabled", "agentChat.eveningReview.minute",   // SPEC §19 F1：iPhone 上设、Mac 触发
         // —— W8 审计补入（2026-10-18）——
         "agentEvents.enabled",                 // 关键时刻唤醒智能体：iPhone 上开，由 Mac 的桥接写事件

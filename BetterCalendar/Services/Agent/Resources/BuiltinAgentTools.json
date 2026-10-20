@@ -47,16 +47,23 @@
          "planDay",
          "reminder",
          "alarm",
+         "yourEventEdit",
+         "yourEventDelete",
+         "yourReminderEdit",
+         "itemDelete",
+         "checkpointDelete",
+         "journalAppend",
+         "journalEdit",
          "experimentNoop"
         ]
        },
        "itemId": {
         "type": "string",
-        "description": "itemEdit / itemSetDone：事项 id（actionTargets.items[].id）"
+        "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete：事项 id（actionTargets.items[].id）"
        },
        "title": {
         "type": "string",
-        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题"
+        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题"
        },
        "body": {
         "type": "string",
@@ -76,7 +83,7 @@
        },
        "done": {
         "type": "boolean",
-        "description": "itemSetDone：true=标完成，false=取消完成"
+        "description": "itemSetDone / yourReminderEdit：true=标完成，false=取消完成"
        },
        "command": {
         "type": "string",
@@ -94,15 +101,15 @@
        },
        "start": {
         "type": "string",
-        "description": "moveBlock：新开始，ISO 8601 带时区"
+        "description": "moveBlock：新开始；yourEventEdit：他日程的新开始（ISO 8601 带时区）"
        },
        "end": {
         "type": "string",
-        "description": "moveBlock：新结束（可选）"
+        "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）"
        },
        "day": {
         "type": "string",
-        "description": "blockCreate / planDay：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
+        "description": "blockCreate / planDay / journalAppend：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
        },
        "blocks": {
         "type": "array",
@@ -273,7 +280,55 @@
        },
        "expectedRevision": {
         "type": "string",
-        "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision）"
+        "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision / journal.entries[].revision；他的日程 / 提醒可省略，由 App 补上）"
+       },
+       "eventId": {
+        "type": "string",
+        "description": "yourEventEdit / yourEventDelete：他的日程 id（context.calendar.events[].eventId）"
+       },
+       "occurrenceStart": {
+        "type": "string",
+        "description": "yourEventEdit / yourEventDelete：这一次的开始（context.calendar.events[].occurrenceStart，原样抄）"
+       },
+       "span": {
+        "type": "string",
+        "enum": [
+         "thisOccurrence",
+         "futureEvents"
+        ],
+        "description": "yourEventEdit：重复日程改哪些（默认 thisOccurrence 只这一次）"
+       },
+       "notes": {
+        "type": "string",
+        "description": "yourEventEdit：新备注（空串 = 清空）"
+       },
+       "reminderId": {
+        "type": "string",
+        "description": "yourReminderEdit：他的提醒 id（context.reminders.items[].reminderId）"
+       },
+       "due": {
+        "type": "string",
+        "description": "yourReminderEdit：新截止（ISO 8601 带时区；只挪已有的截止，粒度不变）"
+       },
+       "checkpointId": {
+        "type": "string",
+        "description": "checkpointDelete：阶段 id（actionTargets.items[].checkpoints[].id）"
+       },
+       "text": {
+        "type": "string",
+        "description": "journalAppend：要加的一段（≤4000 字，不要自己写标记）"
+       },
+       "entryId": {
+        "type": "string",
+        "description": "journalEdit：日记 id（context.journal.entries[].id）"
+       },
+       "find": {
+        "type": "string",
+        "description": "journalEdit：要改的原文（逐字一致、只出现一次）"
+       },
+       "replace": {
+        "type": "string",
+        "description": "journalEdit：改成什么（空串 = 删掉这段）"
        }
       },
       "required": [
@@ -314,7 +369,7 @@
      },
      "escalation": {
       "type": "string",
-      "description": "越级理由：只有确有必要动 Jason 的东西或图钉时才写（1–300 字）"
+      "description": "越级理由（1–300 字）：动 Jason 的东西（他的日程 / 提醒 / 事项删除 / 日记原文）或图钉、固定安排时必填——他要求过什么，或哪里真冲突非改不可；绝不为了整理"
      },
      "primaryLabel": {
       "type": "string",
@@ -348,16 +403,23 @@
             "planDay",
             "reminder",
             "alarm",
+            "yourEventEdit",
+            "yourEventDelete",
+            "yourReminderEdit",
+            "itemDelete",
+            "checkpointDelete",
+            "journalAppend",
+            "journalEdit",
             "experimentNoop"
            ]
           },
           "itemId": {
            "type": "string",
-           "description": "itemEdit / itemSetDone：事项 id（actionTargets.items[].id）"
+           "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete：事项 id（actionTargets.items[].id）"
           },
           "title": {
            "type": "string",
-           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题"
+           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题"
           },
           "body": {
            "type": "string",
@@ -377,7 +439,7 @@
           },
           "done": {
            "type": "boolean",
-           "description": "itemSetDone：true=标完成，false=取消完成"
+           "description": "itemSetDone / yourReminderEdit：true=标完成，false=取消完成"
           },
           "command": {
            "type": "string",
@@ -395,15 +457,15 @@
           },
           "start": {
            "type": "string",
-           "description": "moveBlock：新开始，ISO 8601 带时区"
+           "description": "moveBlock：新开始；yourEventEdit：他日程的新开始（ISO 8601 带时区）"
           },
           "end": {
            "type": "string",
-           "description": "moveBlock：新结束（可选）"
+           "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）"
           },
           "day": {
            "type": "string",
-           "description": "blockCreate / planDay：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
+           "description": "blockCreate / planDay / journalAppend：逻辑日 yyyy-MM-dd（凌晨 0–4 点属于前一天）"
           },
           "blocks": {
            "type": "array",
@@ -574,7 +636,55 @@
           },
           "expectedRevision": {
            "type": "string",
-           "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision）"
+           "description": "目标的版本（today.blocks[].revision / actionTargets.items[].revision / actionTargets.timer.revision / journal.entries[].revision；他的日程 / 提醒可省略，由 App 补上）"
+          },
+          "eventId": {
+           "type": "string",
+           "description": "yourEventEdit / yourEventDelete：他的日程 id（context.calendar.events[].eventId）"
+          },
+          "occurrenceStart": {
+           "type": "string",
+           "description": "yourEventEdit / yourEventDelete：这一次的开始（context.calendar.events[].occurrenceStart，原样抄）"
+          },
+          "span": {
+           "type": "string",
+           "enum": [
+            "thisOccurrence",
+            "futureEvents"
+           ],
+           "description": "yourEventEdit：重复日程改哪些（默认 thisOccurrence 只这一次）"
+          },
+          "notes": {
+           "type": "string",
+           "description": "yourEventEdit：新备注（空串 = 清空）"
+          },
+          "reminderId": {
+           "type": "string",
+           "description": "yourReminderEdit：他的提醒 id（context.reminders.items[].reminderId）"
+          },
+          "due": {
+           "type": "string",
+           "description": "yourReminderEdit：新截止（ISO 8601 带时区；只挪已有的截止，粒度不变）"
+          },
+          "checkpointId": {
+           "type": "string",
+           "description": "checkpointDelete：阶段 id（actionTargets.items[].checkpoints[].id）"
+          },
+          "text": {
+           "type": "string",
+           "description": "journalAppend：要加的一段（≤4000 字，不要自己写标记）"
+          },
+          "entryId": {
+           "type": "string",
+           "description": "journalEdit：日记 id（context.journal.entries[].id）"
+          },
+          "find": {
+           "type": "string",
+           "description": "journalEdit：要改的原文（逐字一致、只出现一次）"
+          },
+          "replace": {
+           "type": "string",
+           "description": "journalEdit：改成什么（空串 = 删掉这段）"
           }
          },
          "required": [

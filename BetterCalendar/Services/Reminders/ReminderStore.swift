@@ -28,6 +28,9 @@ nonisolated struct OwnReminder: Equatable, Sendable {
     /// 截止带不带具体时刻（只写了日期的提醒 = false）。
     var hasTime: Bool
     var list: String
+    /// W32：越级提案定位用（跨设备外部标识）与「能不能改」的事实。nil = 没读（测试替身）。
+    var externalID: String? = nil
+    var facts: YourReminderFacts? = nil
 }
 
 /// 一次「跟上你在提醒事项里的操作」的结果。

@@ -35,6 +35,11 @@ struct JournalEditor: View {
                 Spacer()
                 Toggle("预览", isOn: $previewing).toggleStyle(.button).controlSize(.small)
             }
+            if JournalAuthorship.hasAgentText(entry.body) {
+                // W32b：开发期编辑是纯 Markdown，作者标记以 HTML 注释原样可见；预览 / 列表里衬线斜体 = 智能体写的
+                Text("这篇有智能体写的段落：预览里用衬线斜体显示。编辑时 <!--bc:agent…--> 是作者标记——改了里面任何一个字，那段就算你的。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             if previewing {
                 Text(JournalBody.rendered(entry.body, format: entry.bodyFormat))
                     .frame(maxWidth: .infinity, minHeight: 120, alignment: .topLeading)
