@@ -227,7 +227,7 @@ import Testing
         let d = defaults()
         d.set(Data(#"{"enabled":false,"maxWakesPerHour":3}"#.utf8), forKey: SentinelSettings.key)
         let s = SentinelSettings.load(d)
-        #expect(!s.enabled && s.maxWakesPerHour == 3 && s.minIntervalSeconds == 3 && s.llmMinIntervalSeconds == 120 && s.idleIntervalSeconds == 600 && s.preferredJudge == .jev && s.wakeThreshold == 0.85 && s.dailyBudgetUsd == 1)
+        #expect(!s.enabled && s.maxWakesPerHour == 3 && s.minIntervalSeconds == 3 && s.llmMinIntervalSeconds == 120 && s.idleIntervalSeconds == 600 && s.preferredJudge == .jev && s.wakeThreshold == 0.75 && s.dailyBudgetUsd == 1)
         #expect(SentinelSettings.load(defaults()).enabled)   // 从没设过 = 实验期默认开
     }
 
@@ -338,6 +338,7 @@ import Testing
         judge.verdict = SentinelDecisionQuestions.verdict(probability: 0.8, category: "seems_finished", urgencyScore: 0.2)
         let log = MemorySentinelDecisionLog()
         let e = engine(judge: judge, log: log, bridge: DirectorySentinelBridge(root: try tempRoot()), now: Self.noon)
+        e.settings.wakeThreshold = 0.85   // 显式设门槛（默认值 10-19 起是 0.75）
         await e.runNow()
         #expect(log.rows.last?.outcome == .noWake && log.rows.last?.verdict.wake == false && log.rows.last?.verdict.probability == 0.8)
         e.settings.wakeThreshold = 0.75

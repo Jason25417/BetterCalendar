@@ -18,7 +18,6 @@ struct ProposalPanel: View {
     /// W19：设置里的「审批记录与规则」不重复列待确认卡（它们置顶在「智能体」页）。
     var showsPending = true
     #if os(macOS)
-    @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // W14 哨兵（组装点经 environment 注入；没有就不显示）
     #endif
     @State private var eventsOn = AgentEventSettings.enabled
     @State private var journalOn = AgentContextSettings.allowRecentJournal
@@ -69,7 +68,6 @@ struct ProposalPanel: View {
                     }
                 }
                 if bridge.connected, developerOptions { AgentRuntimeSection(bridge: bridge) }   // W16：运行内部数据收进开发者选项（失败照样进日志 / 横幅）   // SPEC §19 批次 11：最近运行 / 调度失败 / 越权记录
-                if let sentinel { SentinelSection(engine: sentinel) }   // SPEC §19 C1 W14：哨兵（要不要叫醒智能体）
             }
             #endif
             Section("智能体能看到什么（A2）") {

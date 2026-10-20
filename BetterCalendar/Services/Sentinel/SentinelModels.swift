@@ -184,7 +184,7 @@ nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
     var preferredJudge = SentinelJudgeKind.jev
     /// 决策模型的「该叫醒」概率阈值。漏叫一次的代价小（下一拍/例行检查/心跳还会看），
     /// 误叫一次要花 Claude Code 额度、还可能多一条通知 → 偏保守，起步 0.85；按决策日志里的概率分布再调。
-    var wakeThreshold = 0.85
+    var wakeThreshold = 0.75   // 2026-10-19 按 Jev 实测校准：一天 340 次判断最高 0.81，0.85 等于永不叫醒（Jason 定 75%）
     /// 调度节拍：每隔多少秒看一眼（只读本地数据，不调用模型）。
     var tickSeconds: Double = 3
     /// 决策模型：两次判断的最短间隔 / 防抖（变化后安静多久才判断）/ 连续变化时最多等多久。
