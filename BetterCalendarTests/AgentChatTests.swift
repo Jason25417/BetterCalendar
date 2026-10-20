@@ -150,6 +150,7 @@ import Testing
         d2.set(try JSONEncoder().encode([failed]), forKey: "agentChat.outbox.v1")
         let reopened = device("iphone", InMemoryAgentChatTransport(), Bell(), clock, defaults: d2)
         #expect(reopened.status(of: reopened.outbox[0]) == .failed(AgentChatCenter.interruptedSendReason))
+        #expect(!AgentChatCenter.interruptedSendReason.hasPrefix("发送途中"), "W33：没记下原因时不断言是被关掉的（旧版升级上来的是发送失败）")
     }
 
     @Test func statusEscalatesWhenMacOrAgentIsSilent() async throws {
