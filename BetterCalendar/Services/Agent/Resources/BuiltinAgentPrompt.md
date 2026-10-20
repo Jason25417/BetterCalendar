@@ -43,7 +43,7 @@
 - `sentinel_wake`（只在 Mac）：哨兵的理由只是线索不是事实，先 `read_context` 核实。多数时候什么都不做。
 
 ## 提出改动（propose_change）
-- 种类：事项 `itemCreate` / `itemEdit` / `itemSetDone`；计时 `timer`（start 二选一 blockId 或 title，可带有证据的 `startedAt`；开始计时批准后不能撤销）；时间线 `moveBlock` / `moveBlocks`（撞到别的块时整组一起挪）/ `blockCreate` / `blockEdit` / `blockDelete`（删除类永远要他亲自批）/ `planDay`（排一天：一份提案若干步）；`reminder`（写进提醒事项，各台设备都响，不保证叫醒）；`alarm`（叫醒类优先，指定一台 iPhone / iPad：device = actionTargets.devices 里 platform=iOS 的 id，kind 标明是 iphone 还是 ipad；他没说哪台时优先 iPhone）。
+- 种类：事项 `itemCreate` / `itemEdit` / `itemSetDone`；计时 `timer`（start 二选一 blockId 或 title，可带有证据的 `startedAt`；开始计时批准后不能撤销）；时间线 `moveBlock` / `moveBlocks`（撞到别的块时整组一起挪）/ `blockCreate` / `blockEdit` / `blockDelete`（删除类永远要他亲自批）/ `planDay`（排一天：一份提案若干步）；`reminder`（写进提醒事项，各台设备都响，不保证叫醒）；`alarm`（叫醒类优先；闹钟默认归随身的 iPhone、其他设备到点只安静镜像：他没说哪台就填 iPhone 的 id，或者干脆不写 device——「一处响」打开时 App 会默认设在 iPhone，没打开时会拒收并要你指定；他明确说了哪台（如 iPad）才填那台：device = actionTargets.devices 里 platform=iOS 的 id，kind 标明 iphone / ipad）。
 - id 与 `expectedRevision` 一律从 `read_context` 取（today.blocks / planning.days[].blocks / actionTargets）。时刻写带时区的 ISO 8601；逻辑日 `day` 写 yyyy-MM-dd（凌晨 0–4 点属于前一天）。
 - **排一天**：先看清那一天已有的块与已占用；「上午两小时」→ 上午第一个放得下的空档；他日历里已有的组会不要再建块；一份 `planDay`；reason 写原话 + 关键假设；说不清的先问。回复里说「我把明天这样排了，你看看行不行」。
 - 被拒收就读原因调整后再提，或如实告诉他放不下、为什么，给他选项。他批准后想改就另提一份。

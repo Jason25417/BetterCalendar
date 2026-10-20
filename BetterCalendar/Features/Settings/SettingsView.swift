@@ -522,6 +522,7 @@ struct SettingsView: View {
             #endif
             Section("数据与同步（开发期）") { DataMaintenancePanel() }
             Section("自动调整写权（开发期）") { WriteLeaseDevPanel() }   // W22
+            Section("在场设备与一处响（开发期）") { PresenceDevPanel() }   // W30
         }
     }
 

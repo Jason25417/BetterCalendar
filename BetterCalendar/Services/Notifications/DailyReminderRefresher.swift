@@ -21,8 +21,14 @@ nonisolated enum DailyReminderDay {
         return UserDefaults(suiteName: "bc.test.dailyReminderDay.\(UUID().uuidString)") ?? .standard
     }()
 
-    static func record(_ label: Date, in defaults: UserDefaults = .standard) {
+    /// W30：本机记下一天时顺手发布给别的设备（组装点接 SharedDailyReminderDay.publish；开关关着时它什么都不做）。
+    nonisolated(unsafe) static var onRecord: (@MainActor (Date) -> Void)?
+
+    /// publish=false：是从别的设备接过来的，不再往外发。
+    static func record(_ label: Date, in defaults: UserDefaults = .standard, publish: Bool = true) {
         defaults.set(label.timeIntervalSince1970, forKey: key)
+        guard publish, let onRecord else { return }
+        if Thread.isMainThread { MainActor.assumeIsolated { onRecord(label) } }
     }
 
     static func current(in defaults: UserDefaults = .standard) -> Date? {
@@ -75,7 +81,7 @@ final class DailyReminderRefresher {
     /// 改动涉及这些逻辑日：已排的早晚通知若属于其中一天（且那天还没过去）→ 按库重算重排。返回是否重排了。
     /// 不属于这几天 = 已排的那份不受影响，不动（不把别的日子的通知换掉）。
     @discardableResult
-    func refresh(affecting labels: Set<Date>) async -> Bool {
+    func refresh(affecting labels: Set<Date>, logs: Bool = true) async -> Bool {
         guard let day = DailyReminderDay.current(in: defaults), labels.contains(day),
               day >= DayContext.logicalStartOfDay(now()) else { return false }
         guard !isLoose(day) else {
@@ -98,7 +104,7 @@ final class DailyReminderRefresher {
             summary: DailyReminderContent.morningSummary(for: blocks, pooledFromYesterday: pooledFromYesterday()),
             note: note(day))
         await notifier.scheduleDailyReminders(morning: morning, evening: evening, summary: body)
-        DevLog.shared.info("通知", "计划改动涉及 \(PlanEditRules.dayName(day))：早晚通知已按新计划重排")
+        if logs { DevLog.shared.info("通知", "计划改动涉及 \(PlanEditRules.dayName(day))：早晚通知已按新计划重排") }
         return true
     }
 }

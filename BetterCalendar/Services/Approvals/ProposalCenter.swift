@@ -38,6 +38,8 @@ import UIKit
     let rules: PreauthRuleStore?
     /// W10：你对提案回的一句话 → 转给智能体（组装点接到对话 AgentChatCenter）。返回这句话是否已存进 iCloud。
     var forwardReply: ((Proposal, String) async -> Bool)?
+    /// W30：本机通知对齐之后（闹钟镜像：别的设备上设好的闹钟，本机到点安静放一份）。
+    var afterNotificationsReconciled: (([Proposal]) async -> Void)?
     private let executor: any ProposalExecuting
     private let notifier: any ProposalNotifying
     let ledger: any OperationLedger
@@ -580,6 +582,7 @@ import UIKit
         for id in await notifier.shownResultIds() {
             if proposals.first(where: { $0.id == id })?.undoneAt != nil { await notifier.withdrawResult(id) }
         }
+        await afterNotificationsReconciled?(proposals)
     }
 
     /// 要不要发结果通知：规则代你放行的提案，「做完告诉你」完成时 / 任何放行规则执行失败时。

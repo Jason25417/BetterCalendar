@@ -16,7 +16,9 @@ import UserNotifications
     static let userInfoKey = "bcAgentChatId"
 
     private let center: UNUserNotificationCenter
-    init(center: UNUserNotificationCenter = .current()) { self.center = center }
+    /// W30 一处响（nil = 照旧每台都响）。
+    private let reach: ReachOutlet?
+    init(center: UNUserNotificationCenter = .current(), reach: ReachOutlet? = nil) { self.center = center; self.reach = reach }
 
     /// 与已有类别合并注册（setNotificationCategories 是整体替换）。
     static func registerCategories(center: UNUserNotificationCenter = .current()) async {
@@ -48,12 +50,15 @@ import UserNotifications
         content.categoryIdentifier = Self.category
         content.threadIdentifier = "bc.agent.chat"
         content.userInfo = [Self.userInfoKey: message.id.uuidString]
-        do { try await center.add(UNNotificationRequest(identifier: Self.idPrefix + message.id.uuidString, content: content, trigger: nil)) }
+        let request = UNNotificationRequest(identifier: Self.idPrefix + message.id.uuidString, content: content, trigger: nil)
+        do { try await center.add(reach?.route(request, kind: .agentChat, reachID: "agentChat:\(message.id.uuidString)") ?? request) }
         catch { DevLog.shared.error("智能体对话", "通知发送失败：\(error.localizedDescription)") }
     }
 
     func withdraw(_ ids: [UUID]) async {
         guard !ids.isEmpty else { return }
         center.removeDeliveredNotifications(withIdentifiers: ids.map { Self.idPrefix + $0.uuidString })
+        // W30：读过了 = 处理了 → 其他设备上的那几条也收起（「处处知」）
+        await reach?.markHandled(ids.map { "agentChat:\($0.uuidString)" })
     }
 }
