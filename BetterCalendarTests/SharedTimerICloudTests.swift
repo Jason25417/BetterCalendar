@@ -172,6 +172,17 @@ import SwiftData
 
     // MARK: 离线与恢复
 
+    @Test func hangingICloudReadShowsTheRealReasonInsteadOfWaitingForever() async {
+        let clock = Clock()
+        let model = BridgeTaskViewModel(service: HangingICloudService(), persistence: BridgeTaskMemoryPersistence(), enabled: { true },
+                                        now: { clock.t }, backend: .icloud, activePoll: 10, idlePoll: 30)
+        model.cloudTimeout = 0.2
+        await model.refresh()
+        #expect(model.lastError?.contains("计时同步暂未完成") == true)
+        #expect(model.lastError?.contains("没有回应") == true, "写出真实原因，不只说「暂未完成」")
+        #expect(!model.hasEverRead && !model.busy)
+    }
+
     @Test func offlineCommandStaysQueuedAndReplaysWithSameCommandId() async {
         let cloud = MemorySharedTimerCloud(), clock = Clock(), disk = BridgeTaskMemoryPersistence()
         let model = device(cloud, clock, id: "mac", disk: disk)
@@ -310,6 +321,17 @@ import SwiftData
         let all = await cloud.saveCount
         #expect(all == 3)
     }
+}
+
+/// W31b：没登录 iCloud 时 CloudKit 读状态永远不回（不响应取消）的替身。
+@MainActor private final class HangingICloudService: BridgeTaskServing {
+    func readTasks() async throws -> BridgeTaskState {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { c.resume() }
+        }
+        throw URLError(.timedOut)
+    }
+    func submitTask(_ command: BridgeTaskCommand) async throws -> BridgeTaskReceipt { BridgeTaskReceipt(commandId: command.commandId, saved: true) }
 }
 
 /// 旧通道替身：只用于确认开关关闭时旧路径的文案与 409 处理不变。
