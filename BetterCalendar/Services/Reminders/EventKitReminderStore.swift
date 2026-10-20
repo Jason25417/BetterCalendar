@@ -138,7 +138,9 @@ actor EventKitReminderStore: ReminderListAccess {
         let items = try await fetch(store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: others))
         return items.filter { !$0.isCompleted }.map { r in
             OwnReminder(title: r.title ?? "", due: r.dueDateComponents.flatMap { Calendar.current.date(from: $0) },
-                        hasTime: r.dueDateComponents?.hour != nil, list: r.calendar?.title ?? "")
+                        hasTime: r.dueDateComponents?.hour != nil, list: r.calendar?.title ?? "",
+                        externalID: r.calendarItemExternalIdentifier,   // W32：越级提案定位用
+                        facts: YourReminderFacts(r, inBetterCalendarList: false))
         }
     }
 

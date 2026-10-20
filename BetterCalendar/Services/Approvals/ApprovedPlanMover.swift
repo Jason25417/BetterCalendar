@@ -294,6 +294,6 @@ struct PlanEditApplied {
                 failures.append(error.localizedDescription)
             }
         }
-        return failures.isEmpty ? "" : "（日历画面稍后同步：\(failures[0])）"
+        return failures.isEmpty ? "" : "（\(ProposalExecutionOutcome.deviationMarker)日历画面稍后同步：\(failures[0])）"
     }
 }

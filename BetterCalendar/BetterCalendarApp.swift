@@ -141,6 +141,7 @@ struct BetterCalendarApp: App {
                 #endif
             }
             .task { StateBridgeCollector.shared.start(); await StateBridgeCollector.shared.sample() }
+            .task { AgentCJKFont.shared.ensureAvailable() }   // W33：智能体写的中文用楷体；iOS 没有就按需下载（期间衬线顶上，记 DevLog）
     }
 
     @ViewBuilder

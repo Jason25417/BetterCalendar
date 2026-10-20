@@ -31,9 +31,9 @@
 	<key>NSAlarmKitUsageDescription</key>
 	<string>仅在你明确设置一次闹钟时，允许 BetterCalendar 使用系统原生闹钟。</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>读取你的睡眠、步数与锻炼，为你自己的 Dot 助手提供生活状态。</string>
+	<string>只读你的睡眠和锻炼记录，当作被动线索：帮 BetterCalendar 对照「计划 vs 实际」，并在你允许时给它的智能体当背景。不写入任何健康数据。</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>个人状态助手当前只读取健康线索，为你的日程建议提供背景；不会写入或修改健康记录。</string>
+	<string>BetterCalendar 只读取睡眠和锻炼记录，不会写入或修改你的健康数据。</string>
 	<key>NSHomeKitUsageDescription</key>
 	<string>读取你的家居存在传感器状态，帮助区分书桌与床边的活动线索。</string>
 	<key>NSHumanReadableCopyright</key>

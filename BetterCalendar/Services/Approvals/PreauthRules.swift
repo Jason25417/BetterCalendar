@@ -117,10 +117,51 @@ nonisolated enum PreauthPolicy {
         return nil
     }
 
+    // MARK: W32d 低风险自动通过（App 规则，不是智能体的判断；原则 7：自动在前、事后可改）
+
+    /// 内置的「低风险改动自动通过」规则（不进规则列表；留底 / 卡片「详情」里的规则 id 就是它）。
+    static let lowRiskRuleId = UUID(uuidString: "0B5E1A2C-7D3F-4C8E-9A1B-32D0C0FFEE01")!
+    static let lowRiskRule = PreauthRule(id: lowRiskRuleId, createdAt: Date(timeIntervalSince1970: 0), createdByDeviceId: "app",
+                                         origin: .agent, ruleKind: "lowRisk", kindLabel: "低风险改动",
+                                         scope: .kindOnBetterCalendar, effect: .allow, sourceProposalId: nil)
+
+    /// 这份提案能不能低风险自动通过（nil = 能；有值 = 为什么不能）。只看 App 能核实的事实：
+    /// 能：BetterCalendar 自己的计划块——加一块（不是固定安排）/ 挪一块 / 改一块的时长或名字（块不是图钉；时间在今天到 7 天后、
+    ///     不和固定安排或你的日历冲突——这些由 prepare 的排布规则保证，放不下的根本提不进来）；给你建一条提醒。
+    /// 不能：越级（你的日程 / 提醒 / 图钉 / 日记 / 删事项）、闹钟、排一天整组、多块一起挪、改固定 / 要紧 / 截止、删除类、
+    ///     有备选或可调参数（等你挑 / 调）、智能体标了「先问」、测试改动、不是智能体发起的。
+    static func lowRiskReason(_ p: Proposal) -> String? {
+        guard p.origin == .agent else { return "不是智能体发起的" }
+        if p.experiment { return "测试改动" }
+        if p.escalation != nil { return "越级提案" }
+        if p.hasAlternatives { return "有几个方案等你挑" }
+        if p.hasParameters { return "有可调的数值等你定" }
+        if p.askFirst == true { return "智能体标了先问你" }
+        if let b = p.autoPassBlocker { return b }
+        let a = p.action
+        if a.ownership == .yours { return "动的是你的东西" }
+        if a.isDestructive { return "删除类" }
+        switch a {
+        case let .blockCreate(_, blocks):
+            guard blocks.count == 1 else { return "一次加 \(blocks.count) 块" }
+            return blocks[0].isFixed ? "新块是固定安排" : nil
+        case .moveBlock: return nil
+        case let .moveBlocks(moves, false): return moves.count == 1 ? nil : "一起挪 \(moves.count) 块"
+        case let .blockEdit(e):
+            if e.isFixed != nil || e.important != nil || e.deadline != nil { return "改的是固定 / 要紧 / 截止" }
+            return e.title != nil || e.duration != nil ? nil : "没有可自动通过的改动"
+        case .reminder: return nil
+        case .alarm: return "闹钟"
+        case .planDay: return "排一天（整组）"
+        default: return "「\(a.ruleKindLabel)」不在低风险范围"
+        }
+    }
+
     /// 判定顺序（同 Claude Code）：deny ＞ ask ＞ allow；没有匹配 = 先问你。
+    /// W32d：没有你写的规则命中时，「低风险改动自动通过」开着且 lowRiskReason == nil → 直接做（不另发通知；回执卡在对话里，可撤销）。
     /// 越级提案一律先问你（连 deny 也不自动拒绝：越级是智能体审慎判断「确有必要」，要你亲眼看到）；
     /// 有备选方案的一律先问你（智能体在等你挑）；W11：带可调参数的一律先问你（等你确认或调整数值）。
-    static func evaluate(_ p: Proposal, rules: [PreauthRule]) -> ProposalGateVerdict {
+    static func evaluate(_ p: Proposal, rules: [PreauthRule], lowRiskAutoPass: Bool = false) -> ProposalGateVerdict {
         let hits = rules.filter { $0.matches(p) }
         // 有规则命中但仍先问你时，判定里带上那条规则（留底讲得出「为什么规则没生效」）。
         if p.escalation != nil { return .ask("越级提案永远先问你", rule: hits.first) }
@@ -133,6 +174,10 @@ nonisolated enum PreauthPolicy {
         if let ask = hits.first(where: { $0.effect == .ask }) { return .ask("按规则先问你：\(ask.label)", rule: ask) }
         // 两条放行规则同时命中（范围不同）时取更谨慎的「做完告诉你」。
         guard let allow = hits.first(where: { $0.effect == .allowAndInform }) ?? hits.first(where: { $0.effect == .allow }) else {
+            if lowRiskAutoPass {
+                if let why = lowRiskReason(p) { return .ask("没有匹配的预授权规则，也不算低风险（\(why)），先问你") }
+                return ProposalGateVerdict(route: .apply, rule: lowRiskRule, note: "低风险改动自动通过（App 规则，可撤销）")
+            }
             return .ask("没有匹配的预授权规则（默认先问你）")
         }
         if let why = protectionReason(p) { return .ask("规则「\(allow.label)」不能放行这份提案：\(why)", rule: allow) }
@@ -210,5 +255,19 @@ nonisolated enum PreauthPolicy {
 /// 生产闸门：按规则判定（规则列表随设置同步）。
 @MainActor struct PreauthRuleGate: ProposalGate {
     let store: PreauthRuleStore
-    func verdict(for proposal: Proposal) -> ProposalGateVerdict { PreauthPolicy.evaluate(proposal, rules: store.rules) }
+    /// W32d「低风险改动自动通过」开关（默认开，随设置同步）。
+    var lowRiskAutoPass: () -> Bool = { LowRiskAutoPassSettings.enabled }
+    func verdict(for proposal: Proposal) -> ProposalGateVerdict {
+        PreauthPolicy.evaluate(proposal, rules: store.rules, lowRiskAutoPass: lowRiskAutoPass())
+    }
+}
+
+/// W32d（Jason 2026-10-20 要的）：「低风险改动自动通过」。默认开（他明确要；可在设置里关）；随设置同步。
+/// 关着 = 和以前完全一样（只有你写的预授权规则能代你决定）。
+nonisolated enum LowRiskAutoPassSettings {
+    static let key = "approvals.lowRiskAutoPass.enabled"
+    static var enabled: Bool {
+        get { ExperimentDefaults.bool(key, default: true) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
 }

@@ -22,6 +22,16 @@ nonisolated enum AgentContextSettings {
     }
 }
 
+/// W32b「允许智能体提议写日记」开关（默认关；随设置跨端同步，见 SettingsSync 白名单）。
+/// 关着 = 日记类提案一律拒收（批准后执行前关掉也不写）；撤销不受它限制（撤销是你的动作）。
+nonisolated enum AgentJournalSettings {
+    static let key = "agentJournal.allowWrite"
+    static var allowWrite: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 /// 体积上限（context.json 每 20 秒重写一次，智能体每次唤醒都会读——要小）。
 enum AgentContextLimits {
     static let todayBlocks = 40
@@ -69,13 +79,18 @@ struct AgentContextInput {
         var recentMinutes = 0
         var lastWorkedAt: Date?
     }
-    struct CalendarEvent { var title: String; var start: Date; var end: Date; var isAllDay = false; var calendar = "" }
+    struct CalendarEvent { var title: String; var start: Date; var end: Date; var isAllDay = false; var calendar = ""
+        /// W32：越级提案定位用（外部标识 + 这一次的开始）与「能不能改」的事实。
+        var externalID: String? = nil; var facts: YourEventFacts? = nil }
     /// W18：你的日历里一件「已占用」的事（只读；排布规则用的就是这份）。linkedBlockId = 与之是同一件事的计划块。
     struct Occupied { var title: String; var start: Date; var end: Date; var calendar = ""; var linkedBlockId: UUID? = nil }
     /// W12：你自己列表里一条没完成的提醒（只读）。
-    struct OwnReminderItem { var title: String; var due: Date?; var hasTime = true; var list = "" }
+    struct OwnReminderItem { var title: String; var due: Date?; var hasTime = true; var list = ""
+        var externalID: String? = nil; var facts: YourReminderFacts? = nil }
     struct Actual { var title: String; var start: Date; var end: Date }
-    struct JournalDigest { var day: Date; var body: String; var mood: String?; var tags: [String] = []; var modifiedAt: Date }
+    struct JournalDigest { var day: Date; var body: String; var mood: String?; var tags: [String] = []; var modifiedAt: Date
+        /// W32b：journalEdit 要的身份与版本。
+        var id: UUID? = nil; var revision: String? = nil }
 
     /// 一个来源的读取结果：条目或错误（失败显式写进上下文，不当成「没有」）。
     struct Read<T> { var items: [T] = []; var error: String? = nil }
@@ -95,6 +110,8 @@ struct AgentContextInput {
     var reminderLedgerError: String? = nil
     var actuals = Read<Actual>()
     var journalAllowed = false
+    /// W32b：「允许智能体提议写日记」。
+    var journalWriteAllowed = false
     var journal = Read<JournalDigest>()
     /// W13：设备活动摘要（已截断、带来源与时刻；nil = 没接活动记录）。构造见 ActivityContextSummary。
     var activity: [String: Any]? = nil
@@ -200,19 +217,39 @@ enum AgentBridgeContext {
         ] as [String: Any]
 
         // 系统日历（今天 + 未来 3 天）。
-        var calendar = section(source: "系统日历（只读；不含 BetterCalendar 自建的绿/蓝/橙日历）", asOf: asOf, read: input.calendar,
+        var calendar = section(source: "系统日历（Jason 自己的；不含 BetterCalendar 自建的绿/蓝/橙日历）", asOf: asOf, read: input.calendar,
                                limit: AgentContextLimits.calendarEvents, key: "events") { e in
-            ["title": clip(e.title), "start": t(e.start), "end": t(e.end), "allDay": e.isAllDay, "calendar": clip(e.calendar)] as [String: Any]
+            var o: [String: Any] = ["title": clip(e.title), "start": t(e.start), "end": t(e.end), "allDay": e.isAllDay, "calendar": clip(e.calendar)]
+            // W32：越级提案 yourEventEdit / yourEventDelete 用 eventId + occurrenceStart 定位；editable=false 的会被拒收（原因同 notEditableReason）
+            if let id = e.externalID { o["eventId"] = id; o["occurrenceStart"] = t(e.start) }
+            if let f = e.facts {
+                let why = YourItemRules.eventBlocked(f, title: clip(e.title), calendar: clip(e.calendar))
+                o["editable"] = why == nil && e.externalID != nil
+                if let why { o["notEditableReason"] = why }
+                if f.isRecurring { o["recurring"] = true }
+            }
+            return o
         }
         calendar["window"] = window(input.calendarWindow)
+        calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（必须带 escalation，永远要他亲自批）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改动要写 span（默认只这一次），不能删"
         context["calendar"] = calendar
 
         // W12：系统提醒事项（Jason 自己的列表，只读、从不修改；不含 BetterCalendar 自己那本）。
         var reminders = section(source: "系统提醒事项（只读）", asOf: asOf, read: input.ownReminders,
                                 limit: AgentContextLimits.ownReminders, key: "items") { r in
-            ["title": clip(r.title), "due": opt(r.due), "hasTime": r.hasTime, "list": clip(r.list)] as [String: Any]
+            var o: [String: Any] = ["title": clip(r.title), "due": opt(r.due), "hasTime": r.hasTime, "list": clip(r.list)]
+            if let id = r.externalID { o["reminderId"] = id }
+            if let f = r.facts {
+                let snap = YourReminderSnapshot(externalID: r.externalID ?? "", title: clip(r.title), due: r.due, hasTime: r.hasTime,
+                                                isCompleted: false, listTitle: clip(r.list), facts: f)
+                let why = YourItemRules.reminderBlocked(snap)
+                o["editable"] = why == nil && r.externalID != nil
+                if let why { o["notEditableReason"] = why }
+                if f.isRecurring { o["recurring"] = true }
+            }
+            return o
         }
-        reminders["note"] = "Jason 自己提醒列表里没完成的提醒：当作现实与上下文，只读、从不修改（有截止的在前）"
+        reminders["note"] = "Jason 自己提醒列表里没完成的提醒：当作现实与上下文（有截止的在前）。只有他要求、或真有冲突时，才可提越级提案 yourReminderEdit（改名 / 挪已有的截止 / 标完成；必须带 escalation，永远要他亲自批）"
         context["reminders"] = reminders
         // W12：BetterCalendar 投进提醒事项的东西，Jason 在提醒事项里删掉 / 改过时间的——他的决定。
         var projected: [String: Any] = [
@@ -246,16 +283,21 @@ enum AgentBridgeContext {
             var journal = section(source: "BetterCalendar 日记（Jason 已在多端审批面板允许）", asOf: asOf, read: input.journal,
                                   limit: AgentContextLimits.journalEntries, key: "entries") { j in
                 let body = j.body.trimmingCharacters(in: .whitespacesAndNewlines)
-                return ["day": t(DayContext.logicalStartOfDay(j.day)), "mood": j.mood ?? NSNull(), "tags": j.tags,
+                var o: [String: Any] = ["day": t(DayContext.logicalStartOfDay(j.day)), "mood": j.mood ?? NSNull(), "tags": j.tags,
                         "excerpt": String(body.prefix(AgentContextLimits.journalChars)),
                         "excerptTruncated": body.count > AgentContextLimits.journalChars, "bodyChars": body.count,
-                        "modifiedAt": t(j.modifiedAt)] as [String: Any]
+                        "modifiedAt": t(j.modifiedAt)]
+                if let id = j.id { o["id"] = id.uuidString }
+                if let r = j.revision { o["revision"] = r }
+                return o
             }
             journal["included"] = true
             journal["window"] = window(input.recentWindow)
+            journal["writeAllowed"] = input.journalWriteAllowed
+            journal["authorshipNote"] = "excerpt 是原文：<!--bc:agent:…-->…<!--/bc:agent--> 包着的是你（智能体）以前写的段落，App 用楷体（西文衬线斜体）显示；其余是 Jason 写的"
             context["journal"] = journal
         } else {
-            context["journal"] = ["included": false, "source": "BetterCalendar 日记", "asOf": asOf,
+            context["journal"] = ["included": false, "source": "BetterCalendar 日记", "asOf": asOf, "writeAllowed": input.journalWriteAllowed,
                                   "note": "Jason 未允许智能体读日记（多端审批面板开关，默认关）"] as [String: Any]
         }
         // W13：最近的设备活动（只用来理解情境与时机；App/网站名永不进复盘、留底、反馈）。全量走 MCP read_activity。
@@ -320,6 +362,7 @@ enum AgentBridgeContext {
     private let reminderLedger: () throws -> ReminderProjectionLedger?
     private let running: () -> AgentContextInput.Running
     private let journalAllowed: () -> Bool
+    private let journalWriteAllowed: () -> Bool
     private let actionTargets: () -> [String: Any]?
     /// W18：智能体排时间线开关。
     private let planEditing: () -> Bool
@@ -335,12 +378,14 @@ enum AgentBridgeContext {
          reminderLedger: @escaping () throws -> ReminderProjectionLedger? = { try ReminderProjectionLedgerStore().load() },
          running: @escaping () -> AgentContextInput.Running,
          journalAllowed: @escaping () -> Bool = { AgentContextSettings.allowRecentJournal },
+         journalWriteAllowed: @escaping () -> Bool = { AgentJournalSettings.allowWrite },
          actionTargets: @escaping () -> [String: Any]? = { nil },
          planEditing: @escaping () -> Bool = { PlanEditingSettings.enabled }) {
         self.actionTargets = actionTargets
         self.planEditing = planEditing
         self.planStore = planStore; self.actualStore = actualStore; self.longTasks = longTasks; self.calendarStore = calendarStore
         self.journalStore = journalStore; self.running = running; self.journalAllowed = journalAllowed
+        self.journalWriteAllowed = journalWriteAllowed
         self.reminderStore = reminderStore; self.reminderLedger = reminderLedger
     }
 
@@ -426,24 +471,27 @@ enum AgentBridgeContext {
         // 系统日历（EventKit actor，async，不压主线程）
         if let calendarStore {
             do { input.calendar.items = try await calendarStore.systemEvents(in: input.calendarWindow).map {
-                    .init(title: $0.title, start: $0.start, end: $0.end, isAllDay: $0.isAllDay, calendar: $0.calendarTitle)
+                    .init(title: $0.title, start: $0.start, end: $0.end, isAllDay: $0.isAllDay, calendar: $0.calendarTitle,
+                          externalID: $0.externalID, facts: $0.facts)
                 }
             } catch { input.calendar.error = fail("系统日历", error) }
         }
         // W12：系统提醒事项（你自己的列表；不弹权限框，没授权 = 显式错误）+ BetterCalendar 投影账本
         if let reminderStore {
             do { input.ownReminders.items = try await reminderStore.ownOpenReminders().map {
-                    .init(title: $0.title, due: $0.due, hasTime: $0.hasTime, list: $0.list)
+                    .init(title: $0.title, due: $0.due, hasTime: $0.hasTime, list: $0.list, externalID: $0.externalID, facts: $0.facts)
                 }
             } catch { input.ownReminders.error = fail("系统提醒事项", error) }
             do { input.reminderLedger = try reminderLedger() } catch { input.reminderLedgerError = fail("提醒投影账本", error) }
         }
         // 日记：只有 Jason 允许时才读（关着时连读都不读）
         input.journalAllowed = journalAllowed()
+        input.journalWriteAllowed = journalWriteAllowed()
         if input.journalAllowed, let journalStore {
             do {
                 input.journal.items = try journalStore.entries(since: input.recentWindow.start).map {
-                    .init(day: $0.date, body: $0.body, mood: $0.mood, tags: $0.tags, modifiedAt: $0.modifiedAt)
+                    .init(day: $0.date, body: $0.body, mood: $0.mood, tags: $0.tags, modifiedAt: $0.modifiedAt,
+                          id: $0.id, revision: ProposalRevision.journal($0))
                 }
             } catch { input.journal.error = fail("日记", error) }
         }
@@ -477,8 +525,12 @@ extension AgentBridgeContext {
     /// 计划块的 id/版本在 today.blocks 里。只读副本；版本过时的提案会被 App 拒绝。
     static func actionTargets(longTasks: LongTaskStore?, timer: ProposalTimerState?) -> [String: Any] {
         let items = (longTasks.map { $0.todoItems() + $0.active() + $0.doneItems().prefix(20) } ?? []).map { t -> [String: Any] in
-            ["id": t.id.uuidString, "revision": ProposalRevision.item(t), "title": t.title,
+            var o: [String: Any] = ["id": t.id.uuidString, "revision": ProposalRevision.item(t), "title": t.title,
              "zone": t.poolZone.rawValue, "status": t.status.rawValue, "hasNote": !t.note.isEmpty]
+            // W32c：阶段（检查点）的 id——checkpointDelete 用；expectedRevision 用所属事项的 revision
+            let cps = t.sortedCheckpoints
+            if !cps.isEmpty { o["checkpoints"] = cps.map { ["id": $0.id.uuidString, "title": $0.title, "done": $0.doneAt != nil] as [String: Any] } }
+            return o
         }
         var targets: [String: Any] = ["items": items, "deviceId": ProposalDevice.id]
         // W8 D3：最近见过的设备（提醒/闹钟的 targetDevice 从这里取；闹钟只能设在 platform=iOS 的设备上——iPhone 或 iPad，kind 区分；kindInferred=true = 旧版本登记、没写类别，按 iPhone 计）。

@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 enum JournalBodyFormat: String { case markdown, richText }
 
@@ -14,11 +15,16 @@ enum JournalBody {
     static func rendered(_ body: String, format: String) -> AttributedString {
         switch JournalBodyFormat(rawValue: format) ?? .markdown {
         case .markdown:
+            // W32b：按作者切段，各段分别渲染 Markdown；智能体写的段落用固定字体（衬线 + 斜体），标记本身不显示。
             let opts = AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace)
-            return (try? AttributedString(markdown: body, options: opts)) ?? AttributedString(body)
+            return JournalAuthorship.segments(body).reduce(into: AttributedString()) { out, seg in
+                var a = (try? AttributedString(markdown: seg.text, options: opts)) ?? AttributedString(seg.text)
+                if seg.byAgent { JournalAuthorship.applyAgentStyle(&a, style: .body, cjkFontName: AgentCJKFont.shared.name) }   // W33：中文楷体 + 西文衬线斜体
+                out += a
+            }
         case .richText:
-            return AttributedString(body)   // 占位：上线再做富文本渲染/编辑
+            return JournalAuthorship.styled(body)   // 占位：上线再做富文本渲染/编辑
         }
     }
 }

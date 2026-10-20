@@ -16,12 +16,16 @@
 import SwiftUI
 
 /// 越级提案的醒目横条（原则 8「审慎越级」）。
+/// W32：图钉 / 固定安排 / 你的东西（日程、提醒、事项、日记）是同一个越级概念、同一条横条；
+/// subjects = 改动清单里的点名行（「改的是你自己设的日程：《组会》」），放在横条里、不在正文里重复。
 struct ProposalEscalationBanner: View {
     let reason: String
+    var subjects: [String] = []
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Label("越级：这会动你亲手放的位置或你的东西", systemImage: "exclamationmark.shield.fill")
                 .font(.subheadline.bold()).foregroundStyle(.orange)
+            ForEach(Array(subjects.enumerated()), id: \.offset) { _, s in Text(s).font(.callout.bold()) }
             Text("智能体的理由：" + reason).font(.caption)
             Text("越级提案每次都要你亲自批准，预授权规则不会代你放行。").font(.caption2).foregroundStyle(.secondary)
         }
@@ -277,24 +281,7 @@ struct ProposalTuner: View {
     }
 }
 
-/// 已有结论的提案上 W10 相关的一两行说明（你回的话 / 选了哪个方案 / 代你决定的规则）。
-struct ProposalOutcomeNotes: View {
-    let proposal: Proposal
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let reply = proposal.userReply {
-                Text("你回了一句：「\(reply.text)」").font(.caption)
-            }
-            if proposal.hasAlternatives, proposal.chosenOption != nil {
-                Text("你选了：\(proposal.chosen.index + 1). \(proposal.chosen.label)").font(.caption)
-            }
-            if let stamp = proposal.preauth {
-                Text("由预授权规则代你决定（\(stamp.effect.label)）：\(stamp.ruleLabel)").font(.caption2).foregroundStyle(.secondary)
-            }
-            if let e = proposal.escalation { Text("越级理由：" + e).font(.caption2).foregroundStyle(.orange) }
-        }
-    }
-}
+// W32e：原 ProposalOutcomeNotes（你回的话 / 选了哪个方案 / 规则 / 越级理由）拆开：你的操作留在卡上，追溯信息进 ProposalDetails。
 
 /// 面板里的预授权规则列表：可查看、改效果、删除；随设置同步到你所有设备。
 struct PreauthRulesSection: View {

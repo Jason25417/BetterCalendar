@@ -263,8 +263,10 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     private static let outboxKey = "agentChat.outbox.v1"
     /// W31b：没发出去的真实原因也存本机（原来重启后一律显示「上次没发出去」，看不出为什么）。
     private static let outboxErrorsKey = "agentChat.outboxErrors.v1"
-    /// 发送途中 App 被关掉、没留下原因时的说法（同一 id 重试，iCloud 侧幂等，不会多出一条）。
-    nonisolated static let interruptedSendReason = "发送途中 App 被关掉了，不确定发出去没有（重试不会重复）"
+    /// 没留下原因时的说法（同一 id 重试，iCloud 侧幂等，不会多出一条）。
+    /// W33 自测（P4 不虚报）：原来写「发送途中 App 被关掉了」——但从旧版升级上来的发件箱也没有原因（旧版不存），
+    /// 那些其实是发送失败、不是被关掉；只说确定的事：没发出去、原因没记下。
+    nonisolated static let interruptedSendReason = "没发出去，当时的原因没记下（可能是发送途中 App 被关掉；重试不会重复）"
     private static let shownKey = "agentChat.shownHere"
     private static let forwardedKey = "agentChat.forwardedHere"
     private static let lastReadKey = "agentChat.lastReadAt"

@@ -89,6 +89,8 @@ nonisolated struct SystemCalendarEvent: Sendable, Equatable {
     var externalID: String? = nil
     /// 这件你的事件是误存在 BetterCalendar 自家日历里的（无章）。
     var inBetterCalendar: Bool = false
+    /// W32：能不能由越级提案改（只读上下文告诉智能体；执行时写者按同一口径再判）。nil = 没读（测试替身）。
+    var facts: YourEventFacts? = nil
 }
 
 /// W23b：测试宿主里 AppContainer 用的内存日历（不碰真 EventKit——W23 截图测试曾把测试块写进 Jason 的日用版日历）。
