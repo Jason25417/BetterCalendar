@@ -636,11 +636,10 @@ struct RoutineTemplateRows: View {
 
     var body: some View {
         ForEach(store.templates) { t in
+            // W31b：原来 Toggle 撑满左侧、开关位置随名字长短漂移（五行对不齐）→ 名字 | 时刻 | 时长（定宽）| 开关 固定贴右
             HStack {
-                Toggle(t.name, isOn: Binding(
-                    get: { store.templates.first { $0.id == t.id }?.enabled ?? false },
-                    set: { var nt = t; nt.enabled = $0; store.update(nt); FeatureUsage.used(.settingsRoutines, $0 ? "开" : "关") }))
-                Spacer()
+                Text(t.name)
+                Spacer(minLength: 8)
                 DatePicker("", selection: Binding(
                     get: {
                         let c = DateComponents(hour: t.hour, minute: t.minute)
@@ -655,7 +654,12 @@ struct RoutineTemplateRows: View {
                     }), displayedComponents: .hourAndMinute)
                     .labelsHidden()
                     .disabled(!t.enabled)
-                Text("\(t.durationMinutes) 分钟").font(.caption).foregroundStyle(.secondary)
+                Text("\(t.durationMinutes) 分钟").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .frame(minWidth: 52, alignment: .trailing)
+                Toggle(t.name, isOn: Binding(
+                    get: { store.templates.first { $0.id == t.id }?.enabled ?? false },
+                    set: { var nt = t; nt.enabled = $0; store.update(nt); FeatureUsage.used(.settingsRoutines, $0 ? "开" : "关") }))
+                    .labelsHidden()
             }
         }
     }

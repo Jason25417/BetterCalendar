@@ -254,7 +254,7 @@ struct HomeView: View {
     private var axisPage: some View {
         GeometryReader { page in
         VStack(alignment: .leading, spacing: 8) {
-            // W31 自测：大字号 / 矮窗口下这张卡会把时间轴挤到零高（轴整个消失）——卡最多占页面一半，多出的在卡内滚动
+            // W31 自测：大字号 / 矮窗口下这张卡会把时间轴挤到零高（轴整个消失）——卡最多占页面四成，多出的在卡内滚动
             ScrollView(.vertical) {
                 nowNextCard
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { nowCardHeight = $0 }
@@ -281,9 +281,9 @@ struct HomeView: View {
         .padding(.horizontal).padding(.top, 10)
     }
 
-    /// 「现在 / 下一件」卡在时间轴页的高度：自然高度，但不超过页面一半（还没量到时先给上限，免得首帧塌成 0）。纯函数、可单测。
+    /// 「现在 / 下一件」卡在时间轴页的高度：自然高度，但不超过页面四成（还没量到时先给上限，免得首帧塌成 0）。纯函数、可单测。
     nonisolated static func nowCardFrameHeight(natural: CGFloat, page: CGFloat) -> CGFloat {
-        let cap = max(120, page * 0.5)
+        let cap = max(120, page * 0.4)   // W31b：0.5 → 0.4，iPhone 上给时间轴留出六成
         guard natural > 0 else { return cap }
         return min(natural, cap)
     }
