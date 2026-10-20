@@ -75,6 +75,10 @@ struct SettingsView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     #endif
 
+    #if os(macOS)
+    @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // 哨兵单独一行（原藏在「审批记录与规则」里，找不到）
+    #endif
+
     var body: some View {
         Form {
             // W19（S-v2）：待确认卡置顶在「智能体」页；这里是审批记录、预授权规则、智能体能看什么、主动找你、
@@ -89,6 +93,19 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("bc.settings.agent")
                     }
+                    #if os(macOS)
+                    if let sentinel {
+                        NavigationLink {
+                            Form { SentinelSection(engine: sentinel) }.formStyle(.grouped)
+                                .navigationTitle("哨兵")
+                        } label: {
+                            LabeledContent {
+                                Text(sentinel.settings.enabled ? "把握 ≥ \(Int((sentinel.settings.wakeThreshold * 100).rounded()))% 叫醒" : "关")
+                            } label: { Label("哨兵：要不要叫醒智能体", systemImage: "eye") }
+                        }
+                        .accessibilityIdentifier("bc.settings.sentinel")
+                    }
+                    #endif
                     NavigationLink {
                         ProposalPanel(center: proposals, bridge: bridge, alertPush: alertPush, messages: agentMessages,
                                       showsPending: false)
