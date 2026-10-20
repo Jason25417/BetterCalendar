@@ -24,6 +24,12 @@
 //  两台都离线：各自看对方租约过期 → 各自写（本机 KV）→ 重新联网后 KV 后写赢、只剩一个持有者，期间的计划改动按现有 CloudKit 后写赢合并（与改动前相同）。
 //  单设备：只有本机 → 永远是持有者，写入行为与改动前完全一致；KV 不可用（没登录 iCloud）时 KV 退化为本机存储，同样只有本机。
 //
+//  W30（原则 11「人是单位，设备是触点」）：这份租约同时就是「在场设备」的记录——同一个优先级（正在计时 > 最近真正在用），
+//  一份实现：自动调整按它决定谁写，触达（通知）按它决定在哪台响（见 Services/Presence/DevicePresence.swift）。
+//  为此记录里多了三个可选字段（旧版本照常解码、忽略）：持有者最近一次真正被用的时刻 activeAt、设备类别 holderKind、持有起点 heldSince。
+//  「真正在用」的新信号（Mac 键鼠输入 / 锁屏，iPhone·iPad 前台心跳）只在「一处响」开关打开时才会去抢 / 交出租约（userActive / becameInactive）；
+//  开关关着时租约的行为与 W22 逐字一致（只多记 activeAt 字段，不改谁写）。
+//
 
 import Foundation
 import Observation
@@ -59,6 +65,13 @@ nonisolated struct WriteLease: Codable, Equatable, Sendable {
     var seq: Int64
     /// 持有者主动交出（iPhone 回到后台且没在计时）：别的设备立即可接手。
     var releasedAt: Date?
+    // —— W30 在场设备（全部可选：旧记录 / 旧版本照常解码）——
+    /// 持有者最近一次「真正被用」的时刻（持有者自己的钟）：Mac = 有键鼠输入，iPhone / iPad = 在前台。
+    var activeAt: Date? = nil
+    /// 持有者的设备类别（ActivityDeviceKind.rawValue）。
+    var holderKind: String? = nil
+    /// 这台设备从什么时候起持有（换人时重置；同一台续约不变）。
+    var heldSince: Date? = nil
 
     /// 持有者声明的有效时长（同一台钟的两个时刻相减，不受钟差影响）。
     var span: TimeInterval { max(0, expiresAt.timeIntervalSince(renewedAt)) }
@@ -82,7 +95,16 @@ nonisolated enum WriteLeasePolicy {
 
     enum Liveness: Equatable, Sendable { case valid, expired, stale }
 
-    enum Trigger: Equatable, Sendable { case automaticWrite, becameForeground, becameBackground }
+    enum Trigger: Equatable, Sendable {
+        case automaticWrite, becameForeground, becameBackground
+        /// W30：本机真正在被用（Mac 键鼠输入 / iOS 前台心跳）。transition = 刚从「没在用」变成「在用」。
+        case userActive(transition: Bool)
+        /// W30：Mac 锁屏 / 睡眠（不再被用）：没在计时就交出，同 iPhone 回后台。
+        case becameInactive
+    }
+
+    /// W30：持有者 activeAt 多久没刷新就补写一次（在用期间约每 4 分钟一次 KV 写，不刷屏）。
+    static let activeRefresh: TimeInterval = 4 * 60
 
     struct Local: Equatable, Sendable {
         var deviceID: String
@@ -90,6 +112,10 @@ nonisolated enum WriteLeasePolicy {
         var timing: Bool
         var timingUntil: Date?
         var foreground: Bool
+        /// W30：本机最近一次真正被用的时刻（本机钟）；nil = 不知道。写进租约的 activeAt。
+        var activeAt: Date? = nil
+        /// W30：本机设备类别。
+        var kind: String? = nil
     }
 
     enum Event: Equatable, Sendable {
@@ -125,10 +151,22 @@ nonisolated enum WriteLeasePolicy {
     }
 
     static func make(_ reason: WriteLeaseReason, local: Local, now: Date, after previous: WriteLease?) -> WriteLease {
-        WriteLease(holder: local.deviceID, holderLabel: local.deviceLabel, reason: reason,
-                   renewedAt: now, expiresAt: expiry(for: reason, local: local, now: now),
-                   seq: (previous?.seq ?? 0) + 1, releasedAt: nil)
+        let continuing = previous?.holder == local.deviceID && previous?.releasedAt == nil
+        return WriteLease(holder: local.deviceID, holderLabel: local.deviceLabel, reason: reason,
+                          renewedAt: now, expiresAt: expiry(for: reason, local: local, now: now),
+                          seq: (previous?.seq ?? 0) + 1, releasedAt: nil,
+                          activeAt: local.activeAt, holderKind: local.kind,
+                          heldSince: continuing ? (previous?.heldSince ?? previous?.renewedAt ?? now) : now)
     }
+
+    /// W30：持有者的「在用」信号是否已经旧了（没有 / 超过在场窗口）。
+    static func activityStale(_ lease: WriteLease, now: Date, window: TimeInterval) -> Bool {
+        guard let a = lease.activeAt else { return true }
+        return now.timeIntervalSince(a) > window
+    }
+
+    /// W30：在场窗口（与 PresencePolicy.activeWindow 同一个数；放这里避免租约依赖在场层）。
+    static let presenceWindow: TimeInterval = 15 * 60
 
     /// 核心判定。observedAt = 本机最近一次看到这份租约（holder#seq）变化的本机时刻。
     static func decide(current: WriteLease?, observedAt: Date?, local: Local,
@@ -136,8 +174,8 @@ nonisolated enum WriteLeasePolicy {
         let desired: WriteLeaseReason? = local.timing ? .timer : (local.foreground ? .foreground : nil)
 
         guard let cur = current else {
-            // 从没有人持有过（首次 / 单设备）：直接拿。回后台的那一刻不必去拿。
-            if trigger == .becameBackground { return Outcome(mayWrite: false, write: nil, event: nil) }
+            // 从没有人持有过（首次 / 单设备）：直接拿。回后台 / 锁屏的那一刻不必去拿。
+            if trigger == .becameBackground || trigger == .becameInactive { return Outcome(mayWrite: false, write: nil, event: nil) }
             return Outcome(mayWrite: true, write: make(desired ?? .expiredTakeover, local: local, now: now, after: nil),
                            event: .claimedFresh)
         }
@@ -147,7 +185,7 @@ nonisolated enum WriteLeasePolicy {
         }
 
         // 别的设备持有
-        if trigger == .becameBackground { return Outcome(mayWrite: false, write: nil, event: nil) }
+        if trigger == .becameBackground || trigger == .becameInactive { return Outcome(mayWrite: false, write: nil, event: nil) }
         switch liveness(cur, observedAt: observedAt ?? now, now: now) {
         case .valid:
             if local.timing && cur.reason != .timer {
@@ -155,6 +193,12 @@ nonisolated enum WriteLeasePolicy {
             }
             if trigger == .becameForeground && cur.reason != .timer {
                 return Outcome(mayWrite: true, write: make(desired ?? .foreground, local: local, now: now, after: cur),
+                               event: .preempted(from: cur))
+            }
+            // W30：本机真正在被用——刚开始用（从没在用变成在用），或持有者已经很久没被用 → 接过来（计时中的租约照旧不抢）
+            if case let .userActive(transition) = trigger, cur.reason != .timer,
+               transition || activityStale(cur, now: now, window: presenceWindow) {
+                return Outcome(mayWrite: true, write: make(.foreground, local: local, now: now, after: cur),
                                event: .preempted(from: cur))
             }
             return Outcome(mayWrite: false, write: nil, event: nil)
@@ -173,11 +217,14 @@ nonisolated enum WriteLeasePolicy {
         if cur.releasedAt != nil {
             // 自己交出过、还没有别的设备接手：回到前台 / 开始计时才重新拿；
             // 后台里的零星重算照旧可写但不重新拿（单设备与改动前一致；另一台一接手，下一轮读到就让出）
-            if trigger == .becameBackground { return Outcome(mayWrite: false, write: nil, event: nil) }
+            if trigger == .becameBackground || trigger == .becameInactive { return Outcome(mayWrite: false, write: nil, event: nil) }
+            if case .userActive = trigger {   // W30：又开始用了 → 拿回
+                return Outcome(mayWrite: true, write: make(desired ?? .foreground, local: local, now: now, after: cur), event: .reclaimedOwn)
+            }
             guard let desired else { return Outcome(mayWrite: true, write: nil, event: nil) }
             return Outcome(mayWrite: true, write: make(desired, local: local, now: now, after: cur), event: .reclaimedOwn)
         }
-        if trigger == .becameBackground {
+        if trigger == .becameBackground || trigger == .becameInactive {
             guard !local.timing else { return Outcome(mayWrite: true, write: nil, event: nil) }   // 计时中不交出
             var released = cur
             released.seq += 1
@@ -188,12 +235,18 @@ nonisolated enum WriteLeasePolicy {
         if local.timing { reason = .timer }
         else if cur.reason == .timer { reason = local.foreground ? .foreground : .held }
         else if trigger == .becameForeground { reason = .foreground }
+        else if case .userActive = trigger { reason = .foreground }
 
         let targetExpiry = expiry(for: reason, local: local, now: now)
         let halfSpent = now >= cur.renewedAt.addingTimeInterval(cur.span / 2)
         let timerExtended = reason == .timer && targetExpiry.timeIntervalSince(cur.expiresAt) > 5 * 60
+        // W30：在用期间把 activeAt 带到共享记录里（约每 4 分钟一次）
+        var activityRefresh = false
+        if case .userActive = trigger, let a = local.activeAt {
+            activityRefresh = cur.activeAt.map { a.timeIntervalSince($0) >= activeRefresh } ?? true
+        }
         // 自己的租约在本机钟上已过期（挂起很久刚醒）也照样续：对方若已接手，KV 很快送到，下一轮就让出
-        guard reason != cur.reason || halfSpent || timerExtended || now >= cur.expiresAt else {
+        guard reason != cur.reason || halfSpent || timerExtended || activityRefresh || now >= cur.expiresAt else {
             return Outcome(mayWrite: true, write: nil, event: nil)
         }
         let next = make(reason, local: local, now: now, after: cur)
@@ -251,6 +304,8 @@ final class TimelineWriteLease {
 
     let deviceID: String
     let deviceLabel: String
+    /// W30：本机设备类别（ActivityDeviceKind.rawValue；写进租约 holderKind，在场设备据此认出 iPhone）。
+    let deviceKind: String?
     /// iPhone：回到后台（会被挂起）且没在计时 → 主动交出；Mac 后台照常运行，不交出。
     let releasesOnBackground: Bool
     /// 本机计时状态（组装点接执行层）：是否在计时 + 预计结束。
@@ -266,6 +321,12 @@ final class TimelineWriteLease {
     /// 最近一次判定：本机能不能写（状态行 / 协调器备注用）。
     private(set) var lastMayWrite = true
     private(set) var lastChangeNote = "（还没有判定过）"
+    /// W30：本机最近一次真正被用的时刻（回前台 / 键鼠输入 / 前台心跳）。
+    private(set) var lastActiveAt: Date?
+    /// W30：共享记录变了（另一台设备写的、或本机刚写的）→ 在场设备重算。只有一个监听者（DevicePresence）。
+    var onChange: (() -> Void)?
+    /// W30：本机最近一次看到当前这份记录变化的本机时刻（在场判断的「失联」用）。
+    var currentObservedAt: Date? { observedAt }
     private var syncFailureLogged = false
     private var observedKey: String?
     private var observedAt: Date?
@@ -273,6 +334,7 @@ final class TimelineWriteLease {
     init(store: any WriteLeaseStoring,
          deviceID: String,
          deviceLabel: String,
+         deviceKind: String? = nil,
          releasesOnBackground: Bool,
          isEnabled: @escaping @MainActor () -> Bool = { TimelineWriteLease.enabledSetting },
          now: @escaping () -> Date = { .now },
@@ -286,6 +348,7 @@ final class TimelineWriteLease {
         self.store = store
         self.deviceID = deviceID
         self.deviceLabel = deviceLabel
+        self.deviceKind = deviceKind
         self.releasesOnBackground = releasesOnBackground
         self.isEnabled = isEnabled
         self.now = now
@@ -306,9 +369,22 @@ final class TimelineWriteLease {
     func setForeground(_ active: Bool) {
         let was = isForeground
         isForeground = active
+        if active { lastActiveAt = now() }   // W30：回前台 = 真正在用（只记字段，不改谁写）
         guard isEnabled(), active != was else { return }
         if active { _ = apply(.becameForeground) }
         else if releasesOnBackground { _ = apply(.becameBackground) }
+    }
+
+    /// W30：本机真正在被用 / 不再被用（Mac：键鼠输入、锁屏；iOS：前台心跳）。只在「一处响」开关打开时由组装点调用。
+    /// active=true：刷新 activeAt，必要时接过租约（刚开始用 / 持有者很久没被用）；active=false 且 transition（锁屏）：没在计时就交出。
+    func noteUserActivity(active: Bool, transition: Bool) {
+        guard isEnabled() else { return }
+        if active {
+            lastActiveAt = now()
+            _ = apply(.userActive(transition: transition))
+        } else if transition {
+            _ = apply(.becameInactive)
+        }
     }
 
     /// 另一台设备改了租约（KV 推送）或启动读取。
@@ -317,6 +393,7 @@ final class TimelineWriteLease {
         let before = current
         noteObserved(fresh)
         current = fresh
+        defer { if before != fresh { onChange?() } }
         guard let fresh, fresh.holder != deviceID,
               before?.holder != fresh.holder || before?.reason != fresh.reason
                 || (before?.releasedAt == nil) != (fresh.releasedAt == nil) else { return }
@@ -346,7 +423,8 @@ final class TimelineWriteLease {
         current = fresh
         let t = timing()
         let local = WriteLeasePolicy.Local(deviceID: deviceID, deviceLabel: deviceLabel,
-                                           timing: t.running, timingUntil: t.until, foreground: isForeground)
+                                           timing: t.running, timingUntil: t.until, foreground: isForeground,
+                                           activeAt: lastActiveAt, kind: deviceKind)
         let out = WriteLeasePolicy.decide(current: fresh, observedAt: observedAt, local: local, trigger: trigger, now: now())
         if let next = out.write, let data = try? JSONEncoder().encode(next) {
             if store.save(data) {
@@ -357,6 +435,7 @@ final class TimelineWriteLease {
             }
             current = next
             noteObserved(next)
+            onChange?()
         }
         if let event = out.event { report(event) }
         lastMayWrite = out.mayWrite

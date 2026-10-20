@@ -442,7 +442,10 @@ nonisolated struct AgentBridgeIO: Sendable {
             // W8 D3：iOS 系统闹钟（会响铃）。必须指定一台 iPhone / iPad（W28）：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
             let device = try string("device", max: 80) ?? targetDevice
             if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("alarm.device 与 targetDevice 不一致") }
-            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定一台 iPhone / iPad：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
+            // W30（原则 11）：「一处响」打开时不写设备 = 默认设在随身的 iPhone（执行器准备时换成名册里那台 iPhone 的 id，审批卡写明）
+            guard let device = device ?? (ReachSettings.onePlaceEnabled ? ProposalAction.carriedDeviceDefault : nil) else {
+                throw AgentBridgeError.invalid("alarm 必须指定一台 iPhone / iPad：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id")
+            }
             return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
                           fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         case "blockCreate":

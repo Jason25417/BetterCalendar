@@ -57,6 +57,9 @@ enum SettingsSync {
         "agent.sharedMemory.v1",               // 智能体共享记忆（属于角色，各实现共用；≤6000 字）
         "agent.builtin.dailyBudgetUSD",        // 内置智能体每日预算（稳定性上限；每台设备各自按它记账）
         "agent.builtin.model",                 // 内置智能体用哪个 DeepSeek 模型
+        // —— W30（2026-10-19）——
+        "reach.onePlace.enabled",              // 「一处响，处处知」：通知只在在场设备响（一端打开两端都按它；关 = 每台照常响）
+        "drafts.handoff.enabled",              // 打了一半的字跨设备接力（一端打开两端都接力）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。
