@@ -43,6 +43,7 @@ struct AgentChatView: View {
     @State private var flashPinnedId: UUID?
     @FocusState private var inputFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appTheme) private var theme
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,6 +65,7 @@ struct AgentChatView: View {
             Divider()
             inputBar
         }
+        .background(theme.bg.ignoresSafeArea())   // W31 自测：四页里只有这页是纯白——补上同款微暖页底（P1 同一概念同一长相）
         .navigationTitle("智能体")
         .task {
             FeatureUsage.seen(.agentPage)
@@ -190,7 +192,7 @@ struct AgentChatView: View {
                 }
                 Text(m.text)
                     .textSelection(.enabled)
-                    .padding(10).background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(10).background(theme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
                 userStatus(m)
             }
             .frame(maxWidth: Self.readableWidth, alignment: .trailing)   // W28：iPad 宽屏不拉成一整行

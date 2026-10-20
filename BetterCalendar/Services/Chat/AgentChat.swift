@@ -12,6 +12,7 @@
 
 import CloudKit
 import Foundation
+import os
 import Observation
 
 nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable {
@@ -312,10 +313,15 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         outbox.removeAll { $0.id == id }; outboxErrors[id] = nil; persistOutbox()
     }
 
+    /// W31 自测：iCloud 没登录 / 网络卡住时 CloudKit 写入可能永远不回——气泡一直「发送中…」（模拟器实测 9 分钟以上）。
+    /// 超过这么久就当「没发出去」显示原因 + 重试（同一 id，iCloud 侧幂等；万一迟到的写入其实成功了，下次刷新会把它从发件箱收走）。
+    var sendTimeout: TimeInterval = 30
+
     private func post(_ m: AgentChatMessage) async -> AgentChatMessage? {
         outboxErrors[m.id] = nil
         do {
-            try await transport.post(m)
+            let transport = self.transport
+            try await AgentChatSendDeadline.race(seconds: sendTimeout) { try await transport.post(m) }
             outbox.removeAll { $0.id == m.id }; persistOutbox()
             record(.user, "你", "chat.sent", m, "在 \(deviceLabel) 说：\(m.text.prefix(40))")
             await refresh()
@@ -471,5 +477,28 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     private func fail(_ what: String, _ error: Error) {
         lastError = "\(what)：\(error.localizedDescription)"
         DevLog.shared.error("智能体对话", lastError!)
+    }
+}
+
+/// W31：发送限时。不用 task group——group 要等子任务结束，而卡住的 CloudKit 写入可能根本不响应取消；这里谁先到用谁，晚到的那个被丢弃。
+nonisolated enum AgentChatSendDeadline {
+    struct Timeout: LocalizedError {
+        var seconds: TimeInterval
+        var errorDescription: String? { "\(Int(seconds)) 秒内 iCloud 没有回应（可能没登录 iCloud 或网络不通）" }
+    }
+
+    static func race(seconds: TimeInterval, _ op: @escaping @Sendable () async throws -> Void) async throws {
+        let gate = OSAllocatedUnfairLock(initialState: false)
+        let claim: @Sendable () -> Bool = { gate.withLock { done in if done { return false }; done = true; return true } }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let work = Task {
+                do { try await op(); if claim() { cont.resume() } }
+                catch { if claim() { cont.resume(throwing: error) } }
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if claim() { work.cancel(); cont.resume(throwing: Timeout(seconds: seconds)) }
+            }
+        }
     }
 }

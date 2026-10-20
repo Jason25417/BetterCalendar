@@ -29,6 +29,7 @@ struct MessageStrip<Actions: View>: View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.caption).foregroundStyle(tint)
             Text(text).font(.callout).foregroundStyle(textStyle)
+                .fixedSize(horizontal: false, vertical: true)   // W31 自测：旁边是贪婪的 ScrollView 时原因被压成「…」（P4 不让你猜）——整句一定显示全
             Spacer()
             actions()
         }

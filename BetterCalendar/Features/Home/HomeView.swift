@@ -80,6 +80,8 @@ struct HomeView: View {
 
     // 时间线尾行「＋ 加一项」：只写标题，在空档放一小时（不经 AI）
     @State private var addRowActive = false
+    /// W31 自测：「现在 / 下一件」卡的自然高度（时间轴页按它给卡定高，超过上限就卡内滚动）。
+    @State private var nowCardHeight: CGFloat = 0
     @State private var addRowText = ""
 
     let deps: HomeDeps
@@ -250,8 +252,15 @@ struct HomeView: View {
 
     /// 时间轴版今天页：现在 / 下一件（顶上常驻）→ 提示 → 一根连续的时间轴（填满剩下的高度）。
     private var axisPage: some View {
+        GeometryReader { page in
         VStack(alignment: .leading, spacing: 8) {
-            nowNextCard
+            // W31 自测：大字号 / 矮窗口下这张卡会把时间轴挤到零高（轴整个消失）——卡最多占页面一半，多出的在卡内滚动
+            ScrollView(.vertical) {
+                nowNextCard
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { nowCardHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: Self.nowCardFrameHeight(natural: nowCardHeight, page: page.size.height))
             notices
             if addRowActive { addTailRow }
             TimelineAxisView(axis: axis, onEdit: { item in
@@ -268,7 +277,15 @@ struct HomeView: View {
                 }
             }, dayMenu: { day in axisDayMenu(day) })
         }
+        }
         .padding(.horizontal).padding(.top, 10)
+    }
+
+    /// 「现在 / 下一件」卡在时间轴页的高度：自然高度，但不超过页面一半（还没量到时先给上限，免得首帧塌成 0）。纯函数、可单测。
+    nonisolated static func nowCardFrameHeight(natural: CGFloat, page: CGFloat) -> CGFloat {
+        let cap = max(120, page * 0.5)
+        guard natural > 0 else { return cap }
+        return min(natural, cap)
     }
 
     /// 时间轴的「这一天」菜单（U2 第二层）：作用于视口里正在看的那一天。

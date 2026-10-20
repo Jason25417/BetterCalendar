@@ -184,6 +184,9 @@ struct BetterCalendarApp: App {
             }
             #else
             .onAppear { handlePendingAppIntent(); consumePrimeNextStart() }
+            // W31 自测：iPhone 上多行输入框（日记正文、长期「说一句」）回车=换行，键盘原来收不起来、盖住底部 tab——
+            // 全 App 统一：往下拖内容就收键盘（系统惯例）
+            .scrollDismissesKeyboard(.interactively)
             #endif
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
