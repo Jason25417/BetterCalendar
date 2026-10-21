@@ -252,14 +252,15 @@ import Testing
 
         let said = try #require(await phone.send("N1 那个我想弄一下"))
         await bridge.sync(io: io)
-        let written = try events(root)
+        // 桥接按真实时钟（now: .now）判晚间复盘：晚上跑测试会多出一个 evening_review 事件——只看转交的这条
+        let written = try events(root).filter { !$0.lastPathComponent.contains("evening_review") }
         #expect(written.count == 1 && written[0].lastPathComponent.contains("user_message"))
         let event = try JSONSerialization.jsonObject(with: Data(contentsOf: written[0])) as! [String: Any]
         let payload = event["payload"] as! [String: Any]
         #expect(event["kind"] as? String == "user_message" && payload["messageId"] as? String == said.id.uuidString)
         #expect(payload["text"] as? String == "N1 那个我想弄一下" && payload["device"] as? String == "iphone")
         await bridge.sync(io: io)
-        #expect(try events(root).count == 1)                         // 只转交一次
+        #expect(try events(root).filter { !$0.lastPathComponent.contains("evening_review") }.count == 1)   // 只转交一次
         await phone.refresh()
         #expect(phone.status(of: said) == .withAgent(overdue: false))
 
