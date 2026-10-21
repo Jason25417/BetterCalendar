@@ -44,15 +44,22 @@ final class DataSyncMonitor {
                 case .export: phase = .export
                 default: phase = .setup
                 }
+                let wasWedged = self.transportEvidence.isWedged
                 self.transportEvidence.finished(phase, at: endedAt, succeeded: event.succeeded, error: event.error)
-                if let error = event.error { self.report("CloudKit \(event.type)：\(error.localizedDescription)") }
-                if event.succeeded {
+                if let error = event.error { self.report(Self.describe(type: event.type, error: error)) }
+                // 0.72.1：只有导入 / 导出真的成功才算「之前的失败消除了」。旧版连 setup 成功也算——
+                // 10-19 起 Mac 导出每次都被拒，每次重试先 setup 成功就把横幅清掉，失败整整一天不可见。
+                if event.succeeded, phase != .setup {
                     DevLog.shared.resolve(source: "数据同步")   // W16：同步成功 = 之前的短暂失败自动消除
+                    self.issue = nil                          // 下次再失败要重新报（旧版同文案去重 → 清掉后再也不报）
                     switch event.type {
                     case .import: self.lastImport = event.endDate; self.scheduleRefresh(.cloudImportSucceeded)
                     case .export: self.lastExport = event.endDate
                     default: break
                     }
+                }
+                if wasWedged, !self.transportEvidence.isWedged {
+                    NotificationCenter.default.post(name: Self.transportRecovered, object: nil)
                 }
             }
         })
@@ -66,6 +73,29 @@ final class DataSyncMonitor {
     /// Safe bounded metadata for the existing device.status source; no error
     /// descriptions, userInfo, record contents, account IDs or credentials.
     func diagnostics() -> BridgeJSON { transportEvidence.diagnostics() }
+
+    /// 0.72.1：同步通道卡死（导出被服务器拒收、之后没成功过）——见 DataSyncTransportEvidence.isWedged。
+    /// 对账 / 投影据此不把日历上的变化当成你的手改、不拿本机（可能落后的）真相去盖另一台设备的画面。
+    var isTransportWedged: Bool { transportEvidence.isWedged }
+    /// 卡死 → 恢复的那一刻（对账借此把卡死期间挂起的差异重新核一遍）。
+    static let transportRecovered = Notification.Name("BetterCalendar.dataSyncTransportRecovered")
+
+    /// 失败文案：CloudKit「部分失败」只说 "Failed to modify some records"，真正原因藏在逐条错误里
+    /// （例：服务器说 schema 缺字段）——把第一条非「整批连带失败」的原因带出来，失败才真的可见。
+    nonisolated static func describe(type: NSPersistentCloudKitContainer.EventType, error: Error) -> String {
+        "CloudKit \(type)：\(error.localizedDescription)" + (firstPartialReason(error).map { "（\($0)）" } ?? "")
+    }
+
+    nonisolated static func firstPartialReason(_ error: Error) -> String? {
+        var e = error as NSError
+        if e.domain != CKErrorDomain, let u = e.userInfo[NSUnderlyingErrorKey] as? NSError { e = u }
+        guard e.domain == CKErrorDomain, e.code == CKError.Code.partialFailure.rawValue,
+              let items = e.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Error] else { return nil }
+        let reasons = items.values.map { $0 as NSError }
+            .filter { !($0.domain == CKErrorDomain && $0.code == CKError.Code.batchRequestFailed.rawValue) }
+        guard let first = reasons.first else { return nil }
+        return (first.userInfo[NSLocalizedDescriptionKey] as? String) ?? first.localizedDescription
+    }
 
     func report(_ message: String) {
         guard issue != message else { return }

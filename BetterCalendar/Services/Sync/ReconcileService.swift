@@ -109,6 +109,7 @@ final class ReconcileService {
     private let now: () -> Date
     private let calendarAuthorized: () -> Bool
     private var listenTask: Task<Void, Never>?
+    private var recoveryTask: Task<Void, Never>?
     private var debounce: Task<Void, Never>?
     /// 大面积删除保护（设计稿 §4.6）：同一天一半以上同时不见 → 第一次只记下、等下一轮（≥2 分钟后）仍不见才照办。
     private var massHold: [Date: (ids: Set<UUID>, since: Date)] = [:]
@@ -159,6 +160,12 @@ final class ReconcileService {
     func start() {
         listenTask = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .EKEventStoreChanged) {
+                self?.scheduleReconcile()
+            }
+        }
+        // 0.72.1：同步卡死期间挂起的差异，恢复那一刻重新核对（不用等下一次日历变动）
+        recoveryTask = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: DataSyncMonitor.transportRecovered) {
                 self?.scheduleReconcile()
             }
         }
@@ -280,12 +287,24 @@ final class ReconcileService {
         for b in truth where shown[b.id] != nil && !graced.contains(b.id) {
             if let w = b.syncWriter, w != (planWriter as? PlanStore)?.writerID, projection.isFresh(b.syncVersion) { graced.insert(b.id) }
         }
-        let plan = Self.diff(truth: truth, shown: shown.mapValues { ($0.start, $0.end) },
+        var plan = Self.diff(truth: truth, shown: shown.mapValues { ($0.start, $0.end) },
                              hidden: Set(pres.hidden.keys), graced: graced,
                              events: events, fingerprint: fp,
                              elsewhere: elsewhere, ownedElsewhere: ownedElsewhere,
                              isNewerElsewhere: { [projection] e, b in projection.isNewerElsewhere(e, than: b) })
-        if !plan.conflicts.isEmpty {
+        var heldForTransport = 0
+        if !projection.transportTrusted(), !plan.updates.isEmpty || !plan.deletions.isEmpty {
+            // 0.72.1（10-20 B2/B3）：本机 iCloud 数据同步卡死时，本机真相可能落后另一台设备任意久——
+            // 日历上「和本机真相不一样」多半是另一台设备按它更新的真相画的，不是你在日历里手改 / 删的。
+            // 照旧采纳会把智能体的挪动误当手改钉图钉（B2），把另一台设备跨天挪走的块误当删除收进待办（B3）。
+            // → 这几块原样挂起（不采纳、不删、不重画、不钉），同步恢复后重新核对；失败可见。
+            let held = plan.updates.map(\.id) + plan.deletions.map(\.id)
+            plan.conflicts.append(contentsOf: held)
+            plan.updates = []; plan.deletions = []
+            heldForTransport = held.count
+            DataSyncMonitor.shared.report("iCloud 数据同步卡住了：日历上有 \(held.count) 处和本机计划不一致，先不当成你的改动（可能是另一台设备的新安排），同步恢复后再核对。")
+        }
+        if plan.conflicts.count > heldForTransport {
             // P4.0-4：只挂起判不清的那几块（画面原样保留、等核对），同一天别的改动照常处理
             DataSyncMonitor.shared.report("日历与数据库有 \(plan.conflicts.count) 项不同且缺少共同版本，这几项已保留两侧内容、等待核对；其他改动照常同步。")
         }

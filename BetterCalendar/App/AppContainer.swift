@@ -341,6 +341,8 @@ final class AppContainer {
         actionExecutor?.journal = journalStore   // W32b：审批写日记（开关「允许智能体提议写日记」默认关）
         self.photoStore = PhotoStore(context: SharedModelContainer.shared.mainContext)
         self.projection = CalendarSyncEngine(planStore: planStore, calendarStore: eventKitCalendar)
+        // 0.72.1：同步通道卡死时不拿本机（可能落后的）真相去盖 / 判日历（对账经 projection 读同一个开关）
+        projection.transportTrusted = { !DataSyncMonitor.shared.isTransportWedged }
         // 0.20 双向同步：按 ID 对账回流（旧的标题模糊匹配反向同步已在 0.19 删除，这是它的安全重生版）
         self.trash = RetainedTrashService(context: SharedModelContainer.shared.mainContext, projection: projection)
         self.reconcile = ReconcileService(planReader: planStore, planWriter: planStore,
