@@ -359,10 +359,13 @@ nonisolated struct AgentBridgeIO: Sendable {
             "planDay": ["day", "steps"],
             // W32 越级审批你的东西（必须带 escalation；永远要 Jason 亲自批）
             "yourEventEdit": ["eventId", "occurrenceStart", "span", "title", "start", "end", "notes", "expectedRevision"],
-            "yourEventDelete": ["eventId", "occurrenceStart", "expectedRevision"],
+            "yourEventDelete": ["eventId", "occurrenceStart", "span", "expectedRevision"],
             "yourReminderEdit": ["reminderId", "title", "due", "done", "expectedRevision"],
+            "yourReminderDelete": ["reminderId", "expectedRevision"],
             "itemDelete": ["itemId", "expectedRevision"],
             "checkpointDelete": ["itemId", "checkpointId", "expectedRevision"],
+            // W34 给长期事项加阶段（普通审批；新阶段 id = 提案 id）
+            "checkpointCreate": ["itemId", "title", "estimateMinutes", "position", "expectedRevision"],
             // W32b 日记（「允许智能体提议写日记」开着才收）
             "journalAppend": ["day", "text", "expectedRevision"],
             "journalEdit": ["entryId", "find", "replace", "expectedRevision"],
@@ -512,12 +515,12 @@ nonisolated struct AgentBridgeIO: Sendable {
         case "yourEventEdit", "yourEventDelete":
             let ref = YourEventRef(externalID: try required(string("eventId", max: 512), "eventId"),
                                    occurrenceStart: try required(date("occurrenceStart"), "occurrenceStart"))
-            if kind == "yourEventDelete" { return .yourEventDelete(ref: ref, expectedRevision: revision) }
             var span = YourEventSpan.thisOccurrence
             if let raw = try string("span", max: 20) {
-                guard let s = YourEventSpan(rawValue: raw) else { throw AgentBridgeError.invalid("yourEventEdit.span 必须是 thisOccurrence / futureEvents") }
+                guard let s = YourEventSpan(rawValue: raw) else { throw AgentBridgeError.invalid("\(kind).span 必须是 thisOccurrence / futureEvents") }
                 span = s
             }
+            if kind == "yourEventDelete" { return .yourEventDelete(ref: ref, expectedRevision: revision, span: span) }
             let edit = YourEventEdit(ref: ref, span: span, title: try string("title", max: 200), start: try date("start"), end: try date("end"),
                                      notes: try string("notes", max: 2000), expectedRevision: revision)
             guard !edit.isEmpty else { throw AgentBridgeError.invalid("yourEventEdit 至少要改 title / start / end / notes 之一") }
@@ -532,6 +535,19 @@ nonisolated struct AgentBridgeIO: Sendable {
                                         due: try date("due"), done: done, expectedRevision: revision)
             guard !edit.isEmpty else { throw AgentBridgeError.invalid("yourReminderEdit 至少要改 title / due / done 之一") }
             return .yourReminderEdit(edit)
+        case "yourReminderDelete":
+            return .yourReminderDelete(externalID: try required(string("reminderId", max: 512), "reminderId"), expectedRevision: revision)
+        case "checkpointCreate":
+            var position: Int? = nil
+            if let raw = a["position"], !(raw is NSNull) {
+                guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded(),
+                      n.intValue >= 0, n.intValue <= 10_000 else { throw AgentBridgeError.invalid("checkpointCreate.position 必须是 ≥0 的整数") }
+                position = n.intValue
+            }
+            return .checkpointCreate(itemId: try required(uuid("itemId"), "itemId"), checkpointId: proposalId,
+                                     title: try required(string("title", max: YourItemRules.titleLimit), "title"),
+                                     estimatedMinutes: try Self.minutes(a["estimateMinutes"], "checkpointCreate.estimateMinutes"),
+                                     position: position, expectedRevision: revision)
         case "itemDelete":
             return .itemDelete(id: try required(uuid("itemId"), "itemId"), expectedRevision: revision)
         case "checkpointDelete":

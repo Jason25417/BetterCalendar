@@ -231,7 +231,7 @@ enum AgentBridgeContext {
             return o
         }
         calendar["window"] = window(input.calendarWindow)
-        calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（必须带 escalation，永远要他亲自批）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改动要写 span（默认只这一次），不能删"
+        calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（必须带 escalation，永远要他亲自批）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改 / 删要写 span（默认只这一次；futureEvents = 这一次及以后）；删掉后那段时间不再算占用"
         context["calendar"] = calendar
 
         // W12：系统提醒事项（Jason 自己的列表，只读、从不修改；不含 BetterCalendar 自己那本）。
@@ -249,7 +249,7 @@ enum AgentBridgeContext {
             }
             return o
         }
-        reminders["note"] = "Jason 自己提醒列表里没完成的提醒：当作现实与上下文（有截止的在前）。只有他要求、或真有冲突时，才可提越级提案 yourReminderEdit（改名 / 挪已有的截止 / 标完成；必须带 escalation，永远要他亲自批）"
+        reminders["note"] = "Jason 自己提醒列表里没完成的提醒：当作现实与上下文（有截止的在前）。只有他要求、或真有冲突时，才可提越级提案 yourReminderEdit（改名 / 挪已有的截止 / 标完成；recurring=true 标完成 = 只完成这一次）/ yourReminderDelete（删一条；recurring=true = 删整个系列）；必须带 escalation，永远要他亲自批"
         context["reminders"] = reminders
         // W12：BetterCalendar 投进提醒事项的东西，Jason 在提醒事项里删掉 / 改过时间的——他的决定。
         var projected: [String: Any] = [

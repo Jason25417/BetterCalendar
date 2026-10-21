@@ -170,6 +170,7 @@ import UIKit
         let prepared = try await executor.prepare(draft.action, escalation: draft.escalation)
         draft.action = prepared.action
         if let changes = prepared.changes { draft.changes = changes }
+        draft.headline = prepared.headline   // W34：App 写的「做什么」（每次 prepare 依据此刻的真实数据重算）
         // W11：可调参数——绑定必须是这种动作有的字段，默认值 = 准备好的动作里写的那个。
         draft.parameters = try ProposalParameterRules.normalize(draft.parameters, for: draft.action)
         var required = prepared.requiredDeviceId
@@ -229,6 +230,7 @@ import UIKit
         proposal.agentKey = draft.agentKey   // W20：哪种实现提的（追溯用）
         proposal.askFirst = draft.askFirst ? true : nil   // W32d
         proposal.autoPassBlocker = draft.autoPassBlocker
+        proposal.headline = draft.headline
         // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
         // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
         let verdict = gate.verdict(for: proposal)

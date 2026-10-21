@@ -108,6 +108,7 @@ nonisolated enum PreauthPolicy {
         if p.escalation != nil { return "越级提案（动你亲手放的位置或你的东西）每次都要你亲自批准" }
         if actions.contains(where: { $0.ownership == .yours }) { return "动你的东西的改动每次都要你亲自批准" }
         if actions.contains(where: \.isDestructive) { return "删除类改动每次都要你亲自批准" }
+        if actions.contains(where: \.alwaysAsks) { return "加进你的长期事项里的改动，现在每次都先问你" }
         return nil
     }
 
@@ -141,6 +142,7 @@ nonisolated enum PreauthPolicy {
         let a = p.action
         if a.ownership == .yours { return "动的是你的东西" }
         if a.isDestructive { return "删除类" }
+        if a.alwaysAsks { return "加进你的长期事项里" }
         switch a {
         case let .blockCreate(_, blocks):
             guard blocks.count == 1 else { return "一次加 \(blocks.count) 块" }

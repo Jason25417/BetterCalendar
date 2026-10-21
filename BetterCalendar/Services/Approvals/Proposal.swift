@@ -202,12 +202,17 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     // 只有日记的「加一段」是例外（只新增智能体自己的、标了字体的文字，不碰你的字）：普通审批。
     /// 改你的一条日程（标题 / 时间 / 备注；重复日程写明范围，默认只这一次）。写入只经 EventKitYourItemsWriter。
     case yourEventEdit(YourEventEdit)
-    /// 删你的一条日程（只在你要求时；重复日程不删）。撤销 = 按快照原样重建。
-    case yourEventDelete(ref: YourEventRef, expectedRevision: String?)
+    /// 删你的一条日程（只在你要求时）。W34：重复日程按 span 删（nil = 只这一次）；撤销 = 按快照重建
+    ///（只这一次 → 一条独立日程；这一次及以后 → 按原规则重建剩下的系列）。
+    case yourEventDelete(ref: YourEventRef, expectedRevision: String?, span: YourEventSpan? = nil)
     /// 逆操作：按快照重建删掉的日程。只用于撤销，智能体不能提。
     case yourEventRecreate(YourEventSnapshot)
-    /// 改你的一条提醒（改名 / 挪截止 / 标完成）。撤销 = 原样改回。
+    /// 改你的一条提醒（改名 / 挪截止 / 标完成）。撤销 = 原样改回。W34：重复提醒标完成 = 完成这一次（不能一键撤销）。
     case yourReminderEdit(YourReminderEdit)
+    /// W34：删你的一条提醒（重复提醒 = 整个系列）。越级 + 删除类。撤销 = 按完整快照重建（新的一条）。
+    case yourReminderDelete(externalID: String, expectedRevision: String?)
+    /// 逆操作：按快照重建删掉的提醒。只用于撤销。
+    case yourReminderRecreate(YourReminderSnapshot)
     /// W32c：删一条待办 / 长期事项（进回收站，30 天内可恢复；长期事项连同它的阶段）。撤销 = 从回收站恢复。
     case itemDelete(id: UUID, expectedRevision: String?)
     /// 逆操作：把 itemDelete 删掉的那条从回收站恢复（deletionID 对得上才恢复）。只用于撤销。
@@ -215,6 +220,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// W32c：删长期事项里的一个阶段（检查点，进回收站）。expectedRevision = 所属事项的版本。撤销 = 恢复。
     case checkpointDelete(itemId: UUID, checkpointId: UUID, expectedRevision: String?)
     case checkpointRestore(itemId: UUID, checkpointId: UUID, deletionID: UUID)
+    /// W34：给长期事项加一个阶段（checkpointId 由提案 id 推出；position = 插在第几个之前，nil = 末尾）。
+    /// 普通审批（只新增、不改你写的字）；但加在你的事项里 → 预授权规则 / 低风险自动通过都不放行（一律先问）。撤销 = 这个阶段移入回收站。
+    case checkpointCreate(itemId: UUID, checkpointId: UUID, title: String, estimatedMinutes: Int?, position: Int?, expectedRevision: String?)
     /// W32b：在某天的日记末尾加一段智能体写的文字（没有那天的日记就新建；newEntryID 由提案 id 推出）。
     /// 智能体的文字用固定字体显示（JournalAuthorship 标记）。expectedRevision = 提案时那天日记的版本（nil = 当时还没有）。
     case journalAppend(day: Date, text: String, newEntryID: UUID, expectedRevision: String?)
@@ -245,6 +253,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .yourEventDelete: "你的日程：删除"
         case .yourEventRecreate: "你的日程：按原样重建"
         case .yourReminderEdit: "你的提醒：改"
+        case .yourReminderDelete: "你的提醒：删除"
+        case .yourReminderRecreate: "你的提醒：按原样重建"
+        case .checkpointCreate: "长期事项：加阶段"
         case .itemDelete: "事项：删除（进回收站）"
         case .itemRestore: "事项：从回收站恢复"
         case .checkpointDelete: "长期事项：删阶段（进回收站）"
@@ -278,6 +289,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .yourEventDelete: "yourEventDelete"
         case .yourEventRecreate: "yourEventRecreate"
         case .yourReminderEdit: "yourReminderEdit"
+        case .yourReminderDelete: "yourReminderDelete"
+        case .yourReminderRecreate: "yourReminderRecreate"
+        case .checkpointCreate: "checkpointCreate"
         case .itemDelete: "itemDelete"
         case .itemRestore: "itemRestore"
         case .checkpointDelete: "checkpointDelete"
@@ -321,16 +335,19 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 日记「加一段」只新增智能体自己的文字（固定字体标出，不碰你的字）→ 仍算 BetterCalendar 的。
     var ownership: ProposalOwnership {
         switch self {
-        case .yourEventEdit, .yourEventDelete, .yourEventRecreate, .yourReminderEdit,
+        case .yourEventEdit, .yourEventDelete, .yourEventRecreate, .yourReminderEdit, .yourReminderDelete, .yourReminderRecreate,
              .itemDelete, .itemRestore, .checkpointDelete, .checkpointRestore, .journalEdit, .journalRestore: .yours
         default: .betterCalendar
         }
     }
 
+    /// W34：加进你的东西里（不改你的字、不算越级），但预授权规则与低风险自动通过一律不放行（Jason 2026-10-21：先都问）。
+    var alwaysAsks: Bool { if case .checkpointCreate = self { true } else { false } }
+
     /// 只作撤销用的逆操作（智能体不能提；prepare 拒收）。
     var isUndoOnly: Bool {
         switch self {
-        case .itemDiscard, .reminderCancel, .alarmCancel, .yourEventRecreate, .itemRestore, .checkpointRestore, .journalRestore: true
+        case .itemDiscard, .reminderCancel, .alarmCancel, .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore: true
         case .moveBlocks(_, true), .planDay(_, _, true): true
         default: false
         }
@@ -339,7 +356,7 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天 / W32 删你的日程、事项、阶段）：预授权规则永远不能自动放行。
     var isDestructive: Bool {
         switch self {
-        case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete, .yourEventDelete, .itemDelete, .checkpointDelete: true
+        case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete, .yourEventDelete, .yourReminderDelete, .itemDelete, .checkpointDelete: true
         case let .planDay(_, steps, _): steps.contains { if case .delete = $0 { true } else { false } }
         default: false
         }
@@ -455,6 +472,12 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var askFirst: Bool? = nil
     /// 准备时 App 依据真实数据查到的「不能自动通过」原因（如动的是图钉）；nil = 没查到障碍。
     var autoPassBlocker: String? = nil
+    // —— W34（Optional：旧记录照常解码；只在 JSON 载荷里，不改 CloudKit schema）——
+    /// App 依据真实数据写的一句「做什么」（如「删除长期事项「C」（连同 1 个阶段）」）；nil = 用发起者写的 title。
+    var headline: String? = nil
+
+    /// 卡片 / 压缩条上的那一句：有备选方案时说不清是哪个 → 用发起者的 title。
+    var cardHeadline: String { hasAlternatives ? title : (headline ?? title) }
 
     /// 备选方案上限（卡片列得下、你看得过来；通知按钮另有系统限制）。
     static let maxAlternatives = 3
@@ -504,7 +527,10 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
         case let .planDay(_, steps, true)?: PlanEditRules.undoHint(steps)
         case let .timer(command, _, _, _, _)?: command == .resume ? "撤销 = 继续计时" : command == .pause ? "撤销 = 暂停计时" : nil
         case .yourEventEdit?: "撤销 = 把你的日程按改之前的样子原样改回（你之后在日历里又改过就不撤）"
-        case .yourEventRecreate?: "撤销 = 按删之前的样子原样重建这条日程"
+        case let .yourEventRecreate(s)?:
+            s.recurrence != nil ? "撤销 = 按原来的重复规则重建剩下的系列" : s.facts.isRecurring ? "撤销 = 重建成一条独立日程（不会回到重复系列里）" : "撤销 = 按删之前的样子原样重建这条日程"
+        case .yourReminderRecreate?: "撤销 = 按删之前的样子重建这条提醒（新的一条；子任务、标签、旗标、附件不会恢复）"
+        case .checkpointDelete?: "撤销 = 把这个阶段移入回收站（30 天内可恢复）"
         case .yourReminderEdit?: "撤销 = 把你的提醒原样改回（你之后又改过就不撤）"
         case .itemRestore?: "撤销 = 从回收站恢复（长期事项连同它的阶段）"
         case .checkpointRestore?: "撤销 = 从回收站恢复这个阶段"
@@ -528,6 +554,7 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     var notificationBody: String {
         var lines: [String] = []
         if let escalation { lines.append(Self.escalationHeadline + "：" + escalation) }
+        if let headline, !hasAlternatives, headline != title { lines.append(headline) }
         let undecided = state == .pending || state == .expired
         if hasAlternatives && chosenOption == nil {
             for o in options {
@@ -596,6 +623,8 @@ nonisolated struct ProposalDraft: Sendable {
     /// W32d：见 Proposal.askFirst / autoPassBlocker（后者由 ProposalCenter.prepare 填）。
     var askFirst = false
     var autoPassBlocker: String? = nil
+    /// W34：见 Proposal.headline（由 ProposalCenter.prepare 依据主方案填）。
+    var headline: String? = nil
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40

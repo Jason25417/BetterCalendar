@@ -46,14 +46,25 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         return try snapshot(ev)
     }
 
-    func delete(_ ref: YourEventRef) async throws {
+    func delete(_ ref: YourEventRef, span: YourEventSpan) async throws -> YourEventSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("删你的日程「\(ref.externalID.prefix(12))」")
         let ev = try find(ref)
         try guardOurs(ev)
-        do { try store.remove(ev, span: .thisEvent, commit: true) } catch {
+        var undo = try snapshot(ev)
+        let future = span == .futureEvents && ev.hasRecurrenceRules
+        if future {
+            // 撤销快照带原重复规则；按次数结束的换算成「原本最后一次」的日期（从这一次起重建的系列在原本会结束的那天结束）
+            undo.recurrence = (ev.recurrenceRules ?? []).map { rule in
+                var r = YourRecurrenceRule(rule)
+                if rule.recurrenceEnd?.occurrenceCount ?? 0 > 0 { r.occurrenceCount = nil; r.endDate = lastOccurrence(of: ev) }
+                return r
+            }
+        }
+        do { try store.remove(ev, span: future ? .futureEvents : .thisEvent, commit: true) } catch {
             store.reset()
             throw YourItemsError.failed("日程没删掉：\(error.localizedDescription)")
         }
+        return undo
     }
 
     func recreate(_ s: YourEventSnapshot) async throws -> YourEventSnapshot {
@@ -72,6 +83,7 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         ev.url = s.url.flatMap(URL.init(string:))
         ev.timeZone = s.timeZone.flatMap(TimeZone.init(identifier:))
         ev.alarms = s.alarmOffsets.map { EKAlarm(relativeOffset: $0) }
+        if let rules = s.recurrence, !rules.isEmpty { ev.recurrenceRules = rules.map(\.ekRule) }
         do { try store.save(ev, span: .thisEvent, commit: true) } catch {
             store.reset()
             throw YourItemsError.failed("日程没重建成：\(error.localizedDescription)")
@@ -112,7 +124,76 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         return snapshot(r)
     }
 
+    func deleteReminder(_ externalID: String) async throws -> YourReminderSnapshot {
+        try await EventKitWriteGuard.refuseIfTestHost("删你的提醒「\(externalID.prefix(12))」")
+        let r = try findReminder(externalID)
+        guard let list = r.calendar, !ourReminderLists.contains(list.title) else {
+            throw YourItemsError.refused("不删 BetterCalendar 自己提醒列表里的提醒")
+        }
+        let undo = fullSnapshot(r)
+        do { try store.remove(r, commit: true) } catch {
+            store.reset()
+            throw YourItemsError.failed("提醒没删掉：\(error.localizedDescription)")
+        }
+        return undo
+    }
+
+    func recreateReminder(_ s: YourReminderSnapshot) async throws -> YourReminderSnapshot {
+        try await EventKitWriteGuard.refuseIfTestHost("重建你的提醒「\(s.title)」")
+        try access(.reminder)
+        guard !ourReminderLists.contains(s.listTitle) else { throw YourItemsError.refused("不往 BetterCalendar 自家提醒列表里重建") }
+        let candidates = store.calendars(for: .reminder).filter { $0.title == s.listTitle && $0.allowsContentModifications }
+        guard let list = candidates.first(where: { $0.source.title == s.sourceTitle }) ?? (candidates.count == 1 ? candidates.first : nil) else {
+            throw YourItemsError.notFound("找不到原来的提醒列表「\(s.listTitle)」（可能被删了或改了名），没有重建")
+        }
+        let r = EKReminder(eventStore: store)
+        r.calendar = list
+        r.title = s.title
+        r.notes = s.notes
+        r.url = s.url.flatMap(URL.init(string:))
+        r.priority = s.priority ?? 0
+        let tz = s.dueTimeZone.flatMap(TimeZone.init(identifier:))
+        func comps(_ d: Date, time: Bool) -> DateComponents {
+            var c = Calendar.current.dateComponents(time ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day], from: d)
+            c.timeZone = tz
+            return c
+        }
+        if let due = s.due { r.dueDateComponents = comps(due, time: s.hasTime) }
+        if let start = s.startDate { r.startDateComponents = comps(start, time: s.startHasTime ?? s.hasTime) }
+        r.alarms = s.absoluteAlarms.map { EKAlarm(absoluteDate: $0) } + (s.relativeAlarms ?? []).map { EKAlarm(relativeOffset: $0) }
+        if let rules = s.recurrence, !rules.isEmpty { r.recurrenceRules = rules.map(\.ekRule) }
+        do { try store.save(r, commit: true) } catch {
+            store.reset()
+            throw YourItemsError.failed("提醒没重建成：\(error.localizedDescription)")
+        }
+        return snapshot(r)
+    }
+
     // MARK: 内部
+
+    /// 这个系列「原本最后一次」的开始（只用于按次数结束的系列；EventKit 查询窗口最长约 4 年，查不到就用这一次）。
+    private func lastOccurrence(of ev: EKEvent) -> Date {
+        let from: Date = ev.startDate
+        let hi = Calendar.current.date(byAdding: .year, value: 4, to: from) ?? from
+        let hits = store.events(matching: store.predicateForEvents(withStart: from, end: hi, calendars: ev.calendar.map { [$0] }))
+            .filter { $0.calendarItemExternalIdentifier == ev.calendarItemExternalIdentifier }
+        return hits.compactMap { $0.startDate as Date? }.max() ?? from
+    }
+
+    /// 删提醒前的完整快照（撤销按它重建）。
+    private func fullSnapshot(_ r: EKReminder) -> YourReminderSnapshot {
+        var s = snapshot(r)
+        s.startDate = r.startDateComponents.flatMap { Calendar.current.date(from: $0) }
+        s.startHasTime = r.startDateComponents.map { $0.hour != nil }
+        s.dueTimeZone = r.dueDateComponents?.timeZone?.identifier
+        s.priority = r.priority
+        s.url = r.url?.absoluteString
+        s.relativeAlarms = (r.alarms ?? []).compactMap { $0.absoluteDate == nil && $0.structuredLocation == nil ? $0.relativeOffset : nil }
+        s.recurrence = (r.recurrenceRules ?? []).map(YourRecurrenceRule.init)
+        s.sourceTitle = r.calendar?.source?.title
+        s.hasLocationAlarm = (r.alarms ?? []).contains { $0.structuredLocation != nil }
+        return s
+    }
 
     private func access(_ type: EKEntityType) throws {
         guard EKEventStore.authorizationStatus(for: type) == .fullAccess else {
@@ -188,5 +269,31 @@ extension YourReminderFacts {
     nonisolated init(_ r: EKReminder, inBetterCalendarList: Bool) {
         self.init(listWritable: r.calendar?.allowsContentModifications ?? false, inBetterCalendarList: inBetterCalendarList,
                   isRecurring: r.hasRecurrenceRules)
+    }
+}
+
+// W34：重复规则 ↔ 可编码快照。
+extension YourRecurrenceRule {
+    nonisolated init(_ r: EKRecurrenceRule) {
+        self.init(frequency: r.frequency.rawValue, interval: r.interval, firstDayOfTheWeek: r.firstDayOfTheWeek,
+                  daysOfTheWeek: r.daysOfTheWeek?.map { Day(dayOfWeek: $0.dayOfTheWeek.rawValue, weekNumber: $0.weekNumber) },
+                  daysOfTheMonth: r.daysOfTheMonth?.map(\.intValue), daysOfTheYear: r.daysOfTheYear?.map(\.intValue),
+                  weeksOfTheYear: r.weeksOfTheYear?.map(\.intValue), monthsOfTheYear: r.monthsOfTheYear?.map(\.intValue),
+                  setPositions: r.setPositions?.map(\.intValue),
+                  endDate: r.recurrenceEnd?.endDate,
+                  occurrenceCount: (r.recurrenceEnd?.occurrenceCount ?? 0) > 0 ? r.recurrenceEnd?.occurrenceCount : nil)
+    }
+
+    nonisolated var ekRule: EKRecurrenceRule {
+        let end: EKRecurrenceEnd? = endDate.map { EKRecurrenceEnd(end: $0) } ?? occurrenceCount.map { EKRecurrenceEnd(occurrenceCount: $0) }
+        let days = daysOfTheWeek?.compactMap { d in
+            EKWeekday(rawValue: d.dayOfWeek).map { d.weekNumber == 0 ? EKRecurrenceDayOfWeek($0) : EKRecurrenceDayOfWeek($0, weekNumber: d.weekNumber) }
+        }
+        let nums: ([Int]?) -> [NSNumber]? = { $0?.map { NSNumber(value: $0) } }
+        let rule = EKRecurrenceRule(recurrenceWith: EKRecurrenceFrequency(rawValue: frequency) ?? .daily, interval: max(1, interval),
+                                    daysOfTheWeek: days, daysOfTheMonth: nums(daysOfTheMonth), monthsOfTheYear: nums(monthsOfTheYear),
+                                    weeksOfTheYear: nums(weeksOfTheYear), daysOfTheYear: nums(daysOfTheYear),
+                                    setPositions: nums(setPositions), end: end)
+        return rule   // firstDayOfTheWeek 在 EventKit 里只读：重建用系统默认（只影响「每 N 周」跨周起算，快照留底备查）
     }
 }

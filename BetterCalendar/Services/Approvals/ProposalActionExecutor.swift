@@ -57,6 +57,8 @@ enum ProposalRevision {
     func checkpoint(itemId: UUID, id: UUID) throws -> LongTaskCheckpoint?
     func trashCheckpoint(itemId: UUID, id: UUID, at date: Date) throws -> UUID
     func restoreCheckpoint(itemId: UUID, id: UUID, deletionID: UUID, at date: Date) throws
+    /// W34：给长期事项加一个阶段（id 由提案定；position = 插在第几个之前，nil / 超出 = 末尾）。
+    func insertCheckpoint(itemId: UUID, id: UUID, title: String, estimatedMinutes: Int?, position: Int?, at date: Date) throws
 }
 
 /// W32b：日记写入（唯一写者 = JournalStore）。
@@ -458,19 +460,57 @@ enum ProposalTimerRules {
             var e = try YourItemRules.checkEdit(snap, edit)
             e.ref = snap.ref
             e.expectedRevision = try Self.baseline(edit.expectedRevision, current: snap.revision, what: "你的日程「\(snap.title)」")
-            return PreparedProposalAction(action: .yourEventEdit(e), changes: YourItemRules.eventChanges(snap, e))
+            return PreparedProposalAction(action: .yourEventEdit(e), changes: YourItemRules.eventChanges(snap, e),
+                                          headline: YourItemRules.eventEditHeadline(snap, e))
 
-        case let .yourEventDelete(ref, expected):
+        case let .yourEventDelete(ref, expected, span):
             let snap = try await yourEvent(ref)
             try YourItemRules.checkDelete(snap)
             let revision = try Self.baseline(expected, current: snap.revision, what: "你的日程「\(snap.title)」")
-            return PreparedProposalAction(action: .yourEventDelete(ref: snap.ref, expectedRevision: revision), changes: YourItemRules.deleteChanges(snap))
+            let s: YourEventSpan? = snap.facts.isRecurring ? (span ?? .thisOccurrence) : nil   // 不重复的日程没有「以后」
+            return PreparedProposalAction(action: .yourEventDelete(ref: snap.ref, expectedRevision: revision, span: s),
+                                          changes: YourItemRules.deleteChanges(snap, span: s ?? .thisOccurrence),
+                                          headline: YourItemRules.deleteHeadline(snap, span: s ?? .thisOccurrence))
 
         case let .yourReminderEdit(edit):
             let snap = try await yourReminder(edit.externalID)
             var e = try YourItemRules.checkEdit(snap, edit)
             e.expectedRevision = try Self.baseline(edit.expectedRevision, current: snap.revision, what: "你的提醒「\(snap.title)」")
-            return PreparedProposalAction(action: .yourReminderEdit(e), changes: YourItemRules.reminderChanges(snap, e))
+            return PreparedProposalAction(action: .yourReminderEdit(e), changes: YourItemRules.reminderChanges(snap, e),
+                                          headline: YourItemRules.reminderHeadline(snap, e))
+
+        case let .yourReminderDelete(externalID, expected):
+            let snap = try await yourReminder(externalID)
+            try YourItemRules.checkReminderDelete(snap)
+            let revision = try Self.baseline(expected, current: snap.revision, what: "你的提醒「\(snap.title)」")
+            return PreparedProposalAction(action: .yourReminderDelete(externalID: snap.externalID, expectedRevision: revision),
+                                          changes: YourItemRules.reminderDeleteChanges(snap), headline: YourItemRules.reminderDeleteHeadline(snap))
+
+        // —— W34 给长期事项加阶段（普通审批；只新增，不改你写的字）——
+        case let .checkpointCreate(itemId, checkpointId, title, minutes, position, expected):
+            let task = try liveTask(itemId)
+            guard task.poolZone == .longterm else { throw ProposalExecutionError.invalid("「\(task.title)」在待办区：阶段只能加在长期事项上") }
+            guard try itemStore().checkpoint(itemId: itemId, id: checkpointId) == nil else {
+                throw ProposalExecutionError.conflict("这个阶段已经加过了（同一份提案不重复加）")
+            }
+            let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, t.count <= YourItemRules.titleLimit else {
+                throw ProposalExecutionError.invalid("阶段标题不能为空，且不超过 \(YourItemRules.titleLimit) 字")
+            }
+            if let minutes, !(1...1440).contains(minutes) { throw ProposalExecutionError.invalid("阶段预估时长必须是 1–1440 分钟") }
+            if let position, position < 0 { throw ProposalExecutionError.invalid("position 不能是负数") }
+            let revision = try Self.baseline(expected, current: ProposalRevision.item(task), what: "「\(task.title)」")
+            let existing = task.sortedCheckpoints
+            let at = min(position ?? existing.count, existing.count)
+            let place = existing.isEmpty ? "第一个阶段"
+                : at >= existing.count ? "加在最后（「\(existing[existing.count - 1].title)」之后）"
+                : "插在「\(existing[at].title)」之前"
+            return PreparedProposalAction(
+                action: .checkpointCreate(itemId: itemId, checkpointId: checkpointId, title: t, estimatedMinutes: minutes,
+                                          position: at >= existing.count ? nil : at, expectedRevision: revision),
+                changes: [ProposalChange(field: "新阶段", before: nil, after: t + (minutes.map { "（约 \($0) 分钟）" } ?? "")),
+                          .consequence(place + " · 可一键撤销：这个阶段移入回收站")],
+                headline: "给长期事项「\(task.title)」加阶段「\(t)」")
 
         // —— W32c 删事项 / 阶段（越级，进回收站）——
         case let .itemDelete(id, expected):
@@ -480,9 +520,8 @@ enum ProposalTimerRules {
             let cps = task.sortedCheckpoints.count
             return PreparedProposalAction(action: .itemDelete(id: id, expectedRevision: revision), changes: [
                 .escalationSubject("删的是你的\(zone)：《\(task.title)》"),
-                ProposalChange(field: zone, before: task.title + (cps > 0 ? "（连同它的 \(cps) 个阶段）" : ""), after: nil),
-                ProposalChange(field: "进回收站，30 天内可恢复；批准后可一键撤销\(cps > 0 ? "（阶段一起回来）" : "")；已排进时间线的块不受影响", before: nil, after: nil),
-            ])
+                .consequence("进回收站，30 天内可恢复 · 可一键撤销\(cps > 0 ? "（阶段一起回来）" : "") · 已排进时间线的块不受影响"),
+            ], headline: "删除\(zone)「\(task.title)」" + (cps > 0 ? "（连同 \(cps) 个阶段）" : ""))
 
         case let .checkpointDelete(itemId, checkpointId, expected):
             let task = try liveTask(itemId)
@@ -492,9 +531,8 @@ enum ProposalTimerRules {
             let revision = try Self.baseline(expected, current: ProposalRevision.item(task), what: "「\(task.title)」")
             return PreparedProposalAction(action: .checkpointDelete(itemId: itemId, checkpointId: checkpointId, expectedRevision: revision), changes: [
                 .escalationSubject("删的是你长期事项《\(task.title)》里的阶段：《\(cp.title)》"),
-                ProposalChange(field: "「\(task.title)」的阶段", before: cp.title + (cp.doneAt != nil ? "（已推进到）" : ""), after: nil),
-                ProposalChange(field: "进回收站，30 天内可恢复；批准后可一键撤销", before: nil, after: nil),
-            ])
+                .consequence("进回收站，30 天内可恢复 · 可一键撤销"),
+            ], headline: "删除「\(task.title)」的阶段「\(cp.title)」" + (cp.doneAt != nil ? "（已推进到）" : ""))
 
         // —— W32b 日记 ——
         case let .journalAppend(day, text, newEntryID, expected):
@@ -534,7 +572,7 @@ enum ProposalTimerRules {
                 ProposalChange(field: "批准后可一键撤销：正文原样改回（你之后又写过就不撤）", before: nil, after: nil),
             ])
 
-        case .yourEventRecreate, .itemRestore, .checkpointRestore, .journalRestore:
+        case .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore:
             throw ProposalExecutionError.invalid("「\(action.kindLabel)」只用于撤销，不能单独提出")
         }
     }
@@ -750,19 +788,24 @@ enum ProposalTimerRules {
             DevLog.shared.info("多端审批", note)
             return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourEventEdit(back)))
 
-        case let .yourEventDelete(ref, expected):
+        case let .yourEventDelete(ref, expected, span):
             guard let expected else { throw ProposalExecutionError.invalid("缺少你的日程的基线版本，未执行") }
             let before = try await yourEvent(ref)
             guard before.revision == expected else { throw ProposalExecutionError.conflict("你的日程「\(before.title)」在提案之后被改过") }
             try YourItemRules.checkDelete(before)
-            try await yourItemsCall { try await $0.delete(before.ref) }
-            let note = "已删你的日程「\(before.title)」（\(YourItemRules.when(before.start, before.end, allDay: before.isAllDay))）"
+            let s = before.facts.isRecurring ? (span ?? .thisOccurrence) : .thisOccurrence
+            let undoSnapshot = try await yourItemsCall { try await $0.delete(before.ref, span: s) }
+            let at = YourItemRules.when(before.start, before.end, allDay: before.isAllDay)
+            let note = !before.facts.isRecurring ? "已删你的日程「\(before.title)」（\(at)）"
+                : s == .thisOccurrence ? "已删重复日程「\(before.title)」的这一次（\(at)）"
+                : "已删重复日程「\(before.title)」这一次及以后（从 \(at) 起）"
             DevLog.shared.info("多端审批", note)
-            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourEventRecreate(before)))
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourEventRecreate(undoSnapshot)))
 
         case let .yourEventRecreate(snapshot):
             let after = try await yourItemsCall { try await $0.recreate(snapshot) }
-            let note = "已按原样重建你的日程「\(after.title)」（\(YourItemRules.when(after.start, after.end, allDay: after.isAllDay))，日历「\(after.calendarTitle)」；苹果日历里是一条新建的同内容日程）"
+            let what = snapshot.recurrence != nil ? "按原来的重复规则重建了剩下的系列" : snapshot.facts.isRecurring ? "重建成一条独立日程（不在原重复系列里）" : "苹果日历里是一条新建的同内容日程"
+            let note = "已重建你的日程「\(after.title)」（\(YourItemRules.when(after.start, after.end, allDay: after.isAllDay))，日历「\(after.calendarTitle)」；\(what)）"
             DevLog.shared.info("多端审批", note)
             return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "已恢复；要删请另提"))
 
@@ -779,10 +822,30 @@ enum ProposalTimerRules {
             var parts: [String] = []
             if let t = edit.title { parts.append("标题「\(before.title)」→「\(t)」") }
             if edit.due != nil { parts.append("截止 \(YourItemRules.due(before.due, hasTime: before.hasTime)) → \(YourItemRules.due(after.due, hasTime: after.hasTime))") }
-            if let d = edit.done { parts.append(d ? "标完成" : "取消完成") }
+            if let d = edit.done { parts.append(d ? (before.facts.isRecurring ? "标完成这一次（下一次照常出现）" : "标完成") : "取消完成") }
             let note = "已改你的提醒「\(before.title)」：" + parts.joined(separator: "，")
             DevLog.shared.info("多端审批", note)
+            // W34：重复提醒标完成 = 提醒事项已排出下一次，原样撤销做不到 → 如实说明（不给假的撤销）
+            if YourItemRules.isRecurringCompletion(before, edit) {
+                return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: YourItemRules.recurringCompletionUndoReason))
+            }
             return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourReminderEdit(back)))
+
+        case let .yourReminderDelete(externalID, expected):
+            guard let expected else { throw ProposalExecutionError.invalid("缺少你的提醒的基线版本，未执行") }
+            let before = try await yourReminder(externalID)
+            guard before.revision == expected else { throw ProposalExecutionError.conflict("你的提醒「\(before.title)」在提案之后被改过") }
+            try YourItemRules.checkReminderDelete(before)
+            let snapshot = try await yourItemsCall { try await $0.deleteReminder(externalID) }
+            let note = "已删你的提醒「\(before.title)」" + (before.facts.isRecurring ? "（重复提醒，整个系列）" : "")
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(action: .yourReminderRecreate(snapshot)))
+
+        case let .yourReminderRecreate(snapshot):
+            let after = try await yourItemsCall { try await $0.recreateReminder(snapshot) }
+            let note = "已重建你的提醒「\(after.title)」（列表「\(after.listTitle)」；提醒事项里是新的一条）"
+            DevLog.shared.info("多端审批", note)
+            return ProposalExecutionOutcome(note: note, undo: ProposalUndoInfo(unavailableReason: "已恢复；要删请另提"))
 
         // —— W32c 删事项 / 阶段 ——
         case let .itemDelete(id, expected):
@@ -806,6 +869,19 @@ enum ProposalTimerRules {
             let deletion = try itemStoreCall { try $0.trashCheckpoint(itemId: itemId, id: checkpointId, at: self.now()) }
             return ProposalExecutionOutcome(note: "已把「\(taskTitle)」的阶段「\(name)」移入回收站（30 天内可恢复）",
                                             undo: ProposalUndoInfo(action: .checkpointRestore(itemId: itemId, checkpointId: checkpointId, deletionID: deletion)))
+
+        case let .checkpointCreate(itemId, checkpointId, title, minutes, position, expected):
+            let task = try checkedTask(itemId, expected)
+            guard task.poolZone == .longterm else { throw ProposalExecutionError.invalid("「\(task.title)」已不在长期区，没加阶段") }
+            guard try itemStore().checkpoint(itemId: itemId, id: checkpointId) == nil else {
+                throw ProposalExecutionError.conflict("这个阶段已经加过了")
+            }
+            let taskTitle = task.title
+            try itemStoreCall { try $0.insertCheckpoint(itemId: itemId, id: checkpointId, title: title, estimatedMinutes: minutes, position: position, at: self.now()) }
+            let after = try liveTask(itemId)
+            return ProposalExecutionOutcome(note: "已给「\(taskTitle)」加阶段「\(title)」",
+                                            undo: ProposalUndoInfo(action: .checkpointDelete(itemId: itemId, checkpointId: checkpointId,
+                                                                                            expectedRevision: ProposalRevision.item(after))))
 
         case let .checkpointRestore(itemId, checkpointId, deletion):
             try itemStoreCall { try $0.restoreCheckpoint(itemId: itemId, id: checkpointId, deletionID: deletion, at: self.now()) }

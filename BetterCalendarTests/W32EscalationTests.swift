@@ -47,13 +47,36 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
             return e
         }
     }
-    func delete(_ ref: YourEventRef) async throws { try lock.withLock { _events.remove(at: try index(ref)); writes += 1 } }
+    /// W34：删一次 / 这一次及以后（假写者只删这一条；futureEvents 的撤销快照带一条「每周」规则，同真写者的契约）。
+    private(set) var lastDeleteSpan: YourEventSpan?
+    func delete(_ ref: YourEventRef, span: YourEventSpan) async throws -> YourEventSnapshot {
+        try lock.withLock {
+            var undo = _events.remove(at: try index(ref)); writes += 1; lastDeleteSpan = span
+            if span == .futureEvents && undo.facts.isRecurring { undo.recurrence = [YourRecurrenceRule(frequency: 1)] }
+            return undo
+        }
+    }
     func recreate(_ s: YourEventSnapshot) async throws -> YourEventSnapshot {
         lock.withLock {
             var e = s
             e.ref.externalID = "re-" + s.ref.externalID   // 重建 = 新条目（新标识），内容一致
             _events.append(e); writes += 1
             return e
+        }
+    }
+    func deleteReminder(_ id: String) async throws -> YourReminderSnapshot {
+        try lock.withLock {
+            guard let r = _reminders.removeValue(forKey: id) else { throw YourItemsError.notFound("提醒事项里找不到这条提醒") }
+            writes += 1
+            return r
+        }
+    }
+    func recreateReminder(_ s: YourReminderSnapshot) async throws -> YourReminderSnapshot {
+        lock.withLock {
+            var r = s
+            r.externalID = "re-" + s.externalID   // 重建 = 新的一条
+            _reminders[r.externalID] = r; writes += 1
+            return r
         }
     }
     func reminder(_ id: String) async throws -> YourReminderSnapshot {
@@ -145,7 +168,7 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         let p = try await approve(r, draft(.yourEventEdit(edit)))
         #expect(p.changes.first?.isEscalationSubject == true)
         #expect(p.changes.first?.field.contains("改的是你自己设的日程：《组会》（日历「工作」）") == true)
-        #expect(p.changes.contains(ProposalChange(field: "日程标题", before: "组会", after: "组会（改期）")))
+        #expect(p.changes.contains(ProposalChange(field: "标题", before: "组会", after: "组会（改期）")))
         #expect(p.changes.contains { $0.field.contains("时间") && $0.before?.contains("14:00") == true && $0.after?.contains("16:00–17:00") == true })
         #expect(p.state == .applied)
         let changed = try #require(r.your.events.first)
@@ -219,15 +242,11 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
                 }
             }
         }
-        // 全天日程不改时间；重复日程不删
+        // 全天日程不改时间（W34 起重复日程可删，见 W34CapabilityTests）
         var allDay = meeting(r.clock, id: "ev-allday"); allDay.isAllDay = true
         r.your.seed(allDay)
         do { _ = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: allDay.ref, start: at(9, 0, r.clock))))); Issue.record("全天应拒收") }
         catch { #expect(error.localizedDescription.contains("全天")) }
-        let recurring = meeting(r.clock, id: "ev-rec", facts: YourEventFacts(isRecurring: true))
-        r.your.seed(recurring)
-        do { _ = try await r.center.prepare(draft(.yourEventDelete(ref: recurring.ref, expectedRevision: nil))); Issue.record("重复日程删除应拒收") }
-        catch { #expect(error.localizedDescription.contains("重复日程")) }
         #expect(r.your.writes == 0)
     }
 
@@ -236,10 +255,12 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         let rec = meeting(r.clock, id: "ev-rec", facts: YourEventFacts(isRecurring: true))
         let single = meeting(r.clock, id: "ev-single")
         r.your.seed(rec); r.your.seed(single)
-        let a = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: rec.ref, title: "组会 B")))).changes
-        #expect(a.contains { $0.field == "重复日程：只改这一次" })
-        let b = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: rec.ref, span: .futureEvents, title: "组会 B")))).changes
-        #expect(b.contains { $0.field == "重复日程：这一次及以后的都改" })
+        // W34：范围只在「做什么」那一句里说一次
+        let a = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: rec.ref, title: "组会 B"))))
+        #expect(a.headline == "改你的日程「组会」（重复日程，只改这一次）")
+        let b = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: rec.ref, span: .futureEvents, title: "组会 B"))))
+        #expect(b.headline == "改你的日程「组会」（重复日程，这一次及以后的都改）")
+        #expect(b.changes.contains { $0.isConsequence && $0.field.contains("分成两段") })
         let c = try await r.center.prepare(draft(.yourEventEdit(YourEventEdit(ref: single.ref, span: .futureEvents, title: "组会 B"))))
         guard case let .yourEventEdit(e) = c.action else { Issue.record("种类变了"); return }
         #expect(e.span == .thisOccurrence)   // 不重复的日程没有「以后」
@@ -283,7 +304,6 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
                                          listTitle: "BetterCalendar · 要紧事 (Dev)", facts: YourReminderFacts(inBetterCalendarList: true)))
         r.your.seed(YourReminderSnapshot(externalID: "nodue", title: "想法", due: nil, hasTime: false, isCompleted: false, listTitle: "提醒"))
         let cases: [(YourReminderEdit, String)] = [
-            (YourReminderEdit(externalID: "rec", done: true), "重复提醒"),
             (YourReminderEdit(externalID: "bc", title: "x"), "BetterCalendar 自己的提醒列表"),
             (YourReminderEdit(externalID: "nodue", due: at(12, 0, r.clock)), "没有截止时间"),
         ]
@@ -304,7 +324,7 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         let id = task.id
         let p = try await approve(r, draft(.itemDelete(id: id, expectedRevision: nil), escalation: "Jason 说这门不学了，让我删掉"))
         #expect(p.changes.first?.field.contains("删的是你的长期事项：《测度论》") == true)
-        #expect(p.changes.contains { $0.before?.contains("连同它的 2 个阶段") == true })
+        #expect(p.headline == "删除长期事项「测度论」（连同 2 个阶段）")
         #expect(p.state == .applied)
         #expect(try r.items.task(id: id)?.isInTrash == true && r.items.active().isEmpty)
         #expect(await r.center.undo(p.id))

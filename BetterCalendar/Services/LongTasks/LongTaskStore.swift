@@ -141,6 +141,24 @@ final class LongTaskStore {
         reload()
     }
 
+    /// W34：审批加阶段（id 由提案定，重复执行不重复加）。position = 插在第几个（从 0 起）之前，nil / 超出 = 末尾；
+    /// 插在中间时后面的阶段 order 顺延（一次保存）。
+    func insertCheckpoint(itemId: UUID, id: UUID, title: String, estimatedMinutes: Int?, position: Int?, at date: Date) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard let task = try task(id: itemId), !task.isInTrash else { throw DataArchiveError.invalid("事项不存在或已在回收站") }
+        guard try checkpoint(itemId: itemId, id: id) == nil else { throw DataArchiveError.invalid("这个阶段已经存在") }
+        let existing = task.sortedCheckpoints
+        let at = min(max(position ?? existing.count, 0), existing.count)
+        for (i, cp) in existing.enumerated() { cp.order = i < at ? i : i + 1 }
+        let cp = LongTaskCheckpoint(id: id, title: title, estimatedMinutes: estimatedMinutes, order: at, createdAt: date)
+        cp.task = task
+        context.insert(cp)
+        task.modifiedAt = date
+        do { try context.save() } catch { context.rollback(); throw error }
+        reload()
+        DevLog.shared.info("长期区", "审批加阶段：\(task.title) ←「\(title)」")
+    }
+
     /// 长期区在途任务：有 DDL 的按 DDL 升序在前，无 DDL 的按创建时间。
     func active() -> [LongTask] { items }
 

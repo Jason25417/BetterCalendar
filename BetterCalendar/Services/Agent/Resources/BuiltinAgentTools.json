@@ -16,7 +16,7 @@
   "type": "function",
   "function": {
    "name": "propose_change",
-   "description": "向 Jason 提交一项改动提案（iPhone 与 Mac 同时推审批通知）。提交≠执行：要他批准、设备回报「已完成」才算完成。种类与规则见系统提示「提出改动」。被拒收时返回原因（rejected），看原因调整后再提，或如实告诉他放不下、为什么。 低风险改动（单块加 / 挪 / 改时长或名字、建提醒）可能被 App 规则自动通过并立即执行（结果 preauth.ruleId = 低风险规则），对话里留回执可撤销。",
+   "description": "向 Jason 提交一项改动提案（iPhone 与 Mac 同时推审批通知）。提交≠执行：要他批准、设备回报「已完成」才算完成。种类与规则见系统提示「提出改动」。被拒收时返回原因（rejected），看原因调整后再提，或如实告诉他放不下、为什么。 低风险改动（单块加 / 挪 / 改时长或名字、建提醒）可能被 App 规则自动通过并立即执行（结果 preauth.ruleId = 低风险规则），对话里留回执可撤销。 一件事一份提案：同一次行动里同一类的待批提案 App 会自动合成一张批量卡，Jason 可以逐项批准或拒绝，每份各自有结果。",
    "parameters": {
     "type": "object",
     "properties": {
@@ -50,8 +50,10 @@
          "yourEventEdit",
          "yourEventDelete",
          "yourReminderEdit",
+         "yourReminderDelete",
          "itemDelete",
          "checkpointDelete",
+         "checkpointCreate",
          "journalAppend",
          "journalEdit",
          "experimentNoop"
@@ -59,11 +61,11 @@
        },
        "itemId": {
         "type": "string",
-        "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete：事项 id（actionTargets.items[].id）"
+        "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete / checkpointCreate：事项 id（actionTargets.items[].id；checkpointCreate 要 zone=longterm 的长期事项）"
        },
        "title": {
         "type": "string",
-        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题"
+        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）"
        },
        "body": {
         "type": "string",
@@ -296,7 +298,7 @@
          "thisOccurrence",
          "futureEvents"
         ],
-        "description": "yourEventEdit：重复日程改哪些（默认 thisOccurrence 只这一次）"
+        "description": "yourEventEdit / yourEventDelete：重复日程改 / 删哪些（默认 thisOccurrence 只这一次；futureEvents = 这一次及以后）"
        },
        "notes": {
         "type": "string",
@@ -304,7 +306,7 @@
        },
        "reminderId": {
         "type": "string",
-        "description": "yourReminderEdit：他的提醒 id（context.reminders.items[].reminderId）"
+        "description": "yourReminderEdit / yourReminderDelete：他的提醒 id（context.reminders.items[].reminderId，≤512）"
        },
        "due": {
         "type": "string",
@@ -313,6 +315,14 @@
        "checkpointId": {
         "type": "string",
         "description": "checkpointDelete：阶段 id（actionTargets.items[].checkpoints[].id）"
+       },
+       "estimateMinutes": {
+        "type": "integer",
+        "description": "checkpointCreate：新阶段的预估时长（分钟，1–1440，可选）"
+       },
+       "position": {
+        "type": "integer",
+        "description": "checkpointCreate：插在 actionTargets.items[].checkpoints 里此刻第 position 个（从 0 起）阶段之前；省略或 ≥ 阶段数 = 加在最后"
        },
        "text": {
         "type": "string",
@@ -369,7 +379,7 @@
      },
      "escalation": {
       "type": "string",
-      "description": "越级理由（1–300 字）：动 Jason 的东西（他的日程 / 提醒 / 事项删除 / 日记原文）或图钉、固定安排时必填——他要求过什么，或哪里真冲突非改不可；绝不为了整理"
+      "description": "越级理由（1–300 字）：动 Jason 的东西（yourEventEdit / yourEventDelete / yourReminderEdit / yourReminderDelete / itemDelete / checkpointDelete / journalEdit）或图钉、固定安排时必填——他要求过什么，或哪里真冲突非改不可；绝不为了整理"
      },
      "primaryLabel": {
       "type": "string",
@@ -406,8 +416,10 @@
             "yourEventEdit",
             "yourEventDelete",
             "yourReminderEdit",
+            "yourReminderDelete",
             "itemDelete",
             "checkpointDelete",
+            "checkpointCreate",
             "journalAppend",
             "journalEdit",
             "experimentNoop"
@@ -415,11 +427,11 @@
           },
           "itemId": {
            "type": "string",
-           "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete：事项 id（actionTargets.items[].id）"
+           "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete / checkpointCreate：事项 id（actionTargets.items[].id；checkpointCreate 要 zone=longterm 的长期事项）"
           },
           "title": {
            "type": "string",
-           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题"
+           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）"
           },
           "body": {
            "type": "string",
@@ -652,7 +664,7 @@
             "thisOccurrence",
             "futureEvents"
            ],
-           "description": "yourEventEdit：重复日程改哪些（默认 thisOccurrence 只这一次）"
+           "description": "yourEventEdit / yourEventDelete：重复日程改 / 删哪些（默认 thisOccurrence 只这一次；futureEvents = 这一次及以后）"
           },
           "notes": {
            "type": "string",
@@ -660,7 +672,7 @@
           },
           "reminderId": {
            "type": "string",
-           "description": "yourReminderEdit：他的提醒 id（context.reminders.items[].reminderId）"
+           "description": "yourReminderEdit / yourReminderDelete：他的提醒 id（context.reminders.items[].reminderId，≤512）"
           },
           "due": {
            "type": "string",
@@ -669,6 +681,14 @@
           "checkpointId": {
            "type": "string",
            "description": "checkpointDelete：阶段 id（actionTargets.items[].checkpoints[].id）"
+          },
+          "estimateMinutes": {
+           "type": "integer",
+           "description": "checkpointCreate：新阶段的预估时长（分钟，1–1440，可选）"
+          },
+          "position": {
+           "type": "integer",
+           "description": "checkpointCreate：插在 actionTargets.items[].checkpoints 里此刻第 position 个（从 0 起）阶段之前；省略或 ≥ 阶段数 = 加在最后"
           },
           "text": {
            "type": "string",

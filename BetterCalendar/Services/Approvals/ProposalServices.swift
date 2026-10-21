@@ -143,6 +143,8 @@ nonisolated struct PreparedProposalAction: Equatable, Sendable {
     var changes: [ProposalChange]?
     /// 必须在哪台设备执行（计时 = 准备时读状态的那台）；nil = 不限。
     var requiredDeviceId: String? = nil
+    /// W34：一句「做什么」（App 依据真实数据写；nil = 卡片用发起者写的标题）。
+    var headline: String? = nil
 }
 
 /// 一次执行（或撤销）的结果。
