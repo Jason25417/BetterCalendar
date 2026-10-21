@@ -164,8 +164,12 @@ import Testing
         let states = members.map { id in r.center.proposals.first { $0.id == id }?.state }
         #expect(states == [.applied, .applied, .declined])
         #expect(r.items.todoItems().map(\.title).sorted() == ["leaq", "复印"])
-        #expect(await r.center.undoBatch(members) == 2)
-        #expect(r.items.todoItems().map(\.title).sorted() == ["IEEE 754", "X86-64", "leaq", "复印"])
+        // 其中一项你已经自己从回收站恢复了 → 那项撤不了，整批只撤一部分要写明（P4 不暗减）
+        let second = try #require(r.center.proposals.first { $0.id == members[1] })
+        guard case let .itemRestore(itemId, deletion)? = second.undoAction else { Issue.record("撤销动作不对"); return }
+        try r.items.restore(id: itemId, deletionID: deletion, at: r.clock.now)
+        #expect(await r.center.undoBatch(members) == 1)
+        #expect(r.center.lastError?.contains("只撤销了 1 项") == true)
     }
 
     @Test func alternativesParametersAndTimelinePlansNeverBatch() {

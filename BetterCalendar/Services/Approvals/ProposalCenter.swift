@@ -365,10 +365,16 @@ import UIKit
     /// W34：整批撤销 = 这一批里已完成、能撤销的逐份撤销（各自校验版本；撤不了的原因照常可见）。返回撤销成功的份数。
     @discardableResult
     func undoBatch(_ ids: [UUID]) async -> Int {
-        var done = 0
+        var done = 0, tried = 0
         for id in ids {
             guard let p = proposals.first(where: { $0.id == id }), canUndo(p) else { continue }
+            tried += 1
             if await undo(id) { done += 1 }
+        }
+        // P4 不暗减：整批只撤了一部分 → 横幅写明几项没撤（各项原因在留底 / 日志里）
+        if done < tried {
+            lastError = "这一批 \(tried) 项只撤销了 \(done) 项，另外 \(tried - done) 项没撤成（原因见各自的卡片与日志）"
+            DevLog.shared.warn("多端审批", lastError!)
         }
         return done
     }
