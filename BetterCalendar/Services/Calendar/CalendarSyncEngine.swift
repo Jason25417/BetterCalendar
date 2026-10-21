@@ -45,6 +45,12 @@ final class CalendarSyncEngine {
     /// 作者宽限 / 等待另一台设备的窗口（P4 Q8）：超过它还对不上，真相赢（防时钟偏差把两端都卡在「等待」）。
     static let authorGrace: TimeInterval = 10 * 60
 
+    /// 0.72.1：本机的 iCloud 数据同步此刻可信吗（组装点接 `!DataSyncMonitor.shared.isTransportWedged`；测试注入）。
+    /// 不可信 = 导出被服务器拒收、镜像停摆：本机真相可能落后另一台设备任意久（10-20 Mac 落后了 4 小时）。
+    /// 这时「章比本机真相新」不再受 10 分钟宽限限制——宽限是给「数据还在路上」的，不是给「路断了」的；
+    /// 否则过了宽限本机就拿旧真相把另一台设备的新画面盖回去（10-20 19:52 Mac 一次盖回 5 处），两端来回打架。
+    var transportTrusted: () -> Bool = { true }
+
     init(planStore: PlanReading, calendarStore: CalendarStore, actuals: ActualReading? = nil,
          localWriter: String? = nil, fingerprintDefaults: UserDefaults = .standard,
          now: @escaping () -> Date = { .now }) {
@@ -86,7 +92,7 @@ final class CalendarSyncEngine {
     /// 日历里这份是另一台设备写的、比本机真相新、还在宽限内 → 等本机真相到了再说（不拿旧真相去盖）。
     func isNewerElsewhere(_ e: CalendarEventDraft, than block: ScheduledBlock) -> Bool {
         guard let v = e.stampVersion else { return false }
-        return v > block.syncVersion && isFresh(v)
+        return v > block.syncVersion && (isFresh(v) || !transportTrusted())
     }
 
     // MARK: - 投影
