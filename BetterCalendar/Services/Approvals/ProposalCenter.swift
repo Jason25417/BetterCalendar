@@ -349,6 +349,30 @@ import UIKit
         }
     }
 
+    /// W34 批量卡：勾上的同意、没勾的拒绝。整批先一起离开「待你确认」（乐观），再逐份走同一套 decide（各自首个有效回应、各自留底）；
+    /// 某份失败 = 只有那份回到卡片上，原因可见。返回成功提交的份数。
+    @discardableResult
+    func decideBatch(approve: [UUID], decline: [UUID]) async -> Int {
+        let all = approve + decline
+        deciding.formUnion(all)
+        defer { deciding.subtract(all) }
+        var done = 0
+        for id in approve { if await decide(id, .approve) != nil { done += 1 }; deciding.remove(id) }
+        for id in decline { if await decide(id, .decline) != nil { done += 1 }; deciding.remove(id) }
+        return done
+    }
+
+    /// W34：整批撤销 = 这一批里已完成、能撤销的逐份撤销（各自校验版本；撤不了的原因照常可见）。返回撤销成功的份数。
+    @discardableResult
+    func undoBatch(_ ids: [UUID]) async -> Int {
+        var done = 0
+        for id in ids {
+            guard let p = proposals.first(where: { $0.id == id }), canUndo(p) else { continue }
+            if await undo(id) { done += 1 }
+        }
+        return done
+    }
+
     // MARK: 可调参数（W11）
 
     /// 你在卡片上调的值 → 套回选中方案的动作 → 重新走同一套校验；返回将要执行的动作与依据真实数据重算的「改动前 → 改动后」。

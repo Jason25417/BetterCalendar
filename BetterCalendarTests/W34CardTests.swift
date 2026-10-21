@@ -130,4 +130,51 @@ import Testing
         #expect(center.pending.map(\.id) == [second.id])
         #expect(center.lastError?.contains("提交决定失败") == true)
     }
+
+    // MARK: 批量卡 / 整批撤销
+
+    @Test func sameActionSameFamilyBatchesWithinTwoMinutes() async throws {
+        let w = W32EscalationTests()
+        let r = try w.rig()
+        var ids: [UUID] = []
+        for (i, title) in ["IEEE 754", "X86-64", "leaq"].enumerated() {
+            let id = UUID(); ids.append(id)
+            try r.items.createTodo(id: id, title: title, note: "", at: r.clock.now)
+            r.clock.now = r.clock.now.addingTimeInterval(i == 0 ? 0 : 30)
+            _ = try #require(await r.center.submit(w.draft(.itemDelete(id: id, expectedRevision: nil), escalation: "Jason 说这几条都做完了")))
+        }
+        r.clock.now = r.clock.now.addingTimeInterval(10)
+        let created = try #require(await r.center.submit(w.draft(.itemCreate(id: UUID(), title: "买菜", note: nil), escalation: nil)))
+        r.clock.now = r.clock.now.addingTimeInterval(400)   // 隔太久 = 另一次行动
+        let late = UUID()
+        try r.items.createTodo(id: late, title: "复印", note: "", at: r.clock.now)
+        _ = try #require(await r.center.submit(w.draft(.itemDelete(id: late, expectedRevision: nil), escalation: "另一件事")))
+
+        let groups = ProposalBatching.groups(r.center.pending)
+        let batch = try #require(groups.first { $0.isBatch })
+        #expect(groups.count == 3)
+        #expect(batch.title == "删除 3 项" && batch.family == .delete)
+        #expect(groups.contains { $0.proposals.map(\.id) == [created.id] })
+        #expect(groups.filter(\.isBatch).count == 1)
+
+        // 勾两项、去掉一项：勾上的同意、没勾的拒绝；批准的一批整批撤销
+        let members = batch.proposals.map(\.id)
+        #expect(await r.center.decideBatch(approve: Array(members.prefix(2)), decline: [members[2]]) == 3)
+        await r.center.refresh()
+        let states = members.map { id in r.center.proposals.first { $0.id == id }?.state }
+        #expect(states == [.applied, .applied, .declined])
+        #expect(r.items.todoItems().map(\.title).sorted() == ["leaq", "复印"])
+        #expect(await r.center.undoBatch(members) == 2)
+        #expect(r.items.todoItems().map(\.title).sorted() == ["IEEE 754", "X86-64", "leaq", "复印"])
+    }
+
+    @Test func alternativesParametersAndTimelinePlansNeverBatch() {
+        #expect(ProposalFamily.of(.planDay(day: Date(timeIntervalSince1970: 0), steps: [], isUndo: false)) == nil)
+        #expect(ProposalFamily.of(.experimentNoop(note: "x")) == nil)
+        #expect(ProposalFamily.of(.itemRestore(id: UUID(), deletionID: UUID())) == nil)   // 撤销用的逆操作
+        #expect(ProposalFamily.of(.yourReminderEdit(YourReminderEdit(externalID: "r", done: true))) == .complete)
+        #expect(ProposalFamily.of(.yourReminderEdit(YourReminderEdit(externalID: "r", title: "x"))) == .edit)
+        #expect(ProposalFamily.of(.yourReminderDelete(externalID: "r", expectedRevision: nil)) == .delete)
+        #expect(ProposalFamily.of(.checkpointCreate(itemId: UUID(), checkpointId: UUID(), title: "x", estimatedMinutes: nil, position: nil, expectedRevision: nil)) == .create)
+    }
 }

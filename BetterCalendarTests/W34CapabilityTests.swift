@@ -134,8 +134,8 @@ import Testing
                                                      position: 1, expectedRevision: nil)
         // 普通审批：不必写越级理由
         let prepared = try await r.center.prepare(base.draft(action, escalation: nil))
-        #expect(prepared.headline == "给长期事项「通识课作业」加阶段「研究之后的学习节奏」")
-        #expect(prepared.changes.contains(ProposalChange(field: "新阶段", before: nil, after: "研究之后的学习节奏（约 45 分钟）")))
+        #expect(prepared.headline == "给长期事项「通识课作业」加阶段「研究之后的学习节奏」（约 45 分钟）")
+        #expect(ProposalPresentation.changeLines(prepared.changes).isEmpty)   // 标题已说清，不再列一遍
         #expect(prepared.changes.contains { $0.isConsequence && $0.field.contains("插在「初稿」之前") })
         #expect(action.ownership == .betterCalendar && action.alwaysAsks && !action.isDestructive)
 

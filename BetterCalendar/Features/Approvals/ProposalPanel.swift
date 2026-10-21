@@ -39,9 +39,8 @@ struct ProposalPanel: View {
             if showsPending {
                 Section("待你确认（\(center.pending.count)）") {
                     if center.pending.isEmpty { Text("现在没有需要你确认的改动").foregroundStyle(.secondary) }
-                    ForEach(center.pending) { p in
-                        ProposalCard(center: center, proposal: p, highlighted: p.id == focusId)   // W19：与「智能体」页、对话气泡同一张卡
-                    }
+                    // W19：与「智能体」页、对话气泡同一张卡；W34：同一次行动的同类合成一张批量卡
+                    PendingProposalStack(center: center, pending: center.pending, highlighted: { $0 == focusId })
                 }
             } else {
                 Section {

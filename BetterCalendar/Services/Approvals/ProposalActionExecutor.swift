@@ -508,9 +508,8 @@ enum ProposalTimerRules {
             return PreparedProposalAction(
                 action: .checkpointCreate(itemId: itemId, checkpointId: checkpointId, title: t, estimatedMinutes: minutes,
                                           position: at >= existing.count ? nil : at, expectedRevision: revision),
-                changes: [ProposalChange(field: "新阶段", before: nil, after: t + (minutes.map { "（约 \($0) 分钟）" } ?? "")),
-                          .consequence(place + " · 可一键撤销：这个阶段移入回收站")],
-                headline: "给长期事项「\(task.title)」加阶段「\(t)」")
+                changes: [.consequence(place + " · 可一键撤销：这个阶段移入回收站")],
+                headline: "给长期事项「\(task.title)」加阶段「\(t)」" + (minutes.map { "（约 \($0) 分钟）" } ?? ""))
 
         // —— W32c 删事项 / 阶段（越级，进回收站）——
         case let .itemDelete(id, expected):

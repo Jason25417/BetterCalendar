@@ -141,10 +141,9 @@ struct AgentChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(pending) { p in
-                                ProposalCard(center: proposals, proposal: p, highlighted: p.id == focusId || p.id == flashPinnedId)
-                                    .id(Self.pinnedAnchor(p.id))
-                            }
+                            // W34：同一次行动的同类合成一张批量卡
+                            PendingProposalStack(center: proposals, pending: pending,
+                                                 highlighted: { $0 == focusId || $0 == flashPinnedId }, anchor: Self.pinnedAnchor)
                         }
                         .padding(.horizontal, 16).padding(.bottom, 8)
                     }
@@ -203,7 +202,13 @@ struct AgentChatView: View {
                     .textSelection(.enabled)
                     .padding(10).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
                 let pinnedIds = Set(proposals.pending.map(\.id))   // 与置顶区同一份判定
-                ForEach(AgentChatCard.resolve(m.proposalIds, in: proposals.proposals)) { card in proposalCard(card, pinnedIds: pinnedIds) }
+                let cards = AgentChatCard.resolve(m.proposalIds, in: proposals.proposals)
+                // W34：待确认的一批只留一行指路；已有结论的全部收进一个小箭头（压缩条 → 完整卡）
+                let waiting = cards.compactMap { $0.presentation(pinnedIds: pinnedIds) == .pointerToPinned ? $0.proposal : nil }
+                ForEach(ProposalBatching.groups(waiting)) { g in pinnedPointer(g) }
+                ForEach(cards.filter { $0.presentation(pinnedIds: pinnedIds) == .syncing }) { card in proposalCard(card, pinnedIds: pinnedIds) }
+                let resolved = cards.compactMap { $0.presentation(pinnedIds: pinnedIds) == .fullCard ? $0.proposal : nil }
+                if !resolved.isEmpty { ResolvedProposalsGroup(center: proposals, proposals: resolved, focusId: focusId) }
                 HStack(spacing: 6) {
                     Text(m.createdAt.formatted(date: .omitted, time: .shortened))
                     if m.delivery == .suppressed, let why = m.suppressReason { Text("· 没弹通知：\(why)") }
@@ -228,12 +233,25 @@ struct AgentChatView: View {
         }
     }
 
+    /// W19b：待确认时整卡只在顶部出现一次（P1）；气泡里一行指路（W34：一批只一行），点了滚过去并闪一下。
+    private func pinnedPointer(_ g: ProposalGroup) -> some View {
+        Button { flashPinnedId = g.id } label: {
+            Label("「\(g.isBatch ? g.title : g.proposals[0].cardHeadline)」在顶部等你拍板", systemImage: "arrow.up.circle")
+                .font(.caption).lineLimit(1)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("bc.chat.pinnedPointer")
+    }
+
     @ViewBuilder private func proposalCard(_ card: AgentChatCard, pinnedIds: Set<UUID>) -> some View {
         switch card.presentation(pinnedIds: pinnedIds) {
         case .pointerToPinned:
-            // W19b：待确认时整卡只在顶部出现一次（P1）；这里一行指路，点了滚过去并闪一下
             Button { flashPinnedId = card.id } label: {
-                Label("「\(card.proposal?.title ?? "这份提案")」在顶部等你拍板", systemImage: "arrow.up.circle")
+                Label("「\(card.proposal?.cardHeadline ?? "这份提案")」在顶部等你拍板", systemImage: "arrow.up.circle")
                     .font(.caption).lineLimit(1)
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3)))

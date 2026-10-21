@@ -76,3 +76,77 @@ nonisolated enum ProposalPresentation {
     }
 }
 
+// MARK: - W34 批量卡（App 侧合卡；智能体照旧一件事一份提案）
+
+/// 能合成一批的「同类」。排一天 / 计时 / 测试改动本身就是一份完整的事，不合。
+nonisolated enum ProposalFamily: String, Sendable {
+    case delete, create, edit, complete, move
+
+    var verb: String {
+        switch self {
+        case .delete: "删除"
+        case .create: "新增"
+        case .edit: "修改"
+        case .complete: "标完成"
+        case .move: "挪动"
+        }
+    }
+
+    static func of(_ a: ProposalAction) -> ProposalFamily? {
+        if a.isUndoOnly { return nil }
+        switch a {
+        case .blockDelete, .yourEventDelete, .yourReminderDelete, .itemDelete, .checkpointDelete: return .delete
+        case .itemCreate, .blockCreate, .reminder, .alarm, .checkpointCreate, .journalAppend: return .create
+        case .itemEdit, .blockEdit, .yourEventEdit, .journalEdit: return .edit
+        case .itemSetDone: return .complete
+        case let .yourReminderEdit(e): return e.title == nil && e.due == nil && e.done != nil ? .complete : .edit
+        case .moveBlock, .moveBlocks: return .move
+        default: return nil
+        }
+    }
+}
+
+/// 一张卡：一份提案，或同一次行动里的同类一批。
+nonisolated struct ProposalGroup: Identifiable, Equatable, Sendable {
+    let proposals: [Proposal]
+    let family: ProposalFamily?
+    var id: UUID { proposals[0].id }
+    var isBatch: Bool { proposals.count > 1 }
+    var title: String { "\(family?.verb ?? "处理") \(proposals.count) 项" }
+}
+
+nonisolated enum ProposalBatching {
+    /// 同一次行动：同一发起者、相邻两份相隔不超过这么久（智能体一轮里逐份提交，通常几秒内）。
+    static let window: TimeInterval = 120
+
+    /// 能进批量卡：智能体发起、没有备选 / 可调参数（那些要你逐份挑 / 调）、属于某一同类。
+    static func batchable(_ p: Proposal) -> ProposalFamily? {
+        guard p.origin == .agent, !p.experiment, !p.hasAlternatives, !p.hasParameters else { return nil }
+        return ProposalFamily.of(p.action)
+    }
+
+    /// 分组（不看状态：已处理的一批照样认得出，用于「整批撤销」）。组内按提交先后；组的次序 = 输入里第一次出现的次序。
+    static func groups(_ input: [Proposal]) -> [ProposalGroup] {
+        var groupOf: [UUID: Int] = [:]
+        var members: [[Proposal]] = []
+        var families: [ProposalFamily?] = []
+        var open: [String: Int] = [:]   // 发起者 + 同类 → 还能接上的那一组
+        for p in input.sorted(by: { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }) {
+            guard let family = batchable(p) else {
+                groupOf[p.id] = members.count; members.append([p]); families.append(nil); continue
+            }
+            let key = "\(p.originLabel)|\(p.agentKey ?? "")|\(family.rawValue)"
+            if let g = open[key], let last = members[g].last, p.createdAt.timeIntervalSince(last.createdAt) <= window {
+                members[g].append(p); groupOf[p.id] = g
+            } else {
+                open[key] = members.count; groupOf[p.id] = members.count; members.append([p]); families.append(family)
+            }
+        }
+        var seen = Set<Int>(), out: [ProposalGroup] = []
+        for p in input {
+            guard let g = groupOf[p.id], seen.insert(g).inserted else { continue }
+            out.append(ProposalGroup(proposals: members[g], family: families[g]))
+        }
+        return out
+    }
+}

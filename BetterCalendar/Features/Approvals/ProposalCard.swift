@@ -24,7 +24,7 @@ struct ProposalCard: View {
         let changes = p.chosen.changes
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                ProposalBadges(proposal: p)
+                if ProposalBadges.hasAny(p) { ProposalBadges(proposal: p) }
                 Text(ProposalPresentation.headline(p)).font(.subheadline.bold())
             }
             if state == .pending {
@@ -42,7 +42,7 @@ struct ProposalCard: View {
                 }
             } else {
                 if p.hasAlternatives, p.chosenOption != nil { Text("你选了【\(p.chosen.index + 1). \(p.chosen.label)】").font(.caption) }
-                changeLines(changes)
+                changeLines(changes, consequence: false)   // 有结论后后果行不再说（撤销那一行会说清能恢复到什么程度）
                 if !p.tuningSummary.isEmpty { Text(p.tuningSummary.joined(separator: "\n")).font(.caption) }
                 ProposalReason(reason: p.reason)
                 statusLine(p, state: state, autoPassed: autoPassed)
@@ -59,10 +59,10 @@ struct ProposalCard: View {
     }
 
     /// W34：改动前 → 后 + 一行后果；越级点名只在盾牌小窗里。
-    @ViewBuilder private func changeLines(_ changes: [ProposalChange]) -> some View {
+    @ViewBuilder private func changeLines(_ changes: [ProposalChange], consequence: Bool = true) -> some View {
         let lines = ProposalPresentation.changeLines(changes)
         if !lines.isEmpty { Text(lines.joined(separator: "\n")).font(.caption) }
-        if let c = ProposalPresentation.consequenceLine(changes) { Text(c).font(.caption2).foregroundStyle(.secondary) }
+        if consequence, let c = ProposalPresentation.consequenceLine(changes) { Text(c).font(.caption2).foregroundStyle(.secondary) }
     }
 
     /// 结论一行：失败 / 过期等原因照常可见；已完成时结果说明只是复述改动 → 收进「详情」，
@@ -151,6 +151,8 @@ struct ProposalReason: View {
 /// Mac：悬停出系统提示，点一下出小窗；iPhone：点一下出小窗。
 struct ProposalBadges: View {
     let proposal: Proposal
+    /// 有没有要画的图标（没有就不占位，标题顶格）。卡片随提案刷新重画，临近作废那一刻之后的下次刷新就会出闹钟。
+    static func hasAny(_ p: Proposal) -> Bool { p.escalation != nil || ProposalPresentation.isNearExpiry(p, at: .now) }
     var body: some View {
         HStack(spacing: 4) {
             if let e = proposal.escalation {
