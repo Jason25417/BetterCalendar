@@ -7,34 +7,13 @@
 //  - 智能体填了备选方案：每个方案一张小卡 +「选这个」；
 //  - 「以后同类…」：同意并生成预授权规则（做完告诉你 / 直接做）或拒绝并生成 deny 规则，可选范围；
 //    越级 / 动你的东西 / 删除类不提供放行（PreauthPolicy 也会拦）；
-//  - 越级提案顶部醒目横条：「越级：这会动你亲手放的位置或你的东西」+ 理由。
+//  - 越级标记见 ProposalBadges（W34：红色小盾牌 + 小窗，替代原来的大横条）。
 //  W11：方案带可调参数时，卡片上出滑块 / 时间选择器（ProposalTuner）：你调的值套回动作、经 App 同一套校验，
 //  「改动前 → 改动后」实时重算；不合法当场写明原因、不能批准（不悄悄夹到范围里）。带参数的提案不出「以后同类…」
 //  （预授权规则本来就不放行带参数的提案；要设规则，在同类不带参数的提案上设）。
 //
 
 import SwiftUI
-
-/// 越级提案的醒目横条（原则 8「审慎越级」）。
-/// W32：图钉 / 固定安排 / 你的东西（日程、提醒、事项、日记）是同一个越级概念、同一条横条；
-/// subjects = 改动清单里的点名行（「改的是你自己设的日程：《组会》」），放在横条里、不在正文里重复。
-struct ProposalEscalationBanner: View {
-    let reason: String
-    var subjects: [String] = []
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Label("越级：这会动你亲手放的位置或你的东西", systemImage: "exclamationmark.shield.fill")
-                .font(.subheadline.bold()).foregroundStyle(.orange)
-            ForEach(Array(subjects.enumerated()), id: \.offset) { _, s in Text(s).font(.callout.bold()) }
-            Text("智能体的理由：" + reason).font(.caption)
-            Text("越级提案每次都要你亲自批准，预授权规则不会代你放行。").font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityIdentifier("bc.proposal.escalation")
-    }
-}
 
 struct ProposalCardControls: View {
     @Bindable var center: ProposalCenter

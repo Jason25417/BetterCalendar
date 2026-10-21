@@ -4,8 +4,10 @@
 //
 //  W19（P1 双射）：一张提案卡只有一种长相——「智能体」页顶部的待确认卡、对话气泡里的卡、
 //  设置 →「审批记录与规则」里的待确认卡都是这一个组件；回应控件仍是 ProposalCardControls（通知上的按钮是它的系统版）。
-//  待确认：越级横条 + 标题 + 改动前→后（或备选方案）+ 有效期 + 回应控件。
-//  有结论：结论 + 结果说明（降级 / 失败照写，P4）+ 你回的话 / 代你决定的规则 + 能撤销就给「撤销」。
+//  W34（Jason 2026-10-21）：每样信息只出现一次——
+//    [红色小盾牌（越级）][闹钟（临近作废）] 一句「做什么」/ 改动前 → 后 / 一行后果 / 理由 ▸ / 回应控件 / 详情 ▸。
+//    盾牌、闹钟：Mac 悬停出提示、点一下出小窗；iPhone 点一下出小窗。有效期默认不显示（在「详情」里），到期只作废。
+//  有结论：结论 + 结果说明（降级 / 失败照写，P4）+ 你回的话 + 能撤销就给「撤销」。
 //
 
 import SwiftUI
@@ -19,29 +21,30 @@ struct ProposalCard: View {
         let p = proposal
         let state = p.effectiveState(at: .now)
         let autoPassed = p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId
+        let changes = p.chosen.changes
         VStack(alignment: .leading, spacing: 6) {
-            if let e = p.escalation, state == .pending {
-                ProposalEscalationBanner(reason: e, subjects: p.chosen.changes.filter(\.isEscalationSubject)
-                    .map { String($0.field.dropFirst(ProposalChange.escalationMarker.count)) })
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ProposalBadges(proposal: p)
+                Text(ProposalPresentation.headline(p)).font(.subheadline.bold())
             }
-            // W32d：低风险自动通过的回执 =「已自动通过：…」+ 改动 + 撤销
-            Text(autoPassed ? "已自动通过：" + p.title : p.title).font(.subheadline.bold())
             if state == .pending {
                 if p.hasAlternatives {
                     Text("智能体给了 \(p.options.count) 个方案，挑一个：").font(.callout)
                 } else {
-                    changeLines(p, hideSubjects: p.escalation != nil)
+                    changeLines(changes)
                 }
-                reasonLine(p)
-                Text("不处理到 \(p.expiresAt.formatted(date: .abbreviated, time: .shortened)) 就自动作废")
-                    .font(.caption2).foregroundStyle(.secondary)
-                ProposalCardControls(center: center, proposal: p)
-                    .onAppear { FeatureUsage.seen(.proposalCard) }
+                ProposalReason(reason: p.reason)
+                if center.deciding.contains(p.id) {
+                    Label("提交中…", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ProposalCardControls(center: center, proposal: p)
+                        .onAppear { FeatureUsage.seen(.proposalCard) }
+                }
             } else {
                 if p.hasAlternatives, p.chosenOption != nil { Text("你选了【\(p.chosen.index + 1). \(p.chosen.label)】").font(.caption) }
-                changeLines(p, hideSubjects: false)
+                changeLines(changes)
                 if !p.tuningSummary.isEmpty { Text(p.tuningSummary.joined(separator: "\n")).font(.caption) }
-                reasonLine(p)
+                ProposalReason(reason: p.reason)
                 statusLine(p, state: state, autoPassed: autoPassed)
                 if let reply = p.userReply { Text("你回了一句：「\(reply.text)」").font(.caption) }
                 undoRow
@@ -55,14 +58,11 @@ struct ProposalCard: View {
         .id("\(p.id.uuidString)-\(center.replying.contains(p.id))")   // 展开「回一句」时换 id，逼外层重新量高
     }
 
-    /// W32e：卡片 = 改动本身（改动前 → 改动后），每条只出现一次。
-    @ViewBuilder private func changeLines(_ p: Proposal, hideSubjects: Bool) -> some View {
-        let lines = p.chosen.changes.filter { !(hideSubjects && $0.isEscalationSubject) }.map(Proposal.line)
+    /// W34：改动前 → 后 + 一行后果；越级点名只在盾牌小窗里。
+    @ViewBuilder private func changeLines(_ changes: [ProposalChange]) -> some View {
+        let lines = ProposalPresentation.changeLines(changes)
         if !lines.isEmpty { Text(lines.joined(separator: "\n")).font(.caption) }
-    }
-
-    @ViewBuilder private func reasonLine(_ p: Proposal) -> some View {
-        if !p.reason.isEmpty { Text("理由：" + p.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+        if let c = ProposalPresentation.consequenceLine(changes) { Text(c).font(.caption2).foregroundStyle(.secondary) }
     }
 
     /// 结论一行：失败 / 过期等原因照常可见；已完成时结果说明只是复述改动 → 收进「详情」，
@@ -112,7 +112,8 @@ struct ProposalDetails: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("发起：" + p.originLabel + (p.agentKey.map { "（\(AgentKind.of($0).shortLabel)）" } ?? ""))
                 Text("种类：\(p.executedAction.kindLabel)（\(p.executedAction.kind)）")
-                if let e = p.escalation, state != .pending { Text("越级理由：" + e).foregroundStyle(.orange) }
+                if let e = p.escalation { Text("越级理由：" + e).foregroundStyle(.red) }
+                if state == .pending || state == .expired { Text(ProposalPresentation.expiryDetail(p)) }
                 if let stamp = p.preauth {
                     Text("由\(stamp.ruleId == PreauthPolicy.lowRiskRuleId ? "「低风险改动自动通过」" : "预授权规则")代你决定（\(stamp.effect.label)）：\(stamp.ruleLabel) · 规则 \(stamp.ruleId.uuidString.prefix(8))")
                 }
@@ -127,5 +128,77 @@ struct ProposalDetails: View {
         }
         .font(.caption2)
         .accessibilityIdentifier("bc.proposal.details")
+    }
+}
+
+/// W34：理由默认收起（点开才看全文）。
+struct ProposalReason: View {
+    let reason: String
+    var body: some View {
+        if !reason.isEmpty {
+            DisclosureGroup("理由") {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .font(.caption)
+            .accessibilityIdentifier("bc.proposal.reason")
+        }
+    }
+}
+
+/// W34：标题前的小图标——红色小盾牌 = 越级；闹钟 = 临近作废（待确认时才有）。
+/// Mac：悬停出系统提示，点一下出小窗；iPhone：点一下出小窗。
+struct ProposalBadges: View {
+    let proposal: Proposal
+    var body: some View {
+        HStack(spacing: 4) {
+            if let e = proposal.escalation {
+                ProposalBadge(systemImage: "exclamationmark.shield.fill", tint: .red, identifier: "bc.proposal.escalation",
+                              title: "越级：这会动你亲手放的位置或你的东西",
+                              lines: ProposalPresentation.escalationSubjects(proposal.chosen.changes) + ["智能体的理由：" + e],
+                              footnote: "越级提案每次都要你亲自批准，预授权规则不会代你放行。")
+            }
+            if proposal.effectiveState(at: .now) == .pending {
+                TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                    if ProposalPresentation.isNearExpiry(proposal, at: ctx.date) {
+                        ProposalBadge(systemImage: "alarm.fill", tint: .orange, identifier: "bc.proposal.nearExpiry",
+                                      title: ProposalPresentation.timeLeft(proposal, at: ctx.date), lines: [], footnote: nil)
+                    }
+                }
+                .fixedSize()
+            }
+        }
+    }
+}
+
+struct ProposalBadge: View {
+    let systemImage: String
+    let tint: Color
+    let identifier: String
+    let title: String
+    let lines: [String]
+    let footnote: String?
+    @State private var shown = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            Image(systemName: systemImage).foregroundStyle(tint).font(.subheadline)
+        }
+        .buttonStyle(.plain)
+        .help(([title] + lines).joined(separator: "\n"))
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(identifier)
+        .popover(isPresented: $shown) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.bold()).foregroundStyle(tint)
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, l in Text(l).font(.callout) }
+                if let footnote { Text(footnote).font(.caption2).foregroundStyle(.secondary) }
+            }
+            .padding(12)
+            .frame(maxWidth: 320, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .presentationCompactAdaptation(.popover)
+        }
     }
 }

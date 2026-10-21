@@ -142,7 +142,16 @@ import UIKit
     func notificationPermission() async -> Bool? { await notifier.permission() }
     func requestNotificationPermission() async -> Bool { await notifier.requestPermission() }
 
-    var pending: [Proposal] { proposals.filter { $0.effectiveState(at: now()) == .pending } }
+    var pending: [Proposal] { proposals.filter { $0.effectiveState(at: now()) == .pending && !deciding.contains($0.id) } }
+
+    /// W34：点了同意 / 拒绝、还在等 iCloud 条件保存的提案。界面先当它已处理（下一张立即顶上来，不等 2–3 次网络往返）；
+    /// 保存成功 → 立刻换成服务器回来的那份；失败 → 移出这里 = 卡片回到「待你确认」，原因照常进横幅（lastError + DevLog）。
+    private(set) var deciding: Set<UUID> = []
+
+    /// 用传输层刚回来的那份替换本机列表里的同一份（不等整表刷新）。
+    private func upsert(_ p: Proposal) {
+        if let i = proposals.firstIndex(where: { $0.id == p.id }) { proposals[i] = p } else { proposals.insert(p, at: 0) }
+    }
 
     // MARK: 发起
 
@@ -312,8 +321,14 @@ import UIKit
                 }
             }
         }
+        deciding.insert(id)
+        defer { deciding.remove(id) }
         do {
             let outcome = try await transport.decide(id: id, decision: decision, choice: choice, tuning: tuning, deviceId: deviceId, at: now())
+            switch outcome {
+            case let .won(p), let .alreadyClosed(p): upsert(p)
+            }
+            deciding.remove(id)   // 已换成服务器那份：不必等下面的整表刷新 / 执行
             switch outcome {
             case let .won(p):
                 let picked = p.hasAlternatives && decision == .approve ? "，选了【\(p.chosen.index + 1). \(p.chosen.label)】" : ""
