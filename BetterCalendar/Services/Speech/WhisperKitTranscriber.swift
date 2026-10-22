@@ -86,7 +86,7 @@ nonisolated enum WhisperSettings {
         preparing?.cancel(); preparing = nil
         await engine.unload()
         try? FileManager.default.removeItem(at: WhisperSettings.modelRoot)
-        state = WhisperSettings.enabled ? .failed("模型已删除，重新打开开关会再下载") : .off
+        state = WhisperSettings.enabled ? .failed("模型已删除：下次打开 App 会重新下载（关掉再打开开关 = 现在就重下）") : .off
     }
 
     // MARK: 准备

@@ -26,7 +26,7 @@ struct VoiceSettingsSection: View {
                     Button("删除这台设备上的模型（约 630 MB）", role: .destructive) { confirmDelete = true }
                         .confirmationDialog("删除这台设备上的语音模型？", isPresented: $confirmDelete) {
                             Button("删除", role: .destructive) { Task { await transcriber.deleteModel() } }
-                        } message: { Text(on ? "开关还开着，之后会重新下载。" : "需要时打开开关会重新下载。") }
+                        } message: { Text(on ? "开关还开着：下次打开 App 会重新下载（关掉再打开开关 = 现在就重下）。" : "需要时打开开关会重新下载。") }
                 }
                 Text("打开后，每台设备各自下载约 630 MB 的识别模型（只在 Wi-Fi 下下载），第一次还要准备一两分钟；之后点麦克风说话、再点一下停，约 1 秒出字，中英混说比苹果听写准。识别全在本机，录音不出设备，转完即删。模型还没准备好时，这一次会用苹果听写，并在输入框上方写明原因。关掉 = 只用苹果听写。")
                     .font(.caption).foregroundStyle(.secondary)
