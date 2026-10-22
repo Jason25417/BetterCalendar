@@ -26,12 +26,12 @@ actor EventKitYourItemsWriter: YourItemsWriting {
     // MARK: 日程
 
     func event(_ ref: YourEventRef) async throws -> YourEventSnapshot {
-        try snapshot(try find(ref))
+        try snapshot(try await find(ref))
     }
 
     func apply(_ edit: YourEventEdit) async throws -> YourEventSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("改你的日程「\(edit.ref.externalID.prefix(12))」")
-        let ev = try find(edit.ref)
+        let ev = try await find(edit.ref)
         try guardOurs(ev)
         if let t = edit.title { ev.title = t }
         if let n = edit.notes { ev.notes = n.isEmpty ? nil : n }
@@ -48,7 +48,7 @@ actor EventKitYourItemsWriter: YourItemsWriting {
 
     func delete(_ ref: YourEventRef, span: YourEventSpan) async throws -> YourEventSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("删你的日程「\(ref.externalID.prefix(12))」")
-        let ev = try find(ref)
+        let ev = try await find(ref)
         try guardOurs(ev)
         var undo = try snapshot(ev)
         let future = span == .futureEvents && ev.hasRecurrenceRules
@@ -69,7 +69,7 @@ actor EventKitYourItemsWriter: YourItemsWriting {
 
     func recreate(_ s: YourEventSnapshot) async throws -> YourEventSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("重建你的日程「\(s.title)」")
-        try access(.event)
+        try await access(.event)
         guard !ourCalendars.contains(s.calendarTitle) else { throw YourItemsError.refused("不往 BetterCalendar 自家日历里重建") }
         let candidates = store.calendars(for: .event).filter { $0.title == s.calendarTitle && $0.allowsContentModifications }
         guard let cal = candidates.first(where: { $0.source.title == s.sourceTitle }) ?? (candidates.count == 1 ? candidates.first : nil) else {
@@ -94,12 +94,12 @@ actor EventKitYourItemsWriter: YourItemsWriting {
     // MARK: 提醒
 
     func reminder(_ externalID: String) async throws -> YourReminderSnapshot {
-        snapshot(try findReminder(externalID))
+        snapshot(try await findReminder(externalID))
     }
 
     func apply(_ edit: YourReminderEdit) async throws -> YourReminderSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("改你的提醒「\(edit.externalID.prefix(12))」")
-        let r = try findReminder(edit.externalID)
+        let r = try await findReminder(edit.externalID)
         guard let list = r.calendar, !ourReminderLists.contains(list.title) else {
             throw YourItemsError.refused("不改 BetterCalendar 自己提醒列表里的提醒")
         }
@@ -126,7 +126,7 @@ actor EventKitYourItemsWriter: YourItemsWriting {
 
     func deleteReminder(_ externalID: String) async throws -> YourReminderSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("删你的提醒「\(externalID.prefix(12))」")
-        let r = try findReminder(externalID)
+        let r = try await findReminder(externalID)
         guard let list = r.calendar, !ourReminderLists.contains(list.title) else {
             throw YourItemsError.refused("不删 BetterCalendar 自己提醒列表里的提醒")
         }
@@ -140,7 +140,7 @@ actor EventKitYourItemsWriter: YourItemsWriting {
 
     func recreateReminder(_ s: YourReminderSnapshot) async throws -> YourReminderSnapshot {
         try await EventKitWriteGuard.refuseIfTestHost("重建你的提醒「\(s.title)」")
-        try access(.reminder)
+        try await access(.reminder)
         guard !ourReminderLists.contains(s.listTitle) else { throw YourItemsError.refused("不往 BetterCalendar 自家提醒列表里重建") }
         let candidates = store.calendars(for: .reminder).filter { $0.title == s.listTitle && $0.allowsContentModifications }
         guard let list = candidates.first(where: { $0.source.title == s.sourceTitle }) ?? (candidates.count == 1 ? candidates.first : nil) else {
@@ -195,15 +195,21 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         return s
     }
 
-    private func access(_ type: EKEntityType) throws {
-        guard EKEventStore.authorizationStatus(for: type) == .fullAccess else {
-            throw YourItemsError.refused(type == .event ? "没有日历的完整权限（系统设置 → 隐私与安全性 → 日历）" : "没有提醒事项的完整权限（系统设置 → 隐私与安全性 → 提醒事项）")
-        }
+    /// 10-22 真机自测：iPhone 设置里提醒事项已开，authorizationStatus 却不是 .fullAccess（执行全部被拒）。
+    /// 状态不对时直接问 EventKit 一次（已授权 = 不弹框、立刻返回 true）；仍不行才拒绝，并把实际状态写进原因（可诊断）。
+    private func access(_ type: EKEntityType) async throws {
+        let status = EKEventStore.authorizationStatus(for: type)
+        if status == .fullAccess { return }
+        let granted = (try? await (type == .event ? store.requestFullAccessToEvents() : store.requestFullAccessToReminders())) ?? false
+        if granted { return }
+        DevLog.shared.warn("越级审批", "\(type == .event ? "日历" : "提醒事项")权限状态 = \(status.rawValue)，请求完整权限未通过")
+        throw YourItemsError.refused((type == .event ? "没有日历的完整权限（系统设置 → 隐私与安全性 → 日历）" : "没有提醒事项的完整权限（系统设置 → 隐私与安全性 → 提醒事项）")
+                                     + "；当前状态 \(status.rawValue)")
     }
 
     /// 外部标识 + 这一次的开始时刻（毫秒内）定位；对不上一条 = 抛错，不猜。
-    private func find(_ ref: YourEventRef) throws -> EKEvent {
-        try access(.event)
+    private func find(_ ref: YourEventRef) async throws -> EKEvent {
+        try await access(.event)
         let lo = ref.occurrenceStart.addingTimeInterval(-86_400), hi = ref.occurrenceStart.addingTimeInterval(86_400)
         let cals = store.calendars(for: .event)
         let hits = store.events(matching: store.predicateForEvents(withStart: lo, end: hi, calendars: cals)).filter {
@@ -220,9 +226,18 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         if ourCalendars.contains(ev.calendar?.title ?? "") { throw YourItemsError.refused("这条在 BetterCalendar 自家日历里，这个写者不碰") }
     }
 
-    private func findReminder(_ id: String) throws -> EKReminder {
-        try access(.reminder)
-        let hits = store.calendarItems(withExternalIdentifier: id).compactMap { $0 as? EKReminder }
+    private func findReminder(_ id: String) async throws -> EKReminder {
+        try await access(.reminder)
+        var hits = store.calendarItems(withExternalIdentifier: id).compactMap { $0 as? EKReminder }
+        if hits.isEmpty {
+            // 真机实测（2026-10-22）：iPhone 上 calendarItems(withExternalIdentifier:) 对 iCloud 提醒常返回空，而提醒其实已同步到位 → 全量读一遍按外部标识比对。
+            let all: [EKReminder]? = await withCheckedContinuation { cont in
+                store.fetchReminders(matching: store.predicateForReminders(in: nil)) { cont.resume(returning: $0) }
+            }
+            guard let all else { throw YourItemsError.failed("系统没能读出提醒事项（这次没改动，稍后再试）") }
+            hits = all.filter { $0.calendarItemExternalIdentifier == id }
+            DevLog.shared.warn("越级审批", "按外部标识直查提醒为空，全量比对 \(all.count) 条后命中 \(hits.count) 条")
+        }
         guard hits.count == 1, let r = hits.first else {
             throw hits.isEmpty ? YourItemsError.notFound("提醒事项里找不到这条提醒（可能已被删除）")
                                : YourItemsError.notFound("提醒事项里有 \(hits.count) 条对得上的提醒，没法确定是哪一条，未改动")
