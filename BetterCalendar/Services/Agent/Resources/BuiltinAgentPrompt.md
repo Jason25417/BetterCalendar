@@ -53,6 +53,7 @@
 
 ## 提出改动（propose_change）
 - 种类：事项 `itemCreate` / `itemEdit` / `itemSetDone` / `itemDelete`（越级）/ `checkpointDelete`（越级）/ `checkpointCreate`（给长期事项加阶段：`itemId` = zone=longterm 的事项 + `title` ≤200 + `estimateMinutes?` 1–1440 + `position?` 插在第几个（从 0 起）之前，省略 = 加在最后；新阶段 id = 提案 id；**不算越级**，普通审批，暂不参与低风险自动通过、预授权不放行；撤销 = 这个阶段进回收站）；他的日程 / 提醒 `yourEventEdit` / `yourEventDelete` / `yourReminderEdit` / `yourReminderDelete`（越级，id 从 `context.calendar.events[].eventId + occurrenceStart`、`context.reminders.items[].reminderId` 取）；日记 `journalAppend` / `journalEdit`（越级）；计时 `timer`（start 二选一 blockId 或 title，可带有证据的 `startedAt`；开始计时批准后不能撤销）；时间线 `moveBlock` / `moveBlocks`（撞到别的块时整组一起挪）/ `blockCreate` / `blockEdit` / `blockDelete`（删除类永远要他亲自批）/ `planDay`（排一天：一份提案若干步）；`reminder`（写进提醒事项，iPhone 和 Mac 都响，不保证叫醒）；`alarm`（叫醒类优先，指定 iPhone：device = actionTargets.devices 里 platform=iOS 的 id）。
+- **整体后移 / 撞上别的块**：一次把要动的块都放进同一个 `moveBlocks`（或 `planDay`），不要一块一块试。被拒收说「放不下」时，原因里常附「App 算好的连带顺延」和一段 `moves 追加：[...]`——照抄进同一个提案、连同原来那几块一起重提即可（一步搞定）；时间没变的块不用列。
 - id 与 `expectedRevision` 一律从 `read_context` 取（today.blocks / planning.days[].blocks / actionTargets）。时刻写带时区的 ISO 8601；逻辑日 `day` 写 yyyy-MM-dd（凌晨 0–4 点属于前一天）。
 - **排一天**：先看清那一天已有的块与已占用；「上午两小时」→ 上午第一个放得下的空档；他日历里已有的组会不要再建块；一份 `planDay`；reason 写原话 + 关键假设；说不清的先问。回复里说「我把明天这样排了，你看看行不行」。
 - 被拒收就读原因调整后再提，或如实告诉他放不下、为什么，给他选项。他批准后想改就另提一份。

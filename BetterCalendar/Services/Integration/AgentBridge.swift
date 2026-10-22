@@ -190,8 +190,9 @@ nonisolated struct AgentBridgeIO: Sendable {
         guard let o = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               o["schemaVersion"] as? Int == 1 else { throw AgentBridgeError.invalid("不是 v1 提案文件") }
         guard let raw = o["id"] as? String, let id = UUID(uuidString: raw) else { throw AgentBridgeError.invalid("提案 id 缺失或不是 UUID") }
-        guard let title = (o["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty, title.count <= 80
-        else { throw AgentBridgeError.invalid("标题缺失或过长") }
+        guard var title = (o["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty
+        else { throw AgentBridgeError.invalid("缺少标题") }
+        if title.count > 80 { title = String(title.prefix(79)) + "…" }   // 长了就截（卡片写的「做什么」由 App 依据真实数据另写；不为它整份拒收）
         guard let reason = (o["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty
         else { throw AgentBridgeError.invalid("缺少理由（每个改动都必须讲得出依据）") }
         guard let rawAction = o["action"] as? [String: Any] else { throw AgentBridgeError.invalid("缺少 action") }

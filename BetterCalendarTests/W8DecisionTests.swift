@@ -56,7 +56,8 @@ extension ProposalActionTests {
         #expect(await reason(group([(ids.fixed, at(20, 0, c), nil), (ids.other, at(21, 0, c), nil)]))?.contains("固定安排，按规则不挪") == true)
         #expect(await reason(group([(ids.ddl, at(16, 30, c), nil), (ids.other, at(20, 0, c), nil)]))?.contains("越过截止时间 17:00") == true)
         #expect(await reason(group([(ids.flex, at(20, 0, c), nil), (ids.flex, at(21, 0, c), nil)]))?.contains("不止一次") == true)
-        #expect(await reason(group([(ids.flex, at(20, 0, c), nil), (ids.other, at(18, 0, c), nil)]))?.contains("无需挪动") == true)
+        // 全组都不变 → 无需挪动（10-22 起：组里只是顺手列了不变的块 → 跳过它，见 AgentRunFixTests）
+        #expect(await reason(group([(ids.flex, at(11, 0, c), nil), (ids.other, at(18, 0, c), nil)]))?.contains("无需挪动") == true)
         // 「整组挪回」只用于撤销，智能体不能直接提
         #expect(await reason(.moveBlocks(moves: [ProposalBlockMove(id: ids.flex, start: at(20, 0, c), end: nil, expectedRevision: nil)], isUndo: true))?
             .contains("只用于撤销") == true)

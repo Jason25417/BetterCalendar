@@ -115,6 +115,11 @@ import Foundation
             file[k] = args[k]
         }
         if let eventId { file["parentEventId"] = eventId }
+        // 模型常把 askFirst 写进 action 里（10-21 日志）：挪到提案级（它本来的位置），不为放错位置整份拒收
+        if var action = file["action"] as? [String: Any], let misplaced = action.removeValue(forKey: "askFirst") {
+            file["action"] = action
+            if file["askFirst"] == nil { file["askFirst"] = misplaced }
+        }
         if let raw = args["lifetimeMinutes"], !(raw is NSNull) {
             guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded() else {
                 throw AgentBridgeError.invalid("lifetimeMinutes 必须是整数分钟（1–10080）")

@@ -200,11 +200,10 @@ enum PlanEditRules {
                 guard end.timeIntervalSince(m.start) >= 60 else {
                     throw invalid("\(name)的新时间段无效（结束须晚于开始，至少 1 分钟）")
                 }
-                if !restoring {
-                    guard m.start != block.start || end != block.end else {
-                        throw invalid(single ? "\(name)已经在 \(span(m.start, end))，无需挪动"
-                                             : "\(name)已经在 \(span(m.start, end))，无需挪动（不变的块不用列进提案）")
-                    }
+                if !restoring, m.start == block.start, end == block.end {
+                    // 单块：说清楚无需挪；一组里顺手列了不变的块：跳过它（不为一个空操作整组拒收），全组都不变才拒
+                    if single { throw invalid("\(name)已经在 \(span(m.start, end))，无需挪动") }
+                    continue
                 }
                 try checkPlacement(name, m.start, end, mustBeFuture: true)
                 try checkDeadline(name, m.start, end, block.deadline, verb: "挪到")
@@ -270,12 +269,14 @@ enum PlanEditRules {
             }
         }
 
+        guard !resolved.isEmpty else { throw invalid("列出的块都已经在那个时间了，无需挪动") }
+
         // —— 最终整体布局 ——
         let changedIDs = Set(resolved.map(\.step.blockID))
         let placed = resolved.filter(\.placed).compactMap(\.after)
         // 障碍（组外）：前台正在做的块此刻占的时间段 + 仍在「从现在起」时间线上、这次没动的块 + 这次改了属性但没动时间的块。
         var obstacles: [(title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)] = []
-        if let a = c.active, let b = byID[a.id] { obstacles.append((b.title, a.start, max(a.end, c.now), false, false, nil)) }
+        if let a = c.active, let b = byID[a.id] { obstacles.append((b.title, a.start, max(a.end, c.now), true, false, nil)) }   // 正在做：不挪
         let unplacedChanged = Dictionary(resolved.filter { !$0.placed }.compactMap { r in r.after.map { (r.step.blockID, $0) } },
                                          uniquingKeysWith: { a, _ in a })
         for b in c.blocks where b.id != c.active?.id && !isSettled(b.id) && b.end > c.now {
@@ -301,7 +302,9 @@ enum PlanEditRules {
                 throw invalid("\(name)新时间 \(at) 与固定安排「\(hit.title)」(\(theirs)) 重叠，固定安排不动，放不下")
             }
             throw invalid("\(name)新时间 \(at) 和「\(hit.title)」(\(theirs)) 重叠，放不下"
-                + (restoring ? "（放回原位会和它撞上，不硬塞）" : "（不硬塞；要连带挪「\(hit.title)」，请把它也放进同一个提案一起挪）"))
+                + (restoring ? "（放回原位会和它撞上，不硬塞）"
+                   : "（不硬塞；要连带挪「\(hit.title)」，请把它也放进同一个提案一起挪）"
+                     + (cascadeHint(placed: placed, obstacles: obstacles, changedIDs: changedIDs, in: c).map { "。" + $0 } ?? "")))
         }
         if !restoring {
             let sorted = placed.sorted { $0.start < $1.start }
@@ -310,6 +313,40 @@ enum PlanEditRules {
             }
         }
         return resolved
+    }
+
+    /// 撞上可挪的块时，App 算好「后面的块依次往后顺延、各自时长不变」的整组挪法，写进拒收原因
+    ///（智能体照抄进同一个 moveBlocks / planDay 一步就能重提，不再一块一块试）。只是建议：越过逻辑日 4:00、越过截止、
+    /// 要动固定安排或你的日历都算不出来 → 不给（照常拒收）。
+    static func cascadeHint(placed: [ScheduledBlock], obstacles: [(title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)],
+                            changedIDs: Set<UUID>, in c: Context) -> String? {
+        let movable = c.blocks.filter { !changedIDs.contains($0.id) && !c.settledIDs.contains($0.id) && $0.id != c.active?.id
+            && $0.end > c.now && !$0.isFixed }.sorted { $0.start < $1.start }
+        let movableIDs = Set(movable.map(\.id)).union(placed.map(\.id))
+        var busy = placed.map { ($0.start, $0.end) }
+        for o in obstacles where o.fixed || (o.mine && !(o.linked.map(movableIDs.contains) ?? false)) { busy.append((o.start, o.end)) }
+        var moves: [(ScheduledBlock, Date, Date)] = []
+        for b in movable {
+            let length = b.end.timeIntervalSince(b.start)
+            var start = b.start
+            for _ in 0..<64 {
+                guard let o = busy.first(where: { $0.0 < start.addingTimeInterval(length) && start < $0.1 }) else { break }
+                start = o.1
+            }
+            let end = start.addingTimeInterval(length)
+            if busy.contains(where: { $0.0 < end && start < $0.1 }) { return nil }
+            if start != b.start {
+                guard end <= DayContext.logicalWindow(forLabel: DayContext.logicalStartOfDay(b.start)).end else { return nil }
+                if let ddl = b.deadline, end > ddl { return nil }
+                moves.append((b, start, end))
+            }
+            busy.append((start, end))
+        }
+        guard !moves.isEmpty, moves.count <= 20 else { return nil }
+        let iso = ISO8601DateFormatter(); iso.timeZone = .current
+        let human = moves.map { "「\($0.0.title)」\(span($0.0.start, $0.0.end)) → \(span($0.1, $0.2))" }.joined(separator: "，")
+        let items = moves.map { "{\"blockId\":\"\($0.0.id.uuidString)\",\"start\":\"\(iso.string(from: $0.1))\",\"end\":\"\(iso.string(from: $0.2))\"}" }
+        return "App 算好的连带顺延（各自时长不变）：\(human)。要这样做就把这些和原来那几块放进同一个提案一起提，moves 追加：[\(items.joined(separator: ","))]"
     }
 
     /// 给人看的「改动前 → 改动后」。

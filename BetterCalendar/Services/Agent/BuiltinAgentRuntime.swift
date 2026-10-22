@@ -96,7 +96,7 @@ extension DeepSeekClient: BuiltinAgentModel {
     private(set) var queuedCount = 0
 
     // —— 配置（稳定性参数，不是产品规则）——
-    var maxTurns = 8
+    var maxTurns = 12   // 10-21 日志：8 步常被「放不下 → 重试」耗光；拒收原因已附整组挪法（PlanEditRules.cascadeHint）
     var runTimeout: TimeInterval = 120
     /// 收到事件后等一小会儿再开跑，把一阵连发并成一轮。
     var debounce: TimeInterval = 1.5
