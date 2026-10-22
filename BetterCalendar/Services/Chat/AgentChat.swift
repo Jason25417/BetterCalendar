@@ -41,6 +41,8 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     var forwardedByDeviceId: String?
     /// W35：谁接手、为什么（如「Mac 没在线，由 iPhone 回复」）；nil = 正常接手。只在 JSON 载荷里，不改 CloudKit schema。
     var forwardedNote: String? = nil
+    /// W36：你发的图片 / 文件（元数据；本体在 ChatAttachmentStore，经 iCloud 资源字段同步）。nil = 没有。
+    var attachments: [ChatAttachment]? = nil
     // —— 智能体的消息：是否弹通知（Mac 导入时按打扰规则决定一次，各端照办）——
     var delivery: Delivery?
     var suppressReason: String?
@@ -130,6 +132,9 @@ actor CloudKitAgentChatStore: AgentChatTransport {
     private func decode(_ r: CKRecord) -> AgentChatMessage? {
         guard r.recordType == Self.recordType, let raw = r["payload"] as? String,
               let m = try? JSONDecoder().decode(AgentChatMessage.self, from: Data(raw.utf8)) else { return nil }
+        if let files = m.attachments, let assets = r["files"] as? [CKAsset] {   // W36：别的设备发的附件拷进本机
+            for (a, asset) in zip(files, assets) { if let url = asset.fileURL { ChatAttachmentStore.ingest(a, from: url) } }
+        }
         return m
     }
 
@@ -144,6 +149,10 @@ actor CloudKitAgentChatStore: AgentChatTransport {
         try await ensureZone()
         let r = CKRecord(recordType: Self.recordType, recordID: recordID(message.id))
         try encode(message, into: r)
+        // W36：附件本体只在新建时上传一次（之后的回执 / 认领只改载荷，不重传）
+        if let files = message.attachments, !files.isEmpty {
+            r["files"] = files.map { CKAsset(fileURL: ChatAttachmentStore.url(for: $0)) } as CKRecordValue
+        }
         known[r.recordID] = try await db.save(r)
     }
 
@@ -344,9 +353,9 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
 
     /// inReplyToProposal（W10）= 这句话是在回某个提案（从通知 / 面板 / 对话卡片上「回一句」）。
     @discardableResult
-    func send(_ raw: String, inReplyToProposal proposalId: UUID? = nil) async -> AgentChatMessage? {
+    func send(_ raw: String, inReplyToProposal proposalId: UUID? = nil, attachments: [ChatAttachment] = []) async -> AgentChatMessage? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
+        guard !text.isEmpty || !attachments.isEmpty else { return nil }
         let at = now()
         // 回提案：接着带这张卡片的那条智能体消息说；否则接着最近一条智能体消息说（如复盘后补一句）：6 小时内才算接话。
         let carrier = proposalId.flatMap { id in messages.last { $0.author == .agent && $0.proposalIds.contains(id) } }
@@ -354,6 +363,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         var m = AgentChatMessage(id: UUID(), createdAt: at, author: .user, deviceId: deviceId, deviceLabel: deviceLabel,
                                  text: String(text.prefix(2000)), kind: .chat, replyTo: lastAgent?.id)
         m.inReplyToProposal = proposalId
+        if !attachments.isEmpty { m.attachments = Array(attachments.prefix(ChatAttachmentStore.maxPerMessage)) }
         outbox.append(m); persistOutbox()
         return await post(m)
     }

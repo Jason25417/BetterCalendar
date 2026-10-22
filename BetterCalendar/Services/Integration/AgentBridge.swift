@@ -35,6 +35,7 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     func writeAtomic(_ data: Data, to relative: String) throws {
         let url = root.appendingPathComponent(relative)
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
     }
 

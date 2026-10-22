@@ -38,6 +38,8 @@ struct AgentChatView: View {
     /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
     var focusId: UUID? = nil
     @State private var draft = ""
+    @State private var attachments: [ChatAttachment] = []   // W36
+    @State private var composerStatus: String?
     @State private var visible = false
     /// 从气泡「在顶部等你拍板」点过来要闪一下的置顶卡（短暂高亮后清空）。
     @State private var flashPinnedId: UUID?
@@ -186,9 +188,12 @@ struct AgentChatView: View {
                     Label("回提案「\(proposals.proposals.first { $0.id == pid }?.title ?? "…")」", systemImage: "arrowshape.turn.up.left")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                Text(m.text)
-                    .textSelection(.enabled)
-                    .padding(10).background(theme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                ForEach(m.attachments ?? []) { a in ChatAttachmentView(attachment: a) }   // W36
+                if !m.text.isEmpty {
+                    Text(m.text)
+                        .textSelection(.enabled)
+                        .padding(10).background(theme.accent.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                }
                 userStatus(m)
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -276,6 +281,9 @@ struct AgentChatView: View {
     // MARK: 输入
 
     private var inputBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+        if let s = composerStatus { Text(s).font(.caption).foregroundStyle(.secondary) }
+        ChatAttachmentStrip(attachments: $attachments)
         HStack(alignment: .bottom, spacing: 8) {
             TextField("跟智能体说一句", text: $draft, axis: .vertical)
                 .lineLimit(1...5)
@@ -290,21 +298,23 @@ struct AgentChatView: View {
                     if wasEmpty, !isEmpty { FeatureUsage.begin(.agentChatSend) }
                     if !wasEmpty, isEmpty { FeatureUsage.abandonIfOpen(.agentChatSend) }
                 }
+            ChatComposerTools(text: $draft, attachments: $attachments, status: $composerStatus)
             Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                 .buttonStyle(.borderless)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && attachments.isEmpty)
                 .keyboardShortcut(.return, modifiers: .command)
                 .accessibilityIdentifier("bc.chat.send")
+        }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     private func send() {
-        let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let text = draft, files = attachments
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return }
         FeatureUsage.complete(.agentChatSend, "智能体页")
-        draft = ""   // complete 已关掉开头，清空不会记成没做完
-        Task { await chat.send(text) }
+        draft = ""; attachments = []; composerStatus = nil   // complete 已关掉开头，清空不会记成没做完
+        Task { await chat.send(text, attachments: files) }
     }
 }
 

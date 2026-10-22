@@ -105,7 +105,16 @@ extension AgentBridgeIO {
             if let rid = m.replyTo, let prior = chat.messages.first(where: { $0.id == rid }) {
                 payload["inReplyTo"] = ["id": rid.uuidString, "kind": prior.kind.rawValue, "text": String(prior.text.prefix(200))]
             }
-            var summary = "Jason 在对话里说：\(m.text.prefix(80))"
+            // W36：附件——原文件放进桥接目录（Claude Code 能直接看图），连同端侧抽出的文字一起写进事件
+            if let files = m.attachments, !files.isEmpty {
+                var paths: [UUID: String] = [:]
+                for a in files where ChatAttachmentStore.exists(a) {
+                    let rel = "chat/attachments/\(a.id.uuidString).\(a.ext)"
+                    if let data = try? Data(contentsOf: ChatAttachmentStore.url(for: a)), (try? io.writeAtomic(data, to: rel)) != nil { paths[a.id] = rel }
+                }
+                payload["attachments"] = ChatAttachmentStore.agentPayload(files, paths: paths)
+            }
+            var summary = "Jason 在对话里说：\(m.text.prefix(80))" + ((m.attachments?.isEmpty ?? true) ? "" : "（附 \(m.attachments!.count) 个图片 / 文件）")
             // W10：审批的第三种回应——Jason 没点批准/拒绝，而是对这个提案回了一句。
             if let pid = m.inReplyToProposal {
                 payload["inReplyToProposal"] = proposalReplyContext(pid, proposals: proposals, now: now)

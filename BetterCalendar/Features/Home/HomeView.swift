@@ -94,6 +94,8 @@ struct HomeView: View {
     @State private var showTraceSheet = false      // 变更痕迹二层 sheet（E5d）
     @State private var showDevLog = false          // W16：🐞 日志页（工具栏入口）
     @State private var sayText = ""                // 底部「跟智能体说一句」
+    @State private var sayAttachments: [ChatAttachment] = []   // W36：图片 / 文件
+    @State private var sayStatus: String?
     @FocusState private var sayFocused: Bool
     @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W16「开发者选项」
     /// W23：今天页用时间轴（日用版默认关；关着 = W19 卡片列表原样）。
@@ -717,6 +719,9 @@ struct HomeView: View {
     // MARK: ④ 跟智能体说一句
 
     private var sayBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+        if let s = sayStatus { Text(s).font(.caption).foregroundStyle(.secondary) }
+        ChatAttachmentStrip(attachments: $sayAttachments)
         HStack(alignment: .bottom, spacing: 8) {
             TextField(deps.agentChat == nil ? "智能体还没接上" : "跟智能体说一句（比如：明天上午排三小时写论文）",
                       text: $sayText, axis: .vertical)
@@ -733,25 +738,27 @@ struct HomeView: View {
                     if wasEmpty, !isEmpty { FeatureUsage.begin(.todaySayToAgent) }
                     if !wasEmpty, isEmpty { FeatureUsage.abandonIfOpen(.todaySayToAgent) }
                 }
+            if deps.agentChat != nil { ChatComposerTools(text: $sayText, attachments: $sayAttachments, status: $sayStatus) }
             Button(action: sendToAgent) {
                 Label("发给智能体", systemImage: "arrow.up.circle.fill").labelStyle(.iconOnly).font(.title2)
             }
             .buttonStyle(.borderless)
-            .disabled(deps.agentChat == nil || sayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(deps.agentChat == nil || (sayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sayAttachments.isEmpty))
             .accessibilityIdentifier("bc.today.say.send")
+        }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(theme.bg)
     }
 
     private func sendToAgent() {
-        let text = sayText
-        guard let chat = deps.agentChat, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let text = sayText, files = sayAttachments
+        guard let chat = deps.agentChat, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return }
         FeatureUsage.complete(.todaySayToAgent)   // 先关开头，下面清空输入框不算没做完
-        sayText = ""
+        sayText = ""; sayAttachments = []; sayStatus = nil
         sayFocused = false
         deps.router.selectedTab = .chat   // 回复与提案都在「智能体」页
-        Task { await chat.send(text) }
+        Task { await chat.send(text, attachments: files) }
     }
 
     // MARK: 工具栏（U6：只放本页主务需要的；无字图标只留强约定的设置齿轮）

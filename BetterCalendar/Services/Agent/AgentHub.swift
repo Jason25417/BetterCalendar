@@ -129,10 +129,11 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         let iso = ISO8601DateFormatter()
         var payload: [String: Any] = ["messageId": m.id.uuidString, "text": m.text, "device": m.deviceLabel, "saidAt": iso.string(from: m.createdAt)]
         if let handledNote { payload["handledBy"] = handledNote }
+        if let files = m.attachments, !files.isEmpty { payload["attachments"] = ChatAttachmentStore.agentPayload(files) }   // W36
         if let rid = m.replyTo, let prior = chat.messages.first(where: { $0.id == rid }) {
             payload["inReplyTo"] = ["id": rid.uuidString, "kind": prior.kind.rawValue, "text": String(prior.text.prefix(200))]
         }
-        var summary = "Jason 在对话里说：\(m.text.prefix(80))"
+        var summary = "Jason 在对话里说：\(m.text.prefix(80))" + ((m.attachments?.isEmpty ?? true) ? "" : "（附 \(m.attachments!.count) 个图片 / 文件）")
         if let pid = m.inReplyToProposal {
             let proposals = builtin.tools.proposals.proposals
             payload["inReplyToProposal"] = AgentChatBridgeStep.proposalReplyContext(pid, proposals: proposals, now: now())
