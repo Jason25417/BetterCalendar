@@ -67,6 +67,7 @@ final class AppContainer {
     let changeTraces = ChangeTraceStore()      // 变更痕迹（E5b 数据层：直写绿的配套义务，UI=E5d）
     let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
+    let speech: WhisperKitTranscriber?         // W38 端侧语音（Whisper）：全 App 一个模型；测试环境为 nil（只用苹果听写）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
     let sentinel: SentinelEngine?                  // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（Mac；测试环境为 nil）
@@ -402,6 +403,17 @@ final class AppContainer {
         let builtinTools = BuiltinAgentToolbox(proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory,
                                                deviceLabel: ProposalDevice.label,
                                                context: TestHost.isActive ? { [:] } : { await context.snapshot() })
+        // W38：端侧 Whisper——开关开着就在后台下载 / 准备（昂贵网络等 Wi-Fi）；状态在设置页看得到
+        if TestHost.isActive {
+            self.speech = nil
+        } else {
+            let speech = WhisperKitTranscriber()
+            speech.prepare()
+            self.speech = speech
+            #if DEBUG
+            DevWhisperSelfTest.runIfRequested(speech)
+            #endif
+        }
         let deepSeek = DeepSeekClient(apiKey: { TestHost.isActive ? nil : KeychainStore.loadAPIKey(account: DeepSeekClient.keychainAccount) })
         let builtinAgent = BuiltinAgentRuntime(model: deepSeek, tools: builtinTools, usage: BuiltinAgentUsageStore())
         builtinAgent.deviceLabel = ProposalDevice.label

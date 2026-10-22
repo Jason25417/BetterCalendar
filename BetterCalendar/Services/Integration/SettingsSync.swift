@@ -59,6 +59,8 @@ enum SettingsSync {
         "agent.sharedMemory.v1",               // 智能体共享记忆（属于角色，各实现共用；≤6000 字）
         "agent.builtin.dailyBudgetUSD",        // 内置智能体每日预算（稳定性上限；每台设备各自按它记账）
         "agent.builtin.model",                 // 内置智能体用哪个 DeepSeek 模型
+        // —— W38（2026-10-22）——
+        "voice.whisper.enabled",               // 端侧语音（Whisper）开关：属于人；模型各台各自下载（设备类，不同步）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

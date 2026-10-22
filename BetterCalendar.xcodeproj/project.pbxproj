@@ -10,6 +10,7 @@
 		B5317EEA2FF4A5C6008A96E1 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B5317EE92FF4A5C6008A96E1 /* WidgetKit.framework */; };
 		B5317EEC2FF4A5C6008A96E1 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B5317EEB2FF4A5C6008A96E1 /* SwiftUI.framework */; };
 		B5317EFD2FF4A5C7008A96E1 /* BetterCalendarWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B5317EE72FF4A5C6008A96E1 /* BetterCalendarWidgetsExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B5AA0E012FF9000000000001 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = B5AA0E032FF9000000000003 /* WhisperKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -126,6 +127,7 @@
 		B5590C8F2FF29322008C3840 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				B5AA0E012FF9000000000001 /* WhisperKit in Frameworks */,
 			);
 		};
 		B5590C9C2FF29323008C3840 /* Frameworks */ = {
@@ -212,6 +214,9 @@
 				B5590C942FF29322008C3840 /* BetterCalendar */,
 			);
 			name = BetterCalendar;
+			packageProductDependencies = (
+				B5AA0E032FF9000000000003 /* WhisperKit */,
+			);
 			productName = BetterCalendar;
 			productReference = B5590C922FF29322008C3840 /* BetterCalendar.app */;
 			productType = "com.apple.product-type.application";
@@ -293,6 +298,9 @@
 			);
 			mainGroup = B5590C892FF29322008C3840;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B5AA0E022FF9000000000002 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B5590C932FF29322008C3840 /* Products */;
 			projectDirPath = "";
@@ -970,6 +978,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B5AA0E022FF9000000000002 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/argmax-oss-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 1.1.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B5AA0E032FF9000000000003 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B5AA0E022FF9000000000002 /* XCRemoteSwiftPackageReference "argmax-oss-swift" */;
+			productName = WhisperKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = B5590C8A2FF29322008C3840 /* Project object */;
 	validationLevel = 1;
