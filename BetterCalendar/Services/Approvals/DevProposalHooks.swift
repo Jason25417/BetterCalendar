@@ -41,6 +41,7 @@ import Foundation
         on("w34seed") { [weak items] center in if let items { await DevW34SelfTest.seed(center: center, items: items) } }
         on("w34run") { [weak items] center in if let items { await DevW34SelfTest.run(center: center, items: items) } }
         on("w34undo") { center in await DevW34SelfTest.undoYours(center: center) }
+        on("w34dump") { center in await DevW34SelfTest.dump(center: center) }
         on("w34clean") { [weak items] _ in if let items { await DevW34SelfTest.clean(items: items) } }
         DevLog.shared.info("多端审批·钩子", "开发钩子已安装（\(prefix)test|approve|decline|refresh|w34seed|w34run|w34undo|w34clean）")
     }

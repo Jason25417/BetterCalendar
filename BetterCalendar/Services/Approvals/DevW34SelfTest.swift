@@ -27,10 +27,14 @@ import Foundation
         let store = EKEventStore()
         func iso(_ d: Date) -> String { ISO8601DateFormatter().string(from: d) }
         func submit(_ a: [String: Any], title: String, reason: String, escalation: String?, labelSuffix: String = "", lifetime: TimeInterval = 3 * 3600) async {
+            // BC_DEV_W34_ONLY=<标题片段>：只发标题含它的卡（补测单项用）
+            if let only = ProcessInfo.processInfo.environment["BC_DEV_W34_ONLY"], !only.isEmpty, !title.contains(only) { return }
             let id = UUID()
             do {
-                let action = try AgentBridgeIO.action(from: a, proposalId: id, targetDevice: center.deviceId)
-                let p = await center.submit(ProposalDraft(id: id, origin: .agent, originLabel: label + labelSuffix, targetDeviceId: center.deviceId,
+                // BC_DEV_W34_ANY_DEVICE=1：不指定执行设备 = 在哪台批就在哪台执行（Mac 建数据、在 iPhone 上批）
+                let target: String? = ProcessInfo.processInfo.environment["BC_DEV_W34_ANY_DEVICE"] == "1" ? nil : center.deviceId
+                let action = try AgentBridgeIO.action(from: a, proposalId: id, targetDevice: target)
+                let p = await center.submit(ProposalDraft(id: id, origin: .agent, originLabel: label + labelSuffix, targetDeviceId: target,
                                                           title: title, changes: [], reason: reason, action: action, experiment: false,
                                                           lifetime: lifetime, escalation: escalation))
                 log.append(p == nil ? "✗ \(title)：\(center.lastError ?? "?")" : "✓ \(title)")
@@ -171,6 +175,16 @@ import Foundation
             log.append(ok ? "✓ 撤销 \(p.cardHeadline)：\(after?.undoNote ?? "")" : "✗ 撤销 \(p.cardHeadline)：\(center.lastError ?? "?")")
         }
         finish(log.isEmpty ? ["没有可撤销的自测提案"] : log)
+    }
+
+    /// 自测提案的当前状态写进容器里的 w34-dump.txt（日志落盘有延迟时用；命令行直接读）。
+    static func dump(center: ProposalCenter) async {
+        await center.refresh()
+        let lines = center.proposals.filter { $0.originLabel.hasPrefix(label) }.sorted { $0.createdAt < $1.createdAt }.map { p in
+            "\(p.createdAt.formatted(date: .omitted, time: .standard)) \(p.effectiveState(at: .now).rawValue) 决定端=\(p.decidedByDeviceId?.prefix(8) ?? "-") \(p.cardHeadline) | \(p.resultNote ?? "") | 撤销：\(p.undoneAt != nil ? "已撤销 " + (p.undoNote ?? "") : center.undoBlockedReason(p) ?? "可撤销")"
+        }
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("BetterCalendar/w34-dump.txt")
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
     private static func finish(_ log: [String]) {
