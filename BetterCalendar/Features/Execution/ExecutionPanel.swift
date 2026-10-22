@@ -60,7 +60,7 @@ struct ExecutionPanel: View {
     var body: some View {
         Group {
         if model.usesCanonicalTiming, let tasks = model.canonicalTasks {
-            BridgeTaskPanel(model: tasks, planned: model.planned)
+            BridgeTaskPanel(model: tasks, planned: model.planned, compact: compactCapable, onOpenMain: compactCapable ? Self.openMain : nil)
         } else {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -114,6 +114,15 @@ struct ExecutionPanel: View {
                     model.resolveRunRestore(choice)
                 })
         }
+    }
+
+    /// W37：菜单栏小窗里「打开 BetterCalendar」。
+    static var openMain: () -> Void {
+        #if os(macOS)
+        { AppLifecycle.shared?.showMainWindow() }
+        #else
+        {}
+        #endif
     }
 
     /// 离开时长的口语描述（恢复对话框用）。
