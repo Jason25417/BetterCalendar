@@ -26,6 +26,10 @@
 	<string>执行你的专注快捷指令；读取前台浏览器当前页的网址和标题，记进「设备活动记录（实验）」给 BetterCalendar 智能体当情境（设置里可暂停或关闭）。</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>把你的计划写入一个专用「计划」日历(Dev)并读回做对比</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>按麦克风说话时，把你说的话转成文字发给智能体（只在你按下时录音）。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>把你说的话转成文字（优先在本机识别）。</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>用 Face ID 解锁你的日记（隐私锁）</string>
 	<key>NSAlarmKitUsageDescription</key>

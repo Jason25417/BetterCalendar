@@ -679,8 +679,6 @@
 				INFOPLIST_FILE = BetterCalendar/Info.plist;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "番茄钟开始/结束时，执行你自己创建的快捷指令来开关系统专注模式";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "按麦克风说话时，把你说的话转成文字发给智能体（只在你按下时录音）";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "把你说的话转成文字（优先在本机识别）";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
@@ -728,8 +726,6 @@
 				INFOPLIST_FILE = BetterCalendar/Info.plist;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "番茄钟开始/结束时，执行你自己创建的快捷指令来开关系统专注模式";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "按麦克风说话时，把你说的话转成文字发给智能体（只在你按下时录音）";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "把你说的话转成文字（优先在本机识别）";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
@@ -778,8 +774,6 @@
 				INFOPLIST_FILE = BetterCalendar/Info.plist;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "番茄钟开始/结束时，执行你自己创建的快捷指令来开关系统专注模式";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "把你的计划写入一个专用「计划」日历(Dev)并读回做对比";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "按麦克风说话时，把你说的话转成文字发给智能体（只在你按下时录音）";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "把你说的话转成文字（优先在本机识别）";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "把要紧事写进提醒事项并带提前提醒";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
