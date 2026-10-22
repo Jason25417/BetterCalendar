@@ -30,12 +30,13 @@ struct ChatComposerTools: View {
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("发图片")
+            .simultaneousGesture(TapGesture().onEnded { ChatAttachmentStore.warmUpTextRecognition() })
             .onChange(of: photos) { _, items in
                 guard !items.isEmpty else { return }
                 Task { await addPhotos(items); photos = [] }
             }
             #endif
-            Button { importing = true } label: { Image(systemName: "paperclip").font(.title3) }
+            Button { ChatAttachmentStore.warmUpTextRecognition(); importing = true } label: { Image(systemName: "paperclip").font(.title3) }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("发文件或图片")
                 .accessibilityIdentifier("bc.chat.attach")
@@ -75,7 +76,8 @@ struct ChatComposerTools: View {
 
     private func addFiles(_ urls: [URL]) async {
         guard room > 0 else { status = "一条消息最多 \(ChatAttachmentStore.maxPerMessage) 个附件"; return }
-        status = "正在处理附件…"
+        status = urls.contains(where: { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true })
+            ? "正在处理附件（图片要识别里面的字，第一次可能要十几秒）…" : "正在处理附件…"
         var problems: [String] = []
         for url in urls.prefix(room) {
             do { attachments.append(try await ChatAttachmentStore.prepare(fileAt: url)) }
@@ -87,7 +89,7 @@ struct ChatComposerTools: View {
     #if os(iOS)
     private func addPhotos(_ items: [PhotosPickerItem]) async {
         guard room > 0 else { status = "一条消息最多 \(ChatAttachmentStore.maxPerMessage) 个附件"; return }
-        status = "正在处理图片…"
+        status = "正在处理图片（要识别里面的字，第一次可能要十几秒）…"
         var problems: [String] = []
         for item in items.prefix(room) {
             do {

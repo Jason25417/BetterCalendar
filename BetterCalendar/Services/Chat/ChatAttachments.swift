@@ -116,6 +116,19 @@ nonisolated enum ChatAttachmentStore {
         return nil
     }
 
+    /// 真机自测 10-22：一个进程里第一次文字识别要加载模型，Mac 上 15–18 秒（之后同一张图 0.1 秒）——选完图半天不出来像坏了。
+    /// 点回形针 / 相册时先在后台拿一张空白图跑一遍预热，挑文件的那几秒正好盖住加载。每个进程只跑一次。
+    static func warmUpTextRecognition() { _ = warmUp }
+    private static let warmUp: Void = {
+        guard !TestHost.isActive else { return }
+        Task.detached(priority: .utility) {
+            guard let ctx = CGContext(data: nil, width: 64, height: 64, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+            if let blank = ctx.makeImage() { _ = await recognizeText(blank) }
+        }
+    }()
+
     static func recognizeText(_ image: CGImage) async -> String? {
         await withCheckedContinuation { c in
             let request = VNRecognizeTextRequest { req, _ in

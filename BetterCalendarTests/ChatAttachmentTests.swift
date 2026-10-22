@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import CoreText
 import Foundation
 import ImageIO
 import Testing
@@ -45,6 +46,23 @@ import UniformTypeIdentifiers
         let props = try #require(CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any])
         #expect((props[kCGImagePropertyPixelWidth] as? Int) == 2048)
         #expect(ChatAttachmentStore.agentPayload([a]).first?["text"] as? String == "（图片里没识别出文字）")
+    }
+
+    /// 真机自测 10-22：Mac 上用回形针选一张带字的 PNG 加不上（文本文件可以、iPhone 相册可以）。走的是 prepare(fileAt:) 的图片分支 + 真有字的识别。
+    @Test func pickedImageFileWithTextBecomesAnAttachment() async throws {
+        let ctx = try #require(CGContext(data: nil, width: 900, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                         space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 900, height: 300))
+        let line = CFAttributedStringCreate(nil, "MATH 5529 Friday 10:00" as CFString,
+                                            [kCTFontAttributeName: CTFontCreateWithName("Helvetica" as CFString, 64, nil)] as CFDictionary)!
+        ctx.textPosition = CGPoint(x: 30, y: 120); CTLineDraw(CTLineCreateWithAttributedString(line), ctx)
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("课表-\(UUID().uuidString).png")
+        let dest = try #require(CGImageDestinationCreateWithURL(src as CFURL, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, try #require(ctx.makeImage()), nil); #expect(CGImageDestinationFinalize(dest))
+
+        let a = try await ChatAttachmentStore.prepare(fileAt: src)
+        #expect(a.kind == .image && a.ext == "jpg" && ChatAttachmentStore.exists(a))
+        #expect(a.extractedText?.contains("5529") == true)
     }
 
     @Test func attachmentOnlyMessagesSendAndReachTheAgentEvent() async throws {
