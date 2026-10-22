@@ -18,6 +18,8 @@ import Foundation
 @MainActor enum DevW34SelfTest {
     static let containerTitle = "【BC 自测】W34"
     static let label = "BetterCalendar 智能体（自测）"
+    /// Jason 10-22 同意：没有本地账户时可以在 iCloud 里建这一本测试日历 / 列表（测完整本删掉）。启动带 BC_DEV_W34_ICLOUD=1 才放开。
+    static var allowICloud: Bool { ProcessInfo.processInfo.environment["BC_DEV_W34_ICLOUD"] == "1" }
 
     /// 建测试数据 + 发一组 W34 提案。结果（含每一步失败原因）写 DevLog 并 print。
     static func seed(center: ProposalCenter, items: LongTaskStore) async {
@@ -157,6 +159,20 @@ import Foundation
         finish(log)
     }
 
+    /// 撤销本次自测里已执行的「你的日程 / 提醒」提案（真 EventKit），逐份记下撤销结果或不能撤销的原因。
+    static func undoYours(center: ProposalCenter) async {
+        var log: [String] = []
+        await center.refresh()
+        for p in center.proposals where p.originLabel.hasPrefix(label) && p.state == .applied && p.action.ownership == .yours && p.undoneAt == nil {
+            if let why = center.undoBlockedReason(p) { log.append("— \(p.cardHeadline)：不能撤销（\(why)）"); continue }
+            center.clearError()
+            let ok = await center.undo(p.id)
+            let after = center.proposals.first { $0.id == p.id }
+            log.append(ok ? "✓ 撤销 \(p.cardHeadline)：\(after?.undoNote ?? "")" : "✗ 撤销 \(p.cardHeadline)：\(center.lastError ?? "?")")
+        }
+        finish(log.isEmpty ? ["没有可撤销的自测提案"] : log)
+    }
+
     private static func finish(_ log: [String]) {
         let text = log.joined(separator: "\n")
         DevLog.shared.info("W34 自测走查", text)
@@ -168,7 +184,7 @@ import Foundation
         var log: [String] = []
         let store = EKEventStore()
         for type in [EKEntityType.event, .reminder] {
-            for c in store.calendars(for: type) where c.title == containerTitle && c.source.sourceType == .local {
+            for c in store.calendars(for: type) where c.title == containerTitle && (c.source.sourceType == .local || allowICloud) {
                 do { try store.removeCalendar(c, commit: true); log.append("删 \(type == .event ? "日历" : "提醒列表")「\(c.title)」") }
                 catch { log.append("✗ 删「\(c.title)」：\(error.localizedDescription)") }
             }
@@ -190,9 +206,13 @@ import Foundation
 
     /// 本地账户里的测试日历 / 提醒列表（没有就建；本地账户不存在 = 拒绝，不退到 iCloud）。
     private static func localCalendar(_ store: EKEventStore, for type: EKEntityType) throws -> EKCalendar {
-        if let c = store.calendars(for: type).first(where: { $0.title == containerTitle && $0.source.sourceType == .local }) { return c }
-        guard let local = store.sources.first(where: { $0.sourceType == .local }) else {
-            throw NSError(domain: "W34", code: 2, userInfo: [NSLocalizedDescriptionKey: "这台设备没有本地（不同步）账户，不在 iCloud 里建测试数据"])
+        if let c = store.calendars(for: type).first(where: { $0.title == containerTitle && ($0.source.sourceType == .local || allowICloud) }) { return c }
+        let iCloud = !allowICloud ? nil : type == .reminder ? store.defaultCalendarForNewReminders()?.source
+            : store.sources.first(where: { $0.sourceType == .calDAV && $0.title == "iCloud" })
+        // 本地账户只在它真能放这种条目时用（Mac 的本地账户常常不支持提醒事项）
+        let localOK = store.sources.first(where: { $0.sourceType == .local && !$0.calendars(for: type).isEmpty })
+        guard let local = localOK ?? iCloud else {
+            throw NSError(domain: "W34", code: 2, userInfo: [NSLocalizedDescriptionKey: "这台设备没有本地（不同步）账户，不在 iCloud 里建测试数据（Jason 同意后带 BC_DEV_W34_ICLOUD=1 启动）"])
         }
         let c = EKCalendar(for: type, eventStore: store)
         c.title = containerTitle; c.source = local

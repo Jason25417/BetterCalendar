@@ -40,8 +40,9 @@ import Foundation
         // W34 发版前自测（见 DevW34SelfTest）
         on("w34seed") { [weak items] center in if let items { await DevW34SelfTest.seed(center: center, items: items) } }
         on("w34run") { [weak items] center in if let items { await DevW34SelfTest.run(center: center, items: items) } }
+        on("w34undo") { center in await DevW34SelfTest.undoYours(center: center) }
         on("w34clean") { [weak items] _ in if let items { await DevW34SelfTest.clean(items: items) } }
-        DevLog.shared.info("多端审批·钩子", "开发钩子已安装（\(prefix)test|approve|decline|refresh|w34seed|w34run|w34clean）")
+        DevLog.shared.info("多端审批·钩子", "开发钩子已安装（\(prefix)test|approve|decline|refresh|w34seed|w34run|w34undo|w34clean）")
     }
 
     private static func dump(_ center: ProposalCenter, after name: String) {
