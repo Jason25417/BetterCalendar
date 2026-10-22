@@ -15,7 +15,7 @@ import Foundation
     static let prefix = "com.jason.BetterCalendar.dev.proposal."
     private static var tokens: [NSObjectProtocol] = []
 
-    static func install(center: ProposalCenter) {
+    static func install(center: ProposalCenter, items: LongTaskStore? = nil) {
         guard tokens.isEmpty else { return }
         let hub = DistributedNotificationCenter.default()
         func on(_ name: String, _ action: @escaping @MainActor (ProposalCenter) async -> Void) {
@@ -37,7 +37,11 @@ import Foundation
         on("approve") { center in if let p = center.pending.first { await center.decide(p.id, .approve, actorLabel: "Claude（替 Jason 批准）") } }
         on("decline") { center in if let p = center.pending.first { await center.decide(p.id, .decline, actorLabel: "Claude（替 Jason 拒绝）") } }
         on("refresh") { center in await center.refresh() }
-        DevLog.shared.info("多端审批·钩子", "开发钩子已安装（\(prefix)test|approve|decline|refresh）")
+        // W34 发版前自测（见 DevW34SelfTest）
+        on("w34seed") { [weak items] center in if let items { await DevW34SelfTest.seed(center: center, items: items) } }
+        on("w34run") { [weak items] center in if let items { await DevW34SelfTest.run(center: center, items: items) } }
+        on("w34clean") { [weak items] _ in if let items { await DevW34SelfTest.clean(items: items) } }
+        DevLog.shared.info("多端审批·钩子", "开发钩子已安装（\(prefix)test|approve|decline|refresh|w34seed|w34run|w34clean）")
     }
 
     private static func dump(_ center: ProposalCenter, after name: String) {

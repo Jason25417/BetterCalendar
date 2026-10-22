@@ -290,9 +290,19 @@ final class AppContainer {
                     print("BC_DEV_SEED proposal=\(p?.id.uuidString ?? "FAIL \(center?.lastError ?? "")") message=\(m?.id.uuidString ?? "FAIL \(messages?.lastError ?? "")")")
                 }
             }
+            // W34 发版前自测：BC_DEV_SEED_W34=1 建本机本地测试数据 + 发一组提案；BC_DEV_CLEAN_W34=1 只清理（见 DevW34SelfTest）
+            if ProcessInfo.processInfo.environment["BC_DEV_SEED_W34"] == "1" {
+                Task { [weak center = proposals, weak items = longTasks] in
+                    try? await Task.sleep(for: .seconds(4))
+                    if let center, let items { await DevW34SelfTest.seed(center: center, items: items) }
+                }
+            }
+            if ProcessInfo.processInfo.environment["BC_DEV_CLEAN_W34"] == "1" {
+                Task { [weak items = longTasks] in if let items { await DevW34SelfTest.clean(items: items) } }
+            }
             #endif
             #if DEBUG && os(macOS)
-            DevProposalHooks.install(center: proposals)
+            DevProposalHooks.install(center: proposals, items: longTasks)
             #endif
         }
         nativeApprovals.start()
