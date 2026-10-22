@@ -39,6 +39,8 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     // —— 你的消息：Mac 桥接转交给智能体的回执 ——
     var forwardedAt: Date?
     var forwardedByDeviceId: String?
+    /// W35：谁接手、为什么（如「Mac 没在线，由 iPhone 回复」）；nil = 正常接手。只在 JSON 载荷里，不改 CloudKit schema。
+    var forwardedNote: String? = nil
     // —— 智能体的消息：是否弹通知（Mac 导入时按打扰规则决定一次，各端照办）——
     var delivery: Delivery?
     var suppressReason: String?
@@ -60,6 +62,26 @@ nonisolated protocol AgentChatTransport: Sendable {
     func post(_ message: AgentChatMessage) async throws
     func fetchRecent() async throws -> [AgentChatMessage]
     func save(_ message: AgentChatMessage) async throws
+    /// W35：认领你的一句话交给某台设备的智能体——先到先得（iCloud 条件写），两台设备不会都回。
+    func claim(_ id: UUID, deviceId: String, note: String?, at: Date) async throws -> AgentChatClaim
+}
+
+nonisolated enum AgentChatClaim: Equatable, Sendable {
+    /// 本机认领成功（返回写好回执的那份）。
+    case won(AgentChatMessage)
+    /// 已被认领（可能就是本机之前认领的）。
+    case taken(AgentChatMessage)
+}
+
+extension AgentChatTransport {
+    /// 测试替身的缺省实现（不是原子的；真实现见 CloudKitAgentChatStore / InMemoryAgentChatTransport）。
+    func claim(_ id: UUID, deviceId: String, note: String?, at: Date) async throws -> AgentChatClaim {
+        guard var m = try await fetchRecent().first(where: { $0.id == id }) else { throw URLError(.fileDoesNotExist) }
+        if m.forwardedAt != nil { return .taken(m) }
+        m.forwardedAt = at; m.forwardedByDeviceId = deviceId; m.forwardedNote = note
+        try await save(m)
+        return .won(m)
+    }
 }
 
 /// 测试与 test host 用：两个 AgentChatCenter 共用一个实例 = 模拟两台设备经 iCloud 中转。
@@ -73,6 +95,13 @@ actor InMemoryAgentChatTransport: AgentChatTransport {
     }
     func fetchRecent() async throws -> [AgentChatMessage] { store.values.sorted { $0.createdAt < $1.createdAt } }
     func save(_ message: AgentChatMessage) async throws { store[message.id] = message }
+    func claim(_ id: UUID, deviceId: String, note: String?, at: Date) async throws -> AgentChatClaim {
+        guard var m = store[id] else { throw URLError(.fileDoesNotExist) }
+        if m.forwardedAt != nil { return .taken(m) }
+        m.forwardedAt = at; m.forwardedByDeviceId = deviceId; m.forwardedNote = note
+        store[id] = m
+        return .won(m)
+    }
 }
 
 /// 与提案同一个 iCloud 私有分区（BCApprovals），记录类型 BCChatMessage。整条消息以 JSON 存 payload（唯一真相），
@@ -152,6 +181,26 @@ actor CloudKitAgentChatStore: AgentChatTransport {
         case let .failure(error)?: throw error
         case nil: break
         }
+    }
+
+    /// W35：条件写（ifServerRecordUnchanged）——服务器上已有回执就不覆盖；撞上别人同时写 → 重读再判。
+    func claim(_ id: UUID, deviceId: String, note: String?, at: Date) async throws -> AgentChatClaim {
+        let rid = recordID(id)
+        for _ in 0..<3 {
+            let fresh = try await db.record(for: rid)
+            guard var m = decode(fresh) else { throw URLError(.cannotDecodeContentData) }
+            if m.forwardedAt != nil { known[rid] = fresh; return .taken(m) }
+            m.forwardedAt = at; m.forwardedByDeviceId = deviceId; m.forwardedNote = note
+            try encode(m, into: fresh)
+            let (results, _) = try await db.modifyRecords(saving: [fresh], deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+            switch results[rid] {
+            case let .success(saved)?: known[rid] = saved; return .won(m)
+            case let .failure(error)? where (error as? CKError)?.code == .serverRecordChanged: continue
+            case let .failure(error)?: throw error
+            case nil: return .won(m)
+            }
+        }
+        throw URLError(.cannotLoadFromNetwork)   // 连续三次撞上别人的写入：交给下一轮再判（不会两边都回）
     }
 }
 
@@ -256,6 +305,8 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     var recentProactiveDeliveries: () -> [Date] = { [] }
     /// W20：你的一句话已存进 iCloud（本机说的）→ 组装点接到当前智能体（内置智能体在本机进程内接手）。
     var onUserMessageStored: ((AgentChatMessage) -> Void)?
+    /// W35：每次从 iCloud 拉到对话后（组装点接到当前智能体：Mac 据此接手 iPhone 上说的话）。
+    var onRefreshed: (() -> Void)?
     private var shownHere: Set<UUID>
     /// 本机已写过 user_message 事件的消息（回执写 iCloud 失败时也不重复唤醒智能体）。
     private var forwardedHere: Set<UUID>
@@ -360,6 +411,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         }
         defaults.set(Array(shownHere.map(\.uuidString).suffix(300)), forKey: Self.shownKey)
         if isViewing { await markAllRead() } else { recomputeUnread() }
+        onRefreshed?()
     }
 
     /// 对话页出现 / 消失（含回后台）时调用。
@@ -390,11 +442,42 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         return messages.filter { $0.author == .user && $0.forwardedAt == nil && !forwardedHere.contains($0.id) && $0.createdAt > cutoff }
     }
 
+    /// W35：内置智能体接手前先认领（先到先得）。true = 本机接手；false = 别的设备已接手；nil = 没写成（原因可见，下一轮再试）。
+    func claimForAgent(_ id: UUID, note: String? = nil) async -> Bool? {
+        do {
+            switch try await transport.claim(id, deviceId: deviceId, note: note, at: now()) {
+            case let .won(m):
+                replaceLocal(m)
+                forwardedHere.insert(id)
+                defaults.set(Array(forwardedHere.map(\.uuidString).suffix(300)), forKey: Self.forwardedKey)
+                record(.system, "BetterCalendar（\(deviceLabel)）", "chat.claimed", m, note ?? "本机智能体接手")
+                return true
+            case let .taken(m):
+                replaceLocal(m)
+                return m.forwardedByDeviceId == deviceId
+            }
+        } catch {
+            fail("认领这句话失败（下一轮再试）", error)
+            return nil
+        }
+    }
+
+    private func replaceLocal(_ m: AgentChatMessage) {
+        if let i = messages.firstIndex(where: { $0.id == m.id }) { messages[i] = m }
+    }
+
+    /// W35：你那句话下面的一行说明——不是在说话的那台设备上接手、或说话的设备自己兜底时写明。
+    func handlerNote(_ m: AgentChatMessage) -> String? {
+        let latest = messages.first { $0.id == m.id } ?? m
+        return latest.forwardedNote
+    }
+
     /// 已写好 user_message 事件：先本机记下（防重复唤醒），再把回执写回 iCloud 让各端显示「智能体已收到」。
     func markForwarded(_ id: UUID) async {
         forwardedHere.insert(id)
         defaults.set(Array(forwardedHere.map(\.uuidString).suffix(300)), forKey: Self.forwardedKey)
         guard var m = messages.first(where: { $0.id == id }) else { return }
+        if m.forwardedAt != nil, m.forwardedByDeviceId == deviceId { return }   // W35：认领时已写过回执
         m.forwardedAt = now(); m.forwardedByDeviceId = deviceId
         do {
             try await transport.save(m)
@@ -463,8 +546,8 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     func label(for status: AgentChatUserStatus) -> String {
         guard activeAgent() == .builtin else { return status.label }
         switch status {
-        case .waitingForMac(false): return "已存到 iCloud，等内置智能体接手"
-        case .waitingForMac(true): return "内置智能体还没接手：说这句话的那台设备要打开 BetterCalendar（看 设置 → 智能体 的状态）"
+        case .waitingForMac(false): return "已存到 iCloud，等智能体接手（Mac 开着时由 Mac 回复）"
+        case .waitingForMac(true): return "还没有设备接手：Mac 没开时，说这句话的那台设备要打开 BetterCalendar（看 设置 → 智能体 的状态）"
         case .withAgent(true): return "内置智能体超过 10 分钟没回复：看 设置 → 智能体 的状态"
         case .expired: return "没送到：超过 6 小时都没被接手，不再处理（可以重新说一次）"
         default: return status.label

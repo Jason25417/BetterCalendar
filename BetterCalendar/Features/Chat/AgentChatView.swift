@@ -223,7 +223,8 @@ struct AgentChatView: View {
     @ViewBuilder private func userStatus(_ m: AgentChatMessage) -> some View {
         let status = chat.status(of: m)
         HStack(spacing: 8) {
-            Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(chat.label(for: status))")
+            Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(chat.label(for: status))"
+                 + (chat.handlerNote(m).map { " · \($0)" } ?? ""))   // W35：由哪台设备回复（Mac 没在线时写明）
                 .font(.caption2).foregroundStyle(status.isProblem ? .orange : .secondary)
                 .multilineTextAlignment(.trailing)
             if case .failed = status {

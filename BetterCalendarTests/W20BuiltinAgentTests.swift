@@ -65,11 +65,12 @@ import Testing
         let hub: AgentHub
     }
 
-    func env(rules: PreauthRuleStore? = nil, isPhone: Bool = false, now: Date = W20BuiltinAgentTests.sunday) -> Env {
+    func env(rules: PreauthRuleStore? = nil, isPhone: Bool = false, now: Date = W20BuiltinAgentTests.sunday,
+             chatTransport: InMemoryAgentChatTransport = InMemoryAgentChatTransport(), clock sharedClock: Clock? = nil) -> Env {
         let d = UserDefaults(suiteName: "bc-w20-" + UUID().uuidString)!
-        let clock = Clock(now)
-        let chat = AgentChatCenter(transport: InMemoryAgentChatTransport(), notifier: SilentAgentChatNotifier(), ledger: MemoryOperationLedger(),
-                                   deviceId: "mac", deviceLabel: "Mac", defaults: d, now: { clock.now })
+        let clock = sharedClock ?? Clock(now)
+        let chat = AgentChatCenter(transport: chatTransport, notifier: SilentAgentChatNotifier(), ledger: MemoryOperationLedger(),
+                                   deviceId: isPhone ? "iphone" : "mac", deviceLabel: isPhone ? "iPhone" : "Mac", defaults: d, now: { clock.now })
         var off = AttentionSettings(); off.enabled = false; off.capsOn = true
         chat.attention = { off }
         let center: ProposalCenter
@@ -455,17 +456,15 @@ import Testing
 
     // MARK: 事件（进程内送达）
 
-    @Test func ownUserMessagesAreHandledHereOthersAreNot() async throws {
+    @Test func macHandlesItsOwnMessagesOnce() async throws {
         let e = env()
         e.selection.select(.builtin)
         let mine = try #require(await e.chat.send("挪到明天"))
-        e.hub.userMessageStored(mine)
+        await e.hub.pumpMessages()
         #expect(e.runtime.queuedCount == 1)
-        e.hub.pump()   // 同一条不重复排
+        await e.hub.pumpMessages()   // 同一条不重复排
         #expect(e.runtime.queuedCount == 1)
-        var other = mine; other.id = UUID(); other.deviceId = "iphone"
-        e.hub.userMessageStored(other)   // 别的设备说的由那台设备处理
-        #expect(e.runtime.queuedCount == 1)
+        #expect(e.chat.messages.first { $0.id == mine.id }?.forwardedByDeviceId == "mac")
         e.model.script = [FakeModel.call("reply_jason", ["text": "好，我来排", "replyTo": mine.id.uuidString]), FakeModel.done()]
         await e.runtime.processPending()
         #expect(e.chat.status(of: mine) == .replied)
@@ -544,8 +543,67 @@ import Testing
         let e = env()
         e.chat.activeAgent = { .builtin }
         let said = try #require(await e.chat.send("hi"))
-        #expect(e.chat.label(for: e.chat.status(of: said)).contains("内置智能体"))
+        #expect(e.chat.label(for: e.chat.status(of: said)) == "已存到 iCloud，等智能体接手（Mac 开着时由 Mac 回复）")   // W35
         e.chat.activeAgent = { .claudeCode }
         #expect(e.chat.label(for: e.chat.status(of: said)).contains("Mac"))
+    }
+
+    // MARK: W35 iPhone 说的话交给 Mac 跑；Mac 没在线 → iPhone 自己跑并写明
+
+    @Test func macTakesWhatWasSaidOnIPhoneAndIPhoneStaysQuiet() async throws {
+        let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
+        let mac = env(chatTransport: transport, clock: clock), phone = env(isPhone: true, chatTransport: transport, clock: clock)
+        mac.selection.select(.builtin); phone.selection.select(.builtin)
+        let said = try #require(await phone.chat.send("刚到家，想休息一小时"))
+        phone.hub.userMessageStored(said)   // iPhone：先等 Mac（测试里不排定时检查）
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 0)
+        await mac.chat.refresh()
+        await mac.hub.pumpMessages()
+        #expect(mac.runtime.queuedCount == 1)
+        #expect(mac.chat.handlerNote(said) == "由 Mac 接手")
+        clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace + 5)
+        await phone.chat.refresh()
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 0)   // Mac 已接手：iPhone 不再回
+        mac.model.script = [FakeModel.call("reply_jason", ["text": "好，休息吧", "replyTo": said.id.uuidString]), FakeModel.done()]
+        await mac.runtime.processPending()
+        await phone.chat.refresh()
+        #expect(phone.chat.status(of: said) == .replied)
+        let event = try #require(mac.model.requests.first?[1].content)
+        #expect(event.contains(said.id.uuidString) && event.contains("由 Mac 接手"))
+    }
+
+    @Test func iPhoneAnswersItselfAfterTheGraceWhenMacIsAwayAndSaysSo() async throws {
+        let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
+        let phone = env(isPhone: true, chatTransport: transport, clock: clock)
+        phone.selection.select(.builtin)
+        let said = try #require(await phone.chat.send("今晚还要做什么"))
+        clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace - 5)
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 0)   // 还在等 Mac
+        clock.now = clock.now.addingTimeInterval(10)
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 1)
+        #expect(phone.chat.handlerNote(said)?.contains("Mac 没在线") == true && phone.chat.handlerNote(said)?.contains("iPhone") == true)
+        // Mac 之后才上线：已被 iPhone 认领，不会再回一遍
+        let mac = env(chatTransport: transport, clock: clock)
+        mac.selection.select(.builtin)
+        await mac.chat.refresh()
+        await mac.hub.pumpMessages()
+        #expect(mac.runtime.queuedCount == 0)
+        #expect(mac.chat.handlerNote(said)?.contains("Mac 没在线") == true)   // 各端看到同一行说明
+    }
+
+    @Test func claimIsFirstComeFirstServed() async throws {
+        let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
+        let a = env(chatTransport: transport, clock: clock), b = env(isPhone: true, chatTransport: transport, clock: clock)
+        let m = try #require(await b.chat.send("x"))
+        await a.chat.refresh()
+        #expect(await a.chat.claimForAgent(m.id, note: "由 Mac 接手") == true)
+        #expect(await b.chat.claimForAgent(m.id, note: "不该写进去") == false)
+        #expect(await a.chat.claimForAgent(m.id) == true)   // 本机之前认领的：仍算本机
+        await b.chat.refresh()
+        #expect(b.chat.handlerNote(m) == "由 Mac 接手")
     }
 }

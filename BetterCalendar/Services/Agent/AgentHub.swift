@@ -79,19 +79,56 @@ extension AgentBridge: ClaudeCodeAgentChannel {
 
     // MARK: 内置智能体自己发现的事件
 
-    /// 你在本机说了一句（已存进 iCloud）。别的设备上说的由那台设备的内置智能体接手（谁说谁处理，不会两台都回）。
+    // MARK: 谁来回你这句话（W35，Jason 2026-10-22）
+    // iPhone / iPad 上说的话交给 Mac 的内置智能体跑（Mac 不会被系统收回后台时间）；说完等 handoffGrace，
+    // Mac 还没接手 = 说话的那台自己跑，并在那句话下面写明「Mac 没在线，由 iPhone 回复」。
+    // 先到先得：接手前在 iCloud 上条件写「已转交」回执（AgentChatCenter.claimForAgent），两台设备不会都回。
+
+    /// iPhone 说完等 Mac 接手的时间（Mac 开着时，推送 + 认领通常几秒内完成）。
+    static let handoffGrace: TimeInterval = 20
+    /// 生产：iPhone 说完一句后，过 handoffGrace 再查一次（组装点注入）；测试不注入，手动 `await pumpMessages()`。
+    var scheduleHandoffCheck: (TimeInterval) -> Void = { _ in }
+
+    /// 你在本机说了一句（已存进 iCloud）。Mac：马上认领接手；iPhone：先等 Mac。
     func userMessageStored(_ m: AgentChatMessage) {
         guard active == .builtin, m.author == .user, m.deviceId == builtin.tools.chat.deviceId else { return }
-        enqueueUserMessage(m)
+        if isPhone { scheduleHandoffCheck(Self.handoffGrace) } else { Task { [weak self] in await self?.take(m, fallback: false) } }
+    }
+
+    /// 等着接手的你的消息：Mac 接所有设备说的（先到先得）；iPhone 只接自己说的、且等满 handoffGrace 还没人接的。
+    func pumpMessages() async {
+        guard active == .builtin else { return }
+        let chat = builtin.tools.chat
+        for m in chat.pendingForwards() {
+            if isPhone {
+                guard m.deviceId == chat.deviceId, now().timeIntervalSince(m.createdAt) >= Self.handoffGrace else { continue }
+                await take(m, fallback: true)
+            } else {
+                await take(m, fallback: false)
+            }
+        }
     }
 
     private var enqueuedMessages: Set<UUID> = []
+    private var claiming: Set<UUID> = []
 
-    private func enqueueUserMessage(_ m: AgentChatMessage) {
+    private func take(_ m: AgentChatMessage, fallback: Bool) async {
+        guard !enqueuedMessages.contains(m.id), claiming.insert(m.id).inserted else { return }
+        defer { claiming.remove(m.id) }
+        let chat = builtin.tools.chat
+        let note: String? = fallback ? "Mac 没在线（等了 \(Int(Self.handoffGrace)) 秒没接手），由 \(chat.deviceLabel) 回复"
+            : m.deviceId != chat.deviceId ? "由 \(chat.deviceLabel) 接手" : nil
+        guard await chat.claimForAgent(m.id, note: note) == true else { return }
+        if fallback { DevLog.shared.warn("内置智能体", "Mac 没在 \(Int(Self.handoffGrace)) 秒内接手你在 \(m.deviceLabel) 说的话，改由本机回复") }
+        enqueueUserMessage(m, handledNote: note)
+    }
+
+    private func enqueueUserMessage(_ m: AgentChatMessage, handledNote: String? = nil) {
         guard enqueuedMessages.insert(m.id).inserted else { return }
         let chat = builtin.tools.chat
         let iso = ISO8601DateFormatter()
         var payload: [String: Any] = ["messageId": m.id.uuidString, "text": m.text, "device": m.deviceLabel, "saidAt": iso.string(from: m.createdAt)]
+        if let handledNote { payload["handledBy"] = handledNote }
         if let rid = m.replyTo, let prior = chat.messages.first(where: { $0.id == rid }) {
             payload["inReplyTo"] = ["id": rid.uuidString, "kind": prior.kind.rawValue, "text": String(prior.text.prefix(200))]
         }
@@ -108,8 +145,7 @@ extension AgentBridge: ClaudeCodeAgentChannel {
     /// 回前台 / 定时 / 刷新后：补上本机还没接手的你的消息、本机提案的结论、晚间复盘。只在内置智能体接通时做。
     func pump() {
         guard active == .builtin else { return }
-        let chat = builtin.tools.chat
-        for m in chat.pendingForwards() where m.deviceId == chat.deviceId { enqueueUserMessage(m) }
+        Task { [weak self] in await self?.pumpMessages() }
         proposalsRefreshed()
         if let day = dueEveningReview() {
             var payload = eveningFacts()

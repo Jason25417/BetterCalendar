@@ -486,6 +486,15 @@ final class AppContainer {
             AgentChatBridgeStep.eveningFacts(done: execution?.done.map { ($0.title, $0.start, $0.end) } ?? [])
         }
         agentChat.onUserMessageStored = { [weak agentHub] m in agentHub?.userMessageStored(m) }
+        // W35：Mac 拉到对话就看看有没有 iPhone 上说的、等它接手的话；iPhone 说完过 20 秒再查一次（Mac 没接手就自己回）
+        agentChat.onRefreshed = { [weak agentHub] in if agentHub?.isPhone == false { agentHub?.pump() } }
+        agentHub.scheduleHandoffCheck = { [weak agentHub, weak agentChat] delay in
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(delay + 1))
+                await agentChat?.refresh()
+                await agentHub?.pumpMessages()
+            }
+        }
         proposals.didRefresh = { [weak agentHub] in agentHub?.proposalsRefreshed() }
         agentChat.activeAgent = { [weak agentSelection] in agentSelection?.kind ?? .claudeCode }
         _ = NotificationCenter.default.addObserver(forName: SettingsSync.didSyncRemotely, object: nil, queue: .main) { [weak agentSelection, weak agentMemory] _ in
