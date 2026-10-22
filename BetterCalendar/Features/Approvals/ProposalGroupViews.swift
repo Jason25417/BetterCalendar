@@ -105,7 +105,6 @@ struct ProposalBatchCard: View {
                 .controlSize(.small)
                 .onAppear { FeatureUsage.seen(.proposalCard) }
             }
-            Text("每项各自留底、各自通知智能体；批准的这一批之后可以一键整批撤销。").font(.caption2).foregroundStyle(.secondary)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

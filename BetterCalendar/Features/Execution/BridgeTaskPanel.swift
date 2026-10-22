@@ -6,19 +6,22 @@ struct BridgeTaskPanel: View {
     @State private var title = ""
     @State private var mode = BridgeTaskSession.Mode.light
     @State private var focusMinutes = 25
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W37：交付版信息披露（关 = 只留要你处理的）
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("正在做什么").font(.headline)
                 Spacer()
-                Button("刷新") { Task { await model.refresh() } }.disabled(model.busy)
+                if developerOptions { Button("刷新") { Task { await model.refresh() } }.disabled(model.busy) }
             }
-            Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
-                .font(.caption).foregroundStyle(.secondary)
+            if developerOptions {
+                Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if model.sessions.isEmpty {
                 // W31b：读失败了就别再说「等待」——原因在下面橙字里
-                Text(!model.isStale ? "目前没有正在计时的事项" : model.lastError == nil ? "等待读取计时状态" : "还没读到计时状态")
+                Text(!model.isStale ? (developerOptions ? "目前没有正在计时的事项" : "现在没在计时") : model.lastError == nil ? "等待读取计时状态" : "还没读到计时状态")
                     .foregroundStyle(.secondary)
             }
             ForEach(model.sessions) { session in
@@ -37,9 +40,9 @@ struct BridgeTaskPanel: View {
                     }.disabled(!model.canSubmit)
                 }.padding(.vertical, 4)
             }
-            if model.isStale { Text(model.hasEverRead ? "尚未取得最新状态；以上只是最后一次同步的记录。" : "本机还没从云端读到过计时状态。")
+            if model.isStale { Text(model.hasEverRead ? "还没同步到最新状态，上面是上次的记录" : "计时状态还没同步到这台设备")
                     .font(.caption).foregroundStyle(.orange) }
-            if model.hasMore { Text("这里只展示前 100 项；其余计时记录仍保留。")
+            if model.hasMore, developerOptions { Text("这里只展示前 100 项；其余计时记录仍保留。")
                     .font(.caption).foregroundStyle(.secondary) }
             Divider()
             Picker("计时方式", selection: $mode) {
@@ -48,8 +51,10 @@ struct BridgeTaskPanel: View {
             }.pickerStyle(.segmented)
             if mode == .pomodoro {
                 Stepper("专注 \(focusMinutes) 分钟", value: $focusMinutes, in: 1...240)
-                Text("到时静默转为正计时，保留已工作时长；不自动结束或休息。")
-                    .font(.caption).foregroundStyle(.secondary)
+                if developerOptions {
+                    Text("到时静默转为正计时，保留已工作时长；不自动结束或休息。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             TextField("开始什么事项", text: $title)
                 .onSubmit { startNew() }
@@ -66,11 +71,14 @@ struct BridgeTaskPanel: View {
                     }.disabled(!model.canSubmit)
                 }
             }
-            Text(model.message).font(.caption).foregroundStyle(model.lastError == nil ? Color.secondary : Color.orange)
+            // 交付版：同步顺利的状态话不说，只在出错时说一句（失败照常可见）
+            if developerOptions || model.lastError != nil {
+                Text(model.message).font(.caption).foregroundStyle(model.lastError == nil ? Color.secondary : Color.orange)
+            }
             if model.reviewCount > 0 { Text("\(model.reviewCount) 条冲突或未接受的请求已保留；不会自动覆盖新状态。")
                     .font(.caption).foregroundStyle(.orange) }
             // W31b：开发期通道开关默认收起（原来常驻在今天页顶部，iPhone 上把时间轴挤得只剩两三百 pt）；设置里「共享计时（开发期）」仍完整
-            if let control = SharedTimerBackendControl.current {
+            if developerOptions, let control = SharedTimerBackendControl.current {
                 DisclosureGroup { SharedTimerBackendPanel(control: control) } label: {
                     Text("计时通道（开发期）").font(.caption).foregroundStyle(.secondary)
                 }

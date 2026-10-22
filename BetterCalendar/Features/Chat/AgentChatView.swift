@@ -40,6 +40,8 @@ struct AgentChatView: View {
     @State private var draft = ""
     @State private var attachments: [ChatAttachment] = []   // W36
     @State private var composerStatus: String?
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W37：交付版信息披露（关 = 只留要你处理的）
+
     @State private var visible = false
     /// 从气泡「在顶部等你拍板」点过来要闪一下的置顶卡（短暂高亮后清空）。
     @State private var flashPinnedId: UUID?
@@ -216,7 +218,7 @@ struct AgentChatView: View {
                 if !resolved.isEmpty { ResolvedProposalsGroup(center: proposals, proposals: resolved, focusId: focusId) }
                 HStack(spacing: 6) {
                     Text(m.createdAt.formatted(date: .omitted, time: .shortened))
-                    if m.delivery == .suppressed, let why = m.suppressReason { Text("· 没弹通知：\(why)") }
+                    if developerOptions, m.delivery == .suppressed, let why = m.suppressReason { Text("· 没弹通知：\(why)") }
                 }
                 .font(.caption2).foregroundStyle(.secondary)
             }
@@ -229,7 +231,7 @@ struct AgentChatView: View {
         let status = chat.status(of: m)
         HStack(spacing: 8) {
             Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(chat.label(for: status))"
-                 + (chat.handlerNote(m).map { " · \($0)" } ?? ""))   // W35：由哪台设备回复（Mac 没在线时写明）
+                 + (chat.handlerNote(m).flatMap { developerOptions || $0.contains("没在线") ? " · \($0)" : nil } ?? ""))   // W35：Mac 没在线时写明；平常由谁接手只给开发者看
                 .font(.caption2).foregroundStyle(status.isProblem ? .orange : .secondary)
                 .multilineTextAlignment(.trailing)
             if case .failed = status {

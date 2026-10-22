@@ -766,7 +766,7 @@ struct HomeView: View {
     @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
             // W16：🐞 日志入口常驻（开发期失败可见，U13 豁免）；短暂问题只在这里计数
-            IssueLogButton(isPresented: $showDevLog)
+            if developerOptions { IssueLogButton(isPresented: $showDevLog) }   // W37：交付版收起（要你处理的仍走横幅；日志在 设置 → 开发者选项）
             #if os(macOS)
             if developerOptions {
                 Button { openWindow(id: "algo-bench") } label: { Label("算法试验台", systemImage: "flask") }

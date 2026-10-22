@@ -16,6 +16,7 @@ struct ProposalCard: View {
     @Bindable var center: ProposalCenter
     let proposal: Proposal
     var highlighted = false
+    @AppStorage(DeveloperSettings.key) private var developerOptions = DeveloperSettings.defaultValue   // W37：交付版信息披露（关 = 只留要你处理的）
 
     var body: some View {
         let p = proposal
@@ -49,7 +50,7 @@ struct ProposalCard: View {
                 if let reply = p.userReply { Text("你回了一句：「\(reply.text)」").font(.caption) }
                 undoRow
             }
-            ProposalDetails(proposal: p, state: state)
+            if developerOptions { ProposalDetails(proposal: p, state: state) }   // 调试 / 追溯信息只给开发者
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
