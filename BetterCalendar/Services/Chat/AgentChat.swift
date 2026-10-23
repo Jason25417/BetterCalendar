@@ -43,12 +43,20 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     var forwardedNote: String? = nil
     /// W36：你发的图片 / 文件（元数据；本体在 ChatAttachmentStore，经 iCloud 资源字段同步）。nil = 没有。
     var attachments: [ChatAttachment]? = nil
+    /// W40：智能体这句话用到的网页来源（默认收起，点「来源」才展开）。只在 JSON 载荷里，不改 CloudKit schema。nil = 没有。
+    var sources: [ChatSource]? = nil
     // —— 智能体的消息：是否弹通知（Mac 导入时按打扰规则决定一次，各端照办）——
     var delivery: Delivery?
     var suppressReason: String?
 }
 
 /// 智能体回复（桥接文件 chat/<uuid>.json 解析后）。
+/// W40：一条网页来源（智能体用 web_search / read_webpage 查到、回复里引用的）。
+nonisolated struct ChatSource: Codable, Equatable, Sendable, Hashable {
+    var title: String
+    var url: String
+}
+
 nonisolated struct AgentChatReplyDraft: Sendable, Equatable {
     var id: UUID
     var text: String
@@ -58,6 +66,8 @@ nonisolated struct AgentChatReplyDraft: Sendable, Equatable {
     var parentRef: String?
     /// W20：留底里写哪个实现说的（nil = 经桥接的 Claude Code，沿用「BetterCalendar 智能体」）。
     var originLabel: String? = nil
+    /// W40：这句话用到的网页来源。
+    var sources: [ChatSource] = []
 }
 
 nonisolated protocol AgentChatTransport: Sendable {
@@ -511,6 +521,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         var m = AgentChatMessage(id: draft.id, createdAt: at, author: .agent, deviceId: deviceId, deviceLabel: deviceLabel,
                                  text: draft.text, kind: draft.kind, replyTo: draft.replyTo, proposalIds: draft.proposalIds,
                                  parentRef: draft.parentRef, delivery: .delivered)
+        m.sources = draft.sources.isEmpty ? nil : draft.sources
         if case let .suppress(why) = AgentChatNotifyPolicy.evaluate(draft, settings: attention(), at: at, recentProactive: proactive) {
             m.delivery = .suppressed; m.suppressReason = why
         }

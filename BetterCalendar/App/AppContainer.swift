@@ -399,10 +399,11 @@ final class AppContainer {
         // 测试 host：不读真快照、不接网络（单测各自注入假模型）；当前智能体照常读设置（默认 Claude Code）。
         let agentSelection = AgentSelection()
         let agentMemory = AgentSharedMemoryStore()
+        let deepSeek = DeepSeekClient(apiKey: { TestHost.isActive ? nil : KeychainStore.loadAPIKey(account: DeepSeekClient.keychainAccount) })
         let builtinTools = BuiltinAgentToolbox(proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory,
                                                deviceLabel: ProposalDevice.label,
+                                               web: TestHost.isActive ? nil : deepSeek,   // W40：搜索 / 读网页走同一个 DeepSeek key
                                                context: TestHost.isActive ? { [:] } : { await context.snapshot() })
-        let deepSeek = DeepSeekClient(apiKey: { TestHost.isActive ? nil : KeychainStore.loadAPIKey(account: DeepSeekClient.keychainAccount) })
         let builtinAgent = BuiltinAgentRuntime(model: deepSeek, tools: builtinTools, usage: BuiltinAgentUsageStore())
         builtinAgent.deviceLabel = ProposalDevice.label
         builtinAgent.autoStart = !TestHost.isActive

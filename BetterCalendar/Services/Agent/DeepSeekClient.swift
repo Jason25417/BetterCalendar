@@ -100,14 +100,19 @@ nonisolated struct DeepSeekClient: Sendable {
     }
 
     func complete(model: String, messages: [DeepSeekMessage], tools: Data, maxTokens: Int = 2048) async throws -> DeepSeekCompletion {
+        try Self.parse(try await post(Self.endpoint, body: try Self.requestBody(model: model, messages: messages, tools: tools, maxTokens: maxTokens)))
+    }
+
+    /// 带 key 的 POST（对话 / 搜索 / 读网页共用）：没 key、超时、连不上、非 2xx 都抛 DeepSeekError（带给人看的原因和办法）。
+    private func post(_ url: URL, body: Data) async throws -> Data {
         guard let key = apiKey()?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty else {
             throw DeepSeekError(kind: .noKey, message: "还没有填 DeepSeek API key", hint: "到 设置 → 智能体 粘贴 DeepSeek API key，或把当前智能体切回 Claude Code")
         }
-        var req = URLRequest(url: Self.endpoint, timeoutInterval: requestTimeout)
+        var req = URLRequest(url: url, timeoutInterval: requestTimeout)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try Self.requestBody(model: model, messages: messages, tools: tools, maxTokens: maxTokens)
+        req.httpBody = body
         let data: Data, response: URLResponse
         do { (data, response) = try await transport(req) } catch is CancellationError {
             throw CancellationError()
@@ -118,7 +123,38 @@ nonisolated struct DeepSeekClient: Sendable {
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else { throw Self.httpError(status: status, data: data) }
-        return try Self.parse(data)
+        return data
+    }
+
+    // MARK: W40 搜索 / 读网页（DeepSeek 官方 Search / Fetch，2026-10-17 上线；每 1000 次成功调用约 $0.75）
+
+    static let searchEndpoint = URL(string: "https://api.deepseek.com/v1/tools/search")!
+    static let fetchEndpoint = URL(string: "https://api.deepseek.com/v1/tools/fetch")!
+
+    /// 搜索请求体（纯函数）：不要正文（need_content=false，摘要够用、省 token）；不传 localization（IP 定位）——
+    /// 要按地点搜就把地点写进 query（他在提问里说了 / 同意了才写）。
+    static func searchBody(query: String, count: Int) throws -> Data {
+        try SafeJSON.data(withJSONObject: ["query": query, "count": count, "need_content": false], options: [.sortedKeys])
+    }
+
+    static func parseSearch(_ data: Data) throws -> [WebSearchResult] {
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rows = o["results"] as? [[String: Any]] else {
+            throw DeepSeekError(kind: .decode, message: "DeepSeek 搜索返回的格式看不懂", hint: "这是 App 的问题；请告诉开发会话")
+        }
+        return rows.compactMap { r in
+            guard let url = r["url"] as? String else { return nil }
+            func text(_ k: String) -> String { (r[k] as? String) ?? "" }
+            return WebSearchResult(title: text("title"), url: url, snippet: text("snippet"), summary: text("summary"),
+                                   site: r["site_name"] as? String, date: r["date"] as? String,
+                                   score: (r["rerank_score"] as? NSNumber)?.doubleValue)
+        }
+    }
+
+    static func parseFetch(_ data: Data) throws -> WebPage {
+        guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let content = o["content"] as? String else {
+            throw DeepSeekError(kind: .decode, message: "DeepSeek 读网页返回的格式看不懂", hint: "这是 App 的问题；请告诉开发会话")
+        }
+        return WebPage(title: (o["title"] as? String) ?? "", content: content)
     }
 
     static func httpError(status: Int, data: Data) -> DeepSeekError {
@@ -155,6 +191,37 @@ nonisolated struct DeepSeekClient: Sendable {
                                       toolCalls: (calls?.isEmpty ?? true) ? nil : calls)
         return DeepSeekCompletion(message: message, finishReason: choice["finish_reason"] as? String, usage: usage,
                                   model: (o["model"] as? String) ?? "")
+    }
+}
+
+nonisolated struct WebSearchResult: Equatable, Sendable {
+    var title: String
+    var url: String
+    var snippet: String
+    var summary: String
+    var site: String?
+    var date: String?
+    var score: Double?
+}
+
+nonisolated struct WebPage: Equatable, Sendable {
+    var title: String
+    var content: String
+}
+
+/// W40：内置智能体查网页的能力缝（实现 = DeepSeekClient；测试用假的）。
+nonisolated protocol BuiltinAgentWeb: Sendable {
+    func search(query: String, count: Int) async throws -> [WebSearchResult]
+    func fetch(url: String) async throws -> WebPage
+}
+
+extension DeepSeekClient: BuiltinAgentWeb {
+    func search(query: String, count: Int) async throws -> [WebSearchResult] {
+        try Self.parseSearch(try await post(Self.searchEndpoint, body: try Self.searchBody(query: query, count: count)))
+    }
+
+    func fetch(url: String) async throws -> WebPage {
+        try Self.parseFetch(try await post(Self.fetchEndpoint, body: try SafeJSON.data(withJSONObject: ["url": url])))
     }
 }
 

@@ -47,8 +47,21 @@ extension AgentBridgeIO {
             guard let s = v as? String, let u = UUID(uuidString: s) else { throw AgentBridgeError.invalid("proposalIds 里有不是 UUID 的项") }
             return u
         }
-        return AgentChatReplyDraft(id: id, text: text, kind: kind, replyTo: replyTo, proposalIds: ids,
-                                   parentRef: o["parentEventId"] as? String)
+        // W40：网页来源（≤8 条，每条 {title, url}，只收 http / https）
+        let rawSources = (o["sources"] as? [Any]) ?? []
+        guard rawSources.count <= 8 else { throw AgentBridgeError.invalid("一条回复最多带 8 个来源") }
+        let sources = try rawSources.enumerated().map { i, v -> ChatSource in
+            guard let s = v as? [String: Any], let url = (s["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let scheme = URL(string: url)?.scheme?.lowercased(), ["http", "https"].contains(scheme), url.count <= 2000 else {
+                throw AgentBridgeError.invalid("sources[\(i)] 要有 http / https 的 url")
+            }
+            let title = ((s["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return ChatSource(title: String((title.isEmpty ? url : title).prefix(120)), url: url)
+        }
+        var draft = AgentChatReplyDraft(id: id, text: text, kind: kind, replyTo: replyTo, proposalIds: ids,
+                                        parentRef: o["parentEventId"] as? String)
+        draft.sources = sources
+        return draft
     }
 
     /// 最近 40 条对话（只在内容变化时重写）。卡片附提案最新状态，智能体不必再翻 results/。

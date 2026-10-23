@@ -208,6 +208,7 @@ struct AgentChatView: View {
                 Text(m.text)
                     .textSelection(.enabled)
                     .padding(10).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                if let sources = m.sources, !sources.isEmpty { ChatSourcesView(sources: sources) }   // W40：默认收起
                 let pinnedIds = Set(proposals.pending.map(\.id))   // 与置顶区同一份判定
                 let cards = AgentChatCard.resolve(m.proposalIds, in: proposals.proposals)
                 // W34：待确认的一批只留一行指路；已有结论的全部收进一个小箭头（压缩条 → 完整卡）
