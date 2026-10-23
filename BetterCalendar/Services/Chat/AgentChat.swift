@@ -51,7 +51,7 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
 }
 
 /// 智能体回复（桥接文件 chat/<uuid>.json 解析后）。
-/// W40：一条网页来源（智能体用 web_search / read_webpage 查到、回复里引用的）。
+/// W40：一条网页来源（智能体用 search_internet / read_webpage 查到、回复里引用的）。
 nonisolated struct ChatSource: Codable, Equatable, Sendable, Hashable {
     var title: String
     var url: String

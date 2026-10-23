@@ -25,21 +25,21 @@ import Foundation
     /// W39：这一轮被 App 拒收的提案数（≥3 = 打转迹象，自动上报）。
     var rejections = 0
     var reports = 0
-    /// W40：这一轮查网页的次数（web_search + read_webpage，上限 5）。
+    /// W40：这一轮查网页的次数（search_internet + read_webpage，上限 5）。
     var webCalls = 0
 }
 
 @MainActor final class BuiltinAgentToolbox {
     static let toolNames: Set<String> = ["read_context", "propose_change", "read_proposals", "reply_jason", "notify_jason",
                                          "read_messages", "read_chat", "update_shared_memory", "report_problem",
-                                         "web_search", "read_webpage"]
+                                         "search_internet", "read_webpage"]
 
     let proposals: ProposalCenter
     let chat: AgentChatCenter
     let messages: AgentMessageCenter?
     let memory: AgentSharedMemoryStore
     private let context: () async -> [String: Any]
-    /// W40：查网页（nil = 这台没接，web_search / read_webpage 如实说用不了）。
+    /// W40：查网页（nil = 这台没接，search_internet / read_webpage 如实说用不了）。
     private let web: (any BuiltinAgentWeb)?
     private let now: () -> Date
     private let deviceLabel: String
@@ -98,7 +98,8 @@ import Foundation
             case "read_chat": return try await readChat(limit(args, 20, max: 40))
             case "update_shared_memory": return try updateMemory(args)
             case "report_problem": return try reportProblem(args, ledger: ledger)
-            case "web_search": return try await webSearch(args, ledger: ledger)
+            // ⚠️ 不能叫 web_search：那是 DeepSeek 内置工具的保留名，deepseek-flash 上会被忽略（10-23 自测实锤：模型看不到它）
+            case "search_internet": return try await webSearch(args, ledger: ledger)
             case "read_webpage": return try await readWebpage(args, ledger: ledger)
             default: return fail(name, "没有这个工具（可用：\(Self.toolNames.sorted().joined(separator: " / "))）", ledger)
             }
@@ -127,7 +128,7 @@ import Foundation
     private func webSearch(_ args: [String: Any], ledger: BuiltinAgentRunLedger) async throws -> String {
         guard let web else { throw AgentBridgeError.invalid("这台设备没接网页搜索") }
         let unknown = Set(args.keys).subtracting(["query", "count"])
-        guard unknown.isEmpty else { throw AgentBridgeError.invalid("web_search 不认识的参数：\(unknown.sorted().joined(separator: ", "))") }
+        guard unknown.isEmpty else { throw AgentBridgeError.invalid("search_internet 不认识的参数：\(unknown.sorted().joined(separator: ", "))") }
         guard let query = (args["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty, query.count <= 128 else {
             throw AgentBridgeError.invalid("query 必填，1–128 字")
         }

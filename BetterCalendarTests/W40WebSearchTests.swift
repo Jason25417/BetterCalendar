@@ -28,23 +28,23 @@ extension W20BuiltinAgentTests {
         let e = env()
         let tools = webTools(e)
         let ledger = BuiltinAgentRunLedger()
-        let s = object(await tools.call("web_search", arguments: #"{"query":"CSE 2331 midterm date site:osu.edu","count":3}"#, eventId: nil, ledger: ledger))
+        let s = object(await tools.call("search_internet", arguments: #"{"query":"CSE 2331 midterm date site:osu.edu","count":3}"#, eventId: nil, ledger: ledger))
         let rows = try #require(s["results"] as? [[String: Any]])
         #expect(s["ok"] as? Bool == true && rows.count == 3 && (rows[0]["summary"] as? String)?.count == 800)
         let page = object(await tools.call("read_webpage", arguments: #"{"url":"https://example.edu/syllabus"}"#, eventId: nil, ledger: ledger))
         #expect((page["content"] as? String)?.hasSuffix("（后面省略）") == true)
         let bad = object(await tools.call("read_webpage", arguments: #"{"url":"file:///etc/passwd"}"#, eventId: nil, ledger: ledger))
         #expect(bad["ok"] as? Bool == false)
-        let long = object(await tools.call("web_search", arguments: "{\"query\":\"\(String(repeating: "q", count: 129))\"}", eventId: nil, ledger: ledger))
+        let long = object(await tools.call("search_internet", arguments: "{\"query\":\"\(String(repeating: "q", count: 129))\"}", eventId: nil, ledger: ledger))
         #expect(long["ok"] as? Bool == false)
-        for _ in 0..<3 { _ = await tools.call("web_search", arguments: #"{"query":"x"}"#, eventId: nil, ledger: ledger) }
-        let sixth = object(await tools.call("web_search", arguments: #"{"query":"y"}"#, eventId: nil, ledger: ledger))
+        for _ in 0..<3 { _ = await tools.call("search_internet", arguments: #"{"query":"x"}"#, eventId: nil, ledger: ledger) }
+        let sixth = object(await tools.call("search_internet", arguments: #"{"query":"y"}"#, eventId: nil, ledger: ledger))
         #expect((sixth["error"] as? String)?.contains("5 次") == true)
     }
 
     @Test func withoutAWebConnectionToolsSaySo() async {
         let e = env()
-        let out = object(await e.tools.call("web_search", arguments: #"{"query":"x"}"#, eventId: nil, ledger: BuiltinAgentRunLedger()))
+        let out = object(await e.tools.call("search_internet", arguments: #"{"query":"x"}"#, eventId: nil, ledger: BuiltinAgentRunLedger()))
         #expect(out["ok"] as? Bool == false && (out["error"] as? String)?.contains("没接网页搜索") == true)
     }
 
