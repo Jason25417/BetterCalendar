@@ -122,7 +122,9 @@ enum PlanEditRules {
 
     /// 对**改完之后的整体布局**校验，返回每步改动前后（顺序同输入）。不通过抛 ProposalExecutionError.invalid（带给人看的原因）。
     /// planDay = 排一天：每一步都要落在这一天（新增 / 改 / 删的块在这天；挪动从这天挪出或挪进这天）。
-    static func evaluate(_ steps: [ProposalPlanStep], in c: Context, restoring: Bool = false, planDay: Date? = nil) throws -> [Resolved] {
+    /// checkLayout = false：只逐步校验、不查最终布局的重叠（给 withCascade 先拿到落点用）。
+    static func evaluate(_ steps: [ProposalPlanStep], in c: Context, restoring: Bool = false, planDay: Date? = nil,
+                         checkLayout: Bool = true) throws -> [Resolved] {
         guard !steps.isEmpty else { throw invalid("没有要改的块") }
         guard steps.count <= maxGroup else {
             throw invalid("这次要改 \(steps.count) 块，超过技术防失控上限 \(maxGroup)，疑似提案文件出错")
@@ -270,27 +272,10 @@ enum PlanEditRules {
         }
 
         guard !resolved.isEmpty else { throw invalid("列出的块都已经在那个时间了，无需挪动") }
+        guard checkLayout else { return resolved }
 
         // —— 最终整体布局 ——
-        let changedIDs = Set(resolved.map(\.step.blockID))
-        let placed = resolved.filter(\.placed).compactMap(\.after)
-        // 障碍（组外）：前台正在做的块此刻占的时间段 + 仍在「从现在起」时间线上、这次没动的块 + 这次改了属性但没动时间的块。
-        var obstacles: [(title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)] = []
-        if let a = c.active, let b = byID[a.id] { obstacles.append((b.title, a.start, max(a.end, c.now), true, false, nil)) }   // 正在做：不挪
-        let unplacedChanged = Dictionary(resolved.filter { !$0.placed }.compactMap { r in r.after.map { (r.step.blockID, $0) } },
-                                         uniquingKeysWith: { a, _ in a })
-        for b in c.blocks where b.id != c.active?.id && !isSettled(b.id) && b.end > c.now {
-            if changedIDs.contains(b.id) {
-                guard let kept = unplacedChanged[b.id] else { continue }   // 挪了 / 改了时长 / 删了：不当障碍
-                obstacles.append((kept.title, kept.start, kept.end, kept.isFixed, false, nil))
-            } else {
-                obstacles.append((b.title, b.start, b.end, b.isFixed, false, nil))
-            }
-        }
-        for o in c.occupied where o.end > o.start {
-            obstacles.append((o.title, o.start, o.end, true, true, o.linkedBlockID))
-        }
-        obstacles.sort { $0.start < $1.start }
+        let (placed, obstacles, changedIDs) = layout(resolved, in: c)
         for k in placed {
             let name = single && onlyMoves ? "" : "「\(k.title)」"
             guard let hit = obstacles.first(where: { $0.start < k.end && k.start < $0.end && !($0.mine && $0.linked == k.id) }) else { continue }
@@ -315,15 +300,70 @@ enum PlanEditRules {
         return resolved
     }
 
+    typealias Obstacle = (title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)
+
+    /// 最终布局：有新落点的块 + 组外障碍（前台正在做的块此刻占的时间段 + 仍在「从现在起」时间线上、这次没动的块
+    /// + 这次改了属性但没动时间的块 + 你的日历事件）。
+    static func layout(_ resolved: [Resolved], in c: Context) -> (placed: [ScheduledBlock], obstacles: [Obstacle], changedIDs: Set<UUID>) {
+        let changedIDs = Set(resolved.map(\.step.blockID))
+        let placed = resolved.filter(\.placed).compactMap(\.after)
+        var obstacles: [Obstacle] = []
+        if let a = c.active, let b = c.blocks.first(where: { $0.id == a.id }) { obstacles.append((b.title, a.start, max(a.end, c.now), true, false, nil)) }   // 正在做：不挪
+        let unplacedChanged = Dictionary(resolved.filter { !$0.placed }.compactMap { r in r.after.map { (r.step.blockID, $0) } },
+                                         uniquingKeysWith: { a, _ in a })
+        for b in c.blocks where b.id != c.active?.id && !c.settledIDs.contains(b.id) && b.end > c.now {
+            if changedIDs.contains(b.id) {
+                guard let kept = unplacedChanged[b.id] else { continue }   // 挪了 / 改了时长 / 删了：不当障碍
+                obstacles.append((kept.title, kept.start, kept.end, kept.isFixed, false, nil))
+            } else {
+                obstacles.append((b.title, b.start, b.end, b.isFixed, false, nil))
+            }
+        }
+        for o in c.occupied where o.end > o.start {
+            obstacles.append((o.title, o.start, o.end, true, true, o.linkedBlockID))
+        }
+        obstacles.sort { $0.start < $1.start }
+        return (placed, obstacles, changedIDs)
+    }
+
+    /// W41（Jason 2026-10-22）：智能体说「连带的交给 App 算」（提案带 cascade: true）——放不下时，把 App 算好的整组顺延
+    /// 直接并进这份提案（各自时长不变），一步提交，审批卡上逐块列出、批准后可整组挪回。算不出来（越过 4:00 / 截止、
+    /// 要动固定安排、图钉或你的日历）→ 照常拒收、原因不变。没撞上 → 原样返回。
+    static func withCascade(_ steps: [ProposalPlanStep], in c: Context) throws -> [ProposalPlanStep] {
+        do {
+            _ = try evaluate(steps, in: c)
+            return steps
+        } catch {
+            let resolved = try evaluate(steps, in: c, checkLayout: false)
+            let (placed, obstacles, changedIDs) = layout(resolved, in: c)
+            guard let moves = cascadeMoves(placed: placed, obstacles: obstacles, changedIDs: changedIDs, in: c) else { throw error }
+            let extended = steps + moves.map { .move(ProposalBlockMove(id: $0.block.id, start: $0.start, end: $0.end, expectedRevision: nil)) }
+            _ = try evaluate(extended, in: c)
+            return extended
+        }
+    }
+
     /// 撞上可挪的块时，App 算好「后面的块依次往后顺延、各自时长不变」的整组挪法，写进拒收原因
     ///（智能体照抄进同一个 moveBlocks / planDay 一步就能重提，不再一块一块试）。只是建议：越过逻辑日 4:00、越过截止、
-    /// 要动固定安排或你的日历都算不出来 → 不给（照常拒收）。
-    static func cascadeHint(placed: [ScheduledBlock], obstacles: [(title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)],
-                            changedIDs: Set<UUID>, in c: Context) -> String? {
-        let movable = c.blocks.filter { !changedIDs.contains($0.id) && !c.settledIDs.contains($0.id) && $0.id != c.active?.id
-            && $0.end > c.now && !$0.isFixed }.sorted { $0.start < $1.start }
+    /// 要动固定安排、图钉或你的日历都算不出来 → 不给（照常拒收）。
+    static func cascadeHint(placed: [ScheduledBlock], obstacles: [Obstacle], changedIDs: Set<UUID>, in c: Context) -> String? {
+        guard let moves = cascadeMoves(placed: placed, obstacles: obstacles, changedIDs: changedIDs, in: c) else { return nil }
+        let iso = ISO8601DateFormatter(); iso.timeZone = .current
+        let human = moves.map { "「\($0.block.title)」\(span($0.block.start, $0.block.end)) → \(span($0.start, $0.end))" }.joined(separator: "，")
+        let items = moves.map { "{\"blockId\":\"\($0.block.id.uuidString)\",\"start\":\"\(iso.string(from: $0.start))\",\"end\":\"\(iso.string(from: $0.end))\"}" }
+        return "App 算好的连带顺延（各自时长不变）：\(human)。要这样做就把这些和原来那几块放进同一个提案一起提（或提案 action 带 cascade: true 让 App 直接并进去），moves 追加：[\(items.joined(separator: ","))]"
+    }
+
+    /// 连带顺延的算法（cascadeHint / withCascade 共用）：后面可挪的块按时间顺序、撞上就往后推到障碍结束，时长不变。
+    /// 固定安排、图钉（你亲手放的位置）、正在做 / 做完的块、你的日历都不挪，当障碍；越过 4:00、越过截止或超过 20 块 → nil。
+    static func cascadeMoves(placed: [ScheduledBlock], obstacles: [Obstacle], changedIDs: Set<UUID>,
+                             in c: Context) -> [(block: ScheduledBlock, start: Date, end: Date)]? {
+        let candidates = c.blocks.filter { !changedIDs.contains($0.id) && !c.settledIDs.contains($0.id) && $0.id != c.active?.id
+            && $0.end > c.now && !$0.isFixed }
+        let pinned = candidates.filter { $0.isPinned(at: c.now) }
+        let movable = candidates.filter { !$0.isPinned(at: c.now) }.sorted { $0.start < $1.start }
         let movableIDs = Set(movable.map(\.id)).union(placed.map(\.id))
-        var busy = placed.map { ($0.start, $0.end) }
+        var busy = placed.map { ($0.start, $0.end) } + pinned.map { ($0.start, $0.end) }
         for o in obstacles where o.fixed || (o.mine && !(o.linked.map(movableIDs.contains) ?? false)) { busy.append((o.start, o.end)) }
         var moves: [(ScheduledBlock, Date, Date)] = []
         for b in movable {
@@ -343,10 +383,7 @@ enum PlanEditRules {
             busy.append((start, end))
         }
         guard !moves.isEmpty, moves.count <= 20 else { return nil }
-        let iso = ISO8601DateFormatter(); iso.timeZone = .current
-        let human = moves.map { "「\($0.0.title)」\(span($0.0.start, $0.0.end)) → \(span($0.1, $0.2))" }.joined(separator: "，")
-        let items = moves.map { "{\"blockId\":\"\($0.0.id.uuidString)\",\"start\":\"\(iso.string(from: $0.1))\",\"end\":\"\(iso.string(from: $0.2))\"}" }
-        return "App 算好的连带顺延（各自时长不变）：\(human)。要这样做就把这些和原来那几块放进同一个提案一起提，moves 追加：[\(items.joined(separator: ","))]"
+        return moves.map { (block: $0.0, start: $0.1, end: $0.2) }
     }
 
     /// 给人看的「改动前 → 改动后」。

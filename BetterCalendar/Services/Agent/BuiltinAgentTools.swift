@@ -20,11 +20,16 @@ import Foundation
     var proposals: [UUID] = []
     var notifications = 0
     var toolErrors: [String] = []
+    /// W39：这一轮调过的工具（名字 + 结果开头），出问题时整段进「智能体上报」，开发会话据此看它卡在哪。
+    var trail: [String] = []
+    /// W39：这一轮被 App 拒收的提案数（≥3 = 打转迹象，自动上报）。
+    var rejections = 0
+    var reports = 0
 }
 
 @MainActor final class BuiltinAgentToolbox {
     static let toolNames: Set<String> = ["read_context", "propose_change", "read_proposals", "reply_jason", "notify_jason",
-                                         "read_messages", "read_chat", "update_shared_memory"]
+                                         "read_messages", "read_chat", "update_shared_memory", "report_problem"]
 
     let proposals: ProposalCenter
     let chat: AgentChatCenter
@@ -62,6 +67,12 @@ import Foundation
 
     /// 执行一次工具调用，返回给模型的 JSON 文本。eventId = 引出它的事件（留底上下级）。
     func call(_ name: String, arguments raw: String, eventId: String?, ledger: BuiltinAgentRunLedger) async -> String {
+        let result = await dispatch(name, arguments: raw, eventId: eventId, ledger: ledger)
+        ledger.trail.append("\(name) → \(result.prefix(120))")
+        return result
+    }
+
+    private func dispatch(_ name: String, arguments raw: String, eventId: String?, ledger: BuiltinAgentRunLedger) async -> String {
         let args: [String: Any]
         do {
             let parsed = try JSONSerialization.jsonObject(with: Data((raw.isEmpty ? "{}" : raw).utf8))
@@ -80,11 +91,28 @@ import Foundation
             case "read_messages": return try readMessages(limit(args, 20, max: 50))
             case "read_chat": return try await readChat(limit(args, 20, max: 40))
             case "update_shared_memory": return try updateMemory(args)
+            case "report_problem": return try reportProblem(args, ledger: ledger)
             default: return fail(name, "没有这个工具（可用：\(Self.toolNames.sorted().joined(separator: " / "))）", ledger)
             }
         } catch {
             return fail(name, error.localizedDescription, ledger)
         }
+    }
+
+    /// W39：智能体自己上报做不到 / 规则冲突 / 看不懂的地方。只进开发日志（两端汇到 Mac 的日志目录），不通知 Jason、不进对话。
+    private func reportProblem(_ args: [String: Any], ledger: BuiltinAgentRunLedger) throws -> String {
+        let kinds = ["bug": "出错", "missing_capability": "缺能力", "rule_conflict": "规则冲突", "unclear": "没看懂", "other": "其他"]
+        guard let kind = args["kind"] as? String, let label = kinds[kind] else {
+            throw AgentBridgeError.invalid("kind 只能是 \(kinds.keys.sorted().joined(separator: " / "))")
+        }
+        guard let summary = (args["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty else {
+            throw AgentBridgeError.invalid("summary 必填：一句话说清哪里不行")
+        }
+        guard ledger.reports < 3 else { throw AgentBridgeError.invalid("这一轮已经上报 3 条了，合并成一条写清楚") }
+        let details = ((args["details"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        ledger.reports += 1
+        DevLog.shared.info("智能体上报", "【\(label)】\(summary.prefix(200))" + (details.isEmpty ? "" : "\n\(details.prefix(2000))"))
+        return try json(["ok": true, "note": "已记进开发日志，开发会话会看到；Jason 不会收到通知，需要他知道的照常用 reply_jason 说"])
     }
 
     private func fail(_ name: String, _ why: String, _ ledger: BuiltinAgentRunLedger) -> String {
@@ -185,6 +213,7 @@ import Foundation
                                                     detail: "\(draft.title)：\(error.localizedDescription)"))
             ledger.toolErrors.append("propose_change 被拒收：\(error.localizedDescription)")
             DevLog.shared.warn("内置智能体", "提案被拒收：\(error.localizedDescription)")
+            ledger.rejections += 1
             return try json(["ok": false, "rejected": error.localizedDescription,
                              "hint": "看原因调整后再提；放不下就如实告诉 Jason 为什么，给他选项"])
         }

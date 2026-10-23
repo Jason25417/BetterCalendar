@@ -245,7 +245,10 @@ import Testing
         let cloud = InMemoryAgentChatTransport(), clock = Clock(at(15))
         let phone = device("iphone", cloud, Bell(), clock), mac = device("mac", cloud, Bell(), clock)
         let center = proposalCenter()
-        let bridge = AgentBridge(center: center, defaults: defaults()) { ["schemaVersion": 1, "synthetic": true] }
+        // 晚间复盘按真实时刻判断（桥接 sync 用 Date()）：晚上跑这个测试会多写一条 evening_review，与本测试无关 → 关掉
+        let bridgeDefaults = defaults()
+        bridgeDefaults.set(false, forKey: EveningReviewSettings.enabledKey)
+        let bridge = AgentBridge(center: center, defaults: bridgeDefaults) { ["schemaVersion": 1, "synthetic": true] }
         bridge.eventsEnabled = { false }   // 「关键时刻唤醒」关着也要转交你的话
         bridge.chat = mac
 

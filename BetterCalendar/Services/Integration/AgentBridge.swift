@@ -270,13 +270,21 @@ nonisolated struct AgentBridgeIO: Sendable {
             guard let flag = Self.isBool(raw) else { throw AgentBridgeError.invalid("askFirst 必须是 true / false") }
             askFirst = flag
         }
+        // W41：cascade: true = 放不下时把 App 算好的连带顺延并进这份提案（只用于 moveBlock / moveBlocks）
+        var cascade = false
+        if let raw = rawAction["cascade"], !(raw is NSNull) {
+            guard let flag = Self.isBool(raw) else { throw AgentBridgeError.invalid("cascade 必须是 true / false") }
+            cascade = flag
+        }
         let anyReal = action.touchesRealData || alternatives.contains { $0.action.touchesRealData }
-        return ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
+        var draft = ProposalDraft(id: id, parentRef: o["parentEventId"] as? String, origin: .agent,
                              originLabel: (o["originLabel"] as? String) ?? "BetterCalendar 智能体",
                              targetDeviceId: o["targetDevice"] as? String, title: title, changes: changes, reason: reason,
                              action: action, experiment: !anyReal, lifetime: lifetime,
                              escalation: escalation, primaryLabel: primaryLabel, alternatives: alternatives, parameters: parameters,
                              askFirst: askFirst)
+        draft.cascade = cascade
+        return draft
     }
 
     /// W11：可调参数声明（严格：每项只认这些键；类型 / 绑定字段 / 单位 / 范围都校验；绑到这种改动没有的字段 → 拒收）。
@@ -350,8 +358,8 @@ nonisolated struct AgentBridgeIO: Sendable {
             "itemEdit": ["itemId", "title", "note", "expectedRevision"],
             "itemSetDone": ["itemId", "done", "expectedRevision"],
             "timer": ["command", "blockId", "title", "expectedRevision", "startedAt"],
-            "moveBlock": ["blockId", "start", "end", "expectedRevision"],
-            "moveBlocks": ["moves"],
+            "moveBlock": ["blockId", "start", "end", "expectedRevision", "cascade"],
+            "moveBlocks": ["moves", "cascade"],
             "reminder": ["title", "body", "fireAt", "device"],
             "alarm": ["title", "fireAt", "device"],
             // W18 时间线排程
@@ -440,7 +448,9 @@ nonisolated struct AgentBridgeIO: Sendable {
             // W10：只有技术防失控上限（不是产品规则）；一次挪多少块以最终整体布局合法为准。
             guard raw.count <= PlanMoveRules.maxGroup else { throw AgentBridgeError.invalid("moveBlocks 超过技术防失控上限 \(PlanMoveRules.maxGroup) 块，疑似文件出错") }
             let moves = try raw.enumerated().map { i, m -> ProposalBlockMove in
-                guard m["kind"] == nil else { throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 不认识的字段：kind") }
+                for key in ["kind", "cascade"] where m[key] != nil {
+                    throw AgentBridgeError.invalid("moveBlocks.moves[\(i)] 不认识的字段：\(key)" + (key == "cascade" ? "（cascade 写在 action 上，不写在每一项里）" : ""))
+                }
                 var item = m
                 item["kind"] = "moveBlock"
                 do {
@@ -495,6 +505,7 @@ nonisolated struct AgentBridgeIO: Sendable {
                     switch item["op"] as? String {
                     case "create": step = .create(try Self.newBlock(rest, path: path, proposalId: proposalId, index: i))
                     case "move":
+                        guard rest["cascade"] == nil else { throw AgentBridgeError.invalid("排一天里不用 cascade（整天的布局由你排定；连带顺延只用于 moveBlock / moveBlocks）") }
                         rest["kind"] = "moveBlock"
                         guard case let .moveBlock(id, start, end, rev) = try Self.action(from: rest, proposalId: proposalId) else { throw AgentBridgeError.invalid("格式错误") }
                         step = .move(ProposalBlockMove(id: id, start: start, end: end, expectedRevision: rev))

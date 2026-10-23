@@ -173,6 +173,18 @@ enum ProposalTimerRules {
     /// 越级提案永远不被预授权放行（PreauthPolicy 看 Proposal.escalation）。撤销（整组挪回 / 整组撤销）是你的动作，不查。
     /// W32：动「你的东西」（ownership == .yours：你的日程 / 提醒 / 事项 / 你写的日记）是同一个越级概念——同样必须带越级理由，
     /// 点名行（⚠️ …）由各自的 prepare 算好放在改动清单最前面，审批卡把它放进橙色越级横条。
+    func expandCascade(_ action: ProposalAction) async throws -> ProposalAction {
+        let moves: [ProposalBlockMove]
+        switch action {
+        case let .moveBlock(id, start, end, expected): moves = [ProposalBlockMove(id: id, start: start, end: end, expectedRevision: expected)]
+        case let .moveBlocks(list, false): moves = list
+        default: throw ProposalExecutionError.invalid("「连带顺延」（cascade）只用于挪块（moveBlock / moveBlocks）")
+        }
+        let steps = try await planMover().withCascade(moves.map { .move($0) })
+        let all = steps.compactMap { step -> ProposalBlockMove? in if case let .move(m) = step { m } else { nil } }
+        return all.count == moves.count ? action : .moveBlocks(moves: all, isUndo: false)
+    }
+
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction {
         var prepared = try await prepare(action)
         let (pinned, fixed) = try escalationTargets(prepared.action)

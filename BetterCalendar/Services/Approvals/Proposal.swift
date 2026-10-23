@@ -625,6 +625,8 @@ nonisolated struct ProposalDraft: Sendable {
     var autoPassBlocker: String? = nil
     /// W34：见 Proposal.headline（由 ProposalCenter.prepare 依据主方案填）。
     var headline: String? = nil
+    /// W41：智能体说「连带的交给 App 算」（只在提交时用，不存）：prepare 前把 App 算好的连带顺延并进主方案。
+    var cascade = false
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40

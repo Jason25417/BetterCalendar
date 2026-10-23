@@ -226,12 +226,25 @@ extension DeepSeekClient: BuiltinAgentModel {
             DevLog.shared.warn("内置智能体", "这一轮没有回复 Jason 的消息")
             await say("（内置智能体）这一轮我没能组织出回复。可以换个说法再说一次。", replyTo: unanswered.last)
         }
+        if let text = Self.runReport(problem: outcome?.message, kinds: events.map(\.kind), turns: counters.turns, ledger: ledger) {
+            DevLog.shared.info("智能体上报", text)   // W39：给开发会话看它卡在哪（不横幅；随日志汇到 Mac）
+        }
         lastRun = BuiltinAgentRunSummary(at: now(), kinds: events.map(\.kind), turns: counters.turns, costUSD: counters.cost, replies: ledger.replies,
                                          proposals: ledger.proposals.count, problem: outcome?.message)
         if outcome == nil { DevLog.shared.resolve(source: "内置智能体") }
     }
 
     private final class RunCounters { var turns = 0; var cost = 0.0 }
+
+    /// W39：这一轮要不要自动上报（失败，或被拒收 ≥ 3 次 = 打转迹象）；要 → 一段给开发会话看的经过。
+    static func runReport(problem: String?, kinds: [String], turns: Int, ledger: BuiltinAgentRunLedger) -> String? {
+        guard problem != nil || ledger.rejections >= 3 else { return nil }
+        var lines = ["【\(problem == nil ? "打转迹象" : "这一轮失败")】" + (problem ?? "被拒收 \(ledger.rejections) 次"),
+                     "事件：\(kinds.joined(separator: "、"))；走了 \(turns) 步；拒收 \(ledger.rejections) 次；提案 \(ledger.proposals.count) 份；回复 \(ledger.replies) 次"]
+        if !ledger.toolErrors.isEmpty { lines.append("工具出错：" + ledger.toolErrors.suffix(5).joined(separator: "；")) }
+        lines.append("经过：\n" + ledger.trail.suffix(20).enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
+        return lines.joined(separator: "\n")
+    }
 
     private func loop(_ events: [AgentEvent], ledger: BuiltinAgentRunLedger, counters: RunCounters) async throws {
         let modelName = BuiltinAgentSettings.model(defaults)

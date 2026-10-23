@@ -186,10 +186,14 @@ nonisolated enum ProposalExecutionError: Error, LocalizedError, Equatable {
     func perform(_ action: ProposalAction) async throws -> ProposalExecutionOutcome
     /// W32d：依据真实数据，这份（已准备好的）动作有没有「不能低风险自动通过」的障碍（如动的是图钉）。默认 nil。
     func autoPassBlocker(_ action: ProposalAction) async -> String?
+    /// W41：提案带了「连带的交给 App 算」——放不下时把 App 算好的整组顺延并进动作（变成显式的 moveBlocks），
+    /// 之后照常 prepare；卡上列的就是要执行的。默认不支持（原样返回）。
+    func expandCascade(_ action: ProposalAction) async throws -> ProposalAction
 }
 
 extension ProposalExecuting {
     func autoPassBlocker(_ action: ProposalAction) async -> String? { nil }
+    func expandCascade(_ action: ProposalAction) async throws -> ProposalAction { action }
     func prepare(_ action: ProposalAction, escalation: String?) async throws -> PreparedProposalAction { try await prepare(action) }
     func recheck(_ action: ProposalAction, escalation: String?, executingDeviceId: String?) async throws -> PreparedProposalAction {
         try await prepare(action, escalation: escalation)

@@ -228,6 +228,10 @@
         },
         "description": "planDay：每步 {op, …该操作的字段}（create 同 blocks[]；move 同 moves[]；edit 同 blockEdit；delete = blockId + expectedRevision?）"
        },
+       "cascade": {
+        "type": "boolean",
+        "description": "moveBlock / moveBlocks：true = 放不下时让 App 把后面受影响的块按规则连带顺延（各自时长不变），直接并进这份提案、卡上逐块列出（一步提交，不用先被拒收再照抄）；固定安排、图钉、他的日历不会被连带挪，算不出来照常拒收。省略 = 不连带"
+       },
        "moves": {
         "type": "array",
         "items": {
@@ -1108,6 +1112,33 @@
     "required": [
      "text"
     ],
+    "additionalProperties": false
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "report_problem",
+   "description": "给开发者上报一个问题（只进开发日志，Jason 不会收到通知、对话里也看不到）：工具或 App 出错、你缺一项能力做不到他要的事、规则之间冲突、或你没看懂他的意思又没法问清。写清哪里不行、你试过什么、需要什么。一轮最多 3 条；要让 Jason 知道的事照常用 reply_jason 说。",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": ["bug", "missing_capability", "rule_conflict", "unclear", "other"],
+      "description": "bug = 工具 / App 出错；missing_capability = 缺能力做不到；rule_conflict = 规则互相冲突；unclear = 没看懂他的意思；other"
+     },
+     "summary": {
+      "type": "string",
+      "description": "一句话：哪里不行（≤200 字）"
+     },
+     "details": {
+      "type": "string",
+      "description": "经过与需要（可选，≤2000 字）：他要的是什么、你调了哪些工具、拿到什么结果、缺什么才能做到"
+     }
+    },
+    "required": ["kind", "summary"],
     "additionalProperties": false
    }
   }

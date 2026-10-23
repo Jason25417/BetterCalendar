@@ -91,6 +91,8 @@ struct PlanEditApplied {
     func windowBlock(id: UUID) throws -> ScheduledBlock?
     /// 只校验不写：依据真实数据（含你的日历 = 已占用）对最终整体布局校验。
     func evaluate(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> [PlanEditRules.Resolved]
+    /// W41：放不下时把 App 算好的连带顺延并进来（见 PlanEditRules.withCascade）；只校验不写。
+    func withCascade(_ steps: [ProposalPlanStep]) async throws -> [ProposalPlanStep]
     /// 逐步核版本（任一步已变 → conflict，整组不写）+ 整体校验 + 写入 + 刷新画面。
     func apply(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> PlanEditApplied
 }
@@ -159,6 +161,10 @@ struct PlanEditApplied {
 
     func evaluate(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> [PlanEditRules.Resolved] {
         try PlanEditRules.evaluate(steps, in: await context(steps), restoring: restoring, planDay: planDay)
+    }
+
+    func withCascade(_ steps: [ProposalPlanStep]) async throws -> [ProposalPlanStep] {
+        try PlanEditRules.withCascade(steps, in: await context(steps))
     }
 
     func apply(_ steps: [ProposalPlanStep], restoring: Bool, planDay: Date?) async throws -> PlanEditApplied {

@@ -176,6 +176,7 @@ import UIKit
         guard draft.alternatives.count <= Proposal.maxAlternatives else {
             throw ProposalExecutionError.invalid("备选方案最多 \(Proposal.maxAlternatives) 个（这次 \(draft.alternatives.count) 个）")
         }
+        if draft.cascade { draft.action = try await executor.expandCascade(draft.action) }   // W41：卡上列的 = 要执行的
         let prepared = try await executor.prepare(draft.action, escalation: draft.escalation)
         draft.action = prepared.action
         if let changes = prepared.changes { draft.changes = changes }
