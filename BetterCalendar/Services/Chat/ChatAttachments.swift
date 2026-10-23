@@ -68,7 +68,7 @@ nonisolated enum ChatAttachmentStore {
     }
 
     /// 用户挑的文件 / 图片 → 本机一份 + 抽文字。图片统一转成缩过的 JPEG。
-    static func prepare(fileAt source: URL) async throws -> ChatAttachment {
+    @concurrent static func prepare(fileAt source: URL) async throws -> ChatAttachment {
         let scoped = source.startAccessingSecurityScopedResource()
         defer { if scoped { source.stopAccessingSecurityScopedResource() } }
         let name = source.lastPathComponent
@@ -88,7 +88,7 @@ nonisolated enum ChatAttachmentStore {
     }
 
     /// 相册 / 粘贴来的图片数据 → 缩到长边 2048 的 JPEG + 文字识别。
-    static func prepare(imageData: Data, name: String = "图片.jpg") async throws -> ChatAttachment {
+    @concurrent static func prepare(imageData: Data, name: String = "图片.jpg") async throws -> ChatAttachment {
         guard let src = CGImageSourceCreateWithData(imageData as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(src, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                                                      kCGImageSourceThumbnailMaxPixelSize: imageMaxSide,
@@ -129,17 +129,16 @@ nonisolated enum ChatAttachmentStore {
         }
     }()
 
-    static func recognizeText(_ image: CGImage) async -> String? {
-        await withCheckedContinuation { c in
-            let request = VNRecognizeTextRequest { req, _ in
-                let lines = (req.results as? [VNRecognizedTextObservation] ?? []).compactMap { $0.topCandidates(1).first?.string }
-                c.resume(returning: clip(lines.joined(separator: "\n")))
-            }
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["zh-Hans", "en-US"]
-            request.usesLanguageCorrection = true
-            do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { c.resume(returning: nil) }
-        }
+    /// 同步 perform + 直接读结果（原来用完成回调 + continuation：Vision 回调后 perform 又抛错时会二次 resume 闪退，10-22 门控实锤）。
+    /// @concurrent：放到后台线程跑——第一次要加载模型十几秒，不能压在调用方（主线程）上。
+    @concurrent static func recognizeText(_ image: CGImage) async -> String? {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["zh-Hans", "en-US"]
+        request.usesLanguageCorrection = true
+        do { try VNImageRequestHandler(cgImage: image).perform([request]) } catch { return nil }
+        let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+        return clip(lines.joined(separator: "\n"))
     }
 
     static func clip(_ s: String?) -> String? {
