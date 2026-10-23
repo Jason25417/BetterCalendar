@@ -3,8 +3,8 @@
 //  BetterCalendar
 //
 //  W13：设备活动记录的总装（组装点建一份，设置页经 ActivityRecording.current 读写）。
-//  Mac：常驻记录器（10 秒轮询 + 系统通知）、每 2 分钟从 iCloud 导入 iPhone 记录、每轮桥接同步镜像日文件、开机自启默认开。
-//  iPhone：回到前台时把待上传队列传完 + 回填运动/健康；网络变化随手记。
+//  Mac：常驻记录器（10 秒轮询 + 系统通知）、每 2 分钟从 iCloud 导入 iPhone / iPad 记录、每轮桥接同步镜像日文件、开机自启默认开。
+//  iPhone / iPad：回到前台时把待上传队列传完 + 回填运动/健康（iPad 不回填健康，见 PhoneActivitySources）；网络变化随手记。
 //  测试环境不启动任何定时器 / 通知 / 网络监听（各组件单测各自注入假实现）。
 //
 
@@ -60,6 +60,10 @@ nonisolated enum ActivityLaunchAtLogin {
     @ObservationIgnored private var phoneSources: PhoneActivitySources?
     #endif
     @ObservationIgnored private var sink: ActivityPhoneSink?
+    /// W28：设备名册（id → 名字），给摘要 / 设置页把设备 id 换成人认得的名字。测试可注入。
+    @ObservationIgnored var deviceLabels: () -> [String: String] = {
+        Dictionary(KnownDevices.all().map { ($0.id, $0.label) }, uniquingKeysWith: { a, _ in a })
+    }
 
     init(log: FileActivityLog, deviceId: String, defaults: UserDefaults = .standard) {
         self.log = log; self.deviceId = deviceId; self.defaults = defaults
@@ -106,9 +110,9 @@ nonisolated enum ActivityLaunchAtLogin {
         self.recorder = recorder
         let importer = ActivityCloudImporter(transport: cloud, log: log, status: status, defaults: defaults)
         self.importer = importer
-        sink = ActivityPhoneSink(log: log, outbox: nil, transport: nil)
+        sink = ActivityPhoneSink(log: log, outbox: nil, transport: nil, deviceKind: .mac)
         status.set(.cloudImport, .waiting("等第一次拉取"))
-        status.set(.shortcut, .waiting("还没收到 iPhone 的快捷指令记录（iPhone 上设置自动化后会出现）"))
+        status.set(.shortcut, .waiting("还没收到 iPhone / iPad 的快捷指令记录（在那台设备上设置自动化后会出现）"))
         status.set(.bridgeMirror, .waiting("等智能体桥接连接后镜像"))
 
         let tick = Timer(timeInterval: 10, repeats: true) { _ in Task { @MainActor in await recorder.tick() } }
@@ -153,7 +157,8 @@ nonisolated enum ActivityLaunchAtLogin {
     private func writeStoppedMarker() {
         guard recorder?.isRecording == true else { return }
         log.appendSync([ActivityEvent(at: .now, kind: .other, deviceId: deviceId, platform: "macOS",
-                                      detail: ["signal": "recorder", "state": "stopped", "reason": "appTerminating"])])
+                                      detail: ["signal": "recorder", "state": "stopped", "reason": "appTerminating"],
+                                      deviceKind: ActivityDeviceKind.mac.rawValue)])
     }
 
     private func ensureLaunchAtLogin() {
@@ -280,6 +285,7 @@ nonisolated enum ActivityLaunchAtLogin {
         ["schemaVersion": 1, "writtenAt": ActivityCodec.iso(now), "recording": ActivitySettings.isRecording(at: now, defaults),
          "enabled": ActivitySettings.enabled(defaults), "pausedUntil": ActivitySettings.pausedUntil(defaults).map(ActivityCodec.iso) ?? NSNull(),
          "retentionDays": FileActivityLog.retentionDays, "sources": status.snapshot(),
+         "remoteDevices": status.remoteSnapshot(labels: deviceLabels()),
          "note": "recording=false 时没有记录 ≠ 没发生；日文件里 detail.signal=recorder 的行标出每段记录的起止"]
     }
 
@@ -288,7 +294,8 @@ nonisolated enum ActivityLaunchAtLogin {
         do {
             let events = try await log.events(in: ActivityContextSummary.readWindow(now: now))
             return ActivityContextSummary.build(events: events, now: now, recording: ActivitySettings.isRecording(at: now, defaults),
-                                                pausedUntil: ActivitySettings.pausedUntil(defaults), sources: status.snapshot())
+                                                pausedUntil: ActivitySettings.pausedUntil(defaults), sources: status.snapshot(),
+                                                deviceLabels: deviceLabels())
         } catch {
             status.set(.storage, .failed("读本机日文件失败：\(error.localizedDescription)"))
             return ["source": "BetterCalendar 设备活动记录", "asOf": ActivityCodec.iso(now), "error": "读本机日文件失败：\(error.localizedDescription)"]

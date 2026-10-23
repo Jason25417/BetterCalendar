@@ -21,7 +21,7 @@ struct BridgeTaskPanel: View {
                 if compact { moreMenu }
             }
             if developerOptions {
-                Text(model.backend == .icloud ? "两端共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
+                Text(model.backend == .icloud ? "各台设备共用 iCloud 计时；结束计时不代表事项完成。" : "与 Dots 共用 BC 计时；结束计时不代表事项完成。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if model.sessions.isEmpty {
@@ -90,6 +90,7 @@ struct BridgeTaskPanel: View {
             }
             TextField("开始什么事项", text: $title)
                 .onSubmit { startNew() }
+                .persistedDraft($title, key: TextDraftKey.bridgeTaskTitle)   // W29：重启后还在；开始成功才清
             HStack {
                 Button("开始计时") { startNew() }
                     .disabled(!model.canSubmit || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -143,6 +144,7 @@ struct BridgeTaskPanel: View {
         guard model.canSubmit else { return }
         guard model.queueStart(title: submitted, mode: mode, focusMinutes: mode == .pomodoro ? focusMinutes : nil) else { return }
         title = ""
+        TextDraftStore.shared.clear(TextDraftKey.bridgeTaskTitle)
         Task { await model.refresh() }
     }
 }

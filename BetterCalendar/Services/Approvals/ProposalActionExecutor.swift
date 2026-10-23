@@ -375,14 +375,14 @@ enum ProposalTimerRules {
                                           changes: changes, requiredDeviceId: deviceId)
 
         case let .reminder(id, title, body, fireAt, deviceId):
-            // W12（SPEC §19.13 Q5，Jason 2026-10-18）：提醒 = 提醒事项里的一条原生提醒，iPhone 和 Mac 都会响；
+            // W12（SPEC §19.13 Q5，Jason 2026-10-18）：提醒 = 提醒事项里的一条原生提醒，各台设备（iPhone / iPad / Mac）都会响；
             // device 参数只为兼容旧提案保留、不再决定在哪台设备执行（任一台批准的设备写进提醒事项即可）。
             let title = try Self.cleanReminderTitle(title)
             let body = (body ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard body.count <= ProposalReminderRules.bodyLimit else { throw ProposalExecutionError.invalid("提醒正文不超过 \(ProposalReminderRules.bodyLimit) 字") }
             try Self.checkFireAt(fireAt, now: now())
             var changes = [ProposalChange(field: "提醒", before: nil, after: title),
-                           ProposalChange(field: "\(ProposalReminderRules.when(fireAt)) 会出现在提醒事项里，iPhone 和 Mac 都会响", before: nil, after: nil),
+                           ProposalChange(field: "\(ProposalReminderRules.when(fireAt)) 会出现在提醒事项里，各台设备（iPhone / iPad / Mac）都会响", before: nil, after: nil),
                            ProposalChange(field: "要像闹钟那样叫醒你，请改用闹钟", before: nil, after: nil)]
             if !body.isEmpty { changes.insert(ProposalChange(field: "提醒正文", before: nil, after: body), at: 1) }
             return PreparedProposalAction(action: .reminder(id: id, title: title, body: body.isEmpty ? nil : body, fireAt: fireAt, deviceId: deviceId),
@@ -391,14 +391,19 @@ enum ProposalTimerRules {
         case let .alarm(id, title, fireAt, deviceId):
             let title = try Self.cleanReminderTitle(title)
             try Self.checkFireAt(fireAt, now: now())
-            let device = try knownDevice(deviceId, what: "闹钟")
-            guard device.isPhone else {
-                throw ProposalExecutionError.invalid("闹钟只能设在 iPhone 上（「\(device.label)」是 \(device.platform)）；Mac 上不设闹钟，也不改成普通通知")
+            // W30（原则 11）：没指定设备 = 默认随身的 iPhone（名册里最近见过的那台）；你明确指定的照旧
+            let defaulted = deviceId == ProposalAction.carriedDeviceDefault
+            let device = defaulted ? try Self.carriedIPhone(knownDevices()) : try knownDevice(deviceId, what: "闹钟")
+            guard device.isIOSDevice else {
+                throw ProposalExecutionError.invalid("闹钟只能设在 iPhone / iPad 上（「\(device.label)」是 \(device.deviceKind.label)）；Mac 上不设闹钟，也不改成普通通知")
             }
-            return PreparedProposalAction(action: .alarm(id: id, title: title, fireAt: fireAt, deviceId: deviceId),
-                                          changes: [ProposalChange(field: "闹钟", before: nil, after: title),
-                                                    ProposalChange(field: "在「\(device.label)」上 \(ProposalReminderRules.when(fireAt)) 响铃（iPhone 系统闹钟）", before: nil, after: nil)],
-                                          requiredDeviceId: deviceId)
+            var changes = [ProposalChange(field: "闹钟", before: nil, after: title),
+                           ProposalChange(field: "在「\(device.label)」上 \(ProposalReminderRules.when(fireAt)) 响铃（\(device.deviceKind.label) 系统闹钟）", before: nil, after: nil)]
+            if defaulted {
+                changes.append(ProposalChange(field: "没指定设备：默认设在随身的 iPhone；其他设备到点只安静放一份", before: nil, after: nil))
+            }
+            return PreparedProposalAction(action: .alarm(id: id, title: title, fireAt: fireAt, deviceId: device.id),
+                                          changes: changes, requiredDeviceId: device.id)
 
         case .reminderCancel, .alarmCancel:
             throw ProposalExecutionError.invalid("取消提醒/闹钟只用于撤销，不能单独提出")
@@ -673,7 +678,7 @@ enum ProposalTimerRules {
             // 幂等（冒烟 2026-10-18）：上次执行成功但回报没落地 → 这里会再被调用；提醒事项里已有这条就直接算完成，不重写、不报「已过」。
             if let askReminders, let existing = await askReminders.existingAskReminder(id: id) {
                 DevLog.shared.info("提醒", "「\(title)」已经在提醒事项里（上次执行过、回报没落地），按已完成回报")
-                return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，iPhone 和 Mac 都会响",
+                return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，各台设备（iPhone / iPad / Mac）都会响",
                                                 undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: Self.nativeRevisionPrefix + existing.revision)))
             }
             guard fireAt > now() else { throw ProposalExecutionError.invalid("提醒时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补发") }
@@ -682,7 +687,7 @@ enum ProposalTimerRules {
             if let askReminders {
                 do {
                     let receipt = try await askReminders.addAskReminder(id: id, title: title, body: body, fireAt: fireAt)
-                    return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，iPhone 和 Mac 都会响",
+                    return ProposalExecutionOutcome(note: "已写进提醒事项：\(ProposalReminderRules.when(fireAt))「\(title)」，各台设备（iPhone / iPad / Mac）都会响",
                                                     undo: ProposalUndoInfo(action: .reminderCancel(id: id, expectedRevision: Self.nativeRevisionPrefix + receipt.revision)))
                 } catch let error as AskReminderError where error.allowsLocalFallback {
                     fallbackWhy = error.localizedDescription
@@ -700,7 +705,7 @@ enum ProposalTimerRules {
             guard fireAt > now() else { throw ProposalExecutionError.invalid("闹钟时刻 \(ProposalReminderRules.when(fireAt)) 已经过了，没有补响") }
             let scheduler = try notificationScheduler()
             guard scheduler.alarmsSupported else {
-                throw ProposalExecutionError.unavailable("这台设备不能设系统闹钟（只有 iPhone 可以）；没有改用普通通知")
+                throw ProposalExecutionError.unavailable("这台设备不能设系统闹钟（只有 iPhone / iPad 可以）；没有改用普通通知")
             }
             try await scheduler.scheduleAlarm(id: id, title: title, fireAt: fireAt)
             return ProposalExecutionOutcome(note: "已在本机设好 \(ProposalReminderRules.when(fireAt)) 的闹钟「\(title)」",
@@ -1094,6 +1099,14 @@ enum ProposalTimerRules {
     private func notificationScheduler() throws -> any ProposalNotificationScheduling {
         guard let notifications else { throw ProposalExecutionError.unavailable("这台设备没有接入提醒/闹钟") }
         return notifications
+    }
+
+    /// W30：闹钟的默认设备 = 名册里最近见过的 iPhone（随身设备）。没有 iPhone → 直说，不猜别的设备。
+    nonisolated static func carriedIPhone(_ devices: [KnownDevice]) throws -> KnownDevice {
+        guard let phone = devices.filter({ $0.deviceKind == .iphone }).max(by: { $0.seenAt < $1.seenAt }) else {
+            throw ProposalExecutionError.invalid("没指定闹钟设在哪台；默认是随身的 iPhone，但还没有登记过 iPhone（在 iPhone 上打开一次 BetterCalendar 就会登记），也可以指定一台 iPad")
+        }
+        return phone
     }
 
     /// 目标设备必须在名册里（最近见过）；不认识的 id 不猜。

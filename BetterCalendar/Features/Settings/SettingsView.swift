@@ -132,7 +132,7 @@ struct SettingsView: View {
             Section("今天页") {
                 Toggle("时间轴视图（实验）", isOn: $timelineAxis)
                     .accessibilityIdentifier("bc.settings.timelineAxis")
-                Text("打开后，今天页的计划列表换成一根连续的时间轴：「现在」线以上是做成的事（蓝），以下是接下来的计划（绿），你日历里的安排是灰色、只读；4:00 的日界线带日期，顶上的日子条点一下滚到那天。绿色块可以直接拖动改时间、拉底边改时长（iPhone 长按后拖），放不下会写明原因、不会悄悄挤别的块；你拖过的块会钉住。关掉 = 回到原来的列表。")
+                Text("打开后，今天页的计划列表换成一根连续的时间轴：「现在」线以上是做成的事（蓝），以下是接下来的计划（绿），你日历里的安排是灰色、只读；4:00 的日界线带日期，顶上的日子条点一下滚到那天。绿色块可以直接拖动改时间、拉底边改时长（iPhone / iPad 长按后拖），放不下会写明原因、不会悄悄挤别的块；你拖过的块会钉住。关掉 = 回到原来的列表。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ActivitySettingsSection()   // W13：设备活动记录（实验）——披露 + 开关 + 暂停 + 各来源状态
@@ -329,7 +329,7 @@ struct SettingsView: View {
                             usedSetting(.settingsFocusFollow, v ? "开" : "关")
                             FocusFollow.settingsChanged()
                         }
-                    Text("同一 iCloud 的另一台设备开始专注时，这台自动跟随显示同任务计时；动作立即发送，推送优先，活动中每 5 秒补查，空闲时每 15 秒补查，实际到达受网络与系统调度影响；iPhone 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
+                    Text("同一 iCloud 的另一台设备开始专注时，这台自动跟随显示同任务计时；动作立即发送，推送优先，活动中每 5 秒补查，空闲时每 15 秒补查，实际到达受网络与系统调度影响；iPhone / iPad 上番茄任务还会联动「绝对专注」屏蔽。跟随只是陪伴显示、不落任何记录，随时一键退出。")
                         .font(.caption).foregroundStyle(.secondary)
 
                     #if os(macOS)
@@ -522,6 +522,7 @@ struct SettingsView: View {
             #endif
             Section("数据与同步（开发期）") { DataMaintenancePanel() }
             Section("自动调整写权（开发期）") { WriteLeaseDevPanel() }   // W22
+            Section("在场设备与一处响（开发期）") { PresenceDevPanel() }   // W30
         }
     }
 

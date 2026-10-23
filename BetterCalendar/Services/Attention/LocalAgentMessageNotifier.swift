@@ -17,7 +17,9 @@ import UserNotifications
     static let userInfoKey = "bcAgentMessageId"
 
     private let center: UNUserNotificationCenter
-    init(center: UNUserNotificationCenter = .current()) { self.center = center }
+    /// W30 一处响（nil = 照旧每台都响）。
+    private let reach: ReachOutlet?
+    init(center: UNUserNotificationCenter = .current(), reach: ReachOutlet? = nil) { self.center = center; self.reach = reach }
 
     /// 与已有类别合并注册（setNotificationCategories 是整体替换）。
     static func registerCategories(center: UNUserNotificationCenter = .current()) async {
@@ -47,7 +49,8 @@ import UserNotifications
         content.categoryIdentifier = Self.category
         content.threadIdentifier = "bc.agent"
         content.userInfo = [Self.userInfoKey: message.id.uuidString]
-        do { try await center.add(UNNotificationRequest(identifier: Self.idPrefix + message.id.uuidString, content: content, trigger: nil)) }
+        let request = UNNotificationRequest(identifier: Self.idPrefix + message.id.uuidString, content: content, trigger: nil)
+        do { try await center.add(reach?.route(request, kind: .agentMessage, reachID: "agentMessage:\(message.id.uuidString)") ?? request) }
         catch { DevLog.shared.error("智能体消息", "通知发送失败：\(error.localizedDescription)") }
     }
 

@@ -689,6 +689,7 @@ struct HomeView: View {
             HStack(spacing: 6) {
                 TextField("写个标题，回车加进空档", text: $addRowText)
                     .textFieldStyle(.roundedBorder)
+                    .persistedDraft($addRowText, key: TextDraftKey.todayAddRow)   // W29；「取消」= 你清掉的，一并清
                     .onSubmit {
                         let t = addRowText.trimmingCharacters(in: .whitespaces)
                         addRowActive = false; addRowText = ""
@@ -704,6 +705,8 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            // W29：上次没加完的标题还在 → 直接展开给你接着写
+            .onAppear { if TextDraftStore.shared.has(TextDraftKey.todayAddRow) { addRowActive = true } }
         }
     }
 
@@ -731,6 +734,7 @@ struct HomeView: View {
                 .onSubmit(sendToAgent)
                 .disabled(deps.agentChat == nil)
                 .accessibilityIdentifier("bc.today.say")
+                .persistedDraft($sayText, key: TextDraftKey.todaySay)   // W29：重启后还在
                 // W21：打了字 = 开了头；清空没发 = 没做完（发出去 = 做完，见 sendToAgent）
                 .onChange(of: sayText) { old, new in
                     let wasEmpty = old.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -756,6 +760,7 @@ struct HomeView: View {
         guard let chat = deps.agentChat, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return }
         FeatureUsage.complete(.todaySayToAgent)   // 先关开头，下面清空输入框不算没做完
         sayText = ""; sayAttachments = []; sayStatus = nil
+        TextDraftStore.shared.clear(TextDraftKey.todaySay)   // W29：已进发件箱（失败也留在对话里可重试）
         sayFocused = false
         deps.router.selectedTab = .chat   // 回复与提案都在「智能体」页
         Task { await chat.send(text, attachments: files) }

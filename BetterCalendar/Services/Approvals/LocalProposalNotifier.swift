@@ -45,7 +45,9 @@ import Observation
     }
 
     private let center: UNUserNotificationCenter
-    init(center: UNUserNotificationCenter = .current()) { self.center = center }
+    /// W30 一处响（nil = 照旧每台都响）。
+    private let reach: ReachOutlet?
+    init(center: UNUserNotificationCenter = .current(), reach: ReachOutlet? = nil) { self.center = center; self.reach = reach }
 
     /// 与已有类别合并注册（setNotificationCategories 是整体替换，不能覆盖旧审批/提醒的类别）。
     static func registerCategories(center: UNUserNotificationCenter = .current()) async {
@@ -160,7 +162,8 @@ import Observation
 
     func show(_ proposal: Proposal) async {
         if proposal.hasAlternatives { await Self.merge([Self.optionsCategory(for: proposal)], center: center) }
-        do { try await center.add(Self.request(for: proposal)) } catch {
+        let request = Self.request(for: proposal)
+        do { try await center.add(reach?.route(request, kind: .proposal, reachID: "proposal:\(proposal.id.uuidString)") ?? request) } catch {
             DevLog.shared.error("多端审批", "审批通知发送失败：\(error.localizedDescription)")
         }
     }
@@ -183,7 +186,8 @@ import Observation
     }
 
     func showResult(_ proposal: Proposal) async {
-        do { try await center.add(Self.resultRequest(for: proposal)) } catch {
+        let request = Self.resultRequest(for: proposal)
+        do { try await center.add(reach?.route(request, kind: .proposalResult, reachID: "proposalResult:\(proposal.id.uuidString)") ?? request) } catch {
             DevLog.shared.error("预授权规则", "结果通知发送失败：\(error.localizedDescription)")
         }
     }

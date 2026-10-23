@@ -9,8 +9,8 @@ struct WriteLeaseDevPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("两台设备只让一台写自动调整", isOn: $enabled)
-            Text("打开（默认）：顺延 / 活动预报 / 启动补结算只由一台设备写——正在计时的设备优先，其次最近回到前台的设备；另一台只算不写。你的拖动、批准、删除、日历里的改动不受影响。关掉 = 回到两台设备都写（会让计划块来回翻），只在怀疑它出问题时用；随设置同步到所有设备。")
+            Toggle("多台设备只让一台写自动调整", isOn: $enabled)
+            Text("打开（默认）：顺延 / 活动预报 / 启动补结算只由一台设备写——正在计时的设备优先，其次最近回到前台的设备；其他设备只算不写。你的拖动、批准、删除、日历里的改动不受影响。关掉 = 回到每台设备都写（会让计划块来回翻），只在怀疑它出问题时用；随设置同步到所有设备。")
                 .font(.caption).foregroundStyle(.secondary)
             if let lease {
                 Text(lease.statusLine).font(.callout).textSelection(.enabled)

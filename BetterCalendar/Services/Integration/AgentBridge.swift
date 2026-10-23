@@ -470,10 +470,13 @@ nonisolated struct AgentBridgeIO: Sendable {
             return .reminder(id: proposalId, title: try required(string("title", max: 150), "title"), body: try string("body", max: 500),
                              fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         case "alarm":
-            // W8 D3：iPhone 系统闹钟（会响铃）。必须指定 iPhone：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
+            // W8 D3：iOS 系统闹钟（会响铃）。必须指定一台 iPhone / iPad（W28）：device 或 targetDevice（actionTargets.devices 里 platform=iOS 的那台）。
             let device = try string("device", max: 80) ?? targetDevice
             if let device, let targetDevice, device != targetDevice { throw AgentBridgeError.invalid("alarm.device 与 targetDevice 不一致") }
-            guard let device else { throw AgentBridgeError.invalid("alarm 必须指定 iPhone：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id") }
+            // W30（原则 11）：「一处响」打开时不写设备 = 默认设在随身的 iPhone（执行器准备时换成名册里那台 iPhone 的 id，审批卡写明）
+            guard let device = device ?? (ReachSettings.onePlaceEnabled ? ProposalAction.carriedDeviceDefault : nil) else {
+                throw AgentBridgeError.invalid("alarm 必须指定一台 iPhone / iPad：device（或 targetDevice）填 actionTargets.devices 里 platform=iOS 的 id")
+            }
             return .alarm(id: proposalId, title: try required(string("title", max: 150), "title"),
                           fireAt: try required(date("fireAt"), "fireAt"), deviceId: device)
         case "blockCreate":
@@ -829,7 +832,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             }
             if let chat {
                 try await AgentChatBridgeStep.run(io: io, chat: chat, proposals: center.proposals, defaults: defaults,
-                                                  eveningFacts: eveningFacts, now: .now, report: report)
+                                                  eveningFacts: eveningFacts, now: now(), report: report)
             }
             try emitResolvedProposals(io: io)
             await activityMirror?(io)
@@ -934,6 +937,9 @@ nonisolated struct AgentBridgeIO: Sendable {
 
     /// 测试可注入；生产读 AgentEventSettings。
     var eventsEnabled: () -> Bool = { AgentEventSettings.enabled }
+    /// W29：对话桥接一轮用的时钟（晚间复盘到没到点按它算）。测试注入固定时刻——以前用真实时钟，
+    /// 晚上 21:30 后跑测试会多写一条 evening_review 事件（深夜日期炸弹，同 vm-fire-and-forget 第二根因）。
+    var now: () -> Date = { Date() }
 
     /// SPEC §19 C1 W14 哨兵：在桥接目录里做一件事（写唤醒事件 / runtime/sentinel.json）。
     /// 不受「关键时刻唤醒」开关管——哨兵有自己的开关。refreshContext = 先刷新 context.json（唤醒前用）。

@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""W13：生成可导入 iPhone 的快捷指令（设备活动记录：App 打开 / 关闭），并用 macOS `shortcuts sign` 签名。
+"""W13：生成可导入 iPhone / iPad 的快捷指令（设备活动记录：App 打开 / 关闭），并用 macOS `shortcuts sign` 签名。
 
 两种产物：
-1. 通用版（不带触发器，随 App 打包，iPhone 设置引导里一键分享导入；自动化要 Jason 在快捷指令里手建）：
+1. 通用版（不带触发器，随 App 打包，iPhone / iPad 设置引导里一键分享导入；自动化要 Jason 在快捷指令里手建；
+   两类设备共用同一份——动作自己认出是 iPhone 还是 iPad，W28）：
      python3 scripts/make-activity-shortcuts.py
    输出 BetterCalendar/ActivityShortcuts/：
      BetterCalendar 记录 App 打开 = 获取当前 App → 「记录 App 打开」（App = 当前 App）
      BetterCalendar 记录 App 关闭 = 等待 2 秒 → 获取当前 App → 「记录 App 关闭」（现在前台的 App = 当前 App）
 2. 自动化版（带「App 已打开 / 已关闭」触发器、App 名单已填好；含 Jason 的装机清单 = 个人数据，**不进仓库、不进 App 包**）：
-     python3 scripts/make-activity-shortcuts.py --apps apps.json --out ~/Desktop/BetterCalendar-自动化
+     python3 scripts/make-activity-shortcuts.py --apps apps.json --out ~/Desktop/BetterCalendar-自动化-iPhone
+   iPad（W28）：同样导出 iPad 的装机清单，加 `--device ipad`：
+     ideviceinstaller -u <iPad UDID> list --user --xml > apps-ipad.xml   （idevice_id -l 列出连着的设备）
+     python3 scripts/make-activity-shortcuts.py --device ipad --apps apps-ipad.xml --out ~/Desktop/BetterCalendar-自动化-iPad
+   iPad 版的快捷指令名带「（iPad）」、输出目录名必含 iPad（没写就自动补「-iPad」）：快捷指令库随 iCloud 在 iPhone / iPad 间同步，
+   同名会互相顶替；自动化本身不同步，每台设备各自导入、各自建。
    apps 名单二选一：`ideviceinstaller list --user --xml > apps.xml`（brew install libimobiledevice ideviceinstaller；不需要开发者模式，推荐）
    或 `xcrun devicectl device info apps --device <iPhone> --include-all-apps --json-output apps.json`（需要 iPhone 开发者模式）
    （或一行一个 `bundle.id<TAB>名字<TAB>TEAMID` 的文本）。再加 `--harvest-shortcuts-db` 可从本机快捷指令库
@@ -32,6 +38,7 @@ import argparse, json, os, plistlib, sqlite3, subprocess, sys, tempfile, uuid
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "BetterCalendar", "ActivityShortcuts")   # 在 App 包里：iPhone 设置引导可一键分享给「快捷指令」导入
 BUNDLE, TEAM, APP = "com.jason.BetterCalendar", "D2KWHV599Z", "BetterCalendar"
+DEVICE_LABELS = {"iphone": "iPhone", "ipad": "iPad"}
 # 自动化版默认不监听的 App：自己、快捷指令本身（避免自激）。
 EXCLUDED_BUNDLES = {BUNDLE, "com.apple.shortcuts"}
 
@@ -109,9 +116,24 @@ def generic_shortcuts():
             "BetterCalendar 记录 App 关闭": workflow(CLOSE_ACTIONS(), CLOSE_COLOR, GLYPH)}
 
 
-def automation_shortcuts(apps):
-    return {"BetterCalendar 自动记录 App 打开": workflow(OPEN_ACTIONS(), OPEN_COLOR, GLYPH, [app_trigger("opened", apps, "opened")]),
-            "BetterCalendar 自动记录 App 关闭": workflow(CLOSE_ACTIONS(), CLOSE_COLOR, GLYPH, [app_trigger("closed", apps, "closed")])}
+def automation_names(device="iphone"):
+    """iPhone 沿用原名（已导入的不变）；iPad 带「（iPad）」——快捷指令库随 iCloud 同步，同名会互相顶替。"""
+    suffix = "" if device == "iphone" else f"（{DEVICE_LABELS[device]}）"
+    return f"BetterCalendar 自动记录 App 打开{suffix}", f"BetterCalendar 自动记录 App 关闭{suffix}"
+
+
+def automation_shortcuts(apps, device="iphone"):
+    open_name, close_name = automation_names(device)
+    tag = "" if device == "iphone" else f"-{device}"   # 触发器 UUID 按设备区分（同一份 UUID 进两台设备的库不保险）
+    return {open_name: workflow(OPEN_ACTIONS(), OPEN_COLOR, GLYPH, [app_trigger("opened", apps, "opened" + tag)]),
+            close_name: workflow(CLOSE_ACTIONS(), CLOSE_COLOR, GLYPH, [app_trigger("closed", apps, "closed" + tag)])}
+
+
+def device_out_dir(out, device):
+    """iPad 版的输出目录名必须看得出是 iPad（没写就补「-iPad」），免得和 iPhone 版混在一个文件夹里 AirDrop 错。"""
+    if device == "ipad" and "ipad" not in os.path.basename(os.path.normpath(out)).lower():
+        return os.path.normpath(out) + "-iPad"
+    return out
 
 
 # —— App 名单 ——
@@ -234,7 +256,9 @@ def write_and_sign(shortcuts, out_dir, sign=True):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--apps", help="App 名单：devicectl 的 JSON 或文本（有它 = 生成带触发器的自动化版）")
+    p.add_argument("--apps", help="App 名单：ideviceinstaller 的 XML、devicectl 的 JSON 或文本（有它 = 生成带触发器的自动化版）")
+    p.add_argument("--device", choices=sorted(DEVICE_LABELS), default="iphone",
+                   help="名单是哪类设备的（iphone / ipad）：决定快捷指令名与输出目录名（W28）")
     p.add_argument("--out", help="输出目录（自动化版必填，别放进仓库；通用版默认 BetterCalendar/ActivityShortcuts/）")
     p.add_argument("--include-apple", action="store_true", help="保留可删除的苹果自带 App（默认全部不要）")
     p.add_argument("--harvest-shortcuts-db", action="store_true", help="从本机快捷指令库已有的 App 触发器里补 TeamIdentifier / 名字")
@@ -251,12 +275,14 @@ def main(argv=None):
             print("名单里没有可用的 App", file=sys.stderr)
             return 1
         missing = [x["bundle"] for x in apps if not x.get("team")]
-        print(f"{len(apps)} 个 App 进触发器；{len(missing)} 个没有 TeamIdentifier（已省略该键）")
-        os.makedirs(a.out, exist_ok=True)
-        with open(os.path.join(a.out, "apps-used.txt"), "w", encoding="utf-8") as f:   # 实际进了触发器的名单，便于核对
+        out = device_out_dir(a.out, a.device)
+        print(f"{DEVICE_LABELS[a.device]}：{len(apps)} 个 App 进触发器；{len(missing)} 个没有 TeamIdentifier（已省略该键）→ {out}")
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, "apps-used.txt"), "w", encoding="utf-8") as f:   # 实际进了触发器的名单，便于核对
+            f.write(f"# device: {a.device}\n")
             for x in apps:
                 f.write(f"{x['bundle']}\t{x['name']}\t{x.get('team') or ''}\n")
-        return 0 if write_and_sign(automation_shortcuts(apps), a.out, sign=not a.no_sign) else 1
+        return 0 if write_and_sign(automation_shortcuts(apps, a.device), out, sign=not a.no_sign) else 1
     return 0 if write_and_sign(generic_shortcuts(), a.out or OUT, sign=not a.no_sign) else 1
 
 

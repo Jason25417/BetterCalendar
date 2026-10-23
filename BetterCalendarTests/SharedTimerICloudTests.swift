@@ -109,7 +109,7 @@ import SwiftData
         await model.act(.resume, on: model.primary!)
         clock.t += 30
         #expect(model.elapsed(model.primary!) == 90)
-        #expect(model.message == "已同步；两端共用 iCloud 计时")
+        #expect(model.message == "已同步；各台设备共用 iCloud 计时")
     }
 
     @Test func pomodoroSilentlyTurnsIntoCountUpWithoutFinishing() async {

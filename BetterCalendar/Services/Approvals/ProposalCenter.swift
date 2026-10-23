@@ -38,6 +38,8 @@ import UIKit
     let rules: PreauthRuleStore?
     /// W10：你对提案回的一句话 → 转给智能体（组装点接到对话 AgentChatCenter）。返回这句话是否已存进 iCloud。
     var forwardReply: ((Proposal, String) async -> Bool)?
+    /// W30：本机通知对齐之后（闹钟镜像：别的设备上设好的闹钟，本机到点安静放一份）。
+    var afterNotificationsReconciled: (([Proposal]) async -> Void)?
     private let executor: any ProposalExecuting
     private let notifier: any ProposalNotifying
     let ledger: any OperationLedger
@@ -55,6 +57,14 @@ import UIKit
             replying.insert(id)
             usage.begin(.proposalReply, key: id.uuidString)
         }
+    }
+    /// W29：这份提案上次「回一句」打了一半（App 重启过）→ 还在等你拍板就把回复框重新展开（卡片出现时调）。
+    /// 走 toggleReplying 同一条路：记一次「开了头」（上个进程的开头随进程没了，没记成没做完）；已开着 / 不在等 / 没草稿 → 什么都不做。
+    @discardableResult
+    func resumeReplyingIfDrafted(_ id: UUID, drafts: TextDraftStore = .shared) -> Bool {
+        guard !replying.contains(id), pending.contains(where: { $0.id == id }), drafts.has(TextDraftKey.proposalReply(id)) else { return false }
+        toggleReplying(id)
+        return true
     }
     /// W21 功能使用探针（只记哪个功能、什么事件；本机）。测试注入自己的实例。
     var usage: FeatureUsageStore = FeatureUsage.shared
@@ -623,6 +633,7 @@ import UIKit
         for id in await notifier.shownResultIds() {
             if proposals.first(where: { $0.id == id })?.undoneAt != nil { await notifier.withdrawResult(id) }
         }
+        await afterNotificationsReconciled?(proposals)
     }
 
     /// 要不要发结果通知：规则代你放行的提案，「做完告诉你」完成时 / 任何放行规则执行失败时。

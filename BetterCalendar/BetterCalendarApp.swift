@@ -203,6 +203,7 @@ struct BetterCalendarApp: App {
                     container.nativeActions.remote?.startPolling()
                     Task { await container.proposals.refresh() }
                     Task { await container.agentMessages.refresh() }
+                    Task { await container.reachForeground() }   // W30 一处响
                     // W20：内置智能体接通时，回前台补上没接手的你的消息 / 提案结论 / 晚间复盘（Claude Code 时什么都不做）
                     if container.agentHub.active == .builtin { Task { await container.agentChat.refresh(); container.agentHub.pump() } }
                 }

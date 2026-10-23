@@ -116,5 +116,30 @@ class GeneratorTests(unittest.TestCase):
                 gen.main(["--apps", apps, "--no-sign"])
 
 
+    def test_ipad_set_has_distinct_names_uuids_and_folder(self):
+        apps = gen.parse_apps(DEVICECTL_JSON)
+        phone, pad = gen.automation_shortcuts(apps), gen.automation_shortcuts(apps, "ipad")
+        self.assertEqual(set(pad), {"BetterCalendar 自动记录 App 打开（iPad）", "BetterCalendar 自动记录 App 关闭（iPad）"})
+        self.assertTrue(set(phone).isdisjoint(pad))   # 快捷指令库随 iCloud 同步：同名会互相顶替
+        uuids = lambda s: {wf["WFWorkflowTriggers"][0]["WFTriggerUUID"] for wf in s.values()}
+        self.assertTrue(uuids(phone).isdisjoint(uuids(pad)))
+        # 动作完全相同：设备类别由 App Intent 在设备上自己认，不靠快捷指令传
+        for (pn, pw), (dn, dw) in zip(sorted(phone.items()), sorted(pad.items())):
+            self.assertEqual(pw["WFWorkflowActions"], dw["WFWorkflowActions"])
+        self.assertEqual(gen.device_out_dir("/x/BetterCalendar-自动化", "ipad"), "/x/BetterCalendar-自动化-iPad")
+        self.assertEqual(gen.device_out_dir("/x/out-iPad/", "ipad"), "/x/out-iPad/")
+        self.assertEqual(gen.device_out_dir("/x/out", "iphone"), "/x/out")
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "apps.json"); out = os.path.join(tmp, "out")
+            with open(src, "w") as f:
+                f.write(DEVICECTL_JSON)
+            self.assertEqual(gen.main(["--device", "ipad", "--apps", src, "--out", out, "--no-sign"]), 0)
+            self.assertFalse(os.path.exists(out))
+            files = sorted(os.listdir(out + "-iPad"))
+            self.assertIn("BetterCalendar 自动记录 App 打开（iPad）.unsigned.shortcut", files)
+            with open(os.path.join(out + "-iPad", "apps-used.txt")) as f:
+                self.assertEqual(f.readline().strip(), "# device: ipad")
+
+
 if __name__ == "__main__":
     unittest.main()

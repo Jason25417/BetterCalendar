@@ -59,6 +59,9 @@ enum SettingsSync {
         "agent.sharedMemory.v1",               // 智能体共享记忆（属于角色，各实现共用；≤6000 字）
         "agent.builtin.dailyBudgetUSD",        // 内置智能体每日预算（稳定性上限；每台设备各自按它记账）
         "agent.builtin.model",                 // 内置智能体用哪个 DeepSeek 模型
+        // —— W30（2026-10-19）——
+        "reach.onePlace.enabled",              // 「一处响，处处知」：通知只在在场设备响（一端打开两端都按它；关 = 每台照常响）
+        "drafts.handoff.enabled",              // 打了一半的字跨设备接力（一端打开两端都接力）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。
@@ -145,6 +148,12 @@ enum SettingsSync {
                 continue
             }
             guard !valuesEqual(ud.object(forKey: key), remote) else { continue }
+            if remoteIsOlder(key: key, local: ud.object(forKey: key), remote: remote) {
+                // 0.72.2：远程比本机旧（另一台设备 / iCloud 缓存送来的旧副本）→ 不落地，把本机这份推回去
+                if let local = ud.object(forKey: key) { kv.set(local, forKey: key); lastLocal[key] = local as? NSObject }
+                DevLog.shared.warn("设置同步", "iCloud 送来的「\(key)」比本机旧，保留本机这份并重新上传")
+                continue
+            }
             ud.set(remote, forKey: key)
             lastLocal[key] = remote as? NSObject
             applied = true
@@ -154,6 +163,24 @@ enum SettingsSync {
             NotificationCenter.default.post(name: didSyncRemotely, object: nil)
             DevLog.shared.info("设置同步", "已从 iCloud 拉取设置变更")
         }
+    }
+
+    /// 0.72.2（10-20 晚：智能体 01:45Z 写进共享记忆的跟进，22:26 Mac 换装 191 重启后在 22:27:20「已从 iCloud 拉取设置变更」
+    /// 时被旧副本盖掉）：iCloud KV 是整键「后写赢」、启动时又「远程有值即以远程为准」，不看谁新。
+    /// 自带更新时间的键在这里登记：远程那份更旧就不覆盖本机。
+    nonisolated static let versionedKeys: [String: @Sendable (Any) -> Date?] = [
+        "agent.sharedMemory.v1": { value in   // = AgentSharedMemoryStore.key
+            guard let raw = value as? String else { return nil }
+            let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
+            return (try? d.decode(AgentSharedMemory.self, from: Data(raw.utf8)))?.updatedAt
+        },
+    ]
+
+    /// 远程那份是否比本机旧（只对登记了版本的键；读不出版本 = 不判，照旧以远程为准）。
+    nonisolated static func remoteIsOlder(key: String, local: Any?, remote: Any) -> Bool {
+        guard let version = versionedKeys[key], let local,
+              let l = version(local), let r = version(remote) else { return false }
+        return r < l
     }
 
     private static func localSnapshot() -> [String: NSObject] {

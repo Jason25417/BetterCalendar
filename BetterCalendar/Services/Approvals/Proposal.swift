@@ -155,6 +155,8 @@ nonisolated enum ProposalPlanStep: Codable, Equatable, Sendable {
 /// expectedRevision = 提案时目标的版本（ProposalRevision）；执行时目标版本已变 → 失败并说明，不覆盖用户事实。
 /// nil 只出现在刚解析、尚未 prepare 的草稿里——ProposalCenter 提交前一律补成当时的版本。
 nonisolated enum ProposalAction: Codable, Equatable, Sendable {
+    /// W30：闹钟没指定设备 = 默认随身的 iPhone（只在提案准备阶段出现，准备时换成那台 iPhone 的 id；存下来的提案里不会有它）。
+    static let carriedDeviceDefault = ""
     /// 联调用的空改动：批准后只记录「已应用」，不碰任何真实数据。
     case experimentNoop(note: String)
     /// 事项：新增一条待办（待办区）。id 在提交前就定下，撤销 = 按 id 移入回收站。
@@ -240,8 +242,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .itemDiscard: "事项：移入回收站"
         case let .timer(command, _, _, _, _): "计时：" + command.label
         case .moveBlock: "时间线：挪动计划块"
-        case .reminder: "提醒：提醒事项（iPhone 和 Mac 都会响）"
-        case .alarm: "闹钟：iPhone 系统闹钟"
+        case .reminder: "提醒：提醒事项（各台设备都会响）"
+        case .alarm: "闹钟：iPhone / iPad 系统闹钟"
         case .reminderCancel: "提醒：取消"
         case .alarmCancel: "闹钟：取消"
         case let .moveBlocks(moves, isUndo): isUndo ? "时间线：整组挪回" : "时间线：一起挪动 \(moves.count) 个计划块"

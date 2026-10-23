@@ -26,6 +26,9 @@ extension NotificationScheduling {
 
 final class UNNotificationService: NotificationScheduling {
     private let center = UNUserNotificationCenter.current()
+    /// W30 一处响：每条都从触达出口过（nil = 测试 / 没接 = 照旧响）。
+    private let reach: ReachOutlet?
+    init(reach: ReachOutlet? = nil) { self.reach = reach }
     private static let morningID = "bc.reminder.morning"
     private static let eveningID = "bc.reminder.evening"
 
@@ -52,7 +55,7 @@ final class UNNotificationService: NotificationScheduling {
 
     func scheduleDailyReminders(morning: Date?, evening: Date?, summary: String) async {
         center.removePendingNotificationRequests(withIdentifiers: [Self.morningID, Self.eveningID])
-        if let m = morning, m > .now, await add(id: Self.morningID, title: "开始今天", body: summary, at: m) {
+        if let m = morning, m > .now, await add(id: Self.morningID, title: "开始今天", body: summary, at: m, kind: .morning) {
             // 埋点口径：本地通知没有「已送达/已看到」回执，用**排定的触发时刻**近似发出时刻
             BehaviorLog.record("通知排定", "早 \(Self.stamp(m)) · \(summary) ·口径=排定时刻(无送达回执)")
         } else if let m = morning {
@@ -60,11 +63,18 @@ final class UNNotificationService: NotificationScheduling {
             DevLog.shared.warn("通知", "早提醒没排：\(Self.stamp(m)) 已过当前时刻")
         }
         if let e = evening, e > .now, await add(id: Self.eveningID, title: "30 秒记录今天",
-                                                body: "给今天收个尾吧——一句话、30 秒。", at: e) {
+                                                body: "给今天收个尾吧——一句话、30 秒。", at: e, kind: .evening) {
             BehaviorLog.record("通知排定", "晚 \(Self.stamp(e)) ·口径=排定时刻(无送达回执)")
         } else if let e = evening {
             DevLog.shared.warn("通知", "晚提醒没排：\(Self.stamp(e)) 已过当前时刻")
         }
+    }
+
+    static func dayStamp(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyy-MM-dd"
+        return df.string(from: date)
     }
 
     /// 埋点用的触发时刻戳（本地时区、到分）——分析脚本按它算「通知→首次开始」间隔，别用 at 字段（那是排定动作的时刻）。
@@ -80,8 +90,9 @@ final class UNNotificationService: NotificationScheduling {
         content.title = title
         content.body = body
         do {   // trigger=nil → 立刻送达
-            try await center.add(UNNotificationRequest(identifier: "bc.ddl.\(UUID().uuidString)",
-                                                       content: content, trigger: nil))
+            let id = UUID().uuidString
+            let request = UNNotificationRequest(identifier: "bc.ddl.\(id)", content: content, trigger: nil)
+            try await center.add(reach?.route(request, kind: .ddlNudge, reachID: "ddl:\(id)") ?? request)
         } catch {
             DevLog.shared.warn("通知", "DDL 过点补发失败：\(error.localizedDescription)")
         }
@@ -105,14 +116,16 @@ final class UNNotificationService: NotificationScheduling {
     }
 
     @discardableResult
-    private func add(id: String, title: String, body: String, at date: Date) async -> Bool {
+    private func add(id: String, title: String, body: String, at date: Date, kind: ReachKind) async -> Bool {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         do {
-            try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: trigger))
+            let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+            // reachID 按触发那一天：各台设备按同一份计划算出同一天 → 同一个 id（「早通知 2026-10-20」）
+            try await center.add(reach?.route(request, kind: kind, reachID: "\(kind.rawValue):\(Self.dayStamp(date))", fireAt: date) ?? request)
             return true
         } catch {
             DevLog.shared.warn("通知", "排通知失败：\(error.localizedDescription)")

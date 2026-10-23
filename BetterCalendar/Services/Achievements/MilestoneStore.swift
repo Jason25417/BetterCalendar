@@ -211,7 +211,8 @@ final class MilestoneStore {
         let seconds = sessions.reduce(0.0) { $0 + max(0, ($1.end ?? $1.start).timeIntervalSince($1.start)) }
         values[.investedHours] = Int(seconds / 3600)
         values[.pomodoroSegments] = sessions.reduce(0) { $0 + ($1.completedCount ?? 0) }
-        values[.journalEntries] = (try? ctx.fetchCount(FetchDescriptor<JournalEntry>())) ?? 0
+        // W28b：只数真写了东西的（打开日记页留下的空条目不算——P4 不虚报）
+        values[.journalEntries] = JournalEntry.writtenCount((try? ctx.fetch(FetchDescriptor<JournalEntry>())) ?? [])
         let events = BehaviorLog.events(from: .distantPast, to: .distantFuture)
         values[.completions] = events.filter { $0.kind == "完成" }.count
         values[.bonusCompletions] = events.filter { $0.kind == "完成" && $0.detail.contains("（计划外）") }.count

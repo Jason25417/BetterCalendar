@@ -35,8 +35,10 @@ extension AgentBridge: ClaudeCodeAgentChannel {
     @ObservationIgnored private weak var claudeCode: (any ClaudeCodeAgentChannel)?
     private let defaults: UserDefaults
     private let now: () -> Date
-    /// 平台（晚间复盘：iPhone 等 Mac 先写，见 dueEveningReview）。
-    let isPhone: Bool
+    /// 本机设备类别（晚间复盘：Mac 先写，iPhone、iPad 依次错开等一等，见 dueEveningReview）。
+    let deviceKind: ActivityDeviceKind
+    /// W35：iPhone / iPad 上说的话先等 Mac 接手；Mac 直接接（W28 起按设备种类判断）。
+    var isPhone: Bool { deviceKind != .mac }
     /// 测试可注入；生产读「关键时刻唤醒智能体」开关（与 Claude Code 同一个开关）。
     var eventsEnabled: () -> Bool = { AgentEventSettings.enabled }
     /// 晚间复盘的事实素材（做成了什么）。
@@ -45,9 +47,9 @@ extension AgentBridge: ClaudeCodeAgentChannel {
     var active: AgentKind { selection.kind }
 
     init(selection: AgentSelection, builtin: BuiltinAgentRuntime, memory: AgentSharedMemoryStore, claudeCode: (any ClaudeCodeAgentChannel)?,
-         isPhone: Bool, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
+         deviceKind: ActivityDeviceKind, defaults: UserDefaults = .standard, now: @escaping () -> Date = Date.init) {
         self.selection = selection; self.builtin = builtin; self.memory = memory; self.claudeCode = claudeCode
-        self.isPhone = isPhone; self.defaults = defaults; self.now = now
+        self.deviceKind = deviceKind; self.defaults = defaults; self.now = now
         builtin.isActive = { [weak selection] in selection?.kind == .builtin }
         selection.onChange = { [weak self] kind in self?.apply(kind) }
     }
@@ -180,12 +182,15 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         if changed { defaults.set(Array(done.suffix(300)), forKey: Self.resolvedKey) }
     }
 
-    /// 晚间复盘该不该发（一天一次）。两台设备都开着内置智能体时：Mac 到点就发；iPhone 晚 3 分钟、且对话里还没有今天的复盘才发
-    /// （iCloud 同步有延迟，极少数情况下仍可能两条——可见、不丢）。
-    static let phoneEveningGrace: TimeInterval = 180
+    /// 晚间复盘该不该发（一天一次）。几台设备都开着内置智能体时按类别错开：Mac 到点就发；iPhone 晚 3 分钟；iPad 晚 6 分钟——
+    /// 且对话里还没有今天的复盘才发（W28：以前只有 Mac + iPhone；iPad 若也晚 3 分钟，没开 Mac 时 iPhone 和 iPad 会同时各发一条）。
+    /// iCloud 同步有延迟，极少数情况下仍可能两条——可见、不丢。同类别两台（如两台 iPhone）仍是同一时刻，见报告的待定项。
+    static func eveningGrace(_ kind: ActivityDeviceKind) -> TimeInterval {
+        switch kind { case .mac: 0; case .iphone: 180; case .ipad: 360 }
+    }
 
     func dueEveningReview() -> String? {
-        let t = isPhone ? now().addingTimeInterval(-Self.phoneEveningGrace) : now()
+        let t = now().addingTimeInterval(-Self.eveningGrace(deviceKind))
         guard let day = EveningReviewSettings.dueDayKey(enabled: EveningReviewSettings.enabled(defaults), minute: EveningReviewSettings.minute(defaults),
                                                         lastDayKey: defaults.string(forKey: EveningReviewSettings.lastDayKey), now: t) else { return nil }
         let chat = builtin.tools.chat

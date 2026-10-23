@@ -27,6 +27,8 @@ struct ProposalCardControls: View {
             if proposal.hasAlternatives { optionCards } else { decisionRow }
             if center.replying.contains(proposal.id) { replyField }
         }
+        // W29：上次「回一句」打了一半（App 重启过）→ 回复框重新展开、字填回去
+        .onAppear { center.resumeReplyingIfDrafted(proposal.id) }
     }
 
     // MARK: 没有备选：同意 / 拒绝 / 回一句 / 以后同类
@@ -126,6 +128,7 @@ struct ProposalCardControls: View {
                     .lineLimit(1...4).textFieldStyle(.roundedBorder)
                     .onSubmit(sendReply)
                     .accessibilityIdentifier("bc.proposal.replyText")
+                    .persistedDraft($replyText, key: TextDraftKey.proposalReply(proposal.id))   // W29：重启后还在；收起回复框不丢
                 Button("发送", action: sendReply)
                     .disabled(sending || replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -138,7 +141,10 @@ struct ProposalCardControls: View {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !sending else { return }
         sending = true
         Task {
-            if await center.reply(proposal.id, text: text) { replyText = ""; center.replying.remove(proposal.id) }
+            // W29：只有发出去了才清草稿；失败时字留在框里（ProposalCenter 已把失败显示出来）
+            if await center.reply(proposal.id, text: text) {
+                replyText = ""; TextDraftStore.shared.clear(TextDraftKey.proposalReply(proposal.id)); center.replying.remove(proposal.id)
+            }
             sending = false
         }
     }

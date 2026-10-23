@@ -25,6 +25,7 @@ import UIKit
 @MainActor
 final class LogSyncService {
     private let context: ModelContext
+    private let defaults: UserDefaults
     private var buffer: [String] = []
     private var timer: Timer?
     var dumpEnabled = true   // 测试关掉（别往真容器写文件）
@@ -93,8 +94,9 @@ final class LogSyncService {
         #endif
     }
 
-    init(context: ModelContext? = nil) {
+    init(context: ModelContext? = nil, defaults: UserDefaults = .standard) {
         self.context = context ?? SharedModelContainer.shared.mainContext
+        self.defaults = defaults
     }
 
     /// 挂 DevLog 钩子 + 起 30s 节流；error 级立即 flush（崩前尽量落盘）。
@@ -116,8 +118,38 @@ final class LogSyncService {
         (try? context.fetch(FetchDescriptor<DeviceLog>())) ?? []
     }
 
+    /// 0.72.2（10-20 晚 191 实测）：0.72.1 把超限记录拆小后，Mac 导出**仍被拒**，原因字面不变
+    /// （"Cannot create or modify field 'CD_text_ckAsset' in record 'CD_DeviceLog'"，记录 933564C0 = 10-19 那条，
+    /// 此时 text 已只有 199,950 字节）。同一时期 iPhone 一条 481KB 的日志照常内联上传——所以不是大小线，
+    /// 是那条 CloudKit 记录本身坏了：Core Data 为它缓存的旧编码记录（~800KB）让每次改写都要动 ckAsset 字段。
+    /// 修法：本设备自己的日志记录**换新身份重建一次**（新对象 = 新 CloudKit 记录名、没有旧缓存；旧记录只发删除，
+    /// 删除不写任何字段）。内容、天、段号原样；只做一次（标记存本机，不同步——每台设备各自的记录各自重建）。
+    nonisolated static let rebuiltKey = "devicelog.rebuiltAfterCKAssetWedge.v1"
+
+    private func rebuildOwnRecordsOnce() {
+        guard !defaults.bool(forKey: Self.rebuiltKey) else { return }
+        let me = Self.deviceID
+        let mine = fetchAll().filter { $0.deviceID == me }
+        for old in mine {
+            context.insert(DeviceLog(deviceID: old.deviceID, deviceName: old.deviceName, dayKey: old.dayKey,
+                                     text: old.text, modifiedAt: old.modifiedAt))
+            context.delete(old)
+        }
+        do {
+            try context.save()
+            defaults.set(true, forKey: Self.rebuiltKey)
+            if !mine.isEmpty {
+                DevLog.shared.info("数据同步", "跨端日志已换新记录重建 \(mine.count) 条（旧记录卡住了 iCloud 导出）")
+            }
+        } catch {
+            context.rollback()
+            DevLog.shared.warn("数据同步", "跨端日志重建失败（下次再试）：\(error.localizedDescription)")
+        }
+    }
+
     /// 缓冲 → 本设备今日记录（追加，写满续段）+ 拆开本设备超限的旧记录 + 清旧 + （macOS）dump 全部设备日志到纯文本。
     func flush(now: Date = .now) {
+        rebuildOwnRecordsOnce()
         var all = fetchAll()
         let limit = Self.recordTextLimit
         let me = Self.deviceID

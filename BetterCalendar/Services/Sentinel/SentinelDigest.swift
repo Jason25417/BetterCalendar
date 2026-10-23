@@ -51,7 +51,7 @@ struct SentinelDigestInput {
     var timeZone: TimeZone = .current
 }
 
-/// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone 打开次数）。
+/// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone / iPad 各自的打开次数；W28 起按设备类别分开，旧记录按 iPhone 计）。
 nonisolated struct SentinelActivitySummary: Equatable, Sendable {
     enum State: Equatable, Sendable {
         case unknown, app(String), idle, locked, asleep
@@ -74,6 +74,8 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
     var switches = 0
     var hosts: [(host: String, count: Int)] = []
     var phoneOpens: [(name: String, count: Int)] = []
+    /// W28：iPad 的打开次数（与 phoneOpens 分开；以前 iPad 的也会算进 iPhone）。
+    var padOpens: [(name: String, count: Int)] = []
     var eventCount = 0
 
     static func == (a: Self, b: Self) -> Bool {
@@ -81,6 +83,7 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
             && a.appSeconds.map(\.name) == b.appSeconds.map(\.name) && a.appSeconds.map(\.seconds) == b.appSeconds.map(\.seconds)
             && a.awaySeconds == b.awaySeconds && a.hosts.map(\.host) == b.hosts.map(\.host) && a.hosts.map(\.count) == b.hosts.map(\.count)
             && a.phoneOpens.map(\.name) == b.phoneOpens.map(\.name) && a.phoneOpens.map(\.count) == b.phoneOpens.map(\.count)
+            && a.padOpens.map(\.name) == b.padOpens.map(\.name) && a.padOpens.map(\.count) == b.padOpens.map(\.count)
     }
 
     static func summarize(_ events: [ActivityEvent], window: DateInterval, now: Date) -> SentinelActivitySummary {
@@ -97,12 +100,14 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
             case .unknown: break
             }
         }
-        var hostCount: [String: Int] = [:], phone: [String: Int] = [:]
+        var hostCount: [String: Int] = [:], phone: [String: Int] = [:], pad: [String: Int] = [:]
         for e in sorted {
             let inWindow = e.at >= window.start
             if inWindow { s.eventCount += 1 }
-            if e.platform == "iOS" {
-                if inWindow, e.kind == .appOpened, let name = e.appName { phone[name, default: 0] += 1 }
+            if e.platform != "macOS" {
+                if inWindow, e.kind == .appOpened, let name = e.appName {
+                    if e.resolvedDeviceKind.kind == .ipad { pad[name, default: 0] += 1 } else { phone[name, default: 0] += 1 }
+                }
                 continue
             }
             if e.kind == .browserPage {
@@ -130,6 +135,7 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
         s.appSeconds = perApp.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }   // 同时长按名字，保证哈希稳定
         s.hosts = hostCount.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
         s.phoneOpens = phone.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
+        s.padOpens = pad.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
         return s
     }
 }
@@ -224,6 +230,9 @@ enum SentinelDigestBuilder {
             if !activity.phoneOpens.isEmpty {
                 lines.append("iPhone 打开：" + activity.phoneOpens.prefix(6).map { "\($0.name) \($0.count) 次" }.joined(separator: "、"))
             }
+            if !activity.padOpens.isEmpty {
+                lines.append("iPad 打开：" + activity.padOpens.prefix(6).map { "\($0.name) \($0.count) 次" }.joined(separator: "、"))
+            }
         }
 
         // 最近的唤醒与通知
@@ -299,8 +308,12 @@ enum SentinelDigestBuilder {
         parts.append("a:\(summary.current.label)")
         let lastHost = activity.last(where: { $0.kind == .browserPage && $0.at <= now })?.url.flatMap { URL(string: $0)?.host } ?? ""
         parts.append("h:\(lastHost)")
-        let phone = activity.last(where: { $0.platform == "iOS" && $0.at <= now }).map { "\($0.kind.rawValue)|\($0.appName ?? "")" } ?? ""
-        parts.append("p:\(phone)")
+        // W28：iPhone / iPad 各看各的最近一条（以前同一个槽，两台交替会互相覆盖）；旧记录按 iPhone 计
+        for kind in [ActivityDeviceKind.iphone, .ipad] {
+            let last = activity.last(where: { $0.platform != "macOS" && $0.at <= now && $0.resolvedDeviceKind.kind == kind })
+                .map { "\($0.kind.rawValue)|\($0.appName ?? "")" } ?? ""
+            parts.append((kind == .iphone ? "p:" : "pad:") + last)
+        }
         return sha256(Data(parts.joined(separator: "\n").utf8))
     }
 

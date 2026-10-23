@@ -73,10 +73,10 @@ struct NativeApprovalPanel: View {
                 }
                 Text(model.policy.notificationMode == "all_reviewers" ? "新审批将发给执行设备及已单独允许跨设备审批的设备；每台设备同一请求只提醒一次。" : "当前仍沿用旧的单设备提醒策略；可在上方切换多端通知。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("iPhone和Mac需分别允许跨设备审批及审批通知。任一端同意或拒绝后，各端读取同一结果并清理旧通知；离线端重连后补齐，旧按钮不重复执行。新设置不补发已结束请求，也不更改系统通知权限。").font(.caption).foregroundStyle(.secondary)
+                Text("每台设备（iPhone、iPad、Mac）需分别允许跨设备审批及审批通知。任一端同意或拒绝后，各端读取同一结果并清理旧通知；离线端重连后补齐，旧按钮不重复执行。新设置不补发已结束请求，也不更改系统通知权限。").font(.caption).foregroundStyle(.secondary)
                 Text(model.notificationAuthorization.label).font(.caption).foregroundStyle(.secondary)
                 Text("短且完整的事项改动可展开系统通知，选择批准／拒绝；点通知正文打开详情。长内容必须到详情核对。系统预览可能显示事项和修改内容，可在系统设置隐藏锁屏预览。通知不会代你批准。").font(.caption).foregroundStyle(.secondary)
-                Text("当前 BC 运行时约每20秒检查；iPhone锁屏／后台可能延迟，尚未接通服务端远程审批推送。系统专注模式也可能隐藏横幅。").font(.caption).foregroundStyle(.secondary)
+                Text("当前 BC 运行时约每20秒检查；iPhone／iPad 锁屏或后台时可能延迟，尚未接通服务端远程审批推送。系统专注模式也可能隐藏横幅。").font(.caption).foregroundStyle(.secondary)
             }
             if let message = model.message, message != model.displayTestDecision?.title { Text(message).font(.caption).textSelection(.enabled) }
         }.frame(maxWidth: .infinity, alignment: .leading).buttonStyle(.bordered).task { await model.refresh() }

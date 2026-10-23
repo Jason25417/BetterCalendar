@@ -20,6 +20,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleAgentMessage: ((UUID, AgentMessage.Reaction?) async -> Void)?
     /// SPEC §19 A1：智能体对话通知；text 非 nil = 在通知上直接回复了一句，nil = 只打开对话。
     var handleAgentChat: ((UUID, String?) async -> Void)?
+    /// W30 一处响：你在本机点了某条通知 = 处理了 → 其他设备上的那份收起（提案有自己的收起机制，不走这里）。
+    var reach: ReachOutlet?
 
     init(router: AppRouter) {
         self.router = router
@@ -30,6 +32,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
+        if let id = info[ReachOutlet.idKey] as? String, let raw = info[ReachOutlet.kindKey] as? String,
+           ReachKind(rawValue: raw)?.usesHandledBoard == true {
+            await reach?.markHandled([id])
+        }
         if let route = LocalAgentChatNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier,
                                                     typedText: (response as? UNTextInputNotificationResponse)?.userText) {
             FeatureUsage.used(route.text == nil ? .notificationChatOpen : .notificationChatReply)   // W21
@@ -138,6 +144,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
            await LocalProposalNotifier().hasLocalNotification(for: id) {
             return []
         }
+        // W30 一处响：本机这一份是安静的（在场设备在别处）→ App 在前台也只放进通知中心，不弹横幅不出声
+        if notification.request.content.interruptionLevel == .passive { return [.list] }
         return [.banner, .sound]
     }
 }

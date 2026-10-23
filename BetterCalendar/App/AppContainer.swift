@@ -67,6 +67,13 @@ final class AppContainer {
     let changeTraces = ChangeTraceStore()      // 变更痕迹（E5b 数据层：直写绿的配套义务，UI=E5d）
     let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
+    /// W30（原则 11）：在场设备（你此刻在哪台）+ 一处响的触达出口。测试环境为 nil（通知照旧、不碰 iCloud KV）。
+    let presence: DevicePresence?
+    let reach: ReachOutlet?
+    /// W30：早晚通知属于哪一天（跨设备，让每台都排一份）；测试环境为 nil。
+    private(set) var sharedDailyDay: SharedDailyReminderDay?
+    /// W30：「真正在用」的信号（Mac 键鼠 / 锁屏，iOS 前台心跳）。
+    private(set) var activityProbe: UserActivityProbe?
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
     let sentinel: SentinelEngine?                  // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（Mac；测试环境为 nil）
@@ -101,7 +108,29 @@ final class AppContainer {
         self.comparer = OverlapTitleComparer()
         self.notificationDelegate = NotificationDelegate(router: router)
         UNUserNotificationCenter.current().delegate = notificationDelegate
-        self.notifier = UNNotificationService()
+        // W30 一处响：在场设备 + 触达出口先建（各通知发送方都从它过）；在场记录 = 写权租约，租约建好后再接上（见下方）。
+        if TestHost.isActive {
+            self.presence = nil
+            self.reach = nil
+        } else {
+            let presence = DevicePresence(deviceID: ProposalDevice.id, deviceLabel: ProposalDevice.label, devices: { KnownDevices.all() })
+            let reach = ReachOutlet(deviceID: ProposalDevice.id, deviceLabel: ProposalDevice.label,
+                                    presence: { presence.predicted(at: $0) },
+                                    kv: ICloudSharedKV.shared, center: SystemReachCenter(), logDefaults: .standard)
+            reach.scheduleEscalationCheck = { [weak reach] delay in
+                Task { @MainActor [weak reach] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    await reach?.runEscalations()
+                }
+            }
+            presence.addObserver { [weak reach] in Task { @MainActor [weak reach] in await reach?.reevaluate() } }
+            DevicePresence.sharedForDev = presence
+            ReachOutlet.sharedForDev = reach
+            notificationDelegate.reach = reach
+            self.presence = presence
+            self.reach = reach
+        }
+        self.notifier = UNNotificationService(reach: reach)
         self.planStore = PlanStore()
         self.learning = LearningStore()   // E5b：提前建——复盘/日记基线（D11）要用
         // 日记引子基线（E5b/D11）：计划侧=当日最初快照优先（直写绿后真相=活预报，不再当基线用）
@@ -194,16 +223,22 @@ final class AppContainer {
             let store = CloudKitProposalStore()
             self.proposalStore = store
             self.alertPush = ProposalAlertPushControl(store: store)
-            self.agentMessages = AgentMessageCenter(transport: CloudKitAgentMessageStore(), notifier: LocalAgentMessageNotifier(),
+            self.agentMessages = AgentMessageCenter(transport: CloudKitAgentMessageStore(), notifier: LocalAgentMessageNotifier(reach: reach),
                                                     ledger: FileOperationLedger(), deviceId: ProposalDevice.id)
-            self.agentChat = AgentChatCenter(transport: CloudKitAgentChatStore(), notifier: LocalAgentChatNotifier(),
+            self.agentChat = AgentChatCenter(transport: CloudKitAgentChatStore(), notifier: LocalAgentChatNotifier(reach: reach),
                                              ledger: FileOperationLedger(), deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label)
             // W10 分层预授权（A3a）：规则随设置同步（SettingsSync 白名单含 PreauthRuleStore.key）；没有规则 = 一律先问你。
             let rules = PreauthRuleStore()
             self.proposals = ProposalCenter(transport: ConflictCheckedProposalTransport(store: store), gate: PreauthRuleGate(store: rules), rules: rules,
                                             executor: actionExecutor ?? ExperimentOnlyExecutor(),
-                                            notifier: LocalProposalNotifier(), ledger: FileOperationLedger(),
+                                            notifier: LocalProposalNotifier(reach: reach), ledger: FileOperationLedger(),
                                             deviceId: ProposalDevice.id, deviceLabel: ProposalDevice.label, informDefaults: .standard)
+            // W30：闹钟镜像——别的设备上设好的闹钟，本机到点安静放一份（「一处响」开关打开时）
+            if let reach {
+                let mirrors = AlarmMirrorSync(deviceID: ProposalDevice.id, center: SystemReachCenter(), reach: reach,
+                                              devices: { KnownDevices.all() })
+                proposals.afterNotificationsReconciled = { ps in await mirrors.sync(ps) }
+            }
             _ = NotificationCenter.default.addObserver(forName: SettingsSync.didSyncRemotely, object: nil, queue: .main) { [weak rules] _ in
                 MainActor.assumeIsolated { rules?.reload() }   // 另一台设备改了规则
             }
@@ -353,6 +388,12 @@ final class AppContainer {
                 poolForReminders.todoItems()
                     .filter { $0.spilledFromDay.map { DayContext.isSameLogicalDay($0, .now) } ?? false }.count
             })
+        // W30：早晚通知属于哪一天跨设备——别的设备保存了计划，本机也排一份（在场的那台响、其余安静）
+        if let dailyReminders, reach != nil {
+            let shared = SharedDailyReminderDay(kv: ICloudSharedKV.shared, deviceID: ProposalDevice.id, refresher: dailyReminders)
+            DailyReminderDay.onRecord = { label in shared.publish(label) }
+            self.sharedDailyDay = shared
+        }
         if let actionExecutor {
             actionExecutor.timer = execution
             let mover = ApprovedPlanMover(planStore: planStore, projection: projection, startedDays: startedDays)
@@ -415,14 +456,14 @@ final class AppContainer {
         if TestHost.isActive {
             self.agentBridge = nil
             self.sentinel = nil
-            hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: false)
+            hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, deviceKind: .mac)
         } else {
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
             self.agentBridge = bridge
             // W20：桥接只在「当前智能体 = Claude Code」时是通道；共享记忆经桥接给 Claude Code 读写。
             bridge.isActive = { [weak agentSelection] in agentSelection?.kind == .claudeCode }
             bridge.sharedMemory = agentMemory
-            let hub = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: bridge, isPhone: false)
+            let hub = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: bridge, deviceKind: .mac)
             hubLocal = hub
             bridge.activityMirror = { [weak activity] io in await activity?.mirror(to: io) }
             bridge.usageMirror = { io in FeatureUsageBridgeMirror.shared.mirror(to: io) }
@@ -468,7 +509,7 @@ final class AppContainer {
         }
         #else
         self.agentBridge = nil
-        hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, isPhone: true)
+        hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, deviceKind: .current)
         // W20：iPhone 上只有内置智能体有通道（Claude Code 的删块事件仍由 Mac 的中继补发，见下方 deletionRelay）。
         reconcile.onUserDeleted = { [weak hub = hubLocal] deletions in
             hub?.emit(kind: "calendar_user_deleted", summary: AgentCalendarEvents.deletionSummary(deletions),
@@ -544,7 +585,8 @@ final class AppContainer {
             let releasesOnBackground = false   // Mac 后台照常运行
             #endif
             let lease = TimelineWriteLease(store: ICloudKVWriteLeaseStore(), deviceID: ProposalDevice.id,
-                                           deviceLabel: ProposalDevice.label, releasesOnBackground: releasesOnBackground)
+                                           deviceLabel: ProposalDevice.label, deviceKind: ActivityDeviceKind.current.rawValue,
+                                           releasesOnBackground: releasesOnBackground)
             lease.timing = { [weak execution] in
                 guard let execution else { return (false, nil) }
                 return (execution.active != nil || !execution.background.isEmpty, execution.activePrediction?.end)
@@ -556,6 +598,21 @@ final class AppContainer {
             timeline.sharedSpillMarks = SharedSpillMarks(store: ICloudKVWriteLeaseStore(key: SharedSpillMarks.key))
             execution.automaticWriteGate = { [weak lease] in lease?.mayWriteAutomatically() ?? true }
             TimelineWriteLease.sharedForDev = lease
+            // W30：在场设备读这份租约；「真正在用」的信号只在「一处响」打开时去抢 / 交出租约（关着 = W22 行为不变，只刷新显示）
+            presence?.attach(lease)
+            #if os(macOS)
+            let read: @MainActor () -> UserActivityProbe.Reading = { UserActivityProbe.macReading() }
+            #else
+            let read: @MainActor () -> UserActivityProbe.Reading = { [weak lease] in
+                UserActivityProbe.Reading(idleSeconds: lease?.isForeground == true ? 0 : .infinity, locked: false)
+            }
+            #endif
+            let probe = UserActivityProbe(read: read) { [weak lease, weak presence = self.presence] active, transition in
+                if ReachSettings.onePlaceEnabled { lease?.noteUserActivity(active: active, transition: transition) }
+                presence?.tick()
+            }
+            probe.start()
+            self.activityProbe = probe
         }
         // P4 Q4：你的日历事件作为「已占用」参与排布（只读；按设置挑日历，默认全部）。读失败 = 不看（记日志）
         let calendarForBusy = calendarStore
@@ -576,8 +633,10 @@ final class AppContainer {
         if !TestHost.isActive { logSync.start() }
         SettingsSync.start()   // #35：设置跨端同步（平台中立偏好镜像 iCloud KV；白名单外/设备专属项不同步）
         reconcile.start()
-        DataSyncMonitor.shared.start { [weak longTasks, weak execution, weak aggregator, weak learning, weak deletionRelay = self.deletionRelay, weak agentBridge = self.agentBridge] in
+        DataSyncMonitor.shared.start { [weak longTasks, weak execution, weak aggregator, weak learning, weak deletionRelay = self.deletionRelay, weak agentBridge = self.agentBridge, weak sharedDaily = self.sharedDailyDay] in
             longTasks?.reload(); execution?.reloadImportedData()
+            // W30：计划数据同步到了 → 按共享的那一天重排本机的早晚通知（一处响打开时；关着 = no-op）
+            if let sharedDaily { Task { await sharedDaily.adopt() } }
             // P4.1：另一台设备记下的日历删除 → 转交智能体（桥接没接通 / 事件关着就留着下次再试）
             deletionRelay?.relay { ds in
                 guard let bridge = agentBridge, bridge.isActive(), bridge.eventsEnabled(), bridge.connected else { return false }
@@ -599,6 +658,13 @@ final class AppContainer {
         }
         distractionSensor.isRelevant = { [weak exec] in exec?.active != nil }
         #endif
+    }
+
+    /// W30：回到前台——重算在场设备、按共享的那一天补排早晚通知、对齐一处响（收起别处已处理的 / 改派 / 升级）。
+    @MainActor func reachForeground() async {
+        presence?.tick()
+        await sharedDailyDay?.adopt()
+        await reach?.reevaluate()
     }
 
     /// 用例：自然语言 → 排程（不写日历，写入交给确认步骤）。

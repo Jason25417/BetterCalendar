@@ -14,6 +14,8 @@ import ActivityKit
 @MainActor
 final class ActivityKitLiveActivity: ExecutionLiveActivity {
     private var activity: Activity<ExecutionActivityAttributes>?
+    /// 「没开启 / 不支持」只记一次（每次开始计时都记会刷屏）；开启后再关会重新记。
+    private var loggedDisabled = false
 
     init() {
         // App 被系统终止后 ActivityKit 仍可能保留锁屏卡片。重新接管它，避免重启后
@@ -30,9 +32,17 @@ final class ActivityKitLiveActivity: ExecutionLiveActivity {
 
     func start(_ snapshot: LiveActivitySnapshot) {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            DevLog.shared.info("LiveActivity", "系统未开启实时活动（设置→BetterCalendar→实时活动）→ 跳过")
+            if !loggedDisabled {
+                loggedDisabled = true
+                // W28：iPad 没有灵动岛，实时活动是否可用取决于系统版本与设置——不可用时计时照常，只是锁屏没有卡片。
+                let why = ActivityDeviceKind.current == .ipad
+                    ? "这台 iPad 不支持或没开启实时活动（没有灵动岛；设置→BetterCalendar→实时活动）→ 跳过，计时照常"
+                    : "系统未开启实时活动（设置→BetterCalendar→实时活动）→ 跳过"
+                DevLog.shared.info("LiveActivity", why)
+            }
             return
         }
+        loggedDisabled = false
         if activity != nil {
             update(snapshot)
             DevLog.shared.info("LiveActivity", "更新现有活动：\(snapshot.title)\(snapshot.isRemote ? "（同步计时）" : "")")

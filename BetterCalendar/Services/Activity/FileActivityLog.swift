@@ -138,7 +138,13 @@ actor FileActivityLog: ActivityLog {
         }
     }
 
+    /// 时间窗内的记录（按 at 升序）。W29：读时去重——同 id 一条、健康记录语义重复折叠（ActivityHealthDedupe.clean）。
     func events(in window: DateInterval) async throws -> [ActivityEvent] {
+        ActivityHealthDedupe.clean(try rawEvents(in: window))
+    }
+
+    /// 日文件里原样的记录（不去重；appendNew 判「已写过」要看原始 id，否则被折叠掉的那条每次回填都会再写一遍）。
+    private func rawEvents(in window: DateInterval) throws -> [ActivityEvent] {
         var out: [ActivityEvent] = [], bad = 0
         for day in files.days(covering: window) {
             let url = files.url(forDay: day)
@@ -155,8 +161,12 @@ actor FileActivityLog: ActivityLog {
     @discardableResult
     func appendNew(_ events: [ActivityEvent]) async throws -> [ActivityEvent] {
         guard let lo = events.map(\.at).min(), let hi = events.map(\.at).max() else { return [] }
-        var seen = Set(try await self.events(in: DateInterval(start: lo, end: hi)).map(\.id))
-        let fresh = events.filter { seen.insert($0.id).inserted }
+        // W29：有健康记录时往前多看 24 小时（一段睡眠的 at = 入睡时刻，重叠的那段可能更早开始）
+        let hasHealth = events.contains { ActivityHealthDedupe.signal($0) != nil }
+        let existing = try rawEvents(in: DateInterval(start: hasHealth ? lo.addingTimeInterval(-86_400) : lo, end: hi))
+        var seen = Set(existing.map(\.id))
+        let byId = events.filter { seen.insert($0.id).inserted }
+        let fresh = hasHealth ? ActivityHealthDedupe.filterNew(byId, existing: existing) : byId
         try await append(fresh)
         return fresh
     }

@@ -67,6 +67,7 @@ struct LongTermView: View {
                                       text: $sayText, axis: .vertical)
                                 .lineLimit(2...5)
                                 .textFieldStyle(.plain)
+                                .persistedDraft($sayText, key: TextDraftKey.longtermSay)   // W29：重启后还在；收下草稿才清
                             Button { Task { await parseSaid() } } label: {
                                 if parsing {
                                     Label { Text("理解中…") } icon: { ProgressView().controlSize(.small) }
@@ -86,7 +87,7 @@ struct LongTermView: View {
                             Text(parseError).font(.caption).foregroundStyle(.orange)
                         }
                         // 审计 #11：手打兜底走全 App 统一的「＋ 加一项」尾行（InlineAddRow，登记件）
-                        InlineAddRow(prompt: "手动加一件", placeholder: "这件长期的事叫…") {
+                        InlineAddRow(prompt: "手动加一件", placeholder: "这件长期的事叫…", draftKey: TextDraftKey.longtermAddManual) {
                             FeatureUsage.used(.longtermAddManual); store.add(title: $0)
                         }
                     } else {
@@ -183,7 +184,7 @@ struct LongTermView: View {
                         }
                         .padding(.vertical, 2)
                     }
-                    InlineAddRow(prompt: "记一件想做的小事", placeholder: "想做的小事叫…") {
+                    InlineAddRow(prompt: "记一件想做的小事", placeholder: "想做的小事叫…", draftKey: TextDraftKey.longtermAddTodo) {
                         FeatureUsage.used(.longtermTodoAdd)
                         store.addTodo(title: $0)
                     }
@@ -350,6 +351,7 @@ struct LongTermView: View {
                            + (draft.contains { !$0.checkpoints.isEmpty } ? "（含阶段）" : ""))
         FeatureUsage.complete(.longtermSay)
         draft = []; draftUpdates = []; sayText = ""; parseError = nil
+        TextDraftStore.shared.clear(TextDraftKey.longtermSay)   // W29：收下了才清（输入框此刻不在屏上，直接清存储）
     }
 
     /// 草稿摘要行：把解析到的三量与阶段摊开给用户核对。
@@ -514,7 +516,7 @@ struct LongTaskDetailView: View {
                     store.reorderCheckpoints(task, ordered: arr)
                 }
                 // 审计 #11：就地新增走统一「＋ 加一项」尾行（InlineAddRow 登记件）
-                InlineAddRow(prompt: "加一个阶段", placeholder: "如「第 3 章 测度论」") {
+                InlineAddRow(prompt: "加一个阶段", placeholder: "如「第 3 章 测度论」", draftKey: TextDraftKey.checkpointAdd(task.id)) {
                     store.addCheckpoint(to: task, title: $0)
                 }
                 if celebratingCheckpoint != nil {

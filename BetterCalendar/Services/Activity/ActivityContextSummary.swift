@@ -5,7 +5,8 @@
 //  W13：写进 context.json 的「最近设备活动」紧凑摘要（每 20 秒重写，要小）：
 //    - current：Mac 此刻在用什么（App、开始时刻、网页域名与标题 / 窗口标题、是否空闲 / 锁屏 / 睡眠 / 暂停）；
 //    - lastWindow：最近 60 分钟各 App / 网站的前台分钟数（按时间线切段：切 App、换网页、空闲、锁屏、睡眠、暂停都会断段）；
-//    - iphone：最近 6 小时 iPhone 快捷指令记下的 App 打开 / 关闭（最近几条）。
+//    - iphone / ipad（W28 按设备类别分开）：最近 6 小时各自快捷指令记下的 App 打开 / 关闭等（最近几条 + 各台设备）。
+//      旧记录没有设备类别 → 按 iPhone 计，并在 deviceKindNote 里写明。
 //  全部带来源与观察时刻，截断显式标记；完整明细走 MCP read_activity。
 //  红线（羞辱铁律，2026-07-11 分心检测审核起一直有效）：App / 网站名只是智能体理解情境与时机的线索，
 //  永不出现在复盘、操作留底、成就 / 反馈界面里，也不拿来评判 Jason。
@@ -68,7 +69,8 @@ nonisolated enum ActivityContextSummary {
         return out
     }
 
-    static func build(events: [ActivityEvent], now: Date, recording: Bool, pausedUntil: Date?, sources: [[String: Any]] = []) -> [String: Any] {
+    static func build(events: [ActivityEvent], now: Date, recording: Bool, pausedUntil: Date?, sources: [[String: Any]] = [],
+                      deviceLabels: [String: String] = [:]) -> [String: Any] {
         let iso = ISO8601DateFormatter(); iso.timeZone = .current
         let t: (Date) -> String = { iso.string(from: $0) }
         let clip: (String?) -> Any = { s in
@@ -80,7 +82,7 @@ nonisolated enum ActivityContextSummary {
         let segs = segments(mac, now: now)
 
         var o: [String: Any] = [
-            "source": "BetterCalendar 设备活动记录（Mac 实时采集 + iPhone 快捷指令经 iCloud 汇入；本机日文件）",
+            "source": "BetterCalendar 设备活动记录（Mac 实时采集 + iPhone / iPad 快捷指令经 iCloud 汇入；本机日文件）",
             "asOf": t(now), "recording": recording, "pausedUntil": pausedUntil.map(t) ?? NSNull(),
             "redLine": "只用于理解情境与时机；App/网站名永不写进复盘、留底、反馈，不用来评判 Jason（见 CLAUDE.md「设备活动」）",
             "detailTool": "read_activity",
@@ -133,11 +135,31 @@ nonisolated enum ActivityContextSummary {
                            "apps": rank(perApp, topApps, "app"), "domains": rank(perDomain, topDomains, "domain"),
                            "note": "前台分钟数 = 记录器看到的连续使用段（空闲 ≥3 分钟、锁屏、睡眠、暂停都不算）；不等于在做事，也不等于没在做事"] as [String: Any]
 
-        // iPhone（快捷指令自动化，经 iCloud 汇入）
-        let phoneSince = now.addingTimeInterval(-Double(iphoneHours) * 3600)
-        let phone = events.filter { $0.platform == "iOS" && $0.at >= phoneSince && $0.at <= now }
-        let kept = phone.suffix(iphoneEvents).map { e -> [String: Any] in
+        // iPhone / iPad（快捷指令自动化 + 运动/健康回填，经 iCloud 汇入）：按设备类别分开（W28；以前一律当 iPhone）
+        let mobileSince = now.addingTimeInterval(-Double(iphoneHours) * 3600)
+        let mobile = events.filter { $0.platform != "macOS" && $0.at >= mobileSince && $0.at <= now }
+        var legacyInferred = 0
+        for kind in [ActivityDeviceKind.iphone, .ipad] {
+            let mine = mobile.filter { $0.resolvedDeviceKind.kind == kind }
+            if kind == .iphone { legacyInferred = mine.filter { $0.resolvedDeviceKind.inferred }.count }
+            o[kind.rawValue] = mobileSection(kind, mine, deviceLabels: deviceLabels, t: t)
+        }
+        if legacyInferred > 0 {
+            o["deviceKindNote"] = ActivityDeviceKind.legacyNote + "（本窗口内 \(legacyInferred) 条）"
+        }
+        let problems = sources.filter { ["failed", "noPermission"].contains($0["state"] as? String ?? "") }
+        if !problems.isEmpty { o["sourceProblems"] = problems }
+        return o
+    }
+
+    /// 一类移动设备（iPhone / iPad）的最近记录：最近几条 + 各台设备（id、名字、条数、最近时刻）。
+    static func mobileSection(_ kind: ActivityDeviceKind, _ events: [ActivityEvent], deviceLabels: [String: String],
+                              t: (Date) -> String) -> [String: Any] {
+        let ids = Array(Set(events.map(\.deviceId))).sorted()
+        let label: (String) -> String = { deviceLabels[$0] ?? kind.label }
+        let kept = events.suffix(iphoneEvents).map { e -> [String: Any] in
             var r: [String: Any] = ["at": t(e.at), "kind": e.kind.rawValue]
+            if ids.count > 1 { r["device"] = label(e.deviceId) }
             if let a = e.appName { r["app"] = a }
             if let s = e.detail?["signal"] {
                 r["signal"] = s
@@ -147,13 +169,16 @@ nonisolated enum ActivityContextSummary {
             if e.kind == .appClosed, let to = e.detail?["switchedTo"] { r["switchedTo"] = to }
             return r
         }
-        var iphone: [String: Any] = ["source": "iPhone 快捷指令自动化 / 运动与健康回填（经 iCloud 汇到 Mac；可能晚到几分钟）",
-                                     "note": "signal=overlay（started/ended）= 控制中心 / 通知盖了一层，不是关闭；appClosed 才是真关闭（回主屏幕或切换）",
-                                     "windowHours": iphoneHours, "items": Array(kept), "total": phone.count, "truncated": phone.count > kept.count]
-        if phone.count > kept.count { iphone["truncatedNote"] = "只列最近 \(kept.count) 条（共 \(phone.count) 条）" }
-        o["iphone"] = iphone
-        let problems = sources.filter { ["failed", "noPermission"].contains($0["state"] as? String ?? "") }
-        if !problems.isEmpty { o["sourceProblems"] = problems }
+        let devices = ids.map { id -> [String: Any] in
+            let mine = events.filter { $0.deviceId == id }
+            return ["deviceId": id, "label": label(id), "events": mine.count, "lastAt": mine.map(\.at).max().map(t) ?? NSNull()]
+        }
+        var o: [String: Any] = ["source": "\(kind.label) 快捷指令自动化 / 运动与健康回填（经 iCloud 汇到 Mac；可能晚到几分钟）",
+                                "note": "signal=overlay（started/ended）= 控制中心 / 通知盖了一层，不是关闭；appClosed 才是真关闭（回主屏幕或切换）",
+                                "windowHours": iphoneHours, "devices": devices, "items": Array(kept), "total": events.count,
+                                "truncated": events.count > kept.count]
+        if events.isEmpty { o["emptyNote"] = "最近 \(iphoneHours) 小时没有 \(kind.label) 的记录（可能没在用、没建自动化，或还在 iCloud 路上）" }
+        if events.count > kept.count { o["truncatedNote"] = "只列最近 \(kept.count) 条（共 \(events.count) 条）" }
         return o
     }
 }

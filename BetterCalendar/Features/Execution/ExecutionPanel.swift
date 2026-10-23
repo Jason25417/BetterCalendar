@@ -162,6 +162,13 @@ struct ExecutionPanel: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($adHocFocused)
                     .onSubmit { commitAdHoc(kind) }   // 回车即开始（两步走完，低地板）
+                    // W29：打字防抖存草稿（只在输入态里存；弹窗重开时的自动收起不清草稿，下次点「新事项」填回）
+                    .task(id: adHocTitle) {
+                        guard adHocKind != nil else { return }
+                        try? await Task.sleep(for: TextDraftStore.debounce)
+                        guard !Task.isCancelled, adHocKind != nil else { return }
+                        TextDraftStore.shared.save(adHocTitle, for: TextDraftKey.executionAdHoc)
+                    }
                 HStack(spacing: 8) {
                     if kind == .foreground {
                         Menu("计时：\(Self.styleLabel(adHocStyle))") {   // 可选步（高天花板）
@@ -172,7 +179,7 @@ struct ExecutionPanel: View {
                         .font(.caption).fixedSize()
                     }
                     Spacer()
-                    Button("取消") { resetAdHoc() }.font(.caption).buttonStyle(.plain)
+                    Button("取消") { TextDraftStore.shared.clear(TextDraftKey.executionAdHoc); resetAdHoc() }.font(.caption).buttonStyle(.plain)
                     Button(kind == .parallel ? "同时开始" : "开始新事项") { commitAdHoc(kind) }
                         .buttonStyle(.borderedProminent).controlSize(.small)
                         .disabled(adHocTitle.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -184,7 +191,7 @@ struct ExecutionPanel: View {
     }
 
     private func openAdHoc(_ kind: AdHocKind) {
-        adHocKind = kind; adHocTitle = ""; adHocStyle = .light
+        adHocKind = kind; adHocTitle = TextDraftStore.shared.load(TextDraftKey.executionAdHoc) ?? ""; adHocStyle = .light   // W29：上次没开始的字填回
         FeatureUsage.begin(.nowNextAdHoc)   // W21：开了「新事项」输入；开始了 = 做完，取消 = 没做完
         setPopoverHold(true)   // 输入期间挂起弹窗自动关闭（中文空格选字不误关）
         DispatchQueue.main.async { adHocFocused = true }
@@ -201,6 +208,7 @@ struct ExecutionPanel: View {
         let t = adHocTitle
         guard !t.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         FeatureUsage.complete(.nowNextAdHoc, usageSurface + (kind == .parallel ? "·同时做" : ""))
+        TextDraftStore.shared.clear(TextDraftKey.executionAdHoc)
         switch kind {
         case .foreground: Task { await model.startAdHoc(title: t, timingStyle: adHocStyle) }
         case .parallel: model.startAlsoAdHoc(title: t)

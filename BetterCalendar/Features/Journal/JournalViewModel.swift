@@ -21,16 +21,22 @@ final class JournalViewModel {
 
     func reload() { entries = store.search(searchText) }
 
-    /// 当天条目（没有就建）。
+    /// 当天还没落库的草稿（W28b：只打开页面不建空条目；第一次有输入时 save() 落库）。
+    private var draft: JournalEntry?
+
+    /// 当天条目；没有就给草稿（同一逻辑日内复用同一个草稿，编辑器绑定的始终是它）。
     func todayEntry() -> JournalEntry {
-        let e = store.entryForToday()
-        reload()
+        let e = store.todayEntryOrDraft()
+        if !store.isPersisted(e) {
+            if let d = draft, DayContext.isSameLogicalDay(d.date, .now) { return d }
+            draft = e
+        } else { draft = nil }
         return e
     }
 
-    /// 历史 = 非今天的条目（今天在顶部「写下今天」卡片里编辑）。
+    /// 历史 = 非今天、且真写了东西的条目（今天在顶部「写下今天」卡片里编辑；以前打开页面留下的空条目不再占位）。
     var history: [JournalEntry] {
-        entries.filter { !DayContext.isSameLogicalDay($0.date, .now) }
+        entries.filter { !DayContext.isSameLogicalDay($0.date, .now) && $0.hasAnyInput }
     }
 
     /// 「往年今天」（R5）：往年同月同日的条目，最近一年优先；没有则 nil（内测头一年自然不出现）。
@@ -48,9 +54,13 @@ final class JournalViewModel {
     func exportMarkdown() -> String { JournalExport.markdown(entries) }
 
     func save() {
-        store.save(); reload()
+        if let d = draft {
+            store.commit(d)                       // 有输入才落库；全空就继续当草稿
+            if store.isPersisted(d) { draft = nil }
+        } else { store.save() }
+        reload()
         // 「给明天的一句话」（#23）：保存即本地提取（规则匹配，零模型）→ 存给明天；若明早通知已排则并入
-        let note = TomorrowNote.extract(from: store.entryForToday().body)
+        let note = TomorrowNote.extract(from: store.entry(forLogicalDay: .now)?.body ?? "")
         TomorrowNote.store(note)
         if let note { Task { await UNNotificationService.appendTomorrowNoteToMorning(note) } }
     }

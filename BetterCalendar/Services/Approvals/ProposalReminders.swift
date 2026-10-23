@@ -29,7 +29,7 @@ nonisolated enum ProposalReminderRules {
 
 /// 执行器依赖的排程能力（生产 = NativeProposalNotificationScheduler；测试 = 内存假实现）。
 @MainActor protocol ProposalNotificationScheduling: AnyObject {
-    /// 这台设备能不能设系统闹钟（只有 iPhone 能）。
+    /// 这台设备能不能设系统闹钟（只有 iPhone / iPad 能）。
     var alarmsSupported: Bool { get }
     /// 排一条普通提醒；返回设好后的版本（撤销时核对）。
     func scheduleReminder(id: UUID, title: String, body: String, fireAt: Date) async throws -> String
@@ -77,11 +77,11 @@ nonisolated enum ProposalReminderRules {
     func scheduleAlarm(id: UUID, title: String, fireAt: Date) async throws {
         var capability = alarms.inspect()
         guard capability.supported else {
-            throw ProposalExecutionError.unavailable("这台设备不能设系统闹钟（只有 iPhone 可以）；没有改用普通通知")
+            throw ProposalExecutionError.unavailable("这台设备不能设系统闹钟（只有 iPhone / iPad 可以）；没有改用普通通知")
         }
         if capability.authorization == "not_determined" { capability = try await alarms.requestAuthorization() }
         guard capability.authorization == "authorized" else {
-            throw ProposalExecutionError.unavailable("还没允许 BetterCalendar 设闹钟：到 iPhone 的 设置 → BetterCalendar 打开「闹钟」后再试")
+            throw ProposalExecutionError.unavailable("还没允许 BetterCalendar 设闹钟：到这台设备的 设置 → BetterCalendar 打开「闹钟」后再试")
         }
         _ = try await alarms.schedule(NativeAlarmRequest(commandId: id, fireAt: fireAt, title: title,
                                                          userAuthorizationRef: "bc-proposal:" + id.uuidString), userConfirmed: true)

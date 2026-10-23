@@ -2550,4 +2550,34 @@ struct LogicTests {
         store.delete(e1)
         #expect(store.allEntries().isEmpty)
     }
+
+    /// W28b：只打开日记页不落空条目、空条目不算「写下 1 篇」（P4 不虚报）。
+    @Test func journalOpeningPageDoesNotCreateOrCountEmptyEntry() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        let container = try ModelContainer(for: JournalEntry.self, configurations: config)
+        let store = JournalStore(context: container.mainContext)
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 19, hour: 17))!
+        // 打开页面：拿到的是草稿，库里没有任何条目
+        let draft = store.todayEntryOrDraft(now)
+        #expect(draft.modelContext == nil)
+        store.commit(draft)                                   // 什么都没写就「保存」：仍不落库
+        #expect(try container.mainContext.fetchCount(FetchDescriptor<JournalEntry>()) == 0)
+        #expect(JournalEntry.writtenCount(store.allEntries()) == 0)
+        #expect(store.hasContentToday(now) == false)
+        // 只打标签：落库（是输入），但不算写下一篇
+        draft.tags = ["随手"]; store.commit(draft)
+        #expect(store.allEntries().count == 1 && JournalEntry.writtenCount(store.allEntries()) == 0)
+        // 写了正文才算；再次打开拿到的是同一条
+        draft.body = "  今天顺  "; store.commit(draft)
+        #expect(JournalEntry.writtenCount(store.allEntries()) == 1 && store.hasContentToday(now))
+        #expect(store.todayEntryOrDraft(now).id == draft.id && store.allEntries().count == 1)
+        // 历史里的老空条目（以前打开页面留下的）不计数；只放照片 / 只选心情的算
+        let oldEmpty = JournalEntry(date: now.addingTimeInterval(-86_400 * 3))
+        let photoOnly = JournalEntry(date: now.addingTimeInterval(-86_400 * 2), photoRefs: ["p.jpg"])
+        let moodOnly = JournalEntry(date: now.addingTimeInterval(-86_400), mood: "🙂")
+        for e in [oldEmpty, photoOnly, moodOnly] { container.mainContext.insert(e) }
+        try container.mainContext.save()
+        #expect(JournalEntry.writtenCount(store.allEntries()) == 3)
+        #expect(!oldEmpty.hasRealContent && !oldEmpty.hasAnyInput && photoOnly.hasRealContent && moodOnly.hasRealContent)
+    }
 }

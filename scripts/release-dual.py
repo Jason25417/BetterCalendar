@@ -185,7 +185,8 @@ def run_dev(args):
     if args.ios_device:
         with (out / 'build-ios.log').open('wb') as f:
             p = subprocess.run(['xcodebuild', '-project', 'BetterCalendar.xcodeproj', '-scheme', 'BetterCalendar Dev', '-configuration', 'Dev',
-                                '-destination', f'id={args.ios_device}', '-derivedDataPath', str(out / 'DerivedData'), '-allowProvisioningUpdates', 'build'],
+                                '-destination', f'id={args.ios_device}', '-derivedDataPath', str(out / 'DerivedData'), '-allowProvisioningUpdates',
+                                '-allowProvisioningDeviceRegistration', 'build'],   # 新设备第一次装 Dev 版：自动登记到开发者账号（Jason 2026-10-20 同意）
                                cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
         if p.returncode: fail('Dev 版 iOS 构建失败，见 ' + str(out / 'build-ios.log'))
         ios_app = out / 'DerivedData/Build/Products/Dev-iphoneos/BetterCalendar Dev.app'
