@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.74.1", date: "2026-10", changes: [
+            "修复：语音输入中间停顿一下，前面说的话会被吞掉",
+            "内置智能体（DeepSeek）不再等 Mac：在哪台说的就由哪台马上回；只有那台迟迟没接上（比如 App 被系统收回了），Mac 才代回并写明"
+        ]),
         ChangelogEntry(version: "0.74.0", date: "2026-10", changes: [
             "主动唤醒重做：哨兵觉得该提醒你时，智能体一定会发一句（不再自己判断误报吞掉）；觉得没必要就在通知上点「没用」，同一件事当天不再提醒，这类提醒以后也会少一些",
             "少一些误报：你正在日历上的会 / 课里、这块有待你批的改动、或你刚在对话里提过它时，不再提醒「开始时间已过」",
