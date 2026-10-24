@@ -149,6 +149,51 @@ struct ProposalBatchBadges: View {
     }
 }
 
+/// 压缩条：做什么 + 状态（对话里已处理的卡、设置里的「最近结果」共用）。
+struct ProposalCompactStrip: View {
+    @Bindable var center: ProposalCenter
+    let proposal: Proposal
+
+    var body: some View {
+        let p = proposal
+        let status = center.deciding.contains(p.id) ? "提交中…" : ProposalPresentation.compactStatus(p, at: .now)
+        HStack(spacing: 6) {
+            if p.escalation != nil { Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.red).font(.caption2) }
+            Text(p.cardHeadline).font(.caption).lineLimit(1)
+            Spacer(minLength: 6)
+            Text(status).font(.caption2).foregroundStyle(p.effectiveState(at: .now) == .failed ? .orange : .secondary)
+            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.25)))
+        .contentShape(Rectangle())
+        .accessibilityIdentifier("bc.chat.resolvedRow")
+    }
+}
+
+/// 设置 →「审批记录与规则」的「最近结果」一行：压缩条，点开 = 完整卡（撤销 / 详情都在卡里），右上角收回。
+struct ProposalHistoryRow: View {
+    @Bindable var center: ProposalCenter
+    let proposal: Proposal
+    @State private var open = false
+
+    var body: some View {
+        if open {
+            ProposalCard(center: center, proposal: proposal)
+                .overlay(alignment: .topTrailing) {
+                    Button { withAnimation(.snappy) { open = false } } label: {
+                        Image(systemName: "chevron.up").font(.caption2).padding(10).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .accessibilityLabel("收起")
+                }
+        } else {
+            Button { withAnimation(.snappy) { open = true } } label: { ProposalCompactStrip(center: center, proposal: proposal) }
+                .buttonStyle(.plain)
+        }
+    }
+}
+
 /// 一条消息下面已有结论的卡：默认收起成一个小箭头。
 struct ResolvedProposalsGroup: View {
     @Bindable var center: ProposalCenter
@@ -193,7 +238,7 @@ struct ResolvedProposalsGroup: View {
                                         .accessibilityLabel("收起")
                                     }
                             } else {
-                                Button { openCards.insert(p.id) } label: { row(p) }.buttonStyle(.plain)
+                                Button { openCards.insert(p.id) } label: { ProposalCompactStrip(center: center, proposal: p) }.buttonStyle(.plain)
                             }
                         }
                         batchUndo(g)
@@ -202,22 +247,6 @@ struct ResolvedProposalsGroup: View {
                 .padding(.leading, 14)
             }
         }
-    }
-
-    /// 压缩条：做什么 + 状态。
-    private func row(_ p: Proposal) -> some View {
-        let status = center.deciding.contains(p.id) ? "提交中…" : ProposalPresentation.compactStatus(p, at: .now)
-        return HStack(spacing: 6) {
-            if p.escalation != nil { Image(systemName: "exclamationmark.shield.fill").foregroundStyle(.red).font(.caption2) }
-            Text(p.cardHeadline).font(.caption).lineLimit(1)
-            Spacer(minLength: 6)
-            Text(status).font(.caption2).foregroundStyle(p.effectiveState(at: .now) == .failed ? .orange : .secondary)
-            Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.secondary.opacity(0.25)))
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("bc.chat.resolvedRow")
     }
 
     @ViewBuilder private func batchUndo(_ g: ProposalGroup) -> some View {

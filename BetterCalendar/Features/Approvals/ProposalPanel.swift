@@ -51,7 +51,8 @@ struct ProposalPanel: View {
             Section("最近结果") {
                 let closed = center.proposals.filter { $0.effectiveState(at: .now) != .pending }.prefix(20)
                 if closed.isEmpty { Text("还没有").foregroundStyle(.secondary) }
-                ForEach(Array(closed)) { p in historyRow(p) }
+                // 与对话里已处理的卡同一套样子（W34）：一行做什么 + 状态，点开是完整卡（撤销、详情都在卡里）
+                ForEach(Array(closed)) { p in ProposalHistoryRow(center: center, proposal: p) }
             }
             PreauthRulesSection(center: center)   // W10 A3a：预授权规则（查看 / 改效果 / 删除，随设置同步）
             if developerOptions {
@@ -178,46 +179,6 @@ struct ProposalPanel: View {
             }
         }
         .task { await m.refresh() }
-    }
-
-    private func historyRow(_ p: Proposal) -> some View {
-        let state = p.effectiveState(at: .now)
-        let who = p.decidedByDeviceId.map { $0 == center.deviceId ? "本机" : "另一台设备" }
-        return VStack(alignment: .leading, spacing: 2) {
-            Text((p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId ? "已自动通过：" : "") + p.title)   // W32d
-            if p.action.touchesRealData, !p.changes.isEmpty {
-                Text(p.notificationBody.components(separatedBy: "\n").filter { !$0.hasPrefix("理由：") && !$0.hasPrefix("发起：") }
-                    .joined(separator: "\n")).font(.caption)
-            }
-            // W32e：已完成时结果说明只是复述改动 → 收进「详情」；失败 / 过期 / 带「注意：」的照常可见
-            let showNote = state != .applied || (p.resultNote ?? "").contains(ProposalExecutionOutcome.deviationMarker)
-            Text([state.label, who.map { "决定于\($0)" }, showNote ? p.resultNote : nil].compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(state == .failed ? .orange : .secondary)
-            if let reply = p.userReply { Text("你回了一句：「\(reply.text)」").font(.caption) }
-            ProposalDetails(proposal: p, state: state)   // 规则 id / 提案 id / 越级理由 / 完整结果说明
-            undoRow(p)
-            let l = center.latency(for: p.id)
-            if developerOptions, l.notify != nil || l.withdraw != nil {
-                Text("本机延迟：通知 \(l.notify.map { String(format: "%.1f 秒", $0) } ?? "—") · 收起 \(l.withdraw.map { String(format: "%.1f 秒", $0) } ?? "—")")
-                    .font(.caption2.monospaced()).foregroundStyle(.secondary)
-            }
-
-        }
-    }
-
-    /// SPEC §19 A3 后半：已完成的真改动可撤销（撤销 = 一条来源为「你」的操作，写进操作留底）。
-    @ViewBuilder private func undoRow(_ p: Proposal) -> some View {
-        if let at = p.undoneAt {
-            Text("已撤销 \(at.formatted(date: .omitted, time: .shortened))" + (p.undoNote.map { " · \($0)" } ?? ""))
-                .font(.caption).foregroundStyle(.secondary)
-        } else if p.state == .applied, p.action.touchesRealData {
-            if center.canUndo(p) {
-                Button("撤销") { Task { await center.undo(p.id) } }.font(.caption).buttonStyle(.bordered)
-                if let hint = p.undoHint { Text(hint).font(.caption2).foregroundStyle(.secondary) }
-            } else if let reason = center.undoBlockedReason(p) {
-                Text("不能撤销：\(reason)").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
     }
 
     @ViewBuilder private var notificationRow: some View {

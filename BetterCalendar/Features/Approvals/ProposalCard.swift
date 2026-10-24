@@ -192,7 +192,8 @@ struct ProposalBadge: View {
         .help(([title] + lines).joined(separator: "\n"))
         .accessibilityLabel(title)
         .accessibilityIdentifier(identifier)
-        .popover(isPresented: $shown) {
+        // 箭头在小窗顶边 = 小窗出现在图标下方（真机自测 10-22：不指定时 iPhone 往上弹，卡在屏幕顶部被截）
+        .popover(isPresented: $shown, arrowEdge: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.subheadline.bold()).foregroundStyle(tint)
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, l in Text(l).font(.callout) }
