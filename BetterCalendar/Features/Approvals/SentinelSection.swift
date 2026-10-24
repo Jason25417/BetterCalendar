@@ -7,7 +7,6 @@
 //  单独成文件，ProposalPanel 只引用一行，减少与其他工作线的冲突。
 //
 
-#if os(macOS)
 import SwiftUI
 
 struct SentinelSection: View {
@@ -121,4 +120,3 @@ private struct SentinelKeyField: View {
         .onAppear { hasKey = KeychainStore.loadAPIKey(account: account) != nil }
     }
 }
-#endif

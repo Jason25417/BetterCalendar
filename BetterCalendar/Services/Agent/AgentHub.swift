@@ -215,9 +215,8 @@ extension AgentBridge: ClaudeCodeAgentChannel {
     }
 }
 
-// MARK: - 哨兵（Mac）的通道
+// MARK: - 哨兵的通道（W42 起 Mac 与 iPhone 都有哨兵）
 
-#if os(macOS)
 /// 哨兵只认「一个桥接目录」。Claude Code 接通时 = 真桥接目录；内置智能体接通时 = App 沙盒里的一个私有目录，
 /// 哨兵写进去的 sentinel_wake 事件被立刻取走、在进程内送给内置智能体（摘要原文一起带上）。都没接通 = 不连接（哨兵跳过）。
 @MainActor final class AgentSentinelChannel: SentinelBridgeAccess {
@@ -272,4 +271,3 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         }
     }
 }
-#endif

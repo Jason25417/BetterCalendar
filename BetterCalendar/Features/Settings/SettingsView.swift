@@ -75,9 +75,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     #endif
 
-    #if os(macOS)
-    @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // 哨兵单独一行（原藏在「审批记录与规则」里，找不到）
-    #endif
+    @Environment(SentinelEngine.self) private var sentinel: SentinelEngine?   // 哨兵单独一行（W42 起两端都有）
 
     var body: some View {
         Form {
@@ -93,7 +91,6 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("bc.settings.agent")
                     }
-                    #if os(macOS)
                     if let sentinel {
                         NavigationLink {
                             Form { SentinelSection(engine: sentinel) }.formStyle(.grouped)
@@ -105,7 +102,6 @@ struct SettingsView: View {
                         }
                         .accessibilityIdentifier("bc.settings.sentinel")
                     }
-                    #endif
                     NavigationLink {
                         ProposalPanel(center: proposals, bridge: bridge, alertPush: alertPush, messages: agentMessages,
                                       showsPending: false)

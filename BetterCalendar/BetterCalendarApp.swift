@@ -97,6 +97,7 @@ struct BetterCalendarApp: App {
     @ViewBuilder
     private func themedRoot() -> some View {
         mainTabs()
+            .environment(container.sentinel)   // W42：设置里的哨兵（两端）
             .environment(\.appTheme, ThemeSettings.current)
             // 换装批次A（2026-07-14，令牌表 v1）：全局 accent=暮色橙——所有主按钮/选中态一次换装
             .tint(ThemeSettings.current.accent)

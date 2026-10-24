@@ -2,7 +2,8 @@
 //  SentinelEngine.swift
 //  BetterCalendar
 //
-//  SPEC §19 C1 W14：哨兵调度器（Mac 上常驻，组装点创建；测试环境不启动循环）。
+//  SPEC §19 C1 W14：哨兵调度器（组装点创建；测试环境不启动循环）。W42 起 Mac 与 iPhone 都有，只有在场设备判断（presenceGate）；
+//  iPhone 只在 App 打开时跑（看不到设备活动）。你对叫醒后消息点的「没用」回来校准门槛、当天不再为同一件事叫醒（SentinelFeedback）。
 //  每一拍（默认 3 秒）：闸门（开关/桥接/打扰设置/每日花费上限）→ 只读收集（设备活动每拍读；计划与计时按 contextRefreshSeconds 刷新）
 //  → 变化指纹 → 该判断时：摘要 → 判断器（按首选顺序 Jev → OpenAI → Claude，不可用或失败就换下一个，最后规则兜底；兜底一律可见）
 //  → 概率过阈值才算「该叫醒」→ 防风暴 → 写 sentinel_wake 事件 → 决策日志一行 → 状态文件 runtime/sentinel.json（心跳读）。
@@ -13,7 +14,6 @@
 //  它只叫醒智能体，从不直接通知 Jason。
 //
 
-#if os(macOS)
 import Foundation
 import Observation
 
@@ -34,6 +34,11 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     var recentAgentWakes: () -> [SentinelRecentWake] = { [] }
     /// 最近的主动通知（智能体消息中心）。
     var recentNotices: () -> [SentinelRecentNotice] = { [] }
+    /// W42 源头去误报：有待批提案正在动的计划块 id；你最近在对话里说的话。
+    var pendingBlockIDs: () -> Set<UUID> = { [] }
+    /// W42（原则 11）：这台此刻不该判断的原因（别的设备在场）；nil = 判断。
+    var presenceGate: () -> String? = { nil }
+    var recentUserChat: () -> [(at: Date, text: String)] = { [] }
     /// 打扰设置（与智能体主动通知共用一份：静音一处生效）。
     var attention: () -> AttentionSettings = { AttentionSettings.load() }
     /// 智能体忙不忙（默认读桥接：调度器 running 或队列里有事件）；测试可注入。
@@ -171,6 +176,7 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         let g = SentinelCadence.gate(settings: settings, attention: attention(), bridgeConnected: bridge.isConnected, now: t,
                                      costTodayUsd: costTodayUsd, calendar: calendar)
         guard case .open = g else { return g }
+        if let why = presenceGate() { return .skip(why) }
         if let why = primaryUnavailableReason { return .stop("哨兵暂停：\(why)。不会换别的判断器——修好或在面板里改选") }
         return g
     }
@@ -206,9 +212,11 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
 
     private func evaluate(trigger: SentinelTrigger, at t: Date, context: AgentContextInput, events: [ActivityEvent]) async {
         let own = recent.filter { $0.outcome == .woke }.map { SentinelRecentWake(at: $0.at, kind: "sentinel_wake", summary: $0.verdict.reason) }
+        let notices = recentNotices()
         let input = SentinelDigestInput(now: t, context: context, activity: events, activityWindowMinutes: settings.activityWindowMinutes,
                                         recentWakes: own + recentAgentWakes().filter { $0.kind != SentinelBridgeFiles.wakeKind },
-                                        recentNotices: recentNotices(), attention: attention(), timeZone: timeZone)
+                                        recentNotices: notices, attention: attention(), timeZone: timeZone,
+                                        pendingBlockIDs: pendingBlockIDs(), recentUserChat: recentUserChat())
         let digest = SentinelDigestBuilder.build(input)
 
         // 只用你选的判断器（原则 10）：失败 = 这一拍不判断、直说，下一拍再试；不换替身。
@@ -227,8 +235,10 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         }
         let latencyMs = Int((clock.now - started) / .milliseconds(1))
         consecutiveErrors = 0
-        // 决策模型：概率过阈值才算该叫醒。
-        if let p = j.verdict.probability { j.verdict.wake = p >= settings.wakeThreshold }
+        // 决策模型：概率过阈值才算该叫醒。W42：门槛按你的「没用」校准（这类信号近 14 天每个「没用」+0.05，上限 0.95）。
+        let feedbackKey = SentinelFeedback.key(signals: j.verdict.signals, facts: digest.facts)
+        let threshold = SentinelFeedback.threshold(base: settings.wakeThreshold, signals: j.verdict.signals, notices: notices, now: t)
+        if let p = j.verdict.probability { j.verdict.wake = p >= threshold }
 
         let id = UUID()
         var outcome = SentinelOutcome.noWake
@@ -237,7 +247,10 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         var holdReason: String? = nil
         let signature = SentinelCadence.signature(j.verdict, situationKey: digest.situationKey)
         if j.verdict.wake {
-            if SentinelCadence.isDuplicate(signature: signature, wakes: recent, now: t, cooldownMinutes: settings.signatureCooldownMinutes) {
+            if SentinelFeedback.dismissedToday(key: feedbackKey, notices: notices, now: t) {
+                outcome = .dismissedByYou
+            } else if SentinelCadence.isDuplicate(signature: signature, wakes: recent, now: t, cooldownMinutes: settings.signatureCooldownMinutes)
+                        || SentinelFeedback.notifiedRecently(key: feedbackKey, notices: notices, now: t, cooldownMinutes: settings.signatureCooldownMinutes) {
                 outcome = .suppressedDuplicate
             } else if var p = pending, p.signatures.contains(signature) {
                 p.mergedCount += 1
@@ -247,7 +260,7 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
                                                             settings: settings, now: t) {
                 var p = pending ?? SentinelPendingWake(firstAt: t)
                 p.reasons.append(.init(at: t, reason: j.verdict.reason, urgency: j.verdict.urgency, signals: j.verdict.signals,
-                                       signature: signature, probability: j.verdict.probability, decisionId: id))
+                                       signature: signature, probability: j.verdict.probability, decisionId: id, feedbackKey: feedbackKey))
                 p.holdReason = hold
                 pending = p
                 pendingDigest = digest
@@ -256,7 +269,8 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
                 outcome = .held
             } else {
                 do {
-                    eventId = try await writeWake(verdict: j.verdict, digest: digest, trigger: trigger, judge: j.judge, decisionId: id, at: t)
+                    eventId = try await writeWake(verdict: j.verdict, digest: digest, trigger: trigger, judge: j.judge, decisionId: id, at: t,
+                                                  feedbackKey: feedbackKey)
                     outcome = .woke
                     DevLog.shared.info("哨兵", "已叫醒智能体（\(j.verdict.urgency.label)）：\(j.verdict.reason)")
                 } catch {
@@ -303,7 +317,7 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         do {
             let digest = pendingDigest ?? SentinelDigest(text: "（摘要不可用）", hash: String(repeating: "0", count: 64), bytes: 0, facts: SentinelFacts())
             let eventId = try await writeWake(verdict: verdict, digest: digest, trigger: .flush, judge: pendingJudge, decisionId: id, at: t,
-                                              merged: p.reasons)
+                                              merged: p.reasons, feedbackKey: p.reasons.last?.feedbackKey)
             var entry = flushEntry(p, at: t, outcome: .woke, eventId: eventId, error: nil)
             entry.id = id
             pending = nil; pendingDigest = nil
@@ -344,12 +358,12 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     }
 
     private func writeWake(verdict: SentinelVerdict, digest: SentinelDigest, trigger: SentinelTrigger, judge: SentinelJudgeKind,
-                           decisionId: UUID, at t: Date, merged: [SentinelPendingWake.Reason] = []) async throws -> String {
+                           decisionId: UUID, at t: Date, merged: [SentinelPendingWake.Reason] = [], feedbackKey: String? = nil) async throws -> String {
         var written: String?
         try await bridge.withBridge(refreshContext: true) { io in
             written = try SentinelBridgeFiles.writeWake(io: io, verdict: verdict, digestText: digest.text, digestHash: digest.hash,
                                                         digestBytes: digest.bytes, trigger: trigger, judge: judge, decisionId: decisionId,
-                                                        now: t, merged: merged)
+                                                        now: t, merged: merged, signature: feedbackKey)
         }
         guard let written else { throw AgentBridgeError.invalid("唤醒事件没有写出") }
         return written
@@ -441,4 +455,3 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
-#endif

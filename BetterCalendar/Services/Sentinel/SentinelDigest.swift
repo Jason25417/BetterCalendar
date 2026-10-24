@@ -8,7 +8,6 @@
 //  同时算出「事实」（给规则兜底用）与「变化指纹」（调度用：只看计划/计时/当前前台状态，不看时间流逝）。
 //
 
-#if os(macOS)
 import CryptoKit
 import Foundation
 
@@ -49,6 +48,10 @@ struct SentinelDigestInput {
     var recentNotices: [SentinelRecentNotice] = []
     var attention = AttentionSettings()
     var timeZone: TimeZone = .current
+    /// W42 源头去误报：有待批提案正在动的计划块（id）——「开始时间已过」不算它。
+    var pendingBlockIDs: Set<UUID> = []
+    /// W42：你最近在对话里说的话（30 分钟内提过某块 = 你已经在处理 / 改口了）。
+    var recentUserChat: [(at: Date, text: String)] = []
 }
 
 /// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone / iPad 各自的打开次数；W28 起按设备类别分开，旧记录按 iPhone 计）。
@@ -244,7 +247,7 @@ enum SentinelDigestBuilder {
         lines.append("【最近 3 小时给 Jason 的主动通知】" + (notices.isEmpty ? "没有" : ""))
         for n in notices {
             var line = "- \(hm.string(from: n.at)) 「\(clip(n.title, 60))」" + (n.delivered ? "已弹出" : "被拦下（\(n.suppressReason ?? "")）")
-            if let r = n.reaction { line += "，他选了\(r == "muted" ? "静音" : "好")" }
+            if let r = n.reaction { line += "，他选了\(r == "muted" ? "静音" : r == AgentMessage.Reaction.notUseful.rawValue ? "「没用」（这类叫醒他觉得没必要）" : "好")" }
             lines.append(line)
         }
 
@@ -269,10 +272,16 @@ enum SentinelDigestBuilder {
         f.timerRunning = fg != nil
         let running = Set(([fg].compactMap { $0 } + ctx.running.background).map { norm($0.title) })
         // 计划开始已过、没见开始：最近开始的那块（开始在 90 分钟内、还没结束、不是固定安排）。
-        if let b = ctx.today.items.filter({ !$0.isFixed && $0.start <= now.addingTimeInterval(-Double(lateThresholdMinutes) * 60)
+        // W42 源头去误报（10/21–10/23 的 13 次叫醒多是这三种）：此刻你在日历的会 / 课里、这块有待批提案、你 30 分钟内在对话里提过它。
+        let inEvent = ctx.calendar.items.contains { !$0.isAllDay && $0.start <= now && $0.end > now }
+        let chat = input.recentUserChat.filter { now.timeIntervalSince($0.at) < 30 * 60 && $0.at <= now }.map { norm($0.text) }
+        func mentioned(_ title: String) -> Bool { let t = norm(title); return t.count >= 2 && chat.contains { $0.contains(t) } }
+        if !inEvent,
+           let b = ctx.today.items.filter({ !$0.isFixed && $0.start <= now.addingTimeInterval(-Double(lateThresholdMinutes) * 60)
                                             && $0.start > now.addingTimeInterval(-90 * 60) && $0.end > now })
             .sorted(by: { $0.start > $1.start }).first,
-           !running.contains(norm(b.title)), !hasActual(b, ctx.actuals.items) {
+           !running.contains(norm(b.title)), !hasActual(b, ctx.actuals.items),
+           !(b.id.map(input.pendingBlockIDs.contains) ?? false), !mentioned(b.title) {
             f.overdueStart = .init(title: b.title, minutesLate: Int(now.timeIntervalSince(b.start) / 60))
         }
         // 计时超计划：按标题对上今天的块。
@@ -336,4 +345,3 @@ enum SentinelDigestBuilder {
 
     private static func clip(_ s: String, _ n: Int = 40) -> String { s.count > n ? String(s.prefix(n)) + "…" : s }
 }
-#endif

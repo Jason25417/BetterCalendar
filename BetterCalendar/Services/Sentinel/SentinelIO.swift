@@ -9,7 +9,6 @@
 //      （智能体按 digestRef 读）；每一拍写 `runtime/sentinel.json` 状态（心跳检查哨兵是否活着、有没有出错）。
 //
 
-#if os(macOS)
 import Foundation
 
 // MARK: 决策日志
@@ -135,7 +134,7 @@ nonisolated enum SentinelBridgeFiles {
     /// 写摘要原文 + 唤醒事件；返回事件 id。merged = 攒着时合并进来的其他理由（智能体一次看全）。
     static func writeWake(io: AgentBridgeIO, verdict: SentinelVerdict, digestText: String, digestHash: String, digestBytes: Int,
                           trigger: SentinelTrigger, judge: SentinelJudgeKind, decisionId: UUID, now: Date,
-                          merged: [SentinelPendingWake.Reason] = []) throws -> String {
+                          merged: [SentinelPendingWake.Reason] = [], signature: String? = nil) throws -> String {
         let fm = FileManager.default
         let dir = io.root.appendingPathComponent(digestDir, isDirectory: true)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -150,6 +149,7 @@ nonisolated enum SentinelBridgeFiles {
                                       "trigger": trigger.rawValue, "judge": judge.rawValue, "digestRef": ref, "digestHash": digestHash,
                                       "digestBytes": digestBytes, "decisionId": decisionId.uuidString]
         var p = payload
+        if let signature { p["signature"] = signature }   // W42：反馈键（「没用」校准 / 跨设备去重）
         if let prob = verdict.probability { p["probability"] = (prob * 1000).rounded() / 1000 }
         if !merged.isEmpty {
             p["merged"] = merged.map { r -> [String: Any] in
@@ -174,4 +174,3 @@ nonisolated enum SentinelBridgeFiles {
         for f in files.prefix(files.count - keepDigests) { try? fm.removeItem(at: dir.appendingPathComponent(f)) }
     }
 }
-#endif

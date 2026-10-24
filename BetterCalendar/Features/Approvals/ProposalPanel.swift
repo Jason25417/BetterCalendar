@@ -167,12 +167,20 @@ struct ProposalPanel: View {
                     Text(msg.title).font(.subheadline)
                     Text(msg.body).font(.caption)
                     Text([msg.delivery == .delivered ? "已通知" : "已拦下：\(msg.suppressReason ?? "")",
-                          msg.reaction.map { $0 == .muted ? "你选了静音" : "你点了好" }].compactMap { $0 }.joined(separator: " · "))
+                          msg.reaction.map { r -> String in
+                              switch r { case .muted: "你选了静音"; case .notUseful: "你点了没用"; case .acknowledged: "你点了好" }
+                          }].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2).foregroundStyle(.secondary)
-                    if msg.delivery == .delivered, msg.reaction == nil {
+                    if msg.reaction == nil {
                         HStack {
-                            Button("好") { Task { await m.react(msg.id, .acknowledged) } }
-                            Button("静音 2 小时") { Task { await m.react(msg.id, .muted) } }
+                            if msg.delivery == .delivered {
+                                Button("好") { Task { await m.react(msg.id, .acknowledged) } }
+                            }
+                            // W42：「没用」只由你点——哨兵据此校准（同一件事当天不再叫醒、这类信号门槛升高）
+                            Button("没用") { Task { await m.react(msg.id, .notUseful) } }
+                            if msg.delivery == .delivered {
+                                Button("静音 2 小时") { Task { await m.react(msg.id, .muted) } }
+                            }
                         }.font(.caption)
                     }
                 }

@@ -14,7 +14,6 @@
 //    - RuleSentinelJudge：没有 key / 云端关 / 调用失败时的朴素规则兜底（用摘要里算好的事实）。兜底一律可见（DevLog + 面板）。
 //
 
-#if os(macOS)
 import Foundation
 
 @MainActor protocol SentinelJudge {
@@ -335,4 +334,3 @@ struct RuleSentinelJudge: SentinelJudge {
         return SentinelJudgment(verdict: verdict, judge: .rule)
     }
 }
-#endif

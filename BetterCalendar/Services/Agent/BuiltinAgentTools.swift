@@ -27,6 +27,9 @@ import Foundation
     var reports = 0
     /// W40：这一轮查网页的次数（search_internet + read_webpage，上限 5）。
     var webCalls = 0
+    /// W42：这一轮是哨兵叫醒的（信号 / 签名）：notify_jason 发出的消息带上它，Jason 点「没用」时哨兵据此校准。
+    struct Wake: Equatable { var signals: [String]; var signature: String? }
+    var sentinelWake: Wake?
 }
 
 @MainActor final class BuiltinAgentToolbox {
@@ -334,7 +337,8 @@ import Foundation
         var file: [String: Any] = ["schemaVersion": 1, "id": UUID().uuidString, "originLabel": label]
         for k in allowed where args[k] != nil { file[k] = args[k] }
         if let eventId { file["parentEventId"] = eventId }
-        let draft = try AgentBridgeIO.messageDraft(from: SafeJSON.data(withJSONObject: file))   // 与桥接同一套校验
+        var draft = try AgentBridgeIO.messageDraft(from: SafeJSON.data(withJSONObject: file))   // 与桥接同一套校验
+        if let wake = ledger.sentinelWake { draft.wakeSignals = wake.signals; draft.wakeSignature = wake.signature }   // W42
         guard let m = await messages.receive(draft) else {
             throw AgentBridgeError.invalid("消息没有存进 iCloud：\(messages.lastError ?? "未知原因")")
         }

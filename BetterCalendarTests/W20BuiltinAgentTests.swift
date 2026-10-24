@@ -482,8 +482,10 @@ import Testing
         e.hub.emit(kind: "sentinel_wake", summary: "b", payload: ["reason": "像是做完了"], force: true)
         e.hub.emit(kind: "block_finished", summary: "做完了")
         #expect(e.runtime.queuedCount == 2)
+        // W42：哨兵叫醒必须发 → 这一轮 = 发一句 + 说完（两次请求）；一阵连发只叫醒一次 = 只有第一次请求是新一轮的开头
+        e.model.script = [FakeModel.call("notify_jason", ["title": "t", "body": "b", "reason": "r"]), FakeModel.done()]
         await e.runtime.processPending()
-        #expect(e.model.requests.count == 1)   // 一阵连发只叫醒一次
+        #expect(e.model.requests.count == 2 && e.model.requests.filter { $0.count == 2 }.count == 1)
         let text = try #require(e.model.requests.first?[1].content)
         #expect(text.contains("计划开始已过") && text.contains("像是做完了") && text.contains("block_finished"))
     }

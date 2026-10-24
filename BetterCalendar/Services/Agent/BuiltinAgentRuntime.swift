@@ -238,8 +238,11 @@ extension DeepSeekClient: BuiltinAgentModel {
 
     /// W39：这一轮要不要自动上报（失败，或被拒收 ≥ 3 次 = 打转迹象）；要 → 一段给开发会话看的经过。
     static func runReport(problem: String?, kinds: [String], turns: Int, ledger: BuiltinAgentRunLedger) -> String? {
-        guard problem != nil || ledger.rejections >= 3 else { return nil }
-        var lines = ["【\(problem == nil ? "打转迹象" : "这一轮失败")】" + (problem ?? "被拒收 \(ledger.rejections) 次"),
+        let unsentWake = ledger.sentinelWake != nil && ledger.notifications == 0
+        guard problem != nil || ledger.rejections >= 3 || unsentWake else { return nil }
+        let headline = problem.map { "【这一轮失败】" + $0 }
+            ?? (unsentWake ? "【哨兵叫醒没发】追问后仍没调 notify_jason" : "【打转迹象】被拒收 \(ledger.rejections) 次")
+        var lines = [headline,
                      "事件：\(kinds.joined(separator: "、"))；走了 \(turns) 步；拒收 \(ledger.rejections) 次；提案 \(ledger.proposals.count) 份；回复 \(ledger.replies) 次"]
         if !ledger.toolErrors.isEmpty { lines.append("工具出错：" + ledger.toolErrors.suffix(5).joined(separator: "；")) }
         lines.append("经过：\n" + ledger.trail.suffix(20).enumerated().map { "  \($0.offset + 1). \($0.element)" }.joined(separator: "\n"))
@@ -252,6 +255,12 @@ extension DeepSeekClient: BuiltinAgentModel {
         let toolDefs = try toolsLoader()
         var messages: [DeepSeekMessage] = [.system(try systemPrompt()), .user(Self.eventMessage(events))]
         let parent = events.count == 1 ? events[0].id : events.last?.id
+        // W42（Jason 10-24）：哨兵叫醒了 = 必须发；这次叫醒的信号 / 签名随消息记下（「没用」反馈给哨兵校准用）
+        let wake = events.last(where: { $0.kind == "sentinel_wake" })
+        if let wake {
+            ledger.sentinelWake = .init(signals: (wake.payload["signals"] as? [String]) ?? [], signature: wake.payload["signature"] as? String)
+        }
+        var nudged = false
         while true {
             try Task.checkCancellation()
             if let budget = BuiltinAgentSettings.budget(defaults) {   // 默认不设预算（Jason 10-19）；设了才按它停
@@ -266,6 +275,12 @@ extension DeepSeekClient: BuiltinAgentModel {
             counters.cost += c
             messages.append(completion.message)
             guard let calls = completion.message.toolCalls, !calls.isEmpty else {
+                // W42：哨兵叫醒却没发 → 追问一次（仍没发 = 这一轮自动上报，见 runReport）
+                if wake != nil, ledger.notifications == 0, !nudged {
+                    nudged = true
+                    messages.append(.user("这一轮有哨兵叫醒（sentinel_wake）：按规则你必须用 notify_jason 发一句——只向前、一句话、可忽略、不催；情况和哨兵的理由对不上就照实换个说法给一个下一步。现在发。"))
+                    continue
+                }
                 // 模型说完了。纯文字 Jason 看不到：要是他在等回复、它却没调 reply_jason，就把它的原话作为回复送到（同一个智能体的话，不是替身）。
                 if let text = completion.message.content?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
                    let waiting = events.last(where: { $0.kind == "user_message" }),

@@ -13,6 +13,7 @@ import UserNotifications
     static let category = "BC_AGENT_MESSAGE"
     static let ackAction = "BC_AGENT_MESSAGE_ACK"
     static let muteAction = "BC_AGENT_MESSAGE_MUTE"
+    static let notUsefulAction = "BC_AGENT_MESSAGE_NOT_USEFUL"   // W42
     static let idPrefix = "bc.agentmsg."
     static let userInfoKey = "bcAgentMessageId"
 
@@ -25,7 +26,8 @@ import UserNotifications
     static func registerCategories(center: UNUserNotificationCenter = .current()) async {
         let ack = UNNotificationAction(identifier: ackAction, title: "好", options: [])
         let mute = UNNotificationAction(identifier: muteAction, title: "静音 2 小时", options: [])
-        let messages = UNNotificationCategory(identifier: category, actions: [ack, mute], intentIdentifiers: [], options: [])
+        let notUseful = UNNotificationAction(identifier: notUsefulAction, title: "没用", options: [])
+        let messages = UNNotificationCategory(identifier: category, actions: [ack, notUseful, mute], intentIdentifiers: [], options: [])
         var categories = await center.notificationCategories()
         categories = categories.filter { $0.identifier != category }
         categories.insert(messages)
@@ -37,6 +39,7 @@ import UserNotifications
         switch actionIdentifier {
         case ackAction: return (id, .acknowledged)
         case muteAction: return (id, .muted)
+        case notUsefulAction: return (id, .notUseful)
         case UNNotificationDefaultActionIdentifier: return (id, nil)
         default: return nil
         }

@@ -648,3 +648,16 @@ nonisolated enum ProposalLifetime {
         }
     }
 }
+
+extension ProposalAction {
+    /// W42：这份改动会动到哪些计划块（哨兵源头去误报：有待批提案在动的块，「开始时间已过」不算它）。
+    var touchedBlockIDs: [UUID] {
+        switch self {
+        case let .moveBlock(id, _, _, _), let .blockDelete(id, _): [id]
+        case let .moveBlocks(moves, _): moves.map(\.id)
+        case let .blockEdit(e): [e.id]
+        case let .planDay(_, steps, _): steps.map(\.blockID)
+        default: []
+        }
+    }
+}

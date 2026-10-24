@@ -12,7 +12,6 @@
 //      同一理由签名在冷却期内已叫醒过 → 不再叫醒。
 //
 
-#if os(macOS)
 import Foundation
 
 nonisolated struct SentinelCadenceState: Equatable, Sendable {
@@ -112,4 +111,3 @@ nonisolated enum SentinelCadence {
         return nil
     }
 }
-#endif

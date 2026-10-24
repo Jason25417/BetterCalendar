@@ -13,7 +13,8 @@ import Observation
 
 nonisolated struct AgentMessage: Identifiable, Codable, Equatable, Sendable {
     enum Delivery: String, Codable, Sendable { case delivered, suppressed }
-    enum Reaction: String, Codable, Sendable { case acknowledged, muted }
+    /// W42：notUseful =「没用」（只由 Jason 点；哨兵据此校准：同一签名当天不再叫醒、那类信号门槛升高）。
+    enum Reaction: String, Codable, Sendable { case acknowledged, muted, notUseful }
 
     var id: UUID
     var createdAt: Date
@@ -28,6 +29,10 @@ nonisolated struct AgentMessage: Identifiable, Codable, Equatable, Sendable {
     var reaction: Reaction?
     var reactedAt: Date?
     var reactedByDeviceId: String?
+    // —— W42（Optional：只在 JSON 载荷里，不改 CloudKit schema）——
+    /// 这条是哨兵叫醒后发的：叫醒的信号（planned_start_passed…）与签名（同一块同一类 = 同一签名）。nil = 不是哨兵叫醒的。
+    var wakeSignals: [String]? = nil
+    var wakeSignature: String? = nil
 }
 
 nonisolated struct AgentMessageDraft: Sendable {
@@ -37,6 +42,8 @@ nonisolated struct AgentMessageDraft: Sendable {
     var title: String
     var body: String
     var reason: String
+    var wakeSignals: [String]? = nil
+    var wakeSignature: String? = nil
 }
 
 nonisolated protocol AgentMessageTransport: Sendable {
@@ -159,6 +166,7 @@ actor CloudKitAgentMessageStore: AgentMessageTransport {
         var m = AgentMessage(id: draft.id ?? UUID(), createdAt: at, originLabel: draft.originLabel, parentRef: draft.parentRef,
                              title: draft.title, body: draft.body, reason: draft.reason, delivery: .delivered)
         if case let .suppress(why) = verdict { m.delivery = .suppressed; m.suppressReason = why }
+        m.wakeSignals = draft.wakeSignals; m.wakeSignature = draft.wakeSignature
         do {
             try await transport.post(m)
             record(.agent, draft.originLabel, m.delivery == .delivered ? "message.delivered" : "message.suppressed", m,
@@ -191,7 +199,7 @@ actor CloudKitAgentMessageStore: AgentMessageTransport {
         if reaction == .muted { settings.mutedUntil = now().addingTimeInterval(2 * 3600) }
         do {
             try await transport.save(m)
-            record(.user, "你", "message.\(reaction.rawValue)", m, reaction == .muted ? "静音 2 小时" : "知道了")
+            record(.user, "你", "message.\(reaction.rawValue)", m, reaction == .muted ? "静音 2 小时" : reaction == .notUseful ? "没用" : "知道了")
             await refresh()
         } catch { fail("保存回应失败", error) }
     }

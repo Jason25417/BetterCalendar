@@ -67,6 +67,7 @@ final class AppContainer {
     let changeTraces = ChangeTraceStore()      // 变更痕迹（E5b 数据层：直写绿的配套义务，UI=E5d）
     let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
+    let sentinel: SentinelEngine?              // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（W42 起 Mac 与 iPhone 都有；测试环境为 nil）
     /// W30（原则 11）：在场设备（你此刻在哪台）+ 一处响的触达出口。测试环境为 nil（通知照旧、不碰 iCloud KV）。
     let presence: DevicePresence?
     let reach: ReachOutlet?
@@ -76,8 +77,46 @@ final class AppContainer {
     private(set) var activityProbe: UserActivityProbe?
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
-    let sentinel: SentinelEngine?                  // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（Mac；测试环境为 nil）
     #endif
+
+    /// 哨兵（两端一份）：判断器首选 TypeSafe Jev（OpenRouter）→ OpenAI Decisions → Claude Haiku（Jason 10-18 同意把摘要发给 OpenRouter / OpenAI）。
+    /// 通道跟着当前智能体走（Claude Code = Mac 的桥接目录；内置 = 进程内送达，见 AgentSentinelChannel）。
+    private static func makeSentinel(hub: AgentHub, bridge: AgentBridge?, activityLog: FileActivityLog, context: AgentContextGatherer,
+                                     proposals: ProposalCenter, chat: AgentChatCenter, messages: AgentMessageCenter,
+                                     presence: DevicePresence?) -> SentinelEngine {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BetterCalendar/BuiltinAgent/sentinel", isDirectory: true)   // 沙盒容器内：日用 / Dev 各自一份
+        let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
+                                      log: FileSentinelDecisionLog(),
+                                      bridge: AgentSentinelChannel(hub: hub, bridge: bridge, localRoot: root),
+                                      activity: activityLog) { await context.gather(now: $0) }
+        sentinel.recentAgentWakes = { [weak bridge] in
+            (bridge?.runtime?.runs ?? []).filter { ($0.attempt ?? 0) >= 1 }
+                .map { SentinelRecentWake(at: $0.at, kind: $0.kind ?? "?", summary: $0.summary ?? "") }
+        }
+        sentinel.recentNotices = { [weak messages] in
+            (messages?.messages ?? []).map { SentinelRecentNotice(at: $0.createdAt, title: $0.title, delivered: $0.delivery == .delivered,
+                                                                  suppressReason: $0.suppressReason, reaction: $0.reaction?.rawValue,
+                                                                  wakeSignals: $0.wakeSignals ?? [], wakeSignature: $0.wakeSignature) }
+        }
+        // W42 源头去误报：待批提案在动的块 + 你最近在对话里说的话
+        sentinel.pendingBlockIDs = { [weak proposals] in Set((proposals?.pending ?? []).flatMap(\.action.touchedBlockIDs)) }
+        sentinel.recentUserChat = { [weak chat] in
+            (chat?.messages ?? []).filter { $0.author == .user }.suffix(10).map { (at: $0.createdAt, text: $0.text) }
+        }
+        sentinel.attention = { [weak messages] in messages?.settings ?? AttentionSettings.load() }
+        // W42（原则 11）：只有在场设备判断
+        sentinel.presenceGate = { [weak presence] in
+            guard let p = presence?.current() else { return nil }
+            #if os(macOS)
+            let isMac = true
+            #else
+            let isMac = false
+            #endif
+            return SentinelFeedback.presenceSkip(p, myDeviceID: ProposalDevice.id, isMac: isMac)
+        }
+        return sentinel
+    }
 
     init() {
         // 日历后端唯一实现=EventKit（假日历族 2026-07-22 全删，历史见 handoff/记忆 calendar-backend-retired-force-eventkit）。
@@ -452,10 +491,10 @@ final class AppContainer {
         builtinAgent.beginBackgroundWork = { name in BackgroundWork.begin(name) }
         #endif
         let hubLocal: AgentHub
+        var sentinelBridge: AgentBridge? = nil
         #if os(macOS)
         if TestHost.isActive {
             self.agentBridge = nil
-            self.sentinel = nil
             hubLocal = AgentHub(selection: agentSelection, builtin: builtinAgent, memory: agentMemory, claudeCode: nil, deviceKind: .mac)
         } else {
             let bridge = AgentBridge(center: proposals, messages: agentMessages) { await context.snapshot() }
@@ -476,26 +515,7 @@ final class AppContainer {
             let wake = ProposalWake.onPush
             ProposalWake.onPush = { [weak bridge] in await wake?(); await bridge?.sync() }
             bridge.start()   // W20：当前智能体不是 Claude Code 时 start 什么都不做（不轮询）
-            // SPEC §19 C1 W14 哨兵：高频看设备活动 / 计划 / 计时，判断要不要叫醒智能体（只写 sentinel_wake 事件，从不直接通知你）。
-            // 判断器：首选 TypeSafe Jev（OpenRouter）→ OpenAI Decisions → Claude Haiku → 规则兜底（Jason 10-18 同意把摘要发给 OpenRouter / OpenAI）。
-            // W20：哨兵的通道跟着当前智能体走（Claude Code = 桥接目录；内置 = 进程内送达，见 AgentSentinelChannel）。
-            let sentinelRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("BetterCalendar/BuiltinAgent/sentinel", isDirectory: true)   // 沙盒容器内：日用 / Dev 各自一份
-            let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
-                                          log: FileSentinelDecisionLog(),
-                                          bridge: AgentSentinelChannel(hub: hub, bridge: bridge, localRoot: sentinelRoot),
-                                          activity: activity.log) { await context.gather(now: $0) }
-            sentinel.recentAgentWakes = { [weak bridge] in
-                (bridge?.runtime?.runs ?? []).filter { ($0.attempt ?? 0) >= 1 }
-                    .map { SentinelRecentWake(at: $0.at, kind: $0.kind ?? "?", summary: $0.summary ?? "") }
-            }
-            sentinel.recentNotices = { [weak messages = agentMessages] in
-                (messages?.messages ?? []).map { SentinelRecentNotice(at: $0.createdAt, title: $0.title, delivered: $0.delivery == .delivered,
-                                                                      suppressReason: $0.suppressReason, reaction: $0.reaction?.rawValue) }
-            }
-            sentinel.attention = { [weak messages = agentMessages] in messages?.settings ?? AttentionSettings.load() }
-            self.sentinel = sentinel
-            sentinel.start()
+            sentinelBridge = bridge   // W42：哨兵统一在下面建（两端一份），Mac 上 Claude Code 接通时走这个桥接目录
             // P4 Q3：日历里删了块 → 已照办；写事件让智能体按上下文决定要不要问一句（不再弹四选窗）
             // P4.1：iPhone 先发现的删除——回执随 iCloud 到 Mac，中继补发一次（按块 id 去重，Mac 自己先发现的不重发）
             let relay = CalendarDeletionRelay(source: planStore)
@@ -519,6 +539,16 @@ final class AppContainer {
         #endif
         let agentHub = hubLocal
         self.agentHub = agentHub
+        // SPEC §19 C1 W14 哨兵：看设备活动 / 计划 / 计时，判断要不要叫醒智能体（只写 sentinel_wake 事件，从不直接通知你）。
+        // W42：Mac 与 iPhone 都有；只有在场设备判断（判断不了时 Mac 判断、iPhone 不判断）；你点的「没用」回来校准它。
+        if TestHost.isActive {
+            self.sentinel = nil
+        } else {
+            let sentinel = Self.makeSentinel(hub: agentHub, bridge: sentinelBridge, activityLog: activity.log, context: context,
+                                             proposals: proposals, chat: agentChat, messages: agentMessages, presence: presence)
+            self.sentinel = sentinel
+            sentinel.start()
+        }
         // W20：做完一件事 → 当前智能体（两端；Claude Code 只在 Mac 有通道）。
         execution.onBlockFinished = { [weak agentHub] title, seconds in
             agentHub?.emit(kind: "block_finished", summary: "做完了「\(title)」（用时约 \(max(1, seconds / 60)) 分钟）",

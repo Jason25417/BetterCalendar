@@ -10,7 +10,6 @@
 //  哨兵只在 Mac 上跑（桥接目录、设备活动都在 Mac）。
 //
 
-#if os(macOS)
 import Foundation
 
 nonisolated enum SentinelUrgency: String, Codable, Sendable, CaseIterable {
@@ -129,6 +128,7 @@ nonisolated enum SentinelOutcome: String, Codable, Sendable {
     case suppressedDuplicate   // 同一理由签名在冷却期内已叫醒过 → 不再叫醒
     case expired               // 待发的叫醒等太久没发出去（情况多半已变）→ 丢弃
     case wakeFailed            // 要叫醒，但写事件失败（错误见 error）
+    case dismissedByYou        // W42：同一件事你今天点过「没用」→ 当天不再叫醒
 
     var label: String {
         switch self {
@@ -139,6 +139,7 @@ nonisolated enum SentinelOutcome: String, Codable, Sendable {
         case .suppressedDuplicate: "同一理由刚叫醒过，已拦下"
         case .expired: "攒着的叫醒等太久，已丢弃"
         case .wakeFailed: "叫醒失败"
+        case .dismissedByYou: "你今天点过「没用」，不再叫醒"
         }
     }
 }
@@ -265,6 +266,8 @@ nonisolated struct SentinelPendingWake: Equatable, Sendable {
         var signature: String
         var probability: Double?
         var decisionId: UUID
+        /// W42：反馈键（随叫醒事件交给智能体，记在发出的消息上）。
+        var feedbackKey: String? = nil
     }
     var firstAt: Date
     var reasons: [Reason] = []
@@ -295,5 +298,7 @@ nonisolated struct SentinelRecentNotice: Equatable, Sendable {
     var delivered: Bool
     var suppressReason: String?
     var reaction: String?
+    /// W42：这条是哨兵叫醒后发的——叫醒的信号与反馈键（「没用」校准、跨设备去重用）。
+    var wakeSignals: [String] = []
+    var wakeSignature: String? = nil
 }
-#endif

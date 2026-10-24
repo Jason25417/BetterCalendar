@@ -80,6 +80,7 @@ nonisolated struct AgentTranslationStats: Equatable, Sendable {
     var suppressed = 0
     var acknowledged = 0
     var muted = 0
+    var notUseful = 0   // W42：你点了「没用」
 
     /// 已有决定的提案（同意 / 拒绝 / 过期 / 撤回）——各比例的分母。
     var resolved: Int { approved + declined + expired + cancelled + replied }
@@ -163,6 +164,7 @@ nonisolated enum AgentTranslationStatsCalculator {
             switch m.reaction {
             case .acknowledged?: s.acknowledged += 1
             case .muted?: s.muted += 1
+            case .notUseful?: s.notUseful += 1   // W42
             case nil: break
             }
         }
