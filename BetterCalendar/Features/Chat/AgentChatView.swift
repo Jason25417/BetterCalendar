@@ -237,7 +237,7 @@ struct AgentChatView: View {
         let status = chat.status(of: m)
         HStack(spacing: 8) {
             Text("\(m.createdAt.formatted(date: .omitted, time: .shortened)) · \(chat.label(for: status))"
-                 + (chat.handlerNote(m).flatMap { developerOptions || $0.contains("没在线") ? " · \($0)" : nil } ?? ""))   // W35：Mac 没在线时写明；平常由谁接手只给开发者看
+                 + (chat.handlerNote(m).flatMap { developerOptions || ($0.contains("没接上") || $0.contains("没在线")) ? " · \($0)" : nil } ?? ""))   // 0.74.1：别的设备代接时写明；平常由谁接手只给开发者看
                 .font(.caption2).foregroundStyle(status.isProblem ? .orange : .secondary)
                 .multilineTextAlignment(.trailing)
             if case .failed = status {

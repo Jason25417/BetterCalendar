@@ -39,7 +39,7 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     // —— 你的消息：Mac 桥接转交给智能体的回执 ——
     var forwardedAt: Date?
     var forwardedByDeviceId: String?
-    /// W35：谁接手、为什么（如「Mac 没在线，由 iPhone 回复」）；nil = 正常接手。只在 JSON 载荷里，不改 CloudKit schema。
+    /// W35：谁接手、为什么（如「iPhone 没接上（等了 20 秒），由 Mac 回复」）；nil = 正常接手。只在 JSON 载荷里，不改 CloudKit schema。
     var forwardedNote: String? = nil
     /// W36：你发的图片 / 文件（元数据；本体在 ChatAttachmentStore，经 iCloud 资源字段同步）。nil = 没有。
     var attachments: [ChatAttachment]? = nil
@@ -567,8 +567,8 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
     func label(for status: AgentChatUserStatus) -> String {
         guard activeAgent() == .builtin else { return status.label }
         switch status {
-        case .waitingForMac(false): return "已存到 iCloud，等智能体接手（Mac 开着时由 Mac 回复）"
-        case .waitingForMac(true): return "还没有设备接手：Mac 没开时，说这句话的那台设备要打开 BetterCalendar（看 设置 → 智能体 的状态）"
+        case .waitingForMac(false): return "已存到 iCloud，智能体马上接手"
+        case .waitingForMac(true): return "还没有设备接手：打开说这句话的那台设备上的 BetterCalendar，或开着 Mac（看 设置 → 智能体 的状态）"
         case .withAgent(true): return "内置智能体超过 10 分钟没回复：看 设置 → 智能体 的状态"
         case .expired: return "没送到：超过 6 小时都没被接手，不再处理（可以重新说一次）"
         default: return status.label

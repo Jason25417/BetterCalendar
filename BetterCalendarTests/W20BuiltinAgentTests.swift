@@ -556,56 +556,63 @@ import Testing
         let e = env()
         e.chat.activeAgent = { .builtin }
         let said = try #require(await e.chat.send("hi"))
-        #expect(e.chat.label(for: e.chat.status(of: said)) == "已存到 iCloud，等智能体接手（Mac 开着时由 Mac 回复）")   // W35
+        #expect(e.chat.label(for: e.chat.status(of: said)) == "已存到 iCloud，智能体马上接手")   // 0.74.1
         e.chat.activeAgent = { .claudeCode }
         #expect(e.chat.label(for: e.chat.status(of: said)).contains("Mac"))
     }
 
-    // MARK: W35 iPhone 说的话交给 Mac 跑；Mac 没在线 → iPhone 自己跑并写明
+    // MARK: 0.74.1 哪台说的哪台马上回；Mac 只代接别的设备迟迟没接的话
 
-    @Test func macTakesWhatWasSaidOnIPhoneAndIPhoneStaysQuiet() async throws {
+    @Test func iPhoneAnswersRightAwayAndMacStaysQuiet() async throws {
         let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
         let mac = env(chatTransport: transport, clock: clock), phone = env(isPhone: true, chatTransport: transport, clock: clock)
         mac.selection.select(.builtin); phone.selection.select(.builtin)
         let said = try #require(await phone.chat.send("刚到家，想休息一小时"))
-        phone.hub.userMessageStored(said)   // iPhone：先等 Mac（测试里不排定时检查）
-        await phone.hub.pumpMessages()
-        #expect(phone.runtime.queuedCount == 0)
+        await phone.hub.pumpMessages()   // 本机说的：不等，马上接
+        #expect(phone.runtime.queuedCount == 1)
+        #expect(phone.chat.handlerNote(said) == nil)
+        clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace + 5)
         await mac.chat.refresh()
         await mac.hub.pumpMessages()
-        #expect(mac.runtime.queuedCount == 1)
-        #expect(mac.chat.handlerNote(said) == "由 Mac 接手")
-        clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace + 5)
-        await phone.chat.refresh()
-        await phone.hub.pumpMessages()
-        #expect(phone.runtime.queuedCount == 0)   // Mac 已接手：iPhone 不再回
-        mac.model.script = [FakeModel.call("reply_jason", ["text": "好，休息吧", "replyTo": said.id.uuidString]), FakeModel.done()]
-        await mac.runtime.processPending()
-        await phone.chat.refresh()
-        #expect(phone.chat.status(of: said) == .replied)
-        let event = try #require(mac.model.requests.first?[1].content)
-        #expect(event.contains(said.id.uuidString) && event.contains("由 Mac 接手"))
+        #expect(mac.runtime.queuedCount == 0)   // iPhone 已接手：Mac 不再回
+        phone.model.script = [FakeModel.call("reply_jason", ["text": "好，休息吧", "replyTo": said.id.uuidString]), FakeModel.done()]
+        await phone.runtime.processPending()
+        await mac.chat.refresh()
+        #expect(mac.chat.status(of: said) == .replied)
     }
 
-    @Test func iPhoneAnswersItselfAfterTheGraceWhenMacIsAwayAndSaysSo() async throws {
+    @Test func macCoversForAPhoneThatNeverPickedUpAndSaysSo() async throws {
         let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
-        let phone = env(isPhone: true, chatTransport: transport, clock: clock)
-        phone.selection.select(.builtin)
-        let said = try #require(await phone.chat.send("今晚还要做什么"))
+        let phone = env(isPhone: true, chatTransport: transport, clock: clock), mac = env(chatTransport: transport, clock: clock)
+        phone.selection.select(.builtin); mac.selection.select(.builtin)
+        let said = try #require(await phone.chat.send("今晚还要做什么"))   // 说完 iPhone 就被系统收回了：没认领
+        var checks: [TimeInterval] = []
+        mac.hub.scheduleHandoffCheck = { checks.append($0) }
         clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace - 5)
-        await phone.hub.pumpMessages()
-        #expect(phone.runtime.queuedCount == 0)   // 还在等 Mac
-        clock.now = clock.now.addingTimeInterval(10)
-        await phone.hub.pumpMessages()
-        #expect(phone.runtime.queuedCount == 1)
-        #expect(phone.chat.handlerNote(said)?.contains("Mac 没在线") == true && phone.chat.handlerNote(said)?.contains("iPhone") == true)
-        // Mac 之后才上线：已被 iPhone 认领，不会再回一遍
-        let mac = env(chatTransport: transport, clock: clock)
-        mac.selection.select(.builtin)
         await mac.chat.refresh()
         await mac.hub.pumpMessages()
-        #expect(mac.runtime.queuedCount == 0)
-        #expect(mac.chat.handlerNote(said)?.contains("Mac 没在线") == true)   // 各端看到同一行说明
+        #expect(mac.runtime.queuedCount == 0)   // 还在等 iPhone
+        #expect(checks.count == 1 && abs(checks[0] - 5) < 0.001)   // 到点再查一次
+        clock.now = clock.now.addingTimeInterval(10)
+        await mac.hub.pumpMessages()
+        #expect(mac.runtime.queuedCount == 1)
+        #expect(mac.chat.handlerNote(said)?.contains("iPhone 没接上") == true && mac.chat.handlerNote(said)?.contains("由 Mac 回复") == true)
+        // iPhone 之后才回来：已被 Mac 认领，不会再回一遍
+        await phone.chat.refresh()
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 0)
+        #expect(phone.chat.handlerNote(said)?.contains("iPhone 没接上") == true)   // 各端看到同一行说明
+    }
+
+    @Test func iPhoneNeverTakesWhatWasSaidElsewhere() async throws {
+        let transport = InMemoryAgentChatTransport(), clock = Clock(W20BuiltinAgentTests.sunday)
+        let mac = env(chatTransport: transport, clock: clock), phone = env(isPhone: true, chatTransport: transport, clock: clock)
+        phone.selection.select(.builtin)
+        _ = try #require(await mac.chat.send("x"))   // Mac 那台没开内置智能体：没认领
+        clock.now = clock.now.addingTimeInterval(AgentHub.handoffGrace * 3)
+        await phone.chat.refresh()
+        await phone.hub.pumpMessages()
+        #expect(phone.runtime.queuedCount == 0)
     }
 
     @Test func claimIsFirstComeFirstServed() async throws {
