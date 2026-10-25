@@ -14,7 +14,11 @@ import Observation
 nonisolated struct AgentMessage: Identifiable, Codable, Equatable, Sendable {
     enum Delivery: String, Codable, Sendable { case delivered, suppressed }
     /// W42：notUseful =「没用」（只由 Jason 点；哨兵据此校准：同一签名当天不再叫醒、那类信号门槛升高）。
-    enum Reaction: String, Codable, Sendable { case acknowledged, muted, notUseful }
+    enum Reaction: String, Codable, Sendable {
+        case acknowledged, muted, notUseful
+        /// 给界面：你怎么回应的。
+        var youLabel: String { switch self { case .muted: "你选了静音"; case .notUseful: "你点了没用"; case .acknowledged: "你点了好" } }
+    }
 
     var id: UUID
     var createdAt: Date

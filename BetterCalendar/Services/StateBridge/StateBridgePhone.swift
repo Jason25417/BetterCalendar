@@ -17,7 +17,8 @@ import UIKit
     private var started = false
     private var healthReading = false
     private var healthPending = false
-    private var lastHealthFailure: String?
+    /// 0.75：这一段已经记过失败的来源（四个来源轮流失败时，旧的「只记上一个」每轮把四条全刷一遍）；全部读成功才清空。
+    private var loggedHealthFailures: Set<String> = []
     private let types: [HKSampleType] = [HKObjectType.categoryType(forIdentifier:.sleepAnalysis)!,HKObjectType.quantityType(forIdentifier:.stepCount)!,HKObjectType.quantityType(forIdentifier:.restingHeartRate)!,HKObjectType.workoutType()]
     override private init() { super.init(); location.delegate = self }
     func requestPermissions() async {
@@ -136,7 +137,7 @@ import UIKit
         do {
             let sleep = try await samples(types[0],days:3,limit:100)
             client.emit("health.sleep",value:.object(["samples":.array(sleep.compactMap { sample in guard let s = sample as? HKCategorySample else { return nil }; return .object(["id":.string(s.uuid.uuidString),"start":.string(f.string(from:s.startDate)),"end":.string(f.string(from:s.endDate)),"stage":.number(Double(s.value)),"source":.string(s.sourceRevision.source.name)]) }),"availability":.string(sleep.isEmpty ? "no-readable-samples-not-proof-of-no-sleep" : "readable"),"snapshot":.bool(true)]),validFor:36*3600)
-        } catch { failed.append("health.sleep"); recordHealthFailure("health.sleep") }
+        } catch { failed.append("health.sleep"); recordHealthFailure("health.sleep", error) }
         do {
             let stepType = HKObjectType.quantityType(forIdentifier:.stepCount)!
             // Freeze the window before awaiting HealthKit; midnight/timezone
@@ -146,15 +147,15 @@ import UIKit
                 let q = HKStatisticsQuery(quantityType:stepType,quantitySamplePredicate:HKQuery.predicateForSamples(withStart:window.start,end:window.end),options:.cumulativeSum) { _,stats,error in if let error { c.resume(throwing:error) } else { c.resume(returning:(stats?.sumQuantity()?.doubleValue(for:.count()),stats?.sources?.map(\.bundleIdentifier).sorted())) } }; health.execute(q)
             }
             client.emit("health.steps",value:window.steps(result.0,sources:result.1),validFor:300,observedAt:window.end)
-        } catch { failed.append("health.steps"); recordHealthFailure("health.steps") }
+        } catch { failed.append("health.steps"); recordHealthFailure("health.steps", error) }
         do {
             let resting = try await samples(types[2],days:3,limit:5)
             client.emit("health.resting-heart-rate",value:.array(resting.compactMap { s in guard let q = s as? HKQuantitySample else { return nil }; return .object(["id":.string(q.uuid.uuidString),"end":.string(f.string(from:q.endDate)),"bpm":.number(q.quantity.doubleValue(for:HKUnit.count().unitDivided(by:.minute())))]) }),validFor:36*3600)
-        } catch { failed.append("health.resting-heart-rate"); recordHealthFailure("health.resting-heart-rate") }
+        } catch { failed.append("health.resting-heart-rate"); recordHealthFailure("health.resting-heart-rate", error) }
         do {
             let workouts = try await samples(types[3],days:14,limit:30)
             client.emit("health.workouts",value:.array(workouts.compactMap { s in guard let w = s as? HKWorkout else { return nil }; return .object(["id":.string(w.uuid.uuidString),"start":.string(f.string(from:w.startDate)),"end":.string(f.string(from:w.endDate)),"durationSeconds":.number(w.duration),"activityType":.number(Double(w.workoutActivityType.rawValue))]) }),validFor:36*3600)
-        } catch { failed.append("health.workouts"); recordHealthFailure("health.workouts") }
+        } catch { failed.append("health.workouts"); recordHealthFailure("health.workouts", error) }
         // Every source is queried independently. One failed query must not stop
         // later sources or negate successful reads; empty reads remain unknown.
         client.emit("health.status",value:.object([
@@ -162,14 +163,15 @@ import UIKit
             "failedSources":.array(failed.map(BridgeJSON.string)),
             "emptySamplesAreUnknown":.bool(true)
         ]),validFor:3600)
-        if failed.isEmpty { lastHealthFailure = nil }
+        if failed.isEmpty { loggedHealthFailures = [] }
     }
-    private func recordHealthFailure(_ source: String) {
+    private func recordHealthFailure(_ source: String, _ error: Error? = nil) {
         guard StateBridgeCollector.shared.enabled else { return }
         StateBridgeClient.shared.emit(source,value:.object(["availability":.string("read-unavailable")]),validFor:3600)
-        if lastHealthFailure != source {
-            DevLog.shared.warn("StateBridge","健康来源 \(source) 查询失败；其他来源仍分别读取，不能推断未授权或没有活动。")
-            lastHealthFailure = source
+        // iPhone 锁屏时健康数据库按系统设计读不了（Protected health data is inaccessible）：正常现象，不算故障
+        if (error as? HKError)?.code == .errorDatabaseInaccessible { return }
+        if loggedHealthFailures.insert(source).inserted {
+            DevLog.shared.warn("StateBridge","健康来源 \(source) 查询失败（\(error?.localizedDescription ?? "未知原因")）；其他来源仍分别读取，不能推断未授权或没有活动。")
         }
     }
 }

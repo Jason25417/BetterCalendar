@@ -167,9 +167,7 @@ struct ProposalPanel: View {
                     Text(msg.title).font(.subheadline)
                     Text(msg.body).font(.caption)
                     Text([msg.delivery == .delivered ? "已通知" : "已拦下：\(msg.suppressReason ?? "")",
-                          msg.reaction.map { r -> String in
-                              switch r { case .muted: "你选了静音"; case .notUseful: "你点了没用"; case .acknowledged: "你点了好" }
-                          }].compactMap { $0 }.joined(separator: " · "))
+                          msg.reaction?.youLabel].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption2).foregroundStyle(.secondary)
                     if msg.reaction == nil {
                         HStack {

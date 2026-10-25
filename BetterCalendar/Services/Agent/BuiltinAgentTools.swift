@@ -30,6 +30,8 @@ import Foundation
     /// W42：这一轮是哨兵叫醒的（信号 / 签名）：notify_jason 发出的消息带上它，Jason 点「没用」时哨兵据此校准。
     struct Wake: Equatable { var signals: [String]; var signature: String? }
     var sentinelWake: Wake?
+    /// 0.75：这一轮开工时给它看的共享记忆版本（改写时核对：期间被另一台改过就拒收、给最新全文）。
+    var memoryBase: Date?
 }
 
 @MainActor final class BuiltinAgentToolbox {
@@ -99,7 +101,7 @@ import Foundation
             case "notify_jason": return try await notify(args, eventId: eventId, ledger: ledger)
             case "read_messages": return try readMessages(limit(args, 20, max: 50))
             case "read_chat": return try await readChat(limit(args, 20, max: 40))
-            case "update_shared_memory": return try updateMemory(args)
+            case "update_shared_memory": return try updateMemory(args, ledger: ledger)
             case "report_problem": return try reportProblem(args, ledger: ledger)
             // ⚠️ 不能叫 web_search：那是 DeepSeek 内置工具的保留名，deepseek-flash 上会被忽略（10-23 自测实锤：模型看不到它）
             case "search_internet": return try await webSearch(args, ledger: ledger)
@@ -346,9 +348,17 @@ import Foundation
         return try json(["ok": true, "id": m.id.uuidString, "delivery": m.delivery.rawValue, "suppressReason": (m.suppressReason as Any?) ?? NSNull()])
     }
 
-    private func updateMemory(_ args: [String: Any]) throws -> String {
+    private func updateMemory(_ args: [String: Any], ledger: BuiltinAgentRunLedger) throws -> String {
         guard let text = args["text"] as? String else { throw AgentBridgeError.invalid("update_shared_memory 需要 text（整份记忆）") }
-        let m = try memory.replace(text, by: "\(AgentKind.builtin.shortLabel)（\(deviceLabel)）")
+        let m: AgentSharedMemory
+        do {
+            m = try memory.replace(text, by: "\(AgentKind.builtin.shortLabel)（\(deviceLabel)）", basedOn: ledger.memoryBase,
+                                   confirmShrink: args["confirmShrink"] as? Bool == true)
+        } catch AgentSharedMemoryError.changedSinceRead(let by, let latest) {
+            ledger.memoryBase = memory.memory?.updatedAt   // 最新全文已给它：下一次在这份基础上写就放行
+            throw AgentSharedMemoryError.changedSinceRead(by: by, text: latest)
+        }
+        ledger.memoryBase = m.updatedAt
         return try json(["ok": true, "characters": m.text.count, "limit": AgentSharedMemoryStore.maxCharacters])
     }
 }

@@ -96,8 +96,8 @@ extension DeepSeekClient: BuiltinAgentModel {
     private(set) var queuedCount = 0
 
     // —— 配置（稳定性参数，不是产品规则）——
-    var maxTurns = 12   // 10-21 日志：8 步常被「放不下 → 重试」耗光；拒收原因已附整组挪法（PlanEditRules.cascadeHint）
-    var runTimeout: TimeInterval = 120
+    var maxTurns = 50   // Jason 2026-10-25 定 50（原 12：10-21 日志 8 步常被「放不下 → 重试」耗光）
+    var runTimeout: TimeInterval = 600   // 跟着步数放宽：50 步 × 每步数秒～十几秒，120 秒会先于步数上限把长任务切断
     /// 收到事件后等一小会儿再开跑，把一阵连发并成一轮。
     var debounce: TimeInterval = 1.5
     /// 生产 = true：enqueue 自动起一个串行工作任务；测试 = false，手动 `await processPending()`（不留游离 Task）。
@@ -199,6 +199,8 @@ extension DeepSeekClient: BuiltinAgentModel {
         let endBackground = beginBackgroundWork("BetterCalendar 智能体")
         defer { isRunning = false; onRunStateChange?(false); endBackground() }
         let ledger = BuiltinAgentRunLedger()
+        tools.memory.reload()   // 0.75：系统提示里的共享记忆 = 本机此刻最新；记下版本，改写时核对
+        ledger.memoryBase = tools.memory.memory?.updatedAt
         // 你的消息：一接手就写「已转交」回执（各端显示「智能体已收到」，也防止重复处理）。
         let userMessageIds = events.filter { $0.kind == "user_message" }.compactMap { ($0.payload["messageId"] as? String).flatMap(UUID.init) }
         for id in userMessageIds { await tools.chat.markForwarded(id) }

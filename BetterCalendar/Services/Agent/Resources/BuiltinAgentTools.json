@@ -1113,14 +1113,18 @@
   "type": "function",
   "function": {
    "name": "update_shared_memory",
-   "description": "整份改写 BetterCalendar 智能体的共享记忆（各种实现共用的这一份：Jason 的偏好、正在跟进的事、最近被拒的提议、备忘）。当前全文已在系统提示里。只记以后真有用的事实，短句带日期；不写 App / 网站名的评价。上限 6000 字，超了会被拒，请合并精简。",
+   "description": "整份改写 BetterCalendar 智能体的共享记忆（各种实现共用的这一份：Jason 的偏好、正在跟进的事、最近被拒的提议、备忘）。当前全文已在系统提示里。只记以后真有用的事实，短句带日期；不写 App / 网站名的评价。上限 6000 字，超了会被拒，请合并精简。整份改写 = 你没写进来的内容会被删掉：务必在现有全文基础上改。",
    "parameters": {
     "type": "object",
     "properties": {
      "text": {
       "type": "string",
       "description": "改写后的整份记忆（Markdown 短句）"
-     }
+     },
+          "confirmShrink": {
+            "type": "boolean",
+            "description": "有意精简（这次比现有短四成以上）时填 true；平时不填"
+          }
     },
     "required": [
      "text"

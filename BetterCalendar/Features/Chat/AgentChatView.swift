@@ -29,12 +29,28 @@ nonisolated struct AgentChatCard: Identifiable, Equatable {
     }
 }
 
+/// 0.75（Jason 10-25「主动唤醒的消息我在聊天记录里看不到」）：对话页一条时间线 = 对话消息 + 智能体主动发的消息（notify_jason / 哨兵叫醒），
+/// 后者另存在 AgentMessageCenter（打扰规则、通知、「没用」反馈都在那边），这里只按时间合进来显示。
+nonisolated enum ChatTimelineItem: Identifiable, Equatable {
+    case chat(AgentChatMessage)
+    case notice(AgentMessage)
+
+    var id: UUID { switch self { case let .chat(m): m.id; case let .notice(m): m.id } }
+    var createdAt: Date { switch self { case let .chat(m): m.createdAt; case let .notice(m): m.createdAt } }
+
+    static func merge(chat: [AgentChatMessage], notices: [AgentMessage]) -> [ChatTimelineItem] {
+        (chat.map(Self.chat) + notices.map(Self.notice)).sorted { $0.createdAt < $1.createdAt }
+    }
+}
+
 struct AgentChatView: View {
     @Bindable var chat: AgentChatCenter
     @Bindable var proposals: ProposalCenter
     var bridge: AgentBridge? = nil
     /// W20：当前智能体（内置智能体的运行状态 / 跑不了的原因显示在这里；Claude Code 时才提示 Mac 桥接）。
     var hub: AgentHub? = nil
+    /// 0.75：智能体主动发的消息（合进时间线）；nil = 只显示对话。
+    var notices: AgentMessageCenter? = nil
     /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
     var focusId: UUID? = nil
     @State private var draft = ""
@@ -56,15 +72,21 @@ struct AgentChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        if chat.timeline.isEmpty { emptyHint }
-                        ForEach(chat.timeline) { m in bubble(m).id(m.id) }
+                        let items = timeline
+                        if items.isEmpty { emptyHint }
+                        ForEach(items) { item in
+                            switch item {
+                            case let .chat(m): bubble(m).id(m.id)
+                            case let .notice(m): AgentNoticeBubble(message: m, center: notices).id(m.id)
+                            }
+                        }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 12)
                 }
-                .onChange(of: chat.timeline.last?.id) { _, last in
+                .onChange(of: timeline.last?.id) { _, last in
                     if let last { withAnimation { proxy.scrollTo(last, anchor: .bottom) } }
                 }
-                .onAppear { if let last = chat.timeline.last?.id { proxy.scrollTo(last, anchor: .bottom) } }
+                .onAppear { if let last = timeline.last?.id { proxy.scrollTo(last, anchor: .bottom) } }
             }
             Divider()
             inputBar
@@ -77,6 +99,7 @@ struct AgentChatView: View {
             await chat.setViewing(scenePhase == .active)
             await chat.refresh()
             await proposals.refresh()
+            await notices?.refresh()
         }
         .task {
             // 对话页开着时每 10 秒兜底刷新一次（推送丢失也能看到回复）；离开页面随视图取消。
@@ -233,6 +256,8 @@ struct AgentChatView: View {
         }
     }
 
+    private var timeline: [ChatTimelineItem] { ChatTimelineItem.merge(chat: chat.timeline, notices: notices?.messages ?? []) }
+
     @ViewBuilder private func userStatus(_ m: AgentChatMessage) -> some View {
         let status = chat.status(of: m)
         HStack(spacing: 8) {
@@ -362,3 +387,37 @@ struct AgentChatSettingsView: View {
         return (c.hour ?? 21) * 60 + (c.minute ?? 30)
     }
 }
+
+/// 0.75：时间线里一条智能体主动发的消息——标明「主动提醒」、没弹通知时写明原因、能直接点「好 / 没用」（与通知上的按钮同一回应）。
+struct AgentNoticeBubble: View {
+    let message: AgentMessage
+    let center: AgentMessageCenter?
+
+    var body: some View {
+        let m = message
+        VStack(alignment: .leading, spacing: 6) {
+            Label(m.wakeSignature != nil ? "主动提醒（哨兵叫醒）" : "主动提醒", systemImage: "bell")
+                .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(m.title).font(.subheadline.bold())
+                if !m.body.isEmpty { Text(m.body) }
+            }
+            .textSelection(.enabled)
+            .padding(10).background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+            HStack(spacing: 8) {
+                Text(([m.createdAt.formatted(date: .omitted, time: .shortened)]
+                      + [m.delivery == .suppressed ? "没弹通知：\(m.suppressReason ?? "打扰规则拦下")" : nil, m.reaction?.youLabel]
+                        .compactMap { $0 }).joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(.secondary)
+                if m.reaction == nil, let center {
+                    Button("好") { Task { await center.react(m.id, .acknowledged) } }.font(.caption)
+                    Button("没用") { Task { await center.react(m.id, .notUseful) } }.font(.caption)   // W42：只由你点，哨兵据此校准
+                }
+            }
+        }
+        .frame(maxWidth: AgentChatView.readableWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 40)
+    }
+}
+

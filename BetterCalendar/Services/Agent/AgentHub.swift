@@ -137,6 +137,13 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         if let rid = m.replyTo, let prior = chat.messages.first(where: { $0.id == rid }) {
             payload["inReplyTo"] = ["id": rid.uuidString, "kind": prior.kind.rawValue, "text": String(prior.text.prefix(200))]
         }
+        // 0.75：主动提醒现在也在对话页里——你看到提醒后接着说的话，带上那条提醒（比上一条对话还新、6 小时内）
+        let lastAgentChat = chat.messages.last { $0.author == .agent && $0.createdAt < m.createdAt }?.createdAt ?? .distantPast
+        if let notice = builtin.tools.messages?.messages
+            .filter({ $0.createdAt < m.createdAt && $0.createdAt > lastAgentChat && m.createdAt.timeIntervalSince($0.createdAt) < 6 * 3600 })
+            .max(by: { $0.createdAt < $1.createdAt }) {
+            payload["afterNotice"] = ["id": notice.id.uuidString, "title": notice.title, "body": String(notice.body.prefix(200)), "sentAt": iso.string(from: notice.createdAt)]
+        }
         var summary = "Jason 在对话里说：\(m.text.prefix(80))" + ((m.attachments?.isEmpty ?? true) ? "" : "（附 \(m.attachments!.count) 个图片 / 文件）")
         if let pid = m.inReplyToProposal {
             let proposals = builtin.tools.proposals.proposals

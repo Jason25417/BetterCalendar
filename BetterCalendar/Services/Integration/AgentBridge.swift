@@ -847,7 +847,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         do {
             if let text = try io.pendingSharedMemoryUpdate() {
                 do {
-                    try store.replace(text, by: "\(AgentKind.claudeCode.shortLabel)（\(ProposalDevice.label)）")
+                    try store.replace(text, by: "\(AgentKind.claudeCode.shortLabel)（\(ProposalDevice.label)）", confirmShrink: io.pendingSharedMemoryConfirmShrink())
                     try io.finishSharedMemoryUpdate(rejected: nil)
                 } catch {
                     try io.finishSharedMemoryUpdate(rejected: error.localizedDescription)

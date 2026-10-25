@@ -70,6 +70,13 @@ final class DevLog {
 
     func log(_ level: Level, _ source: String, _ message: String) {
         let entry = Entry(time: now(), level: level, source: source, message: message)
+        // 0.75：同一段短暂故障里一模一样的重复（如断网时每 10 秒一次「读取对话失败」）只计数、不再刷一条——
+        // 10-24 日志：断网一阵刷了 66 条，把 300 条环形缓冲里有用的记录挤掉。次数不丢：恢复那条写明重复了几次。
+        if entry.verdict.tier == .transient, let s = issues[entry.verdict.key], !isDecayed(s, at: entry.time),
+           s.lastMessage == message, s.lastLevel == level {
+            track(entry)
+            return
+        }
         entries.append(entry)
         if entries.count > 300 { entries.removeFirst(entries.count - 300) }
         print("[\(level.rawValue.uppercased())] \(source): \(message)")  // 也进 Xcode 控制台
@@ -98,10 +105,12 @@ final class DevLog {
 
     /// 某通道成功了（如 iCloud 拉取 / 导入成功）→ 它名下的短暂问题恢复，计数与升级横幅自动消失。日志里记一笔恢复。
     func resolve(source: String) {
-        let keys = issues.values.filter { $0.source == source && $0.verdict.tier == .transient }.map(\.key)
-        guard !keys.isEmpty else { return }
-        for k in keys { issues.removeValue(forKey: k) }
-        let entry = Entry(time: now(), level: .info, source: source, message: "已恢复（之前的短暂失败自动消除）")
+        let resolved = issues.values.filter { $0.source == source && $0.verdict.tier == .transient }
+        guard !resolved.isEmpty else { return }
+        for s in resolved { issues.removeValue(forKey: s.key) }
+        let total = resolved.reduce(0) { $0 + $1.count }
+        let entry = Entry(time: now(), level: .info, source: source,
+                          message: "已恢复（之前的短暂失败自动消除" + (total > 1 ? "；期间共失败 \(total) 次" : "") + "）")
         entries.append(entry)
         if entries.count > 300 { entries.removeFirst(entries.count - 300) }
         onAppend?(entry)
