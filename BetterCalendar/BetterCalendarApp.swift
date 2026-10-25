@@ -53,6 +53,7 @@ struct BetterCalendarApp: App {
                              calendarStore: container.calendarStore)
             }
             .environment(container.sentinel)   // SPEC §19 C1 W14 哨兵区块（在「审批记录与规则」里）
+            .environment(\.speechTranscriber, container.speech)   // W38 设置页的「语音输入」区块
             .environment(\.appTheme, ThemeSettings.current)
             .tint(ThemeSettings.current.accent)   // 体检 #9：独立 scene 不吃主窗 tint，跨端选中态一致
             .frame(minWidth: 520, idealWidth: 620, minHeight: 520, idealHeight: 720)
@@ -98,6 +99,7 @@ struct BetterCalendarApp: App {
     private func themedRoot() -> some View {
         mainTabs()
             .environment(container.sentinel)   // W42：设置里的哨兵（两端）
+            .environment(\.speechTranscriber, container.speech)   // W38：输入框的麦克风（首页 / 智能体页共用一个模型）
             .environment(\.appTheme, ThemeSettings.current)
             // 换装批次A（2026-07-14，令牌表 v1）：全局 accent=暮色橙——所有主按钮/选中态一次换装
             .tint(ThemeSettings.current.accent)

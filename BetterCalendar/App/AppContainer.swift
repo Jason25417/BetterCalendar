@@ -75,6 +75,7 @@ final class AppContainer {
     private(set) var sharedDailyDay: SharedDailyReminderDay?
     /// W30：「真正在用」的信号（Mac 键鼠 / 锁屏，iOS 前台心跳）。
     private(set) var activityProbe: UserActivityProbe?
+    let speech: WhisperKitTranscriber?         // W38 端侧语音（Whisper）：全 App 一个模型；测试环境为 nil（只用苹果听写）
     #if os(macOS)
     var distractionSensor: MacDistractionSensor!   // 分心自动休息感知器（#26；开关关着=只空转 10s tick）
     #endif
@@ -484,6 +485,17 @@ final class AppContainer {
                                                deviceLabel: ProposalDevice.label,
                                                web: TestHost.isActive ? nil : deepSeek,   // W40：搜索 / 读网页走同一个 DeepSeek key
                                                context: TestHost.isActive ? { [:] } : { await context.snapshot() })
+        // W38：端侧 Whisper——开关开着就在后台下载 / 准备（昂贵网络等 Wi-Fi）；状态在设置页看得到
+        if TestHost.isActive {
+            self.speech = nil
+        } else {
+            let speech = WhisperKitTranscriber()
+            speech.prepare()
+            self.speech = speech
+            #if DEBUG
+            DevWhisperSelfTest.runIfRequested(speech)
+            #endif
+        }
         let builtinAgent = BuiltinAgentRuntime(model: deepSeek, tools: builtinTools, usage: BuiltinAgentUsageStore())
         builtinAgent.deviceLabel = ProposalDevice.label
         builtinAgent.autoStart = !TestHost.isActive

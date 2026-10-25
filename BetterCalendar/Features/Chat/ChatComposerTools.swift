@@ -3,6 +3,7 @@
 //  BetterCalendar
 //
 //  W36：输入框旁的语音 / 图片 / 文件（首页「跟智能体说一句」与对话页共用）。界面先能用（Jason 还在想 UI，之后再定样子）。
+//  W38：语音改走 VoiceInput（Whisper 就绪用 Whisper，没就绪用苹果听写并写明原因）。
 //
 
 import PhotosUI
@@ -15,7 +16,9 @@ struct ChatComposerTools: View {
     @Binding var attachments: [ChatAttachment]
     /// 出错 / 处理中的一行说明（父视图显示在输入框上方）。
     @Binding var status: String?
-    @State private var dictation = SpeechDictation()
+    @Environment(\.speechTranscriber) private var transcriber
+    @State private var voice: VoiceInput?
+    @State private var voiceStatus: String?
     @State private var base = ""
     @State private var importing = false
     #if os(iOS)
@@ -41,15 +44,17 @@ struct ChatComposerTools: View {
                 .accessibilityLabel("发文件或图片")
                 .accessibilityIdentifier("bc.chat.attach")
             Button {
-                if !dictation.isListening { base = text; dictation.clearError() }
-                dictation.toggle()
+                let v = voiceInput()
+                if !v.isActive { base = text }
+                v.tap()
             } label: {
-                Image(systemName: dictation.isListening ? "mic.fill" : "mic").font(.title3)
-                    .foregroundStyle(dictation.isListening ? Color.accentColor : Color.secondary)
-                    .symbolEffect(.pulse, isActive: dictation.isListening)
+                Image(systemName: micActive ? "mic.fill" : "mic").font(.title3)
+                    .foregroundStyle(micActive ? Color.accentColor : Color.secondary)
+                    .symbolEffect(.pulse, isActive: micActive)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel(dictation.isListening ? "停止听写" : "语音输入")
+            .disabled(voice?.phase == .transcribing)
+            .accessibilityLabel(micActive ? "停止听写" : "语音输入")
             .accessibilityIdentifier("bc.chat.mic")
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
@@ -58,18 +63,23 @@ struct ChatComposerTools: View {
             case let .failure(error): status = "没选到文件：\(error.localizedDescription)"
             }
         }
-        .onAppear {
-            dictation.onTranscript = { heard in text = base.isEmpty ? heard : base + " " + heard }
+        // 语音那一行说明：自己写的才自己清（不抹掉附件的提示）
+        .onChange(of: voice?.statusLine) { _, s in
+            if let s { status = s } else if status == voiceStatus { status = nil }
+            voiceStatus = s
         }
-        .onChange(of: dictation.state) { _, s in
-            switch s {
-            case let .failed(why): status = why
-            case .listening: status = "正在听…再点一下麦克风结束"
-            case .starting: status = nil
-            case .idle: if status == "正在听…再点一下麦克风结束" { status = nil }
-            }
-        }
-        .onDisappear { if dictation.isListening { dictation.stop() } }
+        .onDisappear { voice?.cancel() }
+    }
+
+    private var micActive: Bool { voice?.isActive ?? false }
+
+    /// 第一次点麦克风时才建（不点就不碰录音 / 识别）。
+    private func voiceInput() -> VoiceInput {
+        if let voice { return voice }
+        let v = VoiceInput(transcriber: transcriber, recorder: AudioRecorder(), live: SpeechDictation())
+        v.onText = { heard in text = base.isEmpty ? heard : base + " " + heard }
+        voice = v
+        return v
     }
 
     private var room: Int { ChatAttachmentStore.maxPerMessage - attachments.count }
