@@ -1251,6 +1251,46 @@ final class ExecutionViewModel {
         return nil
     }
 
+    // MARK: 0.78 补记做成的事（智能体 actualRecord）
+
+    func proposalPlanBlock(_ id: UUID) async -> (title: String, start: Date, end: Date)? {
+        let today = DayContext.logicalStartOfDay(clock())
+        let labels = (-3...PlanEditRules.horizonDays).map { DayContext.logicalDay(offset: $0, from: today) }
+        guard let b = try? planStore.plannedBlocks(onLabels: labels).first(where: { $0.id == id }) else { return nil }
+        return (b.title, b.start, b.end)
+    }
+
+    func proposalRecordActual(id: UUID, blockId: UUID?, title: String, start: Date, end: Date) async throws {
+        if !loaded { await loadToday() }
+        if DayContext.isSameLogicalDay(start, clock()) {
+            // 今天：进「做成了」列表（同时间轴记做完 / 快捷指令标记完成那条路）
+            done.removeAll { $0.plannedID == id }
+            done.append(ActualRecord(plannedID: id, title: title, start: start, end: end))
+            await flushActuals()
+            NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
+            await updatePreview()
+        } else {
+            do { try planStore.upsertActuals([ActualBlock(id: id, title: title, start: start, end: end)]) }
+            catch { throw ProposalExecutionError.unavailable("补记没存上：\(error.localizedDescription)") }
+            do { _ = try await projection?.recordActuals([CalendarEventDraft(title: title, start: start, end: end, kind: .actual, blockID: id)],
+                                                         readFailureIsEmpty: true) }
+            catch { DevLog.shared.warn("执行", "补记已落库，但蓝色日历这次没画上：\(error.localizedDescription)") }
+            NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
+        }
+        DevLog.shared.info("执行", "智能体补记做成：\(title)（\(PlanEditRules.span(start, end))）")
+    }
+
+    func proposalRemoveActual(id: UUID, start: Date) async throws {
+        do { try planStore.deleteActuals(ids: [id]) }
+        catch { throw ProposalExecutionError.unavailable("撤下补记没成功：\(error.localizedDescription)") }
+        done.removeAll { $0.plannedID == id }
+        do { try await projection?.removeActual(id: id, start: start) }
+        catch { DevLog.shared.warn("执行", "补记已从记录里撤下，但蓝色日历这次没改：\(error.localizedDescription)") }
+        if DayContext.isSameLogicalDay(start, clock()) { await projection?.repaintToday(reason: "撤下补记"); await updatePreview() }
+        NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
+    }
+
+
     // MARK: - 落盘
 
     private func recordActiveIfAny() async {

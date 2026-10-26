@@ -377,6 +377,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             "checkpointDelete": ["itemId", "checkpointId", "expectedRevision"],
             // W34 给长期事项加阶段（普通审批；新阶段 id = 提案 id）
             "checkpointCreate": ["itemId", "title", "estimateMinutes", "position", "expectedRevision"],
+            "actualRecord": ["blockId", "title", "start", "end"],
             // W32b 日记（「允许智能体提议写日记」开着才收）
             "journalAppend": ["day", "text", "expectedRevision"],
             "journalEdit": ["entryId", "find", "replace", "expectedRevision"],
@@ -554,6 +555,12 @@ nonisolated struct AgentBridgeIO: Sendable {
             return .yourReminderEdit(edit)
         case "yourReminderDelete":
             return .yourReminderDelete(externalID: try required(string("reminderId", max: 512), "reminderId"), expectedRevision: revision)
+        case "actualRecord":
+            guard let start = try date("start"), let end = try date("end") else { throw AgentBridgeError.invalid("actualRecord 需要 start 和 end（带时区的 ISO 8601）") }
+            let block = try uuid("blockId")
+            let title = try string("title", max: 200) ?? ""
+            guard block != nil || !title.isEmpty else { throw AgentBridgeError.invalid("actualRecord 二选一：计划块 blockId，或计划外的事 title") }
+            return .actualRecord(recordId: proposalId, blockId: block, title: title, start: start, end: end)
         case "checkpointCreate":
             var position: Int? = nil
             if let raw = a["position"], !(raw is NSNull) {

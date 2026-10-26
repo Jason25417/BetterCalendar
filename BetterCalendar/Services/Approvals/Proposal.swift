@@ -232,6 +232,11 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     case journalEdit(entryID: UUID, find: String, replace: String, expectedRevision: String?)
     /// 逆操作：把那篇日记的正文原样改回（body = nil：撤销新建 = 这篇移入回收站）。只用于撤销。
     case journalRestore(entryID: UUID, body: String?, expectedRevision: String?)
+    /// 0.78（Jason 10-26）：补记一段已经做过的事（蓝色「做成了」，含实际用时）。blockId = 挂到那块计划上（同一个章，绿色让位）；
+    /// nil = 计划外的事（章 = recordId，由提案 id 推出）。只记过去（结束不晚于此刻、最多往前 3 天）。撤销 = actualRemove。
+    case actualRecord(recordId: UUID, blockId: UUID?, title: String, start: Date, end: Date)
+    /// 逆操作：撤下补记的那条实际（id = 它的章）。只用于撤销。
+    case actualRemove(id: UUID, start: Date)
 
     var kindLabel: String {
         switch self {
@@ -265,6 +270,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case let .journalAppend(day, _, _, _): "日记：在\(PlanEditRules.dayName(Calendar.current.startOfDay(for: day)))的日记里加一段"
         case .journalEdit: "日记：改你写的原文"
         case .journalRestore: "日记：改回原样"
+        case .actualRecord: "做成了：补记一段（实际用时）"
+        case .actualRemove: "做成了：撤下补记"
         }
     }
 
@@ -301,6 +308,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
         case .journalAppend: "journalAppend"
         case .journalEdit: "journalEdit"
         case .journalRestore: "journalRestore"
+        case .actualRecord: "actualRecord"
+        case .actualRemove: "actualRemove"
         }
     }
 
@@ -349,16 +358,18 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 只作撤销用的逆操作（智能体不能提；prepare 拒收）。
     var isUndoOnly: Bool {
         switch self {
-        case .itemDiscard, .reminderCancel, .alarmCancel, .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore: true
+        case .itemDiscard, .reminderCancel, .alarmCancel, .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore,
+             .actualRemove: true
         case .moveBlocks(_, true), .planDay(_, _, true): true
         default: false
         }
     }
 
-    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天 / W32 删你的日程、事项、阶段）：预授权规则永远不能自动放行。
     /// 0.77：删的是 BetterCalendar 自家的计划块（不是你的日历 / 提醒 / 事项）。
     var isBlockDelete: Bool { if case .blockDelete = self { return true } else { return false } }
 
+    /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天 / W32 删你的日程、事项、阶段）：
+    /// 预授权规则不能自动放行（0.77 起删自家计划块例外，见 PreauthPolicy.lowRiskReason）。
     var isDestructive: Bool {
         switch self {
         case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete, .yourEventDelete, .yourReminderDelete, .itemDelete, .checkpointDelete: true

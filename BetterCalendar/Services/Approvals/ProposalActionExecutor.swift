@@ -108,6 +108,19 @@ nonisolated struct ProposalTimerState: Equatable, Sendable {
     func proposalStopTimer() async throws
     /// 今天已经占用的时间段（W8，回溯起点查重叠用）：已记下的实际 + 正在跑的计时（前台 / 同时做 / 共享计时，算到此刻）。
     func proposalBusySpans() async -> [ProposalBusySpan]
+    /// 0.78：某块计划（往前 3 天到可排范围）的标题与起止（补记挂靠用）；nil = 找不到。
+    func proposalPlanBlock(_ id: UUID) async -> (title: String, start: Date, end: Date)?
+    /// 0.78：补记 / 撤下一段做成的事（章 = id：挂靠的计划块 id，或计划外那条自己的 id）。
+    func proposalRecordActual(id: UUID, blockId: UUID?, title: String, start: Date, end: Date) async throws
+    func proposalRemoveActual(id: UUID, start: Date) async throws
+}
+
+extension ProposalTimerControlling {
+    func proposalPlanBlock(_ id: UUID) async -> (title: String, start: Date, end: Date)? { nil }
+    func proposalRecordActual(id: UUID, blockId: UUID?, title: String, start: Date, end: Date) async throws {
+        throw ProposalExecutionError.unavailable("这台设备没有接入补记")
+    }
+    func proposalRemoveActual(id: UUID, start: Date) async throws { throw ProposalExecutionError.unavailable("这台设备没有接入补记") }
 }
 
 /// 已被占用的一段时间（标题 + 起止），给回溯起点查重叠。
@@ -588,7 +601,27 @@ enum ProposalTimerRules {
                 ProposalChange(field: "批准后可一键撤销：正文原样改回（你之后又写过就不撤）", before: nil, after: nil),
             ])
 
-        case .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore:
+        case let .actualRecord(recordId, blockId, title, start, end):
+            // 0.78（Jason 10-26「智能体自己补记实际花了多久」）：只记过去；挂到计划块上 = 那块记为做完（绿色让位）
+            let control = try timerControl()
+            guard end > start else { throw ProposalExecutionError.invalid("结束要晚于开始") }
+            guard end <= now().addingTimeInterval(60) else { throw ProposalExecutionError.invalid("只能补记已经过去的时间（结束不能晚于此刻）；正在做的用计时") }
+            guard start >= DayContext.logicalDay(offset: -3, from: now()) else { throw ProposalExecutionError.invalid("最多补记往前 3 天") }
+            guard end.timeIntervalSince(start) <= 16 * 3600 else { throw ProposalExecutionError.invalid("一段最多 16 小时") }
+            let name: String
+            if let blockId {
+                guard let b = await control.proposalPlanBlock(blockId) else { throw ProposalExecutionError.invalid("找不到这块计划（往前 3 天到以后的计划里）") }
+                name = b.title
+            } else {
+                name = try Self.cleanTitle(title)
+            }
+            let when = PlanEditRules.when(start, end, now: now())
+            let minutes = Int((end.timeIntervalSince(start) / 60).rounded())
+            return PreparedProposalAction(action: .actualRecord(recordId: recordId, blockId: blockId, title: name, start: start, end: end),
+                                          changes: [ProposalChange(field: "做成了（补记 \(minutes) 分钟）", before: nil,
+                                                                   after: "「\(name)」\(when)" + (blockId != nil ? "（那块计划记为做完）" : "（计划外）"))])
+
+        case .yourEventRecreate, .yourReminderRecreate, .itemRestore, .checkpointRestore, .journalRestore, .actualRemove:
             throw ProposalExecutionError.invalid("「\(action.kindLabel)」只用于撤销，不能单独提出")
         }
     }
@@ -958,6 +991,16 @@ enum ProposalTimerRules {
             }
             try journalCall { try store.discard(id: entryID, at: self.now()) }
             return ProposalExecutionOutcome(note: "这篇新建的日记已移入回收站（30 天内可恢复）", undo: ProposalUndoInfo(unavailableReason: "已撤销；要找回请到回收站恢复"))
+
+        case let .actualRecord(recordId, blockId, title, start, end):
+            let id = blockId ?? recordId
+            try await timerControl().proposalRecordActual(id: id, blockId: blockId, title: title, start: start, end: end)
+            return ProposalExecutionOutcome(note: "已补记「\(title)」\(PlanEditRules.when(start, end, now: now()))",
+                                            undo: ProposalUndoInfo(action: .actualRemove(id: id, start: start), deviceId: deviceId))
+
+        case let .actualRemove(id, start):
+            try await timerControl().proposalRemoveActual(id: id, start: start)
+            return ProposalExecutionOutcome(note: "补记已撤下", undo: ProposalUndoInfo(unavailableReason: "已撤下"))
         }
     }
 

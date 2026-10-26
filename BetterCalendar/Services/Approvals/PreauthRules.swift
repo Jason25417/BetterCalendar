@@ -156,6 +156,7 @@ nonisolated enum PreauthPolicy {
         case .alarm: return "闹钟"
         case .planDay: return "排一天（整组）"
         case .blockDelete: return nil   // 固定安排 / 图钉由 autoPassBlocker 拦
+        case .actualRecord: return nil   // 0.78：补记做成的事（BetterCalendar 的记录，可撤销）
         default: return "「\(a.ruleKindLabel)」不在低风险范围"
         }
     }

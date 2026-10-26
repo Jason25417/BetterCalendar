@@ -56,6 +56,7 @@
          "checkpointCreate",
          "journalAppend",
          "journalEdit",
+         "actualRecord",
          "experimentNoop"
         ]
        },
@@ -65,7 +66,7 @@
        },
        "title": {
         "type": "string",
-        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）"
+        "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）；actualRecord：计划外的事的名字（不带 blockId 时必填）"
        },
        "body": {
         "type": "string",
@@ -99,15 +100,15 @@
        },
        "blockId": {
         "type": "string",
-        "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id"
+        "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id；actualRecord：做的是哪块计划（可选）"
        },
        "start": {
         "type": "string",
-        "description": "moveBlock：新开始；yourEventEdit：他日程的新开始（ISO 8601 带时区）"
+        "description": "moveBlock：新开始；yourEventEdit：他日程的新开始；actualRecord：实际开始（ISO 8601 带时区）"
        },
        "end": {
         "type": "string",
-        "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）"
+        "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）；actualRecord：实际结束（必填，不晚于此刻）"
        },
        "day": {
         "type": "string",
@@ -426,6 +427,7 @@
             "checkpointCreate",
             "journalAppend",
             "journalEdit",
+            "actualRecord",
             "experimentNoop"
            ]
           },
@@ -435,7 +437,7 @@
           },
           "title": {
            "type": "string",
-           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）"
+           "description": "itemCreate / itemEdit：事项标题；timer start：计划外的事的名字；reminder / alarm：标题（≤150）；blockEdit：新标题；yourEventEdit / yourReminderEdit：新标题；checkpointCreate：新阶段标题（≤200）；actualRecord：计划外的事的名字（不带 blockId 时必填）"
           },
           "body": {
            "type": "string",
@@ -469,15 +471,15 @@
           },
           "blockId": {
            "type": "string",
-           "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id"
+           "description": "timer start：今天计划块 id；moveBlock / blockEdit / blockDelete：计划块 id；actualRecord：做的是哪块计划（可选）"
           },
           "start": {
            "type": "string",
-           "description": "moveBlock：新开始；yourEventEdit：他日程的新开始（ISO 8601 带时区）"
+           "description": "moveBlock：新开始；yourEventEdit：他日程的新开始；actualRecord：实际开始（ISO 8601 带时区）"
           },
           "end": {
            "type": "string",
-           "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）"
+           "description": "moveBlock / yourEventEdit：新结束（可选，省略 = 保持原时长）；actualRecord：实际结束（必填，不晚于此刻）"
           },
           "day": {
            "type": "string",

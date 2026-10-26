@@ -238,6 +238,15 @@ final class CalendarSyncEngine {
 
     /// 回收站恢复一条实际记录：它所在逻辑日的蓝色 = 日历里该日别的蓝块 ＋ 这一条（按窗口对齐）。
     /// 必须先成功才确认恢复（失败抛出，记录留在回收站可再试）。
+    /// 0.78：撤下一条实际（补记的撤销）：它所在逻辑日的蓝色 = 该日别的蓝块（去掉这一条）。
+    func removeActual(id: UUID, start: Date) async throws {
+        let window = DayContext.logicalWindow(forLabel: DayContext.logicalStartOfDay(start))
+        let rest = try await calendarStore.read(kind: .actual).filter {
+            $0.start >= window.start && $0.start < window.end && $0.blockID != id
+        }
+        try await calendarStore.apply(rest, kind: .actual, window: window)
+    }
+
     func restoreActual(id: UUID, title: String, start: Date, end: Date) async throws {
         let window = DayContext.logicalWindow(forLabel: DayContext.logicalStartOfDay(start))
         var existing = try await calendarStore.read(kind: .actual).filter {

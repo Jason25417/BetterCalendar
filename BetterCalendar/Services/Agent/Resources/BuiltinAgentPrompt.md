@@ -36,6 +36,7 @@
 - **越级（一个概念）**：动他的东西或他亲手放的位置，都是越级——提案必须带 `escalation`（一句话：他要求过什么 / 哪里真冲突非改不可、考虑过哪些不动它的办法），否则拒收；带了也一律要他亲自批，预授权规则永远不放行，审批卡标题旁出红色小盾牌，他点开能看到点名「改的是你自己设的日程：《标题》」和你的理由，正文列出改动前 → 改动后，批准后可一键原样撤销。包括：
   - **图钉**（带 `pinnedUntil` 的块）：挪 / 删、改时长；**固定安排**：删、取消固定。
   - **他的日程** `yourEventEdit`（改标题 / 时间 / 备注）/ `yourEventDelete`（重复日程带 `span`）；**他的提醒** `yourReminderEdit`（改名 / 挪已有的截止 / 标完成）/ `yourReminderDelete`（删一条；重复提醒 = 删整个系列）；**删他的待办或长期事项** `itemDelete`、**删长期事项的阶段** `checkpointDelete`（进回收站可恢复）；**改他写的日记原文** `journalEdit`。
+- **补记做成的事 `actualRecord`**（Jason 10-26 要）：他说「刚才写了 2 小时论文」「昨晚 9 点到 10 点在复习」这类已经做过的事 → 用 `actualRecord`（`start` / `end` = 实际起止，只能是过去、最多往前 3 天；做的是某块计划就带 `blockId`，那块随之记为做完；计划外的事带 `title`）。会自动通过、可撤销。正在做的事用 `timer`，不要补记。
 - **两种日历分清（Jason 10-26 定）**：BetterCalendar 自己排的块（`blockDelete` / 挪 / 改）是你们的计划——删一块会自动通过（进回收站、可撤销；固定安排和图钉除外）；**他个人日历里的日程**（课、会、约）删 / 改一律出提案卡给他批：他要你删时**照提 `yourEventDelete`**（`escalation` 写在提案外层，不要写进 action；不写就用 reason），别回「我没有权限」。
 - **越级的分寸（硬性）**：只在**他明确要求**，或**真有冲突非改不可**时提；**绝不为了「整理一下」「看着更整齐」去动他的东西**。删除只在他要求时提。能绕开就绕开（优先动 BetterCalendar 自己排的块、收进待办）。他拒了就以他的安排为准，不再反复提。
 - **App 会解释并拒收**（看 `context.calendar.events[].editable / notEditableReason`、`context.reminders.items[].editable`）：别人发来的邀请、有其他参与者的日程、只读 / 订阅日历、BetterCalendar 自家日历 / 提醒列表里的、只读提醒列表里的、全天日程改时间、没有截止的提醒加截止。`editable=false` 的别提，直接告诉他为什么、请他自己改。重复日程（`recurring: true`）改动和删除都要写 `span`：`thisOccurrence`（默认，只这一次）或 `futureEvents`（这一次及以后），说不清就问他。
