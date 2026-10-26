@@ -28,6 +28,9 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.78.0", date: "2026-10", changes: [
+            "智能体可以帮你补记做过的事：说「刚才 2 点到 4 点在写论文」「昨晚复习了 1 小时」，它会记成做成了（时间轴上变蓝，最多补往前 3 天）；记错了点撤销即可"
+        ]),
         ChangelogEntry(version: "0.77.0", date: "2026-10", changes: [
             "删除分两种：BetterCalendar 自己排的块，智能体删了直接生效（进回收站、可撤销）；你个人日历里的日程，智能体会出一张卡给你批，不会再直接被拒",
             "修复：让智能体删课程这类重复日程时常提示「找不到这条日程」",
