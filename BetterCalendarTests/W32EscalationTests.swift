@@ -141,9 +141,9 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
                           timeZone: "America/New_York", alarmOffsets: [-600], facts: facts)
     }
 
-    func draft(_ action: ProposalAction, escalation: String? = "Jason 说组会改到四点了") -> ProposalDraft {
+    func draft(_ action: ProposalAction, escalation: String? = "Jason 说组会改到四点了", reason: String = "测试") -> ProposalDraft {
         ProposalDraft(origin: .agent, originLabel: "BetterCalendar 智能体", targetDeviceId: "mac", title: "W32 测试",
-                      changes: [], reason: "测试", action: action, experiment: false, escalation: escalation)
+                      changes: [], reason: reason, action: action, experiment: false, escalation: escalation)
     }
 
     func approve(_ r: Rig, _ d: ProposalDraft) async throws -> Proposal {
@@ -160,9 +160,10 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         let original = meeting(r.clock)
         r.your.seed(original)
         let edit = YourEventEdit(ref: original.ref, title: "组会（改期）", start: at(16, 0, r.clock), notes: "")
-        // 没写越级理由 → 拒收，原因点名是他的日程
-        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(.yourEventEdit(edit), escalation: nil)) }
-        do { _ = try await r.center.prepare(draft(.yourEventEdit(edit), escalation: nil)) } catch {
+        // 0.77：没单独写越级理由 → 用提案理由当越级理由照样出卡；理由也是空的才拒收，原因点名是他的日程
+        #expect(try await r.center.prepare(draft(.yourEventEdit(edit), escalation: nil)).escalation == "测试")
+        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(.yourEventEdit(edit), escalation: nil, reason: "")) }
+        do { _ = try await r.center.prepare(draft(.yourEventEdit(edit), escalation: nil, reason: "")) } catch {
             #expect(error.localizedDescription.contains("改的是你自己设的日程：《组会》") && error.localizedDescription.contains("越级"))
         }
         let p = try await approve(r, draft(.yourEventEdit(edit)))
@@ -331,7 +332,7 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         let back = try #require(try r.items.task(id: id))
         #expect(!back.isInTrash && back.sortedCheckpoints.map(\.title) == ["第 1 章", "第 2 章"] && r.items.active().count == 1)
         // 删除类 + 你的东西：没有越级理由一律拒收
-        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(.itemDelete(id: id, expectedRevision: nil), escalation: nil)) }
+        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(.itemDelete(id: id, expectedRevision: nil), escalation: nil, reason: "")) }
     }
 
     @Test func deleteTodoAndCheckpointThenUndo() async throws {
@@ -388,7 +389,7 @@ nonisolated final class FakeYourItems: YourItemsWriting, @unchecked Sendable {
         try r.journal.create(id: id, day: Calendar.current.startOfDay(for: r.clock.now), body: "今天很累，不想动。", at: r.clock.now)
         let edit = ProposalAction.journalEdit(entryID: id, find: "不想动", replace: "休息了一下", expectedRevision: nil)
         #expect(edit.ownership == .yours)
-        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(edit, escalation: nil)) }
+        await #expect(throws: ProposalExecutionError.self) { _ = try await r.center.prepare(draft(edit, escalation: nil, reason: "")) }
         r.switches.read = false
         do { _ = try await r.center.prepare(draft(edit, escalation: "Jason 让我改")); Issue.record("读开关关着应拒收") }
         catch { #expect(error.localizedDescription.contains("读最近日记")) }

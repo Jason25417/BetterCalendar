@@ -160,6 +160,12 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         Task { [weak self] in await self?.pumpMessages() }
         proposalsRefreshed()
         fireDueWakes()
+        if planSuggestEnabled, eventsEnabled(), let day = PlanSuggestSettings.dueDayKey(defaults, now: now().addingTimeInterval(-Self.eveningGrace(deviceKind))) {
+            defaults.set(day, forKey: PlanSuggestSettings.lastDayKey)
+            defaults.set(day, forKey: PlanSuggestSettings.sentDayKey)   // 随 iCloud 同步：别的设备不再发
+            builtin.enqueue(AgentEvent(kind: "plan_suggest", summary: "投放时间：看看待办 / 长期事项里还没排的，今天怎么放进来",
+                                       payload: ["logicalDay": day], at: now()))
+        }
         if let day = dueEveningReview() {
             var payload = eveningFacts()
             let minute = EveningReviewSettings.minute(defaults)
@@ -189,6 +195,9 @@ extension AgentBridge: ClaudeCodeAgentChannel {
                                        payload: payload, at: t))
         }
     }
+
+    /// 0.77：每天的投放建议（plan_suggest）。测试默认关（时钟落在 10:30 后会多出一个事件），要测时打开。
+    var planSuggestEnabled = !TestHost.isActive
 
     static let resolvedKey = "agent.builtin.resolvedEmitted"
 

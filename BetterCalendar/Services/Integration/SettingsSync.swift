@@ -66,6 +66,9 @@ enum SettingsSync {
         "voice.whisper.enabled",               // 端侧语音（Whisper）开关：属于人；模型各台各自下载（设备类，不同步）
         // —— 0.76（2026-10-26）——
         "agent.scheduledWakes.v1",             // 智能体给自己约的唤醒时刻（哪台开着哪台叫，Mac 优先）
+        // —— 0.77（2026-10-26）——
+        "agent.planSuggest.enabled", "agent.planSuggest.minute",   // 每天的投放建议（智能体提议把待办 / 长期事项排进来）
+        "agent.planSuggest.sentDay",           // 今天哪台已经发过（跨设备去重）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。

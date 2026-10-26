@@ -141,7 +141,7 @@ nonisolated enum PreauthPolicy {
         if let b = p.autoPassBlocker { return b }
         let a = p.action
         if a.ownership == .yours { return "动的是你的东西" }
-        if a.isDestructive { return "删除类" }
+        if a.isDestructive, !a.isBlockDelete { return "删除类" }   // 0.77：删 BetterCalendar 自家的块可自动通过（进回收站、可撤销）
         if a.alwaysAsks { return "加进你的长期事项里" }
         switch a {
         case let .blockCreate(_, blocks):
@@ -155,6 +155,7 @@ nonisolated enum PreauthPolicy {
         case .reminder: return nil
         case .alarm: return "闹钟"
         case .planDay: return "排一天（整组）"
+        case .blockDelete: return nil   // 固定安排 / 图钉由 autoPassBlocker 拦
         default: return "「\(a.ruleKindLabel)」不在低风险范围"
         }
     }

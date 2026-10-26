@@ -360,8 +360,18 @@ struct AgentChatView: View {
 struct AgentChatSettingsView: View {
     @AppStorage(EveningReviewSettings.enabledKey) private var reviewOn = EveningReviewSettings.defaultEnabled   // W8：从没设过 = 开
     @AppStorage(EveningReviewSettings.minuteKey) private var reviewMinute = EveningReviewSettings.defaultMinute
+    @AppStorage(PlanSuggestSettings.enabledKey) private var suggestOn = PlanSuggestSettings.defaultEnabled
+    @AppStorage(PlanSuggestSettings.minuteKey) private var suggestMinute = PlanSuggestSettings.defaultMinute
     var body: some View {
         Form {
+            Section {
+                Toggle("每天提议把待办 / 长期事项排进来", isOn: $suggestOn)
+                DatePicker("时间", selection: Binding(get: { time(suggestMinute) }, set: { suggestMinute = minutes(of: $0) }),
+                           displayedComponents: .hourAndMinute)
+                    .disabled(!suggestOn)
+            } header: { Text("投放建议") } footer: {
+                Text("到点后智能体看你还没排的事和今天的空档，给几条建议或直接排上（排上的可以撤销）。需要「关键时刻唤醒智能体」开着。")
+            }
             Section {
                 Toggle("晚上在对话里复盘", isOn: $reviewOn)
                 DatePicker("时间", selection: Binding(get: { timeOfDay }, set: { reviewMinute = minutes(of: $0) }),
@@ -379,8 +389,9 @@ struct AgentChatSettingsView: View {
         .navigationTitle("晚间复盘")
     }
 
-    private var timeOfDay: Date {
-        Calendar.current.date(bySettingHour: reviewMinute / 60, minute: reviewMinute % 60, second: 0, of: .now) ?? .now
+    private var timeOfDay: Date { time(reviewMinute) }
+    private func time(_ m: Int) -> Date {
+        Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: .now) ?? .now
     }
     private func minutes(of date: Date) -> Int {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)

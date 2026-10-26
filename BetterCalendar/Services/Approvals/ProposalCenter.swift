@@ -187,6 +187,12 @@ import UIKit
             throw ProposalExecutionError.invalid("备选方案最多 \(Proposal.maxAlternatives) 个（这次 \(draft.alternatives.count) 个）")
         }
         if draft.cascade { draft.action = try await executor.expandCascade(draft.action) }   // W41：卡上列的 = 要执行的
+        // 0.77（Jason 10-26：删我个人日历的日程「要附提案」，不是直接拒）：动你的东西却没单独写越级理由 → 用提案理由当越级理由，
+        // 照样出卡（红色小盾牌、每次你亲批、预授权不放行）；理由也是空的才拒收
+        if draft.escalation == nil, draft.action.ownership == .yours {
+            let reason = draft.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !reason.isEmpty { draft.escalation = reason }
+        }
         let prepared = try await executor.prepare(draft.action, escalation: draft.escalation)
         draft.action = prepared.action
         if let changes = prepared.changes { draft.changes = changes }

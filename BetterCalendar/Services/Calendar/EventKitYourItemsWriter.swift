@@ -212,12 +212,19 @@ actor EventKitYourItemsWriter: YourItemsWriting {
         try await access(.event)
         let lo = ref.occurrenceStart.addingTimeInterval(-86_400), hi = ref.occurrenceStart.addingTimeInterval(86_400)
         let cals = store.calendars(for: .event)
-        let hits = store.events(matching: store.predicateForEvents(withStart: lo, end: hi, calendars: cals)).filter {
-            $0.calendarItemExternalIdentifier == ref.externalID && abs($0.startDate.timeIntervalSince(ref.occurrenceStart)) < 0.5
-        }
-        guard hits.count == 1, let ev = hits.first else {
-            throw hits.isEmpty ? YourItemsError.notFound("日历里找不到这条日程（可能已被改时间或删除）")
-                               : YourItemsError.notFound("日历里有 \(hits.count) 条对得上的日程，没法确定是哪一条，未改动")
+        let sameID = store.events(matching: store.predicateForEvents(withStart: lo, end: hi, calendars: cals))
+            .filter { $0.calendarItemExternalIdentifier == ref.externalID }
+        // 0.77（10-26：删两节课被「找不到」拒掉）：原来要求开始时刻 0.5 秒内一致——重复日程 / 订阅日历的时刻常有秒级偏差。
+        // 同一外部标识在这 ±1 天里只有一条 → 就是它；有几条（重复日程的相邻几次）→ 取开始时刻最近、且相差不到 1 小时的那条。
+        let picked: EKEvent?
+        if sameID.count == 1 { picked = sameID.first }
+        else { picked = sameID.min { abs($0.startDate.timeIntervalSince(ref.occurrenceStart)) < abs($1.startDate.timeIntervalSince(ref.occurrenceStart)) }
+                   .flatMap { abs($0.startDate.timeIntervalSince(ref.occurrenceStart)) < 3600 ? $0 : nil } }
+        guard let ev = picked else {
+            DevLog.shared.warn("越级审批", "找日程没对上：外部标识 \(ref.externalID.prefix(24))… 在前后一天里有 \(sameID.count) 条"
+                               + (sameID.isEmpty ? "" : "，开始时刻 " + sameID.map { ISO8601DateFormatter().string(from: $0.startDate) }.joined(separator: " / "))
+                               + "；要找的 \(ISO8601DateFormatter().string(from: ref.occurrenceStart))")
+            throw YourItemsError.notFound("日历里找不到这条日程（可能已被改时间或删除）")
         }
         return ev
     }

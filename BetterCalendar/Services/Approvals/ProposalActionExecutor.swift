@@ -970,6 +970,7 @@ enum ProposalTimerRules {
         case let .moveBlock(id, _, _, _): ids = [id]
         case let .moveBlocks(moves, false): ids = moves.map(\.id)
         case let .blockEdit(e): ids = [e.id]
+        case let .blockDelete(id, _): ids = [id]
         default: return nil
         }
         guard let mover else { return "这台设备没有接入时间线" }
@@ -977,6 +978,7 @@ enum ProposalTimerRules {
             do {
                 guard let b = try mover.windowBlock(id: id) else { return "找不到这块" }
                 if b.isPinned(at: now()) { return "「\(b.title)」是你亲手放的位置（图钉）" }
+                if case .blockDelete = action, b.isFixed { return "「\(b.title)」是固定安排" }
             } catch { return "读不到这块：\(error.localizedDescription)" }
         }
         return nil

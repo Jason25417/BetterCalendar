@@ -210,6 +210,11 @@ import Foundation
             file["action"] = action
             if file["askFirst"] == nil { file["askFirst"] = misplaced }
         }
+        // 0.77（10-26 日志：删 Jason 的日程时 escalation 写进了 action，整份被拒）：同样挪到提案级
+        if var action = file["action"] as? [String: Any], let misplaced = action.removeValue(forKey: "escalation") {
+            file["action"] = action
+            if file["escalation"] == nil { file["escalation"] = misplaced }
+        }
         if let raw = args["lifetimeMinutes"], !(raw is NSNull) {
             guard let n = raw as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded() else {
                 throw AgentBridgeError.invalid("lifetimeMinutes 必须是整数分钟（1–10080）")

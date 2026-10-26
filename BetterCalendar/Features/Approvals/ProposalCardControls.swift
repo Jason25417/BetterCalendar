@@ -186,9 +186,17 @@ struct ProposalTuner: View {
                 .accessibilityIdentifier("bc.proposal.tuned.preview")
             case .ok: EmptyView()
             case let .invalid(reason):
-                Label("这个数值不行：\(reason)", systemImage: "exclamationmark.circle")
+                Label("这样直接放不下：\(reason)", systemImage: "exclamationmark.circle")
                     .font(.caption).foregroundStyle(.orange)
                     .accessibilityIdentifier("bc.proposal.tuned.invalid")
+                // 0.77（Jason 10-26）：冲突时照样能按你定的数值发出——不执行这份，交给智能体以它为准调整别的、重新提
+                Button("就按这个，让智能体调别的") {
+                    let text = ProposalParameterRules.sendAnywayText(option.parameters, current, reason: reason,
+                                                                     optionLabel: proposal.hasAlternatives ? option.label : nil)
+                    Task { await center.reply(proposal.id, text: text) }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .accessibilityIdentifier("bc.proposal.tuned.sendAnyway.\(option.index)")
             }
             Button(approveTitle) {
                 FeatureUsage.used(.proposalApprove)

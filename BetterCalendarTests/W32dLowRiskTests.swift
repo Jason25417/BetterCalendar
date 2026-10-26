@@ -129,9 +129,6 @@ import Testing
         let alt = ProposalAlternative(label: "挪到 17 点", action: .moveBlock(id: ids.flex, start: at(17, 0, r.clock), end: nil, expectedRevision: nil))
         let withAlt = try await submitted(r, draft(.moveBlock(id: ids.flex, start: at(16, 0, r.clock), end: nil, expectedRevision: nil), alternatives: [alt]))
         #expect(withAlt.state == .pending)
-        // 删除类
-        let del = try await submitted(r, draft(.blockDelete(id: ids.flex, expectedRevision: nil)))
-        #expect(del.state == .pending)
         // 排一天整组 / 多块一起挪 / 一次加两块
         let plan = try await submitted(r, draft(.planDay(day: label, steps: [.move(ProposalBlockMove(id: ids.flex, start: at(16, 0, r.clock), end: nil))], isUndo: false)))
         #expect(plan.state == .pending)
@@ -148,6 +145,9 @@ import Testing
         #expect(try await submitted(r, draft(fixedNew)).state == .pending)
         // 一个都没被执行
         #expect(try r.plans.plannedBlocks(on: label).first { $0.id == ids.flex }?.start == at(11, 0, r.clock))
+        // 0.77（Jason 10-26）：删 BetterCalendar 自家的块 = 低风险自动通过（进回收站、可撤销）
+        let del = try await submitted(r, draft(.blockDelete(id: ids.flex, expectedRevision: nil)))
+        #expect(del.state == .applied && del.preauth?.ruleId == PreauthPolicy.lowRiskRuleId)
     }
 
     @Test func conflictsAreRejectedNotSqueezed() async throws {

@@ -22,7 +22,7 @@ import Testing
         r.your.seed(rec)
         // 越级：没写理由一律拒收
         await #expect(throws: ProposalExecutionError.self) {
-            _ = try await r.center.prepare(base.draft(.yourEventDelete(ref: rec.ref, expectedRevision: nil), escalation: nil))
+            _ = try await r.center.prepare(base.draft(.yourEventDelete(ref: rec.ref, expectedRevision: nil), escalation: nil, reason: ""))
         }
         let prepared = try await r.center.prepare(base.draft(.yourEventDelete(ref: rec.ref, expectedRevision: nil)))
         #expect(prepared.headline?.hasPrefix("删除重复日程「组会」的这一次") == true)

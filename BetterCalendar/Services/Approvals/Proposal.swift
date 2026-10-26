@@ -356,6 +356,9 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     }
 
     /// 删除类（移入回收站 / 取消提醒 / 取消闹钟 / W18 删计划块、含删除步骤的排一天 / W32 删你的日程、事项、阶段）：预授权规则永远不能自动放行。
+    /// 0.77：删的是 BetterCalendar 自家的计划块（不是你的日历 / 提醒 / 事项）。
+    var isBlockDelete: Bool { if case .blockDelete = self { return true } else { return false } }
+
     var isDestructive: Bool {
         switch self {
         case .itemDiscard, .reminderCancel, .alarmCancel, .blockDelete, .yourEventDelete, .yourReminderDelete, .itemDelete, .checkpointDelete: true

@@ -446,6 +446,14 @@ nonisolated enum ProposalParameterRules {
     }
 
     /// 给人看的值：「15 分钟」「1 小时 20 分钟」「07:45」「10月19日 07:45」。
+    /// 0.77：你调的数值和别的安排冲突、却仍要按它来 → 回给智能体的一句话（提案停止等待，它以你的数值为准调整别的再提）。
+    static func sendAnywayText(_ params: [ProposalParameter], _ values: [String: ProposalParameterValue], reason: String,
+                               optionLabel: String?) -> String {
+        let picked = params.compactMap { p in values[p.id].map { "\(p.label) \(format($0, p))" } }.joined(separator: "，")
+        return "就按我调的来" + (optionLabel.map { "（方案【\($0)】）" } ?? "") + "：\(picked)。"
+            + "App 提示这样直接放不下（\(reason)）——请以我定的这个为准，调整别的安排，再给我提案。"
+    }
+
     static func format(_ v: ProposalParameterValue, _ p: ProposalParameter) -> String {
         switch v {
         case let .date(d):

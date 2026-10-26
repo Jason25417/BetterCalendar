@@ -233,7 +233,7 @@ enum AgentBridgeContext {
             return o
         }
         calendar["window"] = window(input.calendarWindow)
-        calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（必须带 escalation，永远要他亲自批）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改 / 删要写 span（默认只这一次；futureEvents = 这一次及以后）；删掉后那段时间不再算占用"
+        calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（出提案卡、永远要他亲自批；escalation 写在提案外层，没写就用 reason）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改 / 删要写 span（默认只这一次；futureEvents = 这一次及以后）；删掉后那段时间不再算占用"
         context["calendar"] = calendar
         if let caution = input.dataSyncCaution {
             context["dataSync"] = ["caution": caution,
