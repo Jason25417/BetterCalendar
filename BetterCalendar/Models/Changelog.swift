@@ -28,6 +28,11 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.78.1", date: "2026-10", changes: [
+            "你发给智能体的话、它回你的话，长度上限都放宽到 8000 字（原来你 2000 字、它 1000 字）",
+            "修复：智能体偶尔把自己的思考过程当成回复发出来、还说到一半就断",
+            "分阶段、持续很久的事，智能体现在能直接建在长期区（再加阶段），不会只建成一条待办"
+        ]),
         ChangelogEntry(version: "0.78.0", date: "2026-10", changes: [
             "智能体可以帮你补记做过的事：说「刚才 2 点到 4 点在写论文」「昨晚复习了 1 小时」，它会记成做成了（时间轴上变蓝，最多补往前 3 天）；记错了点撤销即可"
         ]),
