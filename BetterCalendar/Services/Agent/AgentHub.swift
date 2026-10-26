@@ -215,8 +215,12 @@ extension AgentBridge: ClaudeCodeAgentChannel {
             guard state.isClosed else { continue }
             done.insert(p.id.uuidString); changed = true
             guard t.timeIntervalSince(p.appliedAt ?? p.decidedAt ?? p.expiresAt) < 7200 else { continue }
-            builtin.enqueue(AgentEvent(kind: "proposal_resolved", summary: "提案「\(p.title)」：\(state.label)",
-                                       payload: ["proposalId": p.id.uuidString, "state": state.rawValue], at: t))
+            // 0.78.1（智能体上报：payload 只有 id 和 state）：带上标题、种类、结果说明、能否撤销，不必再查一次
+            var payload: [String: Any] = ["proposalId": p.id.uuidString, "state": state.rawValue, "stateLabel": state.label,
+                                          "title": p.title, "kind": p.executedAction.kind,
+                                          "undoAvailable": p.state == .applied && p.undoAction != nil && p.undoneAt == nil]
+            if let note = p.resultNote { payload["resultNote"] = String(note.prefix(300)) }
+            builtin.enqueue(AgentEvent(kind: "proposal_resolved", summary: "提案「\(p.title)」：\(state.label)", payload: payload, at: t))
         }
         if changed { defaults.set(Array(done.suffix(300)), forKey: Self.resolvedKey) }
     }

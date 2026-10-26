@@ -60,6 +60,11 @@
          "experimentNoop"
         ]
        },
+       "zone": {
+         "type": "string",
+         "enum": ["todo", "longterm"],
+         "description": "itemCreate：建在哪个区——longterm = 长期区（分阶段、持续很久的事，之后用 checkpointCreate 加阶段）；默认 todo（待办区）"
+       },
        "itemId": {
         "type": "string",
         "description": "itemEdit / itemSetDone / itemDelete / checkpointDelete / checkpointCreate：事项 id（actionTargets.items[].id；checkpointCreate 要 zone=longterm 的长期事项）"
@@ -430,6 +435,11 @@
             "actualRecord",
             "experimentNoop"
            ]
+          },
+          "zone": {
+            "type": "string",
+            "enum": ["todo", "longterm"],
+            "description": "itemCreate：建在哪个区——longterm = 长期区（分阶段、持续很久的事，之后用 checkpointCreate 加阶段）；默认 todo（待办区）"
           },
           "itemId": {
            "type": "string",

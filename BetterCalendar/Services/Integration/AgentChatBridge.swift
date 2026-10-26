@@ -31,8 +31,15 @@ extension AgentBridgeIO {
             throw AgentBridgeError.invalid("不是 v1 对话回复文件")
         }
         guard let raw = o["id"] as? String, let id = UUID(uuidString: raw) else { throw AgentBridgeError.invalid("回复 id 缺失或不是 UUID") }
-        guard let text = (o["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, text.count <= 1000 else {
-            throw AgentBridgeError.invalid("回复正文缺失或过长（≤1000 字）")
+        guard let raw = o["text"] as? String else { throw AgentBridgeError.invalid("回复正文缺失") }
+        // 0.78.1（10-26：一条回复整段是 <analysis>…</analysis> 思考、正文为空还被截断）：思考过程不给 Jason 看
+        let text = AgentChatText.strippingThinking(raw)
+        guard !text.isEmpty else {
+            throw AgentBridgeError.invalid(raw.contains("<") ? "回复里只有思考过程（<analysis> 之类），没有要对 Jason 说的话：只把说给他的话写进 text"
+                                                             : "回复正文缺失")
+        }
+        guard text.count <= AgentChatMessage.maxText else {
+            throw AgentBridgeError.invalid("回复太长（\(text.count) 字，上限 \(AgentChatMessage.maxText)）：拆成两条，或先说结论")
         }
         let kindRaw = (o["kind"] as? String) ?? AgentChatMessage.Kind.chat.rawValue
         guard let kind = AgentChatMessage.Kind(rawValue: kindRaw) else { throw AgentBridgeError.invalid("不认识的回复种类 \(kindRaw)") }
@@ -174,3 +181,24 @@ extension AgentBridgeIO {
         return ["doneToday": items, "doneSource": "BetterCalendar 执行陪伴记下的实际（蓝色日历同源）"]
     }
 }
+
+/// 0.78.1：模型偶尔把思考过程（<analysis> / <think> / <thinking> / <reasoning>）写进要发给 Jason 的话里——去掉；
+/// 没闭合的（输出被截断在思考中）从开标签起整段去掉。
+nonisolated enum AgentChatText {
+    static let tags = ["analysis", "think", "thinking", "reasoning"]
+
+    static func strippingThinking(_ raw: String) -> String {
+        var s = raw
+        for tag in tags {
+            while let open = s.range(of: "<\(tag)>", options: .caseInsensitive) {
+                if let close = s.range(of: "</\(tag)>", options: .caseInsensitive, range: open.upperBound..<s.endIndex) {
+                    s.removeSubrange(open.lowerBound..<close.upperBound)
+                } else {
+                    s.removeSubrange(open.lowerBound..<s.endIndex)
+                }
+            }
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+

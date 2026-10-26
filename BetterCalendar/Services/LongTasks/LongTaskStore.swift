@@ -76,6 +76,17 @@ final class LongTaskStore {
         DevLog.shared.info("待办区", "审批新增待办：\(title)")
     }
 
+    /// 0.78.1：新增一条长期事项（长期区，指定 id；同 createTodo 不按标题去重）。
+    func createLongTerm(id: UUID, title: String, note: String, at date: Date) throws {
+        guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }
+        guard try task(id: id) == nil else { throw DataArchiveError.invalid("这条事项已存在，不重复新增") }
+        let entry = LongTask(id: id, title: title, note: note, createdAt: date, modifiedAt: date, zone: .longterm)
+        context.insert(entry)
+        do { try context.save() } catch { context.delete(entry); throw error }
+        reload()
+        DevLog.shared.info("长期区", "审批新增长期事项：\(title)")
+    }
+
     /// 按 id 修改事项（标题/备注/状态等，由 change 决定）并保存；保存失败回滚本次改动后抛错。
     func update(id: UUID, at date: Date, _ change: (LongTask) -> Void) throws {
         guard !context.hasChanges else { throw DataArchiveError.invalid("还有未保存的改动，稍后再试（不覆盖进行中的编辑）") }

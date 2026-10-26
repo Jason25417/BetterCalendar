@@ -28,6 +28,9 @@ nonisolated struct AgentChatMessage: Identifiable, Codable, Equatable, Sendable 
     var deviceLabel: String
     var text: String
     var kind: Kind = .chat
+    /// 0.78.1（Jason 10-26「发送和收到的消息有文字上限」）：你说的和智能体回的都放宽到 8000 字（原来你 2000、它 1000）。
+    /// 仍设上限 = 技术稳定上限（CloudKit 单条记录别变大字段，见 cloudkit-large-text 教训），不是产品规则。
+    static let maxText = 8000
     /// 智能体回复的是哪一条你的消息；你的消息则指向你接着说的那条智能体消息（如复盘后补一句）。
     var replyTo: UUID?
     /// 对话里的提案卡片：只存 id，状态读 ProposalCenter（与通知、面板同一份）。
@@ -371,7 +374,7 @@ nonisolated enum AgentChatUserStatus: Equatable, Sendable {
         let carrier = proposalId.flatMap { id in messages.last { $0.author == .agent && $0.proposalIds.contains(id) } }
         let lastAgent = carrier ?? messages.last { $0.author == .agent && at.timeIntervalSince($0.createdAt) < Self.forwardWindow }
         var m = AgentChatMessage(id: UUID(), createdAt: at, author: .user, deviceId: deviceId, deviceLabel: deviceLabel,
-                                 text: String(text.prefix(2000)), kind: .chat, replyTo: lastAgent?.id)
+                                 text: String(text.prefix(AgentChatMessage.maxText)), kind: .chat, replyTo: lastAgent?.id)
         m.inReplyToProposal = proposalId
         if !attachments.isEmpty { m.attachments = Array(attachments.prefix(ChatAttachmentStore.maxPerMessage)) }
         outbox.append(m); persistOutbox()

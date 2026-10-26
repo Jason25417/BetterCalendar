@@ -315,13 +315,16 @@ enum AgentBridgeContext {
             var planning: [String: Any] = [
                 "source": "BetterCalendar 计划（PlanStore）+ 你的日历（只读，排布时当作已占用）", "asOf": asOf, "enabled": true,
                 "horizonDays": PlanEditRules.horizonDays, "window": window(input.planningWindow),
-                "note": "day 用 yyyy-MM-dd（逻辑日，凌晨 0–4 点属于前一天）。今天的块在 today.blocks；明天起的在 days[].blocks（id / revision / pinnedUntil 同 today）。occupied = Jason 自己日历里的安排：只读、当作已占用，App 校验时绝不让块和它重叠（linkedBlockId = 和那一块是同一件事，对那一块不算障碍）。",
+                "note": "day 用 yyyy-MM-dd（逻辑日，凌晨 0–4 点属于前一天）。days[] 从今天起逐日列出（今天那一项和 today.blocks 是同一份）；某天 blocks 为空 = 那天确实还没排。occupied = Jason 自己日历里的安排：只读、当作已占用，App 校验时绝不让块和它重叠（linkedBlockId = 和那一块是同一件事，对那一块不算障碍）。",
             ]
             let kept = Array(input.upcoming.items.prefix(AgentContextLimits.upcomingBlocks))
-            planning["days"] = input.upcomingLabels.map { label -> [String: Any] in
-                ["day": PlanEditRules.dayKey(label), "name": PlanEditRules.dayName(label), "logicalDayStart": t(label),
-                 "blocks": kept.filter { DayContext.logicalStartOfDay($0.start) == label }.map(blockJSON)]
-            }
+            // 0.78.1（智能体上报「days 和 today 对不上」：今天只在 today.blocks 里，它以为数据缺了）：今天也列进 days（同一份）
+            planning["days"] = [["day": PlanEditRules.dayKey(input.logicalDayStart), "name": "今天", "logicalDayStart": t(input.logicalDayStart),
+                                 "blocks": input.today.items.map(blockJSON)] as [String: Any]]
+                + input.upcomingLabels.map { label -> [String: Any] in
+                    ["day": PlanEditRules.dayKey(label), "name": PlanEditRules.dayName(label), "logicalDayStart": t(label),
+                     "blocks": kept.filter { DayContext.logicalStartOfDay($0.start) == label }.map(blockJSON)]
+                }
             planning["blocksTotal"] = input.upcoming.items.count
             planning["blocksTruncated"] = input.upcoming.items.count > kept.count
             if let e = input.upcoming.error { planning["blocksError"] = e }

@@ -226,8 +226,8 @@ import Testing
         #expect(ok["ok"] as? Bool == true && ledger.repliedTo == [said.id])
         let reply = try #require(e.chat.messages.last)
         #expect(reply.author == .agent && reply.replyTo == said.id && reply.parentRef == "ev-1")
-        let tooLong = object(await e.tools.call("reply_jason", arguments: #"{"text":"\#(String(repeating: "长", count: 1001))"}"#, eventId: nil, ledger: ledger))
-        #expect((tooLong["error"] as? String)?.contains("1000") == true)
+        let tooLong = object(await e.tools.call("reply_jason", arguments: #"{"text":"\#(String(repeating: "长", count: 8001))"}"#, eventId: nil, ledger: ledger))
+        #expect((tooLong["error"] as? String)?.contains("8000") == true)   // 0.78.1：上限 1000 → 8000
         let n = object(await e.tools.call("notify_jason", arguments: #"{"title":"休息","body":"起来走走","reason":"连续两小时"}"#, eventId: nil, ledger: ledger))
         #expect(n["ok"] as? Bool == true && e.messages.messages.first?.originLabel == "BetterCalendar 内置智能体")
         let bad = object(await e.tools.call("notify_jason", arguments: #"{"title":"x","body":"y"}"#, eventId: nil, ledger: ledger))

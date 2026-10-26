@@ -49,6 +49,8 @@ enum ProposalRevision {
 @MainActor protocol ProposalItemStore: AnyObject {
     func task(id: UUID) throws -> LongTask?
     func createTodo(id: UUID, title: String, note: String, at date: Date) throws
+    /// 0.78.1：新建一条长期事项（长期区）。
+    func createLongTerm(id: UUID, title: String, note: String, at date: Date) throws
     func update(id: UUID, at date: Date, _ change: (LongTask) -> Void) throws
     func discard(id: UUID, at date: Date) throws
     /// W32c：删除 / 恢复事项与阶段（回收站；返回 deletionID 供撤销）。
@@ -59,6 +61,12 @@ enum ProposalRevision {
     func restoreCheckpoint(itemId: UUID, id: UUID, deletionID: UUID, at date: Date) throws
     /// W34：给长期事项加一个阶段（id 由提案定；position = 插在第几个之前，nil / 超出 = 末尾）。
     func insertCheckpoint(itemId: UUID, id: UUID, title: String, estimatedMinutes: Int?, position: Int?, at date: Date) throws
+}
+
+extension ProposalItemStore {
+    func createLongTerm(id: UUID, title: String, note: String, at date: Date) throws {
+        throw ProposalExecutionError.unavailable("这台设备还不能新建长期事项")
+    }
 }
 
 /// W32b：日记写入（唯一写者 = JournalStore）。
@@ -292,14 +300,14 @@ enum ProposalTimerRules {
         case .experimentNoop:
             return PreparedProposalAction(action: action, changes: nil)
 
-        case let .itemCreate(id, title, note):
+        case let .itemCreate(id, title, note, longTerm):
             let store = try itemStore()
             let title = try Self.cleanTitle(title)
             let note = try Self.cleanNote(note)
             guard try store.task(id: id) == nil else { throw ProposalExecutionError.invalid("事项 id 已存在，不重复新增") }
-            var changes = [ProposalChange(field: "待办", before: nil, after: title)]
+            var changes = [ProposalChange(field: longTerm == true ? "长期事项" : "待办", before: nil, after: title)]
             if let note, !note.isEmpty { changes.append(ProposalChange(field: "「\(title)」备注", before: nil, after: note)) }
-            return PreparedProposalAction(action: .itemCreate(id: id, title: title, note: note), changes: changes)
+            return PreparedProposalAction(action: .itemCreate(id: id, title: title, note: note, longTerm: longTerm == true ? true : nil), changes: changes)
 
         case let .itemEdit(id, title, note, expected):
             let task = try liveTask(id)
@@ -633,11 +641,12 @@ enum ProposalTimerRules {
         case let .experimentNoop(note):
             return ProposalExecutionOutcome(note: "测试改动已应用：未修改任何真实数据（\(note)）")
 
-        case let .itemCreate(id, title, note):
+        case let .itemCreate(id, title, note, longTerm):
             let store = try itemStore()
-            try store.createTodo(id: id, title: title, note: note ?? "", at: now())
+            if longTerm == true { try store.createLongTerm(id: id, title: title, note: note ?? "", at: now()) }
+            else { try store.createTodo(id: id, title: title, note: note ?? "", at: now()) }
             let created = try liveTask(id)
-            return ProposalExecutionOutcome(note: "已新增待办「\(title)」",
+            return ProposalExecutionOutcome(note: longTerm == true ? "已新增长期事项「\(title)」" : "已新增待办「\(title)」",
                                             undo: ProposalUndoInfo(action: .itemDiscard(id: id, expectedRevision: ProposalRevision.item(created))))
 
         case let .itemEdit(id, title, note, expected):

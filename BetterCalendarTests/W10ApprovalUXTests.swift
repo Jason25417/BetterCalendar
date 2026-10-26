@@ -261,7 +261,7 @@ import UserNotifications
                                                      "alternatives": [["label": "买豆浆", "action": ["kind": "itemCreate", "title": "买豆浆"]]]]))
         #expect(ok.alternatives.count == 1 && ok.alternatives[0].label == "买豆浆" && ok.primaryLabel == "买牛奶")
         #expect(ok.escalation == "你亲手放的块和新会冲突" && !ok.experiment)
-        if case let .itemCreate(_, title, _) = ok.alternatives[0].action { #expect(title == "买豆浆") } else { Issue.record("应为 itemCreate") }
+        if case let .itemCreate(_, title, _, _) = ok.alternatives[0].action { #expect(title == "买豆浆") } else { Issue.record("应为 itemCreate") }
         let bad: [[String: Any]] = [
             ["escalation": ""],
             ["escalation": 3],

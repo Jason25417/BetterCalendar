@@ -560,8 +560,9 @@ import Testing
         let planning = try #require(c["planning"] as? [String: Any])
         #expect(planning["enabled"] as? Bool == true && planning["horizonDays"] as? Int == PlanEditRules.horizonDays)
         let days = try #require(planning["days"] as? [[String: Any]])
-        #expect(days.count == PlanEditRules.horizonDays && days[0]["day"] as? String == "2026-10-19")
-        let rows = try #require(days[0]["blocks"] as? [[String: Any]])
+        // 0.78.1：days 从今天起列（今天那一项 = today.blocks）
+        #expect(days.count == PlanEditRules.horizonDays + 1 && days[0]["name"] as? String == "今天" && days[1]["day"] as? String == "2026-10-19")
+        let rows = try #require(days[1]["blocks"] as? [[String: Any]])
         let gymRow = try #require(rows.first { $0["title"] as? String == "健身" })
         #expect(gymRow["id"] as? String == gym.id.uuidString && gymRow["revision"] as? String == ProposalRevision.block(gym))
         #expect(gymRow["pinnedUntil"] is String, "图钉要让智能体看得到（动它须越级）")

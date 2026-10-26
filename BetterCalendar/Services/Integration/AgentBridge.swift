@@ -355,7 +355,7 @@ nonisolated struct AgentBridgeIO: Sendable {
         guard let kind = a["kind"] as? String else { throw AgentBridgeError.invalid("action.kind 缺失") }
         let allowed: [String: Set<String>] = [
             "experimentNoop": ["note"],
-            "itemCreate": ["title", "note"],
+            "itemCreate": ["title", "note", "zone"],
             "itemEdit": ["itemId", "title", "note", "expectedRevision"],
             "itemSetDone": ["itemId", "done", "expectedRevision"],
             "timer": ["command", "blockId", "title", "expectedRevision", "startedAt"],
@@ -414,7 +414,10 @@ nonisolated struct AgentBridgeIO: Sendable {
         case "experimentNoop":
             return .experimentNoop(note: try string("note", max: 200) ?? "智能体测试提案")
         case "itemCreate":
-            return .itemCreate(id: proposalId, title: try required(string("title", max: 200), "title"), note: try string("note", max: 2000))
+            let zone = try string("zone", max: 20)
+            guard zone == nil || zone == "todo" || zone == "longterm" else { throw AgentBridgeError.invalid("itemCreate.zone 只能是 todo / longterm") }
+            return .itemCreate(id: proposalId, title: try required(string("title", max: 200), "title"), note: try string("note", max: 2000),
+                               longTerm: zone == "longterm" ? true : nil)
         case "itemEdit":
             let title = try string("title", max: 200), note = try string("note", max: 2000)
             guard title != nil || note != nil else { throw AgentBridgeError.invalid("itemEdit 至少要改 title 或 note 之一") }

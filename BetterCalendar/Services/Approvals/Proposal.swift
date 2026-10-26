@@ -160,7 +160,8 @@ nonisolated enum ProposalAction: Codable, Equatable, Sendable {
     /// 联调用的空改动：批准后只记录「已应用」，不碰任何真实数据。
     case experimentNoop(note: String)
     /// 事项：新增一条待办（待办区）。id 在提交前就定下，撤销 = 按 id 移入回收站。
-    case itemCreate(id: UUID, title: String, note: String?)
+    /// 0.78.1：longTerm = true 建在长期区（分阶段、持续很久的事；之后可用 checkpointCreate 加阶段），nil / false = 待办区。
+    case itemCreate(id: UUID, title: String, note: String?, longTerm: Bool? = nil)
     /// 事项：改标题 / 备注（nil = 该字段不改）。
     case itemEdit(id: UUID, title: String?, note: String?, expectedRevision: String?)
     /// 事项：标完成（done=true）/ 取消完成（done=false）。

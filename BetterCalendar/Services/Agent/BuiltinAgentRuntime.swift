@@ -285,10 +285,16 @@ extension DeepSeekClient: BuiltinAgentModel {
                     continue
                 }
                 // 模型说完了。纯文字 Jason 看不到：要是他在等回复、它却没调 reply_jason，就把它的原话作为回复送到（同一个智能体的话，不是替身）。
-                if let text = completion.message.content?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+                if completion.finishReason == "length", !ledger.repliedTo.isEmpty || events.contains(where: { $0.kind == "user_message" }) {
+                    // 0.78.1：输出到上限被截断——不把半句话当回复发出去；记下来，这一轮按失败可见
+                    DevLog.shared.warn("内置智能体", "这一轮的输出太长被截断（到了单次输出上限），没把半截内容发给你")
+                    ledger.toolErrors.append("输出被截断（finish_reason=length）")
+                }
+                if completion.finishReason != "length",
+                   let text = completion.message.content.map(AgentChatText.strippingThinking), !text.isEmpty,
                    let waiting = events.last(where: { $0.kind == "user_message" }),
                    let mid = (waiting.payload["messageId"] as? String).flatMap(UUID.init), !ledger.repliedTo.contains(mid) {
-                    let args = try SafeJSON.data(withJSONObject: ["text": String(text.prefix(1000)), "replyTo": mid.uuidString])
+                    let args = try SafeJSON.data(withJSONObject: ["text": String(text.prefix(AgentChatMessage.maxText)), "replyTo": mid.uuidString])
                     _ = await tools.call("reply_jason", arguments: String(decoding: args, as: UTF8.self), eventId: waiting.id, ledger: ledger)
                 }
                 return
