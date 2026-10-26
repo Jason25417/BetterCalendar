@@ -484,6 +484,7 @@ final class AppContainer {
         let builtinTools = BuiltinAgentToolbox(proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory,
                                                deviceLabel: ProposalDevice.label,
                                                web: TestHost.isActive ? nil : deepSeek,   // W40：搜索 / 读网页走同一个 DeepSeek key
+                                               wakes: AgentWakeSchedule(),                  // 0.76：定时唤醒
                                                context: TestHost.isActive ? { [:] } : { await context.snapshot() })
         // W38：端侧 Whisper——开关开着就在后台下载 / 准备（昂贵网络等 Wi-Fi）；状态在设置页看得到
         if TestHost.isActive {

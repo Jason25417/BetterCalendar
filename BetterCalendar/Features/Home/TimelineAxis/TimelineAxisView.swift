@@ -16,6 +16,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct TimelineAxisView<DayMenu: View>: View {
     @Bindable var axis: TimelineAxisModel
@@ -39,6 +42,8 @@ struct TimelineAxisView<DayMenu: View>: View {
     @State private var leftActiveAt: Date?
     /// W26b：拖动贴边自动滚。
     @State private var scroller = AxisAutoScroller()
+    /// 0.76：点了闸门以上的淡色计划块，等你确认「记成做完」。
+    @State private var confirmDone: AxisItem?
 
     struct Viewport: Equatable {
         var visibleDay: Date?
@@ -75,7 +80,7 @@ struct TimelineAxisView<DayMenu: View>: View {
                                        busy: axis.isCommitting, scroller: scroller,
                                        onMove: { item, start in Task { await axis.commitDrag(item, start: start) } },
                                        onResize: { item, end in Task { await axis.commitResize(item, end: end) } },
-                                       onTap: onEdit)
+                                       onTap: onEdit, onTapPast: { confirmDone = $0 })
                             .frame(height: geo.section(day.label).height)
                             .id(day.label)
                     }
@@ -83,6 +88,17 @@ struct TimelineAxisView<DayMenu: View>: View {
                 .scrollTargetLayout()
             }
             .scrollPosition($position)
+            .scrollDisabled(scroller.isDragging)   // 0.76：拖块时手指不滚页面（贴边自动滚照常）
+            .confirmationDialog(confirmDone.map { "「\($0.title)」做完了？" } ?? "", isPresented: Binding(
+                get: { confirmDone != nil }, set: { if !$0 { confirmDone = nil } }), titleVisibility: .visible) {
+                Button("做完了（按计划时间记）") {
+                    if let item = confirmDone { Task { await axis.markPastDone(item) } }
+                    confirmDone = nil
+                }
+                Button("取消", role: .cancel) { confirmDone = nil }
+            } message: {
+                Text(confirmDone.map { "记一笔 \(PlanEditRules.span($0.start, $0.end))，变成蓝色的「做成了」" } ?? "")
+            }
             .coordinateSpace(.named(AxisAutoScroller.viewportSpace))
             // 每帧的位置只交给自动滚（不被观察的属性，不触发重算）
             .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in scroller.offsetY = y }
@@ -223,6 +239,8 @@ private struct AxisDaySection: View {
     let onMove: (AxisItem, Date) -> Void
     let onResize: (AxisItem, Date) -> Void
     let onTap: (AxisItem) -> Void
+    /// 0.76：点闸门以上淡色的计划块（问一句要不要记成做完）。
+    let onTapPast: (AxisItem) -> Void
 
     @Environment(\.appTheme) private var theme
     @State private var drag: AxisDrag?
@@ -374,19 +392,28 @@ private struct AxisDaySection: View {
             }
             .offset(x: x, y: localY(start))
             .zIndex(dragging ? 2 : (item.kind == .plan ? 1 : 0))
-            .modifier(MoveGesture(enabled: item.isDraggable && !busy, onChange: { dy, fingerY in
+            .contentShape(AxisHitShape(minHeight: 36))   // 0.76：短块也好按中（触控范围上下补到 36pt，不越进旁边一列）
+            .modifier(MoveGesture(enabled: item.isDraggable && !busy, pressDuration: 0.18, onChange: { dy, fingerY in
                 track(item, .move, dy: dy, fingerY: fingerY)
             }, onEnd: { dy in
                 let total = dy + finish()
                 onMove(item, geo.time(atY: geo.y(item.start) + total))
             }, onCancel: cancel))
-            .onTapGesture { if item.kind == .plan, item.blockID != nil { onTap(item) } }
+            .onTapGesture {
+                if item.kind == .plan, item.blockID != nil { onTap(item) }
+                if item.kind == .pastPlan, item.blockID != nil { onTapPast(item) }
+            }
     }
 
     // MARK: 拖动 + 贴边自动滚
 
     private func track(_ item: AxisItem, _ mode: AxisDrag.Mode, dy: CGFloat, fingerY: CGFloat?) {
-        if drag == nil { scroller.begin() }
+        if drag == nil {
+            scroller.begin()
+            #if os(iOS)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()   // 0.76：长按成立就震一下——可以拖了，不用猜要等多久
+            #endif
+        }
         drag = AxisDrag(itemID: item.id, mode: mode, dy: dy)
         if let fingerY { scroller.update(fingerY: fingerY) }
     }
@@ -505,7 +532,7 @@ private struct AxisBlockView: View {
 
     private var tint: Color {
         switch item.kind {
-        case .plan: theme.plannedTint
+        case .plan, .pastPlan: theme.plannedTint
         case .actual: theme.actualTint
         case .occupied: .gray
         }
@@ -518,7 +545,7 @@ private struct AxisBlockView: View {
                 HStack(spacing: 3) {
                     if let icon = leadingIcon { Image(systemName: icon).font(.caption2).foregroundStyle(tint) }
                     Text(item.title).font(.caption.weight(.medium)).lineLimit(height >= 40 ? 2 : 1)
-                        .foregroundStyle(item.kind == .occupied ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .foregroundStyle(item.kind == .occupied || item.kind == .pastPlan ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                     Spacer(minLength: 0)
                     tags
                 }
@@ -544,6 +571,7 @@ private struct AxisBlockView: View {
         case .actual: item.isRunning ? "timer" : "checkmark"
         case .occupied: "calendar"
         case .plan: item.isFixed ? "lock" : nil
+        case .pastPlan: nil
         }
     }
 
@@ -566,6 +594,7 @@ private struct AxisBlockView: View {
         case .occupied: return span + (item.calendarName.map { " · \($0)" } ?? "")
         case .actual: return item.isRunning ? "正在做 · 从 \(PlanEditRules.hm(start))" : span
         case .plan: return item.isRunning ? "接下来 · 到 \(PlanEditRules.hm(end))" : span
+        case .pastPlan: return span + " · 点一下记做完"
         }
     }
 
@@ -574,6 +603,7 @@ private struct AxisBlockView: View {
         case .plan: tint.opacity(dragging ? 0.2 : 0.09)
         case .actual: tint.opacity(0.3)
         case .occupied: Color.gray.opacity(0.16)
+        case .pastPlan: tint.opacity(0.04)
         }
     }
 
@@ -582,6 +612,7 @@ private struct AxisBlockView: View {
         case .plan: shape.strokeBorder(tint.opacity(0.85), lineWidth: 1.2)
         case .actual: shape.strokeBorder(.clear)
         case .occupied: shape.strokeBorder(Color.gray.opacity(0.3), style: StrokeStyle(lineWidth: 0.8, dash: [3, 2]))
+        case .pastPlan: shape.strokeBorder(tint.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         }
     }
 
@@ -596,6 +627,17 @@ private struct AxisBlockView: View {
             return s
         case .actual: return (item.isRunning ? "正在做：" : "做成了：") + "\(item.title)，\(span)"
         case .occupied: return "你的日历\(item.calendarName.map { "「\($0)」" } ?? "")：\(item.title)，\(span)，只读"
+        case .pastPlan: return "计划过：\(item.title)，\(span)。点一下可记成做完"
         }
     }
 }
+
+/// 0.76：块的触控范围——高度不足 minHeight 时上下各补一半（宽度不变，不抢旁边一列）。
+private struct AxisHitShape: Shape {
+    var minHeight: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let extra = max(0, minHeight - rect.height) / 2
+        return Path(rect.insetBy(dx: 0, dy: -extra))
+    }
+}
+

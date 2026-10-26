@@ -43,10 +43,14 @@ final class AxisAutoScroller {
     /// 每次拖动一个编号：上一轮循环收尾时不会误清 / 误续这一轮的循环。
     @ObservationIgnored private var generation = 0
 
+    /// 0.76（Jason 10-26「拖时页面跟着滚」）：正在拖一块——外层 ScrollView 据此关掉手指滚动（贴边自动滚照常）。
+    private(set) var isDragging = false
+
     /// 开始一次拖动。
     func begin() {
         guard !active else { return }
         active = true
+        isDragging = true
         generation += 1
         startOffset = offsetY
         delta = 0
@@ -65,6 +69,7 @@ final class AxisAutoScroller {
         loop?.cancel(); loop = nil
         let d = delta
         active = false; fingerY = nil; delta = 0
+        isDragging = false
         return d
     }
 

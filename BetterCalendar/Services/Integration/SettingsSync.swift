@@ -64,6 +64,8 @@ enum SettingsSync {
         "drafts.handoff.enabled",              // 打了一半的字跨设备接力（一端打开两端都接力）
         // —— W38（2026-10-22）——
         "voice.whisper.enabled",               // 端侧语音（Whisper）开关：属于人；模型各台各自下载（设备类，不同步）
+        // —— 0.76（2026-10-26）——
+        "agent.scheduledWakes.v1",             // 智能体给自己约的唤醒时刻（哪台开着哪台叫，Mac 优先）
     ]
 
     /// 用户能看到/改到、但**有意不同步**的设置（本质上属于这台设备）。只作审计清单与测试用，不参与同步逻辑。
@@ -171,6 +173,9 @@ enum SettingsSync {
     /// 时被旧副本盖掉）：iCloud KV 是整键「后写赢」、启动时又「远程有值即以远程为准」，不看谁新。
     /// 自带更新时间的键在这里登记：远程那份更旧就不覆盖本机。
     nonisolated static let versionedKeys: [String: @Sendable (Any) -> Date?] = [
+        "agent.scheduledWakes.v1": { value in   // = AgentWakeSchedule.key（整份带更新时间）
+            AgentWakeSchedule.decode(value as? String)?.updatedAt
+        },
         "agent.sharedMemory.v1": { value in   // = AgentSharedMemoryStore.key
             guard let raw = value as? String else { return nil }
             let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601

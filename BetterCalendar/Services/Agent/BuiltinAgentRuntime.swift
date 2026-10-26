@@ -82,7 +82,8 @@ nonisolated struct BuiltinAgentRunSummary: Equatable, Sendable {
 
 extension DeepSeekClient: BuiltinAgentModel {
     func complete(model: String, messages: [DeepSeekMessage], tools: Data) async throws -> DeepSeekCompletion {
-        try await complete(model: model, messages: messages, tools: tools, maxTokens: 2048)
+        // 0.76：2048 太小——整份改写 3000 字的共享记忆时参数被截断成半截 JSON（10-25 日志 3 次「参数不是合法的 JSON」）
+        try await complete(model: model, messages: messages, tools: tools, maxTokens: 8192)
     }
 }
 

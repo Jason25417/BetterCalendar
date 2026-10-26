@@ -160,6 +160,7 @@ nonisolated struct AgentBridgeIO: Sendable {
             }
             object["chosenOption"] = p.chosenOption ?? NSNull()
         }
+        object["stateLabel"] = p.effectiveState(at: now).label   // 0.76：state 的白话（如 replied =「你回了一句，等智能体重新提」，不是被拒）
         if let reply = p.userReply {
             object["userReply"] = ["text": reply.text, "at": iso.string(from: reply.at), "deviceId": reply.deviceId]
         }

@@ -80,7 +80,8 @@ struct AxisRunning: Equatable {
 
 /// 轴上的一块。
 struct AxisItem: Identifiable, Equatable {
-    enum Kind: Equatable { case plan, actual, occupied }
+    /// pastPlan（0.76，Jason 10-26 定）：整块已在闸门以上、还没记下做成的计划——淡色保留（不标「没做」），点一下可记成做完。
+    enum Kind: Equatable { case plan, actual, occupied, pastPlan }
     var id: String
     var kind: Kind
     var title: String
@@ -166,7 +167,16 @@ enum TimelineAxisComposer {
 
         var all: [AxisItem] = []
         for g in green.drawn {
-            // 闸门：绿色只活在「现在」之后（R1）——整块在过去的不画（不留尸体 / 虚影），跨着现在的只画剩下那段
+            // 0.76（Jason 10-26 改 R1）：整块在过去、还没记下做成的 → 淡色留在闸门以上（流水线照常往上走），点一下可记做完；
+            // 跨着现在的只画剩下那段（绿）
+            if g.end <= now, !runningIDs.contains(g.block.id) {
+                guard g.end.timeIntervalSince(g.start) >= minVisible else { continue }
+                let b = g.block
+                all.append(AxisItem(id: "past-\(b.id.uuidString)", kind: .pastPlan, title: b.title, start: g.start, end: g.end,
+                                    blockID: b.id, isFixed: b.isFixed, isAnchor: b.isAnchor,
+                                    plannedStart: b.start, plannedEnd: b.end))
+                continue
+            }
             let from = max(g.start, now)
             guard g.end.timeIntervalSince(from) >= minVisible else { continue }
             let b = g.block

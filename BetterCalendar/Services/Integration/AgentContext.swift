@@ -66,6 +66,8 @@ struct AgentContextInput {
         var pinnedUntil: Date? = nil }
     struct Run { var title: String; var start: Date; var pausedSeconds: TimeInterval = 0; var timingStyle: String? = nil }
     struct Running { var foreground: Run?; var background: [Run] = []; var onBreak = false }
+    /// 0.76：本机数据此刻可能不全（iCloud 账号掉线 / 刚启动还没收到第一次同步 / 同步卡住）的说明；nil = 正常。
+    var dataSyncCaution: String?
     struct PoolEntry {
         var title: String
         var deadline: Date?
@@ -233,6 +235,10 @@ enum AgentBridgeContext {
         calendar["window"] = window(input.calendarWindow)
         calendar["note"] = "Jason 自己的日程：当作现实与上下文。只有他要求、或真有冲突非改不可时，才可提越级提案 yourEventEdit / yourEventDelete（必须带 escalation，永远要他亲自批）；editable=false 的（别人的邀请、有其他参与者、只读日历）不要提。recurring=true 的改 / 删要写 span（默认只这一次；futureEvents = 这一次及以后）；删掉后那段时间不再算占用"
         context["calendar"] = calendar
+        if let caution = input.dataSyncCaution {
+            context["dataSync"] = ["caution": caution,
+                                   "rule": "本机计划可能还不全（不是真被删了）：别据此重排或删改，先告诉 Jason 数据还在同步、稍后再看"]
+        }
 
         // W12：系统提醒事项（Jason 自己的列表，只读、从不修改；不含 BetterCalendar 自己那本）。
         var reminders = section(source: "系统提醒事项（只读）", asOf: asOf, read: input.ownReminders,
@@ -393,6 +399,9 @@ enum AgentBridgeContext {
         AgentBridgeContext.snapshot(await gather(now: now))
     }
 
+    /// 生产读 DataSyncMonitor；测试注入。
+    var dataSyncCaution: (Date) async -> String? = { now in await DataSyncMonitor.shared.agentCaution(now: now) }
+
     func gather(now: Date) async -> AgentContextInput {
         var input = AgentContextInput(now: now)
         input.actionTargets = actionTargets()
@@ -407,6 +416,7 @@ enum AgentBridgeContext {
             } catch { input.today.error = fail("今天的计划", error) }
         }
         input.running = running()
+        input.dataSyncCaution = await dataSyncCaution(now)
         // W18：明天起几天的计划 + 你的日历「已占用」（与排布规则用的是同一份：同样按设置过滤、同样的关联）
         input.planEditing = planEditing()
         if input.planEditing {

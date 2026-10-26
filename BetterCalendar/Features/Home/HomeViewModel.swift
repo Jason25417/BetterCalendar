@@ -272,17 +272,29 @@ final class HomeViewModel {
         targetDayDidChange()
     }
 
+    /// 0.76：时间轴拖动连带顺延的块——保存时不钉成图钉（只钉你亲手拖的）。
+    private var axisNoPin: Set<UUID> = []
+
     /// 时间轴拖动 / 拉长缩短的落地：改列表里这一块的起止 → 立即保存（confirm：写 PlanStore、按「你眼前那一版」
     /// 对比钉成图钉、请 CalendarSyncEngine 重投影）。调用方已按 PlanEditRules 校验过、并已 focusDay 到这一天。
     /// 返回 false = 这一页里没有这块（不写任何东西）。
     @discardableResult
-    func applyAxisSpan(id: UUID, start: Date, end: Date) async -> Bool {
+    func applyAxisSpan(id: UUID, start: Date, end: Date, pushed: [(id: UUID, start: Date, end: Date)] = []) async -> Bool {
         guard let i = blocks.firstIndex(where: { $0.id == id }) else {
             DevLog.shared.warn("今天页", "时间轴改动没落地：这一页里找不到那一块（可能刚被别处删掉）")
             return false
         }
+        let pushedIdx = pushed.compactMap { p in blocks.firstIndex { $0.id == p.id }.map { ($0, p) } }
+        guard pushedIdx.count == pushed.count else {
+            DevLog.shared.warn("今天页", "时间轴连带顺延没落地：这一页里找不到要顺延的块")
+            return false
+        }
         blocks[i].start = start
         blocks[i].end = end
+        // 0.76：撞上后面的块 → 那几块跟着往后顺延（时长不变）；只钉你亲手拖的那一块，顺延的不钉
+        for (j, p) in pushedIdx { blocks[j].start = p.start; blocks[j].end = p.end }
+        axisNoPin = Set(pushed.map(\.id))
+        defer { axisNoPin = [] }
         blocks.sort { $0.start < $1.start }
         committedCount = nil; markEditedIfLoaded(); persistDraft()
         await flushAutosave()
@@ -761,7 +773,8 @@ final class HomeViewModel {
             for (label, dayBlocks) in byLabel {
                 try planStore.replacePlanned(dayBlocks.map(\.scheduled), on: label)
                 for b in dayBlocks.map(\.scheduled) {
-                    guard let old = shownSpans[b.id] ?? storedSpans[b.id], old.0 != b.start || old.1 != b.end else { continue }
+                    guard let old = shownSpans[b.id] ?? storedSpans[b.id], old.0 != b.start || old.1 != b.end,
+                          !axisNoPin.contains(b.id) else { continue }
                     try planStore.setPinned(ids: [b.id], until: ScheduledBlock.pinExpiry(forStart: b.start))
                 }
                 // 投影：常规日→绿；实时模式（已开始今天）→绿淡出、投橙。会前提醒规则在投影层统一挂。

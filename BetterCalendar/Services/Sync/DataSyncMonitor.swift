@@ -104,6 +104,25 @@ final class DataSyncMonitor {
         DevLog.shared.warn("数据同步", message)
     }
 
+    @ObservationIgnored private let launchedAt = Date()
+    /// 启动后多久内还没收到第一次导入，算「本机数据可能还不全」。
+    static let firstImportGrace: TimeInterval = 15 * 60
+
+    /// 0.76（10-25 01:38 iPhone iCloud 账号短暂掉线 → 系统清空同步库再重新导入，智能体在空窗里读到「今天 0 块」去重排）：
+    /// 给智能体的一句提醒——本机数据此刻可能不全。nil = 正常。
+    func agentCaution(now: Date) async -> String? {
+        guard !TestHost.isActive else { return nil }
+        await checkAccount()
+        if !account.hasPrefix("iCloud 账号可用") && account != "尚未检查" {
+            return "iCloud 账号此刻不可用（\(account)）：系统可能清空了本机同步库、正在重新导入"
+        }
+        if isTransportWedged { return "iCloud 同步卡住了：本机看到的可能是旧数据" }
+        if lastImport.map({ $0 < launchedAt }) ?? true, now.timeIntervalSince(launchedAt) < Self.firstImportGrace {
+            return "App 刚启动 \(Int(now.timeIntervalSince(launchedAt) / 60)) 分钟，还没收到第一次 iCloud 同步：本机计划可能还不全"
+        }
+        return nil
+    }
+
     func checkAccount() async {
         guard !TestHost.isActive else { return }
         do {

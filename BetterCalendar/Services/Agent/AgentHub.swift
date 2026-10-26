@@ -159,6 +159,7 @@ extension AgentBridge: ClaudeCodeAgentChannel {
         guard active == .builtin else { return }
         Task { [weak self] in await self?.pumpMessages() }
         proposalsRefreshed()
+        fireDueWakes()
         if let day = dueEveningReview() {
             var payload = eveningFacts()
             let minute = EveningReviewSettings.minute(defaults)
@@ -166,6 +167,26 @@ extension AgentBridge: ClaudeCodeAgentChannel {
             payload["configuredTime"] = String(format: "%02d:%02d", minute / 60, minute % 60)
             defaults.set(day, forKey: EveningReviewSettings.lastDayKey)
             builtin.enqueue(AgentEvent(kind: "evening_review", summary: "晚间复盘时间到：在对话里写「今天做成了什么」", payload: payload, at: now()))
+        }
+    }
+
+    /// 0.76：智能体给自己约的时刻到了 → scheduled_wake。Mac 到点就叫，iPhone / iPad 晚 2 分钟兜底（见 AgentWakeSchedule）。
+    /// 是你让它约的（「12 点半再来」）：不受「关键时刻唤醒」开关限制。
+    func fireDueWakes() {
+        guard active == .builtin, let wakes = builtin.tools.wakes else { return }
+        let (fire, missed) = wakes.takeDue(isMac: !isPhone, by: builtin.tools.chat.deviceLabel)
+        let t = now()
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "HH:mm"
+        for w in missed {
+            DevLog.shared.warn("内置智能体", "约好的 \(f.string(from: w.at)) 唤醒迟到超过 12 小时（那段时间没有设备开着 BetterCalendar），不再叫：\(w.note.prefix(60))")
+        }
+        for w in fire {
+            let late = Int(t.timeIntervalSince(w.at) / 60)
+            var payload: [String: Any] = ["wakeId": w.id.uuidString, "note": w.note, "scheduledAt": ISO8601DateFormatter().string(from: w.at),
+                                          "scheduledBy": w.createdBy]
+            if late >= 5 { payload["lateMinutes"] = late }
+            builtin.enqueue(AgentEvent(kind: "scheduled_wake", summary: "你约的 \(f.string(from: w.at)) 到了：\(w.note.prefix(80))" + (late >= 5 ? "（迟到 \(late) 分钟）" : ""),
+                                       payload: payload, at: t))
         }
     }
 

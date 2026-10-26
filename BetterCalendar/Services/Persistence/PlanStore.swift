@@ -221,7 +221,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
             .filter { !$0.isInTrash && $0.kind == .planned && DayContext.logicalStartOfDay($0.start) == label }
             .sorted { $0.start < $1.start }
             .map(Self.scheduled)
-        DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(Self.dayStr(day))")
+        // 0.76：不再每次读都记一行——10-25/26 两天刷了 3.5 万行，挤掉日志环形缓冲、也撑大同步的设备日志（读失败照旧抛出可见）
         return result
     }
 
@@ -231,7 +231,7 @@ final class PlanStore: PlanReading, PlanWriting, ActualReading, ActualWriting, C
             .filter { !$0.isInTrash && $0.kind == .planned && wanted.contains(DayContext.logicalStartOfDay($0.start)) }
             .sorted { $0.start < $1.start }
             .map(Self.scheduled)
-        DevLog.shared.info("PlanStore", "读到 \(result.count) 计划块 @ \(wanted.count) 天")
+        // 0.76：不再每次读都记一行——10-25/26 两天刷了 3.5 万行，挤掉日志环形缓冲、也撑大同步的设备日志（读失败照旧抛出可见）
         return result
     }
 

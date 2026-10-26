@@ -1199,5 +1199,30 @@
     "additionalProperties": false
    }
   }
- }
+ },
+  {
+    "type": "function",
+    "function": {
+      "name": "schedule_wake",
+      "description": "给自己约一个时刻：到点你会被叫醒（事件 scheduled_wake）接着做 note 里的事。Jason 说「X 点再来」「过一会儿回来复盘 / 停计时」时用它，不要做成待办。最多 7 天内、同时最多 20 个；取消一个还没到的用 cancel。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "到点时刻，带时区的 ISO 8601，如 2026-10-26T12:30:00-04:00"
+          },
+          "note": {
+            "type": "string",
+            "description": "到点要做的事（写给到时的自己，具体些）"
+          },
+          "cancel": {
+            "type": "string",
+            "description": "要取消的约定 id（只取消时填，此时不填 at / note）"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
 ]

@@ -280,15 +280,17 @@ enum PlanEditRules {
             let name = single && onlyMoves ? "" : "「\(k.title)」"
             guard let hit = obstacles.first(where: { $0.start < k.end && k.start < $0.end && !($0.mine && $0.linked == k.id) }) else { continue }
             let at = when(k.start, k.end, now: c.now), theirs = when(hit.start, hit.end, now: c.now)
+            let gaps = freeGapsHint(for: k, placed: placed, obstacles: obstacles, now: c.now)
             if hit.mine {
-                throw invalid("\(name)新时间 \(at) 和你日历里的「\(hit.title)」(\(theirs)) 重叠：那是你的安排（只读、不动），放不下")
+                throw invalid("\(name)新时间 \(at) 和你日历里的「\(hit.title)」(\(theirs)) 重叠：那是你的安排（只读、不动），放不下。" + gaps)
             }
             if hit.fixed {
-                throw invalid("\(name)新时间 \(at) 与固定安排「\(hit.title)」(\(theirs)) 重叠，固定安排不动，放不下")
+                throw invalid("\(name)新时间 \(at) 与固定安排「\(hit.title)」(\(theirs)) 重叠，固定安排不动，放不下。" + gaps)
             }
+            // 空档提示放在前面：连带顺延的 JSON 必须在最后（智能体从「moves 追加：」照抄到结尾）
             throw invalid("\(name)新时间 \(at) 和「\(hit.title)」(\(theirs)) 重叠，放不下"
-                + (restoring ? "（放回原位会和它撞上，不硬塞）"
-                   : "（不硬塞；要连带挪「\(hit.title)」，请把它也放进同一个提案一起挪）"
+                + (restoring ? "（放回原位会和它撞上，不硬塞）。" + gaps
+                   : "（不硬塞；要连带挪「\(hit.title)」，请把它也放进同一个提案一起挪）。" + gaps
                      + (cascadeHint(placed: placed, obstacles: obstacles, changedIDs: changedIDs, in: c).map { "。" + $0 } ?? "")))
         }
         if !restoring {
@@ -301,6 +303,33 @@ enum PlanEditRules {
     }
 
     typealias Obstacle = (title: String, start: Date, end: Date, fixed: Bool, mine: Bool, linked: UUID?)
+
+    /// 0.76（10-25 日志：智能体为一块复习连试 8 个时间、次次撞课 →「打转」）：放不下时顺手告诉它那天哪里放得下——
+    /// 同一逻辑日 8:00 起到次日 2:00、此刻之后，避开你的日历事件和别的计划块，列出够长的空档（最多 3 个）。
+    nonisolated static let gapDayStartHour = 8
+    nonisolated static let gapDayEndHour = 26   // 次日 2:00（Jason 一般 2 点睡）
+
+    static func freeGapsHint(for k: ScheduledBlock, placed: [ScheduledBlock], obstacles: [Obstacle], now: Date) -> String {
+        let duration = k.end.timeIntervalSince(k.start)
+        let minutes = Int((duration / 60).rounded())
+        let day = DayContext.logicalStartOfDay(k.start)
+        let cal = Calendar.current
+        let dayStart = cal.date(bySettingHour: gapDayStartHour, minute: 0, second: 0, of: day) ?? day
+        let dayEnd = dayStart.addingTimeInterval(Double(gapDayEndHour - gapDayStartHour) * 3600)
+        var cursor = max(dayStart, now)
+        let busy = (obstacles.filter { !($0.mine && $0.linked == k.id) }.map { ($0.start, $0.end) }
+                    + placed.filter { $0.id != k.id }.map { ($0.start, $0.end) })
+            .filter { $0.1 > cursor && $0.0 < dayEnd }
+            .sorted { $0.0 < $1.0 }
+        var gaps: [(Date, Date)] = []
+        for (s, e) in busy {
+            if s.timeIntervalSince(cursor) >= duration { gaps.append((cursor, s)) }
+            cursor = max(cursor, e)
+        }
+        if dayEnd.timeIntervalSince(cursor) >= duration { gaps.append((cursor, dayEnd)) }
+        guard !gaps.isEmpty else { return "那天（\(dayName(day))）\(hm(dayStart)) 到次日 2:00 已经没有连续 \(minutes) 分钟的空档：换一天，或缩短这一块" }
+        return "那天能放下 \(minutes) 分钟的空档：" + gaps.prefix(3).map { span($0.0, $0.1) }.joined(separator: "、") + "（不用再逐个试）"
+    }
 
     /// 最终布局：有新落点的块 + 组外障碍（前台正在做的块此刻占的时间段 + 仍在「从现在起」时间线上、这次没动的块
     /// + 这次改了属性但没动时间的块 + 你的日历事件）。

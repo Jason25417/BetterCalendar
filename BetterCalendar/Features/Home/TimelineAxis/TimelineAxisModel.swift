@@ -20,6 +20,12 @@ import Observation
     var axisTodayDone: [AxisActual] { get }
     /// 正在做（前台 + 后台同时做）。
     var axisRunning: [AxisRunning] { get }
+    /// 0.76：把一块过去的计划按计划时段记成做完。返回 nil = 记上了；否则 = 没记上的原因。
+    func axisMarkDone(_ block: ScheduledBlock) async -> String?
+}
+
+extension AxisLiveSource {
+    func axisMarkDone(_ block: ScheduledBlock) async -> String? { "这里还不能记做完" }
 }
 
 extension ExecutionViewModel: AxisLiveSource {
@@ -151,6 +157,20 @@ final class TimelineAxisModel {
             running: live?.axisRunning ?? [], occupied: occupied, windDownHour: WorkHoursSettings.windDownHour))
     }
 
+    /// 0.76：闸门以上淡色的计划块 → 记成做完（按计划时段；今天的进「做成了」，更早的直接落库 + 画蓝）。
+    func markPastDone(_ item: AxisItem) async {
+        guard item.kind == .pastPlan, let id = item.blockID, let block = storedPlanned.first(where: { $0.id == id }) else { return }
+        if let live, let why = await live.axisMarkDone(block) {
+            notice = "没记上：\(why)"
+            DevLog.shared.warn("今天页", "时间轴记做完没成：\(why)")
+            return
+        }
+        guard live != nil else { notice = "没记上：执行陪伴还没准备好"; return }
+        FeatureUsage.used(.todayAxisDrag, "记做完")
+        BehaviorLog.record("今天页时间轴", "点过去的计划记做完")
+        await reload(includeCalendar: false)
+    }
+
     /// 某一天的计划块（「这一天」菜单导出用）：正在编辑的那一天用编辑中的版本。
     func planned(on label: Date) -> [ScheduledBlock] {
         if let page = home.pageDay, page == label { return home.blocks.map(\.scheduled) }
@@ -213,8 +233,16 @@ final class TimelineAxisModel {
             return refuse("这次没读到计划，没有改动：\(error.localizedDescription)")
         }
         now = clock()
+        // 0.76（Jason 10-26「放不下就弹回」）：撞上后面可挪的块 → 后面的块依次顺延（时长不变，同智能体的 cascade）；
+        // 撞上你的日历 / 固定安排 / 图钉、越过 4:00 或截止 → 照旧不改、写明原因（附那天放得下的空档）。跨天不顺延。
+        var pushed: [(id: UUID, start: Date, end: Date)] = []
         do {
-            _ = try PlanEditRules.evaluate([step], in: context())
+            let steps = crossDay ? [step] : try PlanEditRules.withCascade([step], in: context())
+            if crossDay { _ = try PlanEditRules.evaluate(steps, in: context()) }
+            pushed = steps.dropFirst().compactMap { s in
+                if case let .move(m) = s, let e = m.end { return (m.id, m.start, e) }
+                return nil
+            }
         } catch let e as ProposalExecutionError {
             // 规则不许（放不下）：你试了、没落地——记「没做完」（常这样 = 轴可能不好用，给智能体 / 开发者的线索）
             FeatureUsage.record(feature, .abandoned, detail)
@@ -229,7 +257,7 @@ final class TimelineAxisModel {
                 return refuse(reason)
             }
         } else {
-            guard await home.applyAxisSpan(id: id, start: start, end: end) else {
+            guard await home.applyAxisSpan(id: id, start: start, end: end, pushed: pushed) else {
                 FeatureUsage.record(feature, .failed, detail)
                 return refuse("这一块刚被别处改过或删掉了，没有改动")
             }
@@ -237,7 +265,7 @@ final class TimelineAxisModel {
         if let err = home.errorText {   // 保存路径自己的失败（写库 / 提醒同步）已在页面横幅上；这里只补一句
             DevLog.shared.warn("今天页", "时间轴改动保存时有问题：\(err)")
         }
-        notice = nil
+        notice = pushed.isEmpty ? nil : "后面 \(pushed.count) 块跟着往后顺延了（时长不变）"
         FeatureUsage.used(feature, detail)
         BehaviorLog.record("今天页时间轴", stepName(step) + (crossDay ? "（跨天）" : ""))
         await reload(includeCalendar: false)

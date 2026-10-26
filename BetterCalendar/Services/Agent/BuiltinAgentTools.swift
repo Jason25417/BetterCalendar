@@ -37,12 +37,14 @@ import Foundation
 @MainActor final class BuiltinAgentToolbox {
     static let toolNames: Set<String> = ["read_context", "propose_change", "read_proposals", "reply_jason", "notify_jason",
                                          "read_messages", "read_chat", "update_shared_memory", "report_problem",
-                                         "search_internet", "read_webpage"]
+                                         "search_internet", "read_webpage", "schedule_wake"]
 
     let proposals: ProposalCenter
     let chat: AgentChatCenter
     let messages: AgentMessageCenter?
     let memory: AgentSharedMemoryStore
+    /// 0.76：定时唤醒（nil = 没接入，如部分测试）。
+    let wakes: AgentWakeSchedule?
     private let context: () async -> [String: Any]
     /// W40：查网页（nil = 这台没接，search_internet / read_webpage 如实说用不了）。
     private let web: (any BuiltinAgentWeb)?
@@ -51,8 +53,9 @@ import Foundation
     private var label: String { AgentKind.builtin.originLabel }
 
     init(proposals: ProposalCenter, chat: AgentChatCenter, messages: AgentMessageCenter?, memory: AgentSharedMemoryStore,
-         deviceLabel: String, web: (any BuiltinAgentWeb)? = nil, now: @escaping () -> Date = Date.init,
+         deviceLabel: String, web: (any BuiltinAgentWeb)? = nil, wakes: AgentWakeSchedule? = nil, now: @escaping () -> Date = Date.init,
          context: @escaping () async -> [String: Any]) {
+        self.wakes = wakes
         self.proposals = proposals; self.chat = chat; self.messages = messages; self.memory = memory
         self.deviceLabel = deviceLabel; self.web = web; self.now = now; self.context = context
     }
@@ -90,11 +93,16 @@ import Foundation
             guard let o = parsed as? [String: Any] else { throw AgentBridgeError.invalid("参数必须是 JSON 对象") }
             args = o
         } catch {
-            return fail(name, "参数不是合法的 JSON：\(error.localizedDescription)", ledger)
+            let cut = !raw.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("}")
+            return fail(name, "参数不是合法的 JSON：\(error.localizedDescription)"
+                        + (cut ? "（参数在中途断了，多半是一次写得太长被截断：精简后再试）" : ""), ledger)
         }
         do {
             switch name {
-            case "read_context": return try json(["available": true, "ageSeconds": 0, "context": await context()])
+            case "read_context":
+                var out: [String: Any] = ["available": true, "ageSeconds": 0, "context": await context()]
+                if let wakes { out["scheduledWakes"] = wakes.json() }   // 0.76：你给自己约的时刻
+                return try json(out)
             case "propose_change": return try await propose(args, eventId: eventId, ledger: ledger)
             case "read_proposals": return try readProposals(limit(args, 20, max: 50))
             case "reply_jason": return try await reply(args, eventId: eventId, ledger: ledger)
@@ -106,6 +114,7 @@ import Foundation
             // ⚠️ 不能叫 web_search：那是 DeepSeek 内置工具的保留名，deepseek-flash 上会被忽略（10-23 自测实锤：模型看不到它）
             case "search_internet": return try await webSearch(args, ledger: ledger)
             case "read_webpage": return try await readWebpage(args, ledger: ledger)
+            case "schedule_wake": return try scheduleWake(args)
             default: return fail(name, "没有这个工具（可用：\(Self.toolNames.sorted().joined(separator: " / "))）", ledger)
             }
         } catch {
@@ -346,6 +355,23 @@ import Foundation
         }
         ledger.notifications += 1
         return try json(["ok": true, "id": m.id.uuidString, "delivery": m.delivery.rawValue, "suppressReason": (m.suppressReason as Any?) ?? NSNull()])
+    }
+
+    /// 0.76：给自己约一个时刻，到点被叫醒（scheduled_wake）；或取消一个还没到的。
+    private func scheduleWake(_ args: [String: Any]) throws -> String {
+        guard let wakes else { throw AgentBridgeError.invalid("这台设备没有接入定时唤醒") }
+        let unknown = Set(args.keys.filter { !(args[$0] is NSNull) }).subtracting(["at", "note", "cancel"])
+        guard unknown.isEmpty else { throw AgentBridgeError.invalid("schedule_wake 不认识的参数：\(unknown.sorted().joined(separator: ", "))") }
+        if let raw = args["cancel"] as? String {
+            guard let id = UUID(uuidString: raw) else { throw AgentWakeError.notFound }
+            try wakes.cancel(id)
+            return try json(["ok": true, "cancelled": raw, "scheduledWakes": wakes.json()])
+        }
+        guard let at = args["at"] as? String else { throw AgentBridgeError.invalid("schedule_wake 需要 at（到点时刻）和 note（到点做什么）；取消用 cancel") }
+        let w = try wakes.add(at: try AgentWakeSchedule.parseTime(at), note: args["note"] as? String ?? "", by: "\(AgentKind.builtin.shortLabel)（\(deviceLabel)）")
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_CN"); f.dateFormat = "M月d日 HH:mm"
+        return try json(["ok": true, "id": w.id.uuidString, "at": f.string(from: w.at),
+                         "note": "到点会叫醒你（事件 scheduled_wake，Mac 开着最准时；都没开就等下次打开时补叫）"])
     }
 
     private func updateMemory(_ args: [String: Any], ledger: BuiltinAgentRunLedger) throws -> String {

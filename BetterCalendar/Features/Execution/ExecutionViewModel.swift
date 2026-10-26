@@ -1222,6 +1222,35 @@ final class ExecutionViewModel {
         return best.title
     }
 
+    /// 0.76：时间轴上点闸门以上的淡色计划块「做完了」——按计划时段记实际（今天的进「做成了」列表，同快捷指令「标记完成」；
+    /// 更早的日子直接落库 + 画蓝，同复盘「补一笔」）。返回 nil = 记上了。
+    func axisMarkDone(_ block: ScheduledBlock) async -> String? {
+        if !loaded { await loadToday() }
+        if let item = planned.first(where: { $0.id == block.id }) {
+            guard !isDone(item) else { return nil }
+            done.append(ActualRecord(plannedID: item.id, title: item.title, start: block.start, end: block.end))
+            await flushActuals()
+            NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
+            await updatePreview()
+            DevLog.shared.info("执行", "时间轴记做完：\(item.title)")
+            return nil
+        }
+        do {
+            try planStore.upsertActuals([ActualBlock(id: block.id, title: block.title, start: block.start, end: block.end)])
+        } catch {
+            return "写入失败：\(error.localizedDescription)"
+        }
+        do {
+            _ = try await projection?.recordActuals([CalendarEventDraft(title: block.title, start: block.start, end: block.end,
+                                                                        kind: .actual, blockID: block.id)], readFailureIsEmpty: true)
+        } catch {
+            DevLog.shared.warn("执行", "记做完已落库，但蓝色日历这次没画上：\(error.localizedDescription)")
+        }
+        NotificationCenter.default.post(name: ExecutionProgressSignal.changed, object: nil)
+        DevLog.shared.info("执行", "时间轴补记做完（\(PlanEditRules.dayName(DayContext.logicalStartOfDay(block.start)))）：\(block.title)")
+        return nil
+    }
+
     // MARK: - 落盘
 
     private func recordActiveIfAny() async {

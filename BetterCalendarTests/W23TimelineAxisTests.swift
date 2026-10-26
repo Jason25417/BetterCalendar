@@ -18,11 +18,11 @@ import AppKit
 
 @MainActor
 @Suite struct W23TimelineAxisTests {
-    private let cal = Calendar.current
-    private func at(_ d: Int, _ h: Int, _ m: Int = 0) -> Date {
+    let cal = Calendar.current
+    func at(_ d: Int, _ h: Int, _ m: Int = 0) -> Date {
         cal.date(from: DateComponents(year: 2026, month: 10, day: d, hour: h, minute: m))!
     }
-    private func label(_ d: Int) -> Date { cal.startOfDay(for: at(d, 12)) }
+    func label(_ d: Int) -> Date { cal.startOfDay(for: at(d, 12)) }
 
     // MARK: 几何：时间 ↔ 位置，跨 4:00 日界线连续
 
@@ -87,8 +87,10 @@ import AppKit
         let all = days.flatMap(\.items)
         // 闸门以上没有任何绿色
         #expect(!all.contains { $0.kind == .plan && $0.start < now }, "R1：绿色只活在现在之后")
-        #expect(!all.contains { $0.blockID == missed.id }, "没做的计划不留尸体 / 虚影 / 空槽")
-        #expect(!all.contains { $0.blockID == yesterday.id })
+        // 0.76（Jason 10-26 改 R1）：整块在过去、没记下做成的 → 淡色留着（pastPlan，不能拖，点一下可记做完），不标「没做」
+        let missedItem = all.first { $0.blockID == missed.id }
+        #expect(missedItem?.kind == .pastPlan && missedItem?.isDraggable == false)
+        #expect(all.first { $0.blockID == yesterday.id }?.kind == .pastPlan)
         #expect(all.filter { $0.kind == .actual }.map(\.title).sorted() == ["健身", "散步"], "过去只有做成的事（含计划外）")
         #expect(!all.contains { $0.kind == .plan && $0.blockID == done.id }, "做完的绿色让位给蓝色")
         // 跨着现在、没开始的：只画从现在起剩下的（不画成「迟到」）
@@ -365,7 +367,7 @@ import AppKit
         let doneA = ScheduledBlock(title: "写论文第二章", start: t(9), end: t(11))
         let doneB = ScheduledBlock(title: "健身", start: t(11, 30), end: t(12, 15))
         let running = ScheduledBlock(title: "整理笔记", start: t(13, 30), end: t(15))
-        let missed = ScheduledBlock(title: "没做的计划（不该出现）", start: t(12, 30), end: t(13, 15))
+        let missed = ScheduledBlock(title: "过去的计划（淡色，点一下记做完）", start: t(12, 30), end: t(13, 15))
         let next = ScheduledBlock(title: "读文献", start: t(15, 30), end: t(16, 30))
         let meeting = ScheduledBlock(title: "组会", start: t(17), end: t(18), isFixed: true)
         let ddl = ScheduledBlock(title: "交作业", start: t(19), end: t(20), priority: .important, deadline: t(21))
