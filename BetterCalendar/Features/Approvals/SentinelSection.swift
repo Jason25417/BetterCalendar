@@ -39,14 +39,6 @@ struct SentinelSection: View {
                         Text("把握超过 \(Int((engine.settings.wakeThreshold * 100).rounded()))% 才叫醒")
                     }
                     Text("越高越少打扰、越可能漏；按决策日志里的概率分布再调。").font(.caption2).foregroundStyle(.secondary)
-                    Slider(value: $engine.settings.startThreshold, in: 0.3...0.95, step: 0.01) {
-                        Text("「像是开始了」把握超过 \(Int((engine.settings.startThreshold * 100).rounded()))% 才叫醒")
-                    }
-                    Slider(value: $engine.settings.finishThreshold, in: 0.3...0.95, step: 0.01) {
-                        Text("「像是做完了」把握超过 \(Int((engine.settings.finishThreshold * 100).rounded()))% 才叫醒")
-                    }
-                    Text("0.79：开始 / 做完按设备活动与计划块的活动签名分开判断，各有各的线；签名从你的计时记录里学（已学 \(engine.signatures?.profiles.count ?? 0) 件事）。")
-                        .font(.caption2).foregroundStyle(.secondary)
                 }
             }
 

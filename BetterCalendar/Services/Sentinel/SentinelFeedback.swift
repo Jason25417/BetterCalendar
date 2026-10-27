@@ -23,8 +23,6 @@ nonisolated enum SentinelFeedback {
         if set.contains(SentinelSignal.plannedStartPassed.rawValue), let t = facts.overdueStart?.title { subjects.append(t) }
         if set.contains(SentinelSignal.timerOverPlan.rawValue), let t = facts.timerOverrun?.title { subjects.append(t) }
         if set.contains(SentinelSignal.deadlineNearNoProgress.rawValue), let t = facts.deadlineSoon?.title { subjects.append(t) }
-        if set.contains(SentinelSignal.untrackedContextSwitch.rawValue), let t = facts.activityStart?.title { subjects.append(t) }
-        if set.contains(SentinelSignal.seemsFinished.rawValue), let t = facts.activityStop?.title { subjects.append(t) }
         return signals.sorted().joined(separator: ",") + "|" + subjects.joined(separator: "/")
     }
 
@@ -37,41 +35,6 @@ nonisolated enum SentinelFeedback {
             let n = dismissed.filter { $0.wakeSignals.contains(s) }.count
             return min(maxThreshold, base + Double(n) * notUsefulStep)
         }.min() ?? base
-    }
-
-    /// 0.79 W49（C）：分问分阈值——wake 过线、或 started / finished 各自过线，都算该叫醒；过线的那题补进 signals，理由按事实点名那块。
-    /// 每题的阈值同样吃「没用」校准（那类信号近 14 天每个「没用」+0.05）。
-    static func apply(_ v: SentinelVerdict, facts: SentinelFacts, settings: SentinelSettings, notices: [SentinelRecentNotice], now: Date) -> SentinelVerdict {
-        var out = v
-        guard let p = v.probability else { return out }
-        var signals = Set(v.signals)
-        var reasons: [String] = []
-        let wakeT = threshold(base: settings.wakeThreshold, signals: v.signals, notices: notices, now: now)
-        var wake = p >= wakeT
-        if let s = v.scores?["started"] {
-            let sig = SentinelSignal.untrackedContextSwitch.rawValue
-            if s >= threshold(base: settings.startThreshold, signals: [sig], notices: notices, now: now) {
-                wake = true; signals.insert(sig)
-                let pct = Int((s * 100).rounded())
-                reasons.append(facts.activityStart.map { "最近的活动像是在做「\($0.title)」，但没在计时（把握 \(pct)%）" } ?? "像是开始了一件没记的事（把握 \(pct)%）")
-            }
-        }
-        if let f = v.scores?["finished"] {
-            let sig = SentinelSignal.seemsFinished.rawValue
-            if f >= threshold(base: settings.finishThreshold, signals: [sig], notices: notices, now: now) {
-                wake = true; signals.insert(sig)
-                let pct = Int((f * 100).rounded())
-                reasons.append(facts.activityStop.map { "像是停下了「\($0.title)」（把握 \(pct)%）" } ?? "像是做完了一件事（把握 \(pct)%）")
-            }
-        }
-        out.wake = wake
-        if !reasons.isEmpty {
-            // wake 本身没过线时理由换成过线那题的；过线了就并列。
-            out.reason = p >= wakeT ? ([v.reason] + reasons).joined(separator: "；") : reasons.joined(separator: "；")
-            if out.urgency == .low { out.urgency = .normal }
-        }
-        out.signals = signals.sorted()
-        return out
     }
 
     /// 今天（逻辑日，4 点日界线）你对同一个键点过「没用」。

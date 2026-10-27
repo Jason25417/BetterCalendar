@@ -25,15 +25,6 @@ struct SentinelFacts: Equatable {
     /// 当前空闲 / 锁屏 / 睡眠已持续多少分钟（nil = 在用电脑或不知道）。
     var idleMinutes: Int?
     var timerRunning = false
-    /// 0.79 W49：活动签名算出来的事实（只在 Mac 有数据时出现）。
-    struct ActivityStart: Equatable { var title: String; var matchPercent: Int; var borrowed: Bool }
-    struct ActivityStop: Equatable { var title: String; var beforePercent: Int; var nowPercent: Int; var timerRunning: Bool }
-    /// 没在计时、没有实际记录，但最近 10 分钟的活动像在做这块（之前 15 分钟不像）→ 像是开始了。
-    var activityStart: ActivityStart?
-    /// 之前 15 分钟像在做这块（或正在计时），最近 10 分钟不像了 → 像是停下了。
-    var activityStop: ActivityStop?
-    /// 每块（有签名的）最近 10 分钟的匹配百分比，摘要状态行用。
-    var activityMatch: [String: Int] = [:]
 }
 
 struct SentinelDigest {
@@ -61,8 +52,6 @@ struct SentinelDigestInput {
     var pendingBlockIDs: Set<UUID> = []
     /// W42：你最近在对话里说的话（30 分钟内提过某块 = 你已经在处理 / 改口了）。
     var recentUserChat: [(at: Date, text: String)] = []
-    /// 0.79 W49：按标题查活动签名（学过的 / 借来的）；nil = 没有。
-    var signatures: (String) -> ActivitySignatureHit? = { _ in nil }
 }
 
 /// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone / iPad 各自的打开次数；W28 起按设备类别分开，旧记录按 iPhone 计）。
@@ -91,10 +80,6 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
     /// W28：iPad 的打开次数（与 phoneOpens 分开；以前 iPad 的也会算进 iPhone）。
     var padOpens: [(name: String, count: Int)] = []
     var eventCount = 0
-    /// 0.79 W49（B）：窗口内前台状态的转变（短于 minSegmentSeconds 的一闪而过不算），最近的在后。
-    struct Transition: Equatable, Sendable { var at: Date; var from: State; var to: State }
-    var transitions: [Transition] = []
-    static let minSegmentSeconds: Double = 60
 
     static func == (a: Self, b: Self) -> Bool {
         a.current == b.current && a.currentSince == b.currentSince && a.switches == b.switches && a.eventCount == b.eventCount
@@ -102,7 +87,6 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
             && a.awaySeconds == b.awaySeconds && a.hosts.map(\.host) == b.hosts.map(\.host) && a.hosts.map(\.count) == b.hosts.map(\.count)
             && a.phoneOpens.map(\.name) == b.phoneOpens.map(\.name) && a.phoneOpens.map(\.count) == b.phoneOpens.map(\.count)
             && a.padOpens.map(\.name) == b.padOpens.map(\.name) && a.padOpens.map(\.count) == b.padOpens.map(\.count)
-            && a.transitions == b.transitions
     }
 
     static func summarize(_ events: [ActivityEvent], window: DateInterval, now: Date) -> SentinelActivitySummary {
@@ -110,11 +94,9 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
         let sorted = events.filter { $0.at <= now }.sorted { $0.at < $1.at }
         var state: State = .unknown, since: Date? = nil, lastApp: String? = nil
         var perApp: [String: Double] = [:]
-        var segments: [(state: State, start: Date, end: Date)] = []
         func close(at t: Date) {
             let a = max(since ?? window.start, window.start), b = min(t, now)
             guard b > a else { return }
-            if state != .unknown { segments.append((state, a, b)) }
             switch state {
             case let .app(name): perApp[name, default: 0] += b.timeIntervalSince(a)
             case .idle, .locked, .asleep: s.awaySeconds += b.timeIntervalSince(a)
@@ -153,13 +135,6 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
         close(at: now)
         s.current = state
         s.currentSince = since
-        // 转变：先把一闪而过的段（< 1 分钟，且不是当前这段）合并掉，再看相邻两段状态不同的地方。
-        let kept = segments.enumerated().filter { $0.element.end.timeIntervalSince($0.element.start) >= minSegmentSeconds || $0.offset == segments.count - 1 }.map(\.element)
-        var prev: State?
-        for seg in kept {
-            if let prev, prev != seg.state { s.transitions.append(Transition(at: seg.start, from: prev, to: seg.state)) }
-            prev = seg.state
-        }
         s.appSeconds = perApp.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }   // 同时长按名字，保证哈希稳定
         s.hosts = hostCount.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
         s.phoneOpens = phone.map { ($0.key, $0.value) }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
@@ -171,12 +146,6 @@ nonisolated struct SentinelActivitySummary: Equatable, Sendable {
 enum SentinelDigestBuilder {
     static let lateThresholdMinutes = 10
     static let deadlineHorizonMinutes = 180
-    /// 0.79 W49：匹配看最近几分钟；「之前」看再往前几分钟；像是开始 / 停下的百分比门槛。
-    static let activityMatchMinutes: Double = 10
-    static let activityBeforeMinutes: Double = 15
-    static let activityStartPercent = 60
-    static let activityBeforePercent = 40
-    static let activityStopPercent = 25
 
     static func build(_ input: SentinelDigestInput) -> SentinelDigest {
         let now = input.now, ctx = input.context
@@ -206,18 +175,12 @@ enum SentinelDigestBuilder {
             if b.isFixed { tags.append("固定") }
             if b.important { tags.append("要紧") }
             if let d = b.deadline { tags.append("截止 \(hm.string(from: d))") }
-            var status: String
-            let match = facts.activityMatch[norm(b.title)]
+            let status: String
             if runningTitles.contains(norm(b.title)) { status = "正在计时" }
             else if hasActual(b, ctx.actuals.items) { status = "已有实际记录" }
             else if b.end <= now { status = "已过，没有实际记录" }
-            else if b.start <= now {
-                status = (match ?? 0) >= activityStartPercent
-                    ? "应在进行中，没在计时，但最近的活动像在做它（已过开始 \(mins(now.timeIntervalSince(b.start))) 分）"
-                    : "应在进行中，没见开始迹象（已过开始 \(mins(now.timeIntervalSince(b.start))) 分）"
-            }
+            else if b.start <= now { status = "应在进行中，没见开始迹象（已过开始 \(mins(now.timeIntervalSince(b.start))) 分）" }
             else { status = "未到（\(mins(b.start.timeIntervalSince(now))) 分后开始）" }
-            if let match { status += "；最近 \(Int(activityMatchMinutes)) 分钟活动匹配 \(match)%" }
             lines.append("- \(hm.string(from: b.start))–\(hm.string(from: b.end)) \(clip(b.title))" + (tags.isEmpty ? "" : "（\(tags.joined(separator: "、"))）") + "：\(status)")
         }
 
@@ -274,15 +237,6 @@ enum SentinelDigestBuilder {
                 lines.append("iPad 打开：" + activity.padOpens.prefix(6).map { "\($0.name) \($0.count) 次" }.joined(separator: "、"))
             }
         }
-        // 0.79 W49（B）：转变本身（开始 / 结束是一次转变，不是均值）
-        let transitions = Array(activity.transitions.suffix(6))
-        if !transitions.isEmpty {
-            lines.append("【最近转变（Mac 前台）】")
-            for (i, tr) in transitions.enumerated() {
-                let until = i + 1 < transitions.count ? transitions[i + 1].at : now
-                lines.append("- \(hm.string(from: tr.at)) \(tr.from.label) → \(tr.to.label)（持续 \(max(1, mins(until.timeIntervalSince(tr.at)))) 分\(i + 1 < transitions.count ? "" : "，至今")）")
-            }
-        }
 
         // 最近的唤醒与通知
         let recentCut = now.addingTimeInterval(-3 * 3600)
@@ -303,12 +257,6 @@ enum SentinelDigestBuilder {
         if let o = facts.timerOverrun { hints.append("「\(clip(o.title))」计时已超过计划结束 \(o.minutesOver) 分") }
         if let d = facts.deadlineSoon { hints.append("「\(clip(d.title))」\(d.minutesLeft) 分后截止，最近 24 小时没见推进") }
         if let idle = facts.idleMinutes, idle >= 1 { hints.append("已离开电脑 \(idle) 分") }
-        if let a = facts.activityStart {
-            hints.append("「\(clip(a.title))」没在计时、没有实际记录，但最近 \(Int(activityMatchMinutes)) 分钟的活动像在做它（匹配 \(a.matchPercent)%\(a.borrowed ? "，按同类事的习惯估" : "")）——像是开始了")
-        }
-        if let st = facts.activityStop {
-            hints.append("「\(clip(st.title))」像是停下了：之前匹配 \(st.beforePercent)%，最近 \(Int(activityMatchMinutes)) 分钟只有 \(st.nowPercent)%" + (st.timerRunning ? "（计时还在走）" : ""))
-        }
         lines.append("【已算出的事实】" + (hints.isEmpty ? "无" : hints.joined(separator: "；")))
 
         let text = lines.joined(separator: "\n")
@@ -323,29 +271,6 @@ enum SentinelDigestBuilder {
         let fg = ctx.running.foreground
         f.timerRunning = fg != nil
         let running = Set(([fg].compactMap { $0 } + ctx.running.background).map { norm($0.title) })
-        // 0.79 W49（A）：按签名算每块最近 10 分钟 / 之前 15 分钟的匹配度 → 像是开始了 / 停下了
-        let recentWindow = DateInterval(start: now.addingTimeInterval(-activityMatchMinutes * 60), end: now)
-        let earlierWindow = DateInterval(start: now.addingTimeInterval(-(activityMatchMinutes + activityBeforeMinutes) * 60),
-                                         end: now.addingTimeInterval(-activityMatchMinutes * 60))
-        let recentProfile = ActivityProfile.sample(input.activity, interval: recentWindow, now: now)
-        let earlierProfile = ActivityProfile.sample(input.activity, interval: earlierWindow, now: now)
-        let nearBlocks = ctx.today.items.filter { !$0.isFixed && $0.end > now.addingTimeInterval(-3 * 3600) && $0.start < now.addingTimeInterval(6 * 3600) }
-        var starts: [SentinelFacts.ActivityStart] = [], stops: [SentinelFacts.ActivityStop] = []
-        for b in nearBlocks {
-            guard let hit = input.signatures(b.title) else { continue }
-            let nowPct = recentProfile.map { Int((hit.profile.match($0) * 100).rounded()) }
-            let beforePct = earlierProfile.map { Int((hit.profile.match($0) * 100).rounded()) }
-            if let nowPct { f.activityMatch[norm(b.title)] = nowPct }
-            let isRunning = running.contains(norm(b.title))
-            if !isRunning, !hasActual(b, ctx.actuals.items), let nowPct, nowPct >= activityStartPercent, (beforePct ?? 0) < activityBeforePercent {
-                starts.append(.init(title: b.title, matchPercent: nowPct, borrowed: hit.borrowedFrom != nil))
-            }
-            if let beforePct, beforePct >= activityStartPercent, (nowPct ?? 0) < activityStopPercent, recentProfile != nil || earlierProfile != nil {
-                stops.append(.init(title: b.title, beforePercent: beforePct, nowPercent: nowPct ?? 0, timerRunning: isRunning))
-            }
-        }
-        f.activityStart = starts.max { $0.matchPercent < $1.matchPercent }
-        f.activityStop = stops.max { $0.beforePercent < $1.beforePercent }
         // 计划开始已过、没见开始：最近开始的那块（开始在 90 分钟内、还没结束、不是固定安排）。
         // W42 源头去误报（10/21–10/23 的 13 次叫醒多是这三种）：此刻你在日历的会 / 课里、这块有待批提案、你 30 分钟内在对话里提过它。
         let inEvent = ctx.calendar.items.contains { !$0.isAllDay && $0.start <= now && $0.end > now }
@@ -356,8 +281,7 @@ enum SentinelDigestBuilder {
                                             && $0.start > now.addingTimeInterval(-90 * 60) && $0.end > now })
             .sorted(by: { $0.start > $1.start }).first,
            !running.contains(norm(b.title)), !hasActual(b, ctx.actuals.items),
-           !(b.id.map(input.pendingBlockIDs.contains) ?? false), !mentioned(b.title),
-           (f.activityMatch[norm(b.title)] ?? 0) < activityStartPercent {   // 0.79：活动像在做它 = 有开始迹象
+           !(b.id.map(input.pendingBlockIDs.contains) ?? false), !mentioned(b.title) {
             f.overdueStart = .init(title: b.title, minutesLate: Int(now.timeIntervalSince(b.start) / 60))
         }
         // 计时超计划：按标题对上今天的块。
@@ -406,7 +330,6 @@ enum SentinelDigestBuilder {
         var parts = ctx.today.items.map { "\($0.id?.uuidString ?? $0.title)|\(Int($0.start.timeIntervalSince1970))|\(Int($0.end.timeIntervalSince1970))" }
         parts.append("t:\(ctx.running.foreground?.title ?? "")|\(ctx.running.onBreak)")
         parts.append("f:\(f.overdueStart?.title ?? "")|\(f.timerOverrun?.title ?? "")|\(f.deadlineSoon?.title ?? "")|\(f.idleMinutes != nil)")
-        parts.append("a:\(f.activityStart?.title ?? "")|\(f.activityStop?.title ?? "")")
         return String(sha256(Data(parts.joined(separator: "\n").utf8)).prefix(16))
     }
 

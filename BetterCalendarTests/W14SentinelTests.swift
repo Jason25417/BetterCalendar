@@ -325,9 +325,9 @@ import Testing
         let body = try JSONSerialization.jsonObject(with: req.httpBody!) as! [String: Any]
         #expect(body["model"] as? String == "gpt-6-luna" && body["input"] as? String == digest.text)
         let qs = body["questions"] as! [[String: Any]]
-        #expect(qs.map { $0["type"] as? String } == ["predicate", "predicate", "predicate", "choice", "score"])   // 0.79：started / finished 分问
-        #expect(qs.map { $0["name"] as? String } == ["wake", "started", "finished", "category", "urgency"])
-        #expect((qs[3]["choices"] as? [[String: Any]])?.count == SentinelSignal.allCases.count && (qs[4]["levels"] as? [[String: Any]])?.count == 3)
+        #expect(qs.map { $0["type"] as? String } == ["predicate", "choice", "score"])
+        #expect(qs.map { $0["name"] as? String } == ["wake", "category", "urgency"])
+        #expect((qs[1]["choices"] as? [[String: Any]])?.count == SentinelSignal.allCases.count && (qs[2]["levels"] as? [[String: Any]])?.count == 3)
         // 拒答 → 抛错（可见）
         let refused = OpenAIDecisionsSentinelJudge(apiKey: { "k" }, transport: http(200, ["answers": [["type": "refusal", "name": "wake"]]]))
         await #expect(throws: (any Error).self) { try await refused.judge(digest) }

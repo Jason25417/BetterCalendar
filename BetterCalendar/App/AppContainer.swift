@@ -87,19 +87,10 @@ final class AppContainer {
                                      presence: DevicePresence?) -> SentinelEngine {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("BetterCalendar/BuiltinAgent/sentinel", isDirectory: true)   // 沙盒容器内：日用 / Dev 各自一份
-        #if os(macOS)
-        let signatures: ActivitySignatureStore? = ActivitySignatureStore()   // 0.79 W49：只有 Mac 有前台活动可学
-        #else
-        let signatures: ActivitySignatureStore? = nil
-        #endif
         let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
                                       log: FileSentinelDecisionLog(),
                                       bridge: AgentSentinelChannel(hub: hub, bridge: bridge, localRoot: root),
-                                      activity: activityLog, signatures: signatures) { await context.gather(now: $0) }
-        // 0.79 W49（D→A）：智能体推断的补记被拒 → 签名按负样本调整
-        hub.onActualRecordRejected = { [weak sentinel] title, start, end in
-            Task { await sentinel?.unlearn(title: title, start: start, end: end) }
-        }
+                                      activity: activityLog) { await context.gather(now: $0) }
         sentinel.recentAgentWakes = { [weak bridge] in
             (bridge?.runtime?.runs ?? []).filter { ($0.attempt ?? 0) >= 1 }
                 .map { SentinelRecentWake(at: $0.at, kind: $0.kind ?? "?", summary: $0.summary ?? "") }
