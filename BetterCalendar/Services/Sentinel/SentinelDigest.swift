@@ -52,6 +52,15 @@ struct SentinelDigestInput {
     var pendingBlockIDs: Set<UUID> = []
     /// W42：你最近在对话里说的话（30 分钟内提过某块 = 你已经在处理 / 改口了）。
     var recentUserChat: [(at: Date, text: String)] = []
+    // —— W51（0.80，Jason 2026-10-27）：哨兵以前缺的不是量，是智能体有、它没有的两样——共享记忆与对话；顺带待批提案与明天的计划。
+    /// 智能体的共享记忆（他的偏好 / 在跟进的事 / 拒绝过什么）；nil 或空 = 不附这一节。
+    var sharedMemory: String? = nil
+    /// 最近 24 小时的对话（双方；最多取最近 12 条）。
+    var recentChat: [(at: Date, fromUser: Bool, text: String)] = []
+    /// 待你批的提案（发起时刻 + 一句「做什么」）。
+    var pendingProposals: [(at: Date, title: String)] = []
+    /// 明天（逻辑日）的计划块（来自 context.upcoming）。
+    var tomorrow: [AgentContextInput.Block] = []
 }
 
 /// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone / iPad 各自的打开次数；W28 起按设备类别分开，旧记录按 iPhone 计）。
@@ -217,6 +226,13 @@ enum SentinelDigestBuilder {
             }
         }
 
+        // W51：明天的计划（只给个数与前几块；判断「今天放不下」「别催」时要用）
+        if !input.tomorrow.isEmpty {
+            let items = input.tomorrow.sorted { $0.start < $1.start }
+            lines.append("【明天的计划】共 \(items.count) 块：" + items.prefix(6).map { "\(hm.string(from: $0.start)) \(clip($0.title))" }.joined(separator: "；")
+                         + (items.count > 6 ? "…" : ""))
+        }
+
         // 设备活动
         lines.append("【设备活动（最近 \(Int(input.activityWindowMinutes)) 分钟）】" + (activity.eventCount == 0 && activity.current == .unknown ? "没有记录" : ""))
         if activity.current != .unknown || activity.eventCount > 0 {
@@ -249,6 +265,22 @@ enum SentinelDigestBuilder {
             var line = "- \(hm.string(from: n.at)) 「\(clip(n.title, 60))」" + (n.delivered ? "已弹出" : "被拦下（\(n.suppressReason ?? "")）")
             if let r = n.reaction { line += "，他选了\(r == "muted" ? "静音" : r == AgentMessage.Reaction.notUseful.rawValue ? "「没用」（这类叫醒他觉得没必要）" : "好")" }
             lines.append(line)
+        }
+
+        // W51：待批提案 / 最近对话 / 共享记忆（智能体看得到、哨兵以前看不到的那几样）
+        let pendingNow = input.pendingProposals.filter { $0.at <= now }.sorted { $0.at > $1.at }.prefix(6)
+        if !pendingNow.isEmpty {
+            lines.append("【待 Jason 批的提案】" + pendingNow.map { "\(hm.string(from: $0.at)) \(clip($0.title, 60))" }.joined(separator: "；"))
+        }
+        let chatCut = now.addingTimeInterval(-24 * 3600)
+        let chat = input.recentChat.filter { $0.at >= chatCut && $0.at <= now }.sorted { $0.at < $1.at }.suffix(12)
+        if !chat.isEmpty {
+            lines.append("【最近 24 小时的对话】")
+            for c in chat { lines.append("- \(hm.string(from: c.at)) \(c.fromUser ? "Jason" : "智能体")：\(clip(c.text, 120))") }
+        }
+        if let memory = input.sharedMemory?.trimmingCharacters(in: .whitespacesAndNewlines), !memory.isEmpty {
+            lines.append("【智能体的共享记忆（他的偏好 / 在跟进的事 / 拒绝过什么；与他说过的话冲突时以对话为准）】")
+            lines.append(clip(memory, 2000))
         }
 
         // 预先算好的事实（帮模型少算；规则兜底也用它）

@@ -14,6 +14,9 @@ import UserNotifications
     static let ackAction = "BC_AGENT_MESSAGE_ACK"
     static let muteAction = "BC_AGENT_MESSAGE_MUTE"
     static let notUsefulAction = "BC_AGENT_MESSAGE_NOT_USEFUL"   // W42
+    /// W51：自动顺延回执（漂的是「没开始」的块）——按钮「我在做」= 撤回顺延 + 从原开始时间起计时。
+    static let reflowCategory = "BC_AGENT_MESSAGE_REFLOW"
+    static let doingAction = "BC_AGENT_MESSAGE_DOING"
     static let idPrefix = "bc.agentmsg."
     static let userInfoKey = "bcAgentMessageId"
 
@@ -28,10 +31,24 @@ import UserNotifications
         let mute = UNNotificationAction(identifier: muteAction, title: "静音 2 小时", options: [])
         let notUseful = UNNotificationAction(identifier: notUsefulAction, title: "没用", options: [])
         let messages = UNNotificationCategory(identifier: category, actions: [ack, notUseful, mute], intentIdentifiers: [], options: [])
+        let doing = UNNotificationAction(identifier: doingAction, title: "我在做", options: [])
+        let reflow = UNNotificationCategory(identifier: reflowCategory, actions: [doing, ack], intentIdentifiers: [], options: [])
         var categories = await center.notificationCategories()
-        categories = categories.filter { $0.identifier != category }
+        categories = categories.filter { $0.identifier != category && $0.identifier != reflowCategory }
         categories.insert(messages)
+        categories.insert(reflow)
         center.setNotificationCategories(categories)
+    }
+
+    /// W51：通知上的「我在做」（返回消息 id）。
+    static func doingRoute(userInfo: [AnyHashable: Any], actionIdentifier: String) -> UUID? {
+        guard actionIdentifier == doingAction, let raw = userInfo[userInfoKey] as? String else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    /// 这条消息用哪个类别：自动顺延且漂的是「没开始」的块 → 带「我在做」。
+    static func categoryFor(_ message: AgentMessage) -> String {
+        PlanDriftRules.parseMessageRef(message.parentRef)?.kind == "notStarted" ? reflowCategory : category
     }
 
     static func route(userInfo: [AnyHashable: Any], actionIdentifier: String) -> (id: UUID, reaction: AgentMessage.Reaction?)? {
@@ -49,7 +66,7 @@ import UserNotifications
         let content = UNMutableNotificationContent()
         content.title = message.title
         content.body = message.body
-        content.categoryIdentifier = Self.category
+        content.categoryIdentifier = Self.categoryFor(message)
         content.threadIdentifier = "bc.agent"
         content.userInfo = [Self.userInfoKey: message.id.uuidString]
         let request = UNNotificationRequest(identifier: Self.idPrefix + message.id.uuidString, content: content, trigger: nil)

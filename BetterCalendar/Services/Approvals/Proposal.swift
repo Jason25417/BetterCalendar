@@ -492,6 +492,9 @@ nonisolated struct Proposal: Identifiable, Codable, Equatable, Sendable {
     // —— W34（Optional：旧记录照常解码；只在 JSON 载荷里，不改 CloudKit schema）——
     /// App 依据真实数据写的一句「做什么」（如「删除长期事项「C」（连同 1 个阶段）」）；nil = 用发起者写的 title。
     var headline: String? = nil
+    // —— W51（0.80，Optional：旧记录照常解码；只在 JSON 载荷里）——
+    /// App 自己发起的「自动顺延」（PlanDriftMonitor）：值 = 漂了的那块的 id。走专用规则直接执行（可撤销、回执可点「我在做」）。
+    var autoReflow: String? = nil
 
     /// 卡片 / 压缩条上的那一句：有备选方案时说不清是哪个 → 用发起者的 title。
     var cardHeadline: String { hasAlternatives ? title : (headline ?? title) }
@@ -644,6 +647,8 @@ nonisolated struct ProposalDraft: Sendable {
     var headline: String? = nil
     /// W41：智能体说「连带的交给 App 算」（只在提交时用，不存）：prepare 前把 App 算好的连带顺延并进主方案。
     var cascade = false
+    /// W51（0.80）：见 Proposal.autoReflow（App 自动顺延；只由 PlanDriftMonitor 填）。
+    var autoReflow: String? = nil
 
     /// 方案按钮名字的长度上限（通知按钮放得下）。
     static let optionLabelLimit = 40

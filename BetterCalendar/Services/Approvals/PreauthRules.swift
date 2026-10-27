@@ -126,6 +126,13 @@ nonisolated enum PreauthPolicy {
                                          origin: .agent, ruleKind: "lowRisk", kindLabel: "低风险改动",
                                          scope: .kindOnBetterCalendar, effect: .allow, sourceProposalId: nil)
 
+    // MARK: W51（0.80）自动顺延（App 规则：PlanDriftMonitor 发起的整组顺延直接执行，可撤销；回执可点「我在做」）
+
+    static let autoReflowRuleId = UUID(uuidString: "0B5E1A2C-7D3F-4C8E-9A1B-32D0C0FFEE02")!
+    static let autoReflowRule = PreauthRule(id: autoReflowRuleId, createdAt: Date(timeIntervalSince1970: 0), createdByDeviceId: "app",
+                                            origin: .system, ruleKind: "autoReflow", kindLabel: "自动顺延",
+                                            scope: .kindOnBetterCalendar, effect: .allow, sourceProposalId: nil)
+
     /// 这份提案能不能低风险自动通过（nil = 能；有值 = 为什么不能）。只看 App 能核实的事实：
     /// 能：BetterCalendar 自己的计划块——加一块（不是固定安排）/ 挪一块 / 改一块的时长或名字（块不是图钉；时间在今天到 7 天后、
     ///     不和固定安排或你的日历冲突——这些由 prepare 的排布规则保证，放不下的根本提不进来）；给你建一条提醒。
@@ -166,6 +173,11 @@ nonisolated enum PreauthPolicy {
     /// 越级提案一律先问你（连 deny 也不自动拒绝：越级是智能体审慎判断「确有必要」，要你亲眼看到）；
     /// 有备选方案的一律先问你（智能体在等你挑）；W11：带可调参数的一律先问你（等你确认或调整数值）。
     static func evaluate(_ p: Proposal, rules: [PreauthRule], lowRiskAutoPass: Bool = false) -> ProposalGateVerdict {
+        // W51：App 自己的自动顺延（只挪 BetterCalendar 自家的弹性块、固定 / 图钉 / 你的日历都不动，由排布规则保证）→ 直接做，可撤销。
+        if p.autoReflow != nil, p.origin == .system, p.escalation == nil, !p.hasAlternatives, !p.hasParameters,
+           case .moveBlocks(_, false) = p.action {
+            return ProposalGateVerdict(route: .apply, rule: autoReflowRule, note: "自动顺延（App 规则，可撤销）")
+        }
         let hits = rules.filter { $0.matches(p) }
         // 有规则命中但仍先问你时，判定里带上那条规则（留底讲得出「为什么规则没生效」）。
         if p.escalation != nil { return .ask("越级提案永远先问你", rule: hits.first) }

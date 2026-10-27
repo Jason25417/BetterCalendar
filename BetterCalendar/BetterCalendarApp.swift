@@ -76,7 +76,7 @@ struct BetterCalendarApp: App {
         // 入口 = 系统「窗口」菜单。
         Window("BetterCalendar 智能体", id: AgentChatWindow.id) {
             NavigationStack {
-                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub, notices: container.agentMessages,
+                AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub, notices: container.agentMessages, drift: container.drift,
                               focusId: container.router.proposalFocusId)
             }
             .environment(\.appTheme, ThemeSettings.current)
@@ -157,7 +157,7 @@ struct BetterCalendarApp: App {
                     .tag(AppRouter.Tab.schedule)
                     .tabItem { Label("今天", systemImage: "sun.max") }
                 NavigationStack {
-                    AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub, notices: container.agentMessages,
+                    AgentChatView(chat: container.agentChat, proposals: container.proposals, bridge: container.agentBridge, hub: container.agentHub, notices: container.agentMessages, drift: container.drift,
                                   focusId: container.router.proposalFocusId)
                 }
                 .tag(AppRouter.Tab.chat)

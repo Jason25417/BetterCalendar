@@ -181,7 +181,7 @@ nonisolated struct SentinelDecisionEntry: Codable, Equatable, Sendable, Identifi
 nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
     /// 总开关（实验期默认开，Jason 2026-10-18）。
     var enabled = true
-    /// 首选判断器（Jev / OpenAI / Claude）；不可用或失败时按 Jev → OpenAI → Claude → 规则 依次兜底，可见。
+    /// 你选的判断器（Jev / OpenAI / Claude / 规则）；原则 10：只用这一个，不可用或失败 = 哨兵暂停并直说，不换替身。
     var preferredJudge = SentinelJudgeKind.jev
     /// 决策模型的「该叫醒」概率阈值。漏叫一次的代价小（下一拍/例行检查/心跳还会看），
     /// 误叫一次要花 Claude Code 额度、还可能多一条通知 → 偏保守，起步 0.85；按决策日志里的概率分布再调。

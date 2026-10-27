@@ -257,6 +257,7 @@ import UIKit
         proposal.askFirst = draft.askFirst ? true : nil   // W32d
         proposal.autoPassBlocker = draft.autoPassBlocker
         proposal.headline = draft.headline
+        proposal.autoReflow = draft.autoReflow   // W51
         // W10 分层预授权（A3a）：规则命中「直接做 / 做完告诉你 / 不做」时，提案建出来就带着规则的决定（原子：
         // 不会先在别的端弹「待确认」再被收起）；默认一律先问你。越级 / 动你的东西 / 删除类永远不被自动放行（PreauthPolicy）。
         let verdict = gate.verdict(for: proposal)

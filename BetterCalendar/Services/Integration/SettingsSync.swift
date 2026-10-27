@@ -68,6 +68,8 @@ enum SettingsSync {
         "agent.scheduledWakes.v1",             // 智能体给自己约的唤醒时刻（哪台开着哪台叫，Mac 优先）
         // —— 0.77（2026-10-26）——
         "agent.planSuggest.enabled", "agent.planSuggest.minute",   // 每天的投放建议（智能体提议把待办 / 长期事项排进来）
+        // —— W51 / 0.80（2026-10-27）——
+        AutoReflowSettings.key,                // 自动顺延（落后 10 分钟按原顺序往后挪，可撤回、可点「我在做」）：一端关两端关
         "agent.planSuggest.sentDay",           // 今天哪台已经发过（跨设备去重）
     ]
 

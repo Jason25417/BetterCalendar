@@ -51,6 +51,8 @@ struct AgentChatView: View {
     var hub: AgentHub? = nil
     /// 0.75：智能体主动发的消息（合进时间线）；nil = 只显示对话。
     var notices: AgentMessageCenter? = nil
+    /// W51（0.80）：自动顺延的回执气泡上「我在做」/「撤回顺延」要用；nil = 不显示这两个按钮。
+    var drift: PlanDriftMonitor? = nil
     /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
     var focusId: UUID? = nil
     @State private var draft = ""
@@ -77,7 +79,7 @@ struct AgentChatView: View {
                         ForEach(items) { item in
                             switch item {
                             case let .chat(m): bubble(m).id(m.id)
-                            case let .notice(m): AgentNoticeBubble(message: m, center: notices).id(m.id)
+                            case let .notice(m): AgentNoticeBubble(message: m, center: notices, drift: drift).id(m.id)
                             }
                         }
                     }
@@ -403,11 +405,15 @@ struct AgentChatSettingsView: View {
 struct AgentNoticeBubble: View {
     let message: AgentMessage
     let center: AgentMessageCenter?
+    /// W51：自动顺延回执（parentRef = reflow:<提案 id>:<kind>）的「我在做」/「撤回顺延」。
+    var drift: PlanDriftMonitor? = nil
 
     var body: some View {
         let m = message
+        let reflow = PlanDriftRules.parseMessageRef(m.parentRef)
         VStack(alignment: .leading, spacing: 6) {
-            Label(m.wakeSignature != nil ? "主动提醒（哨兵叫醒）" : "主动提醒", systemImage: "bell")
+            Label(reflow != nil ? "自动顺延" : m.wakeSignature != nil ? "主动提醒（哨兵叫醒）" : "主动提醒",
+                  systemImage: reflow != nil ? "arrow.right.to.line" : "bell")
                 .font(.caption).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(m.title).font(.subheadline.bold())
@@ -420,7 +426,19 @@ struct AgentNoticeBubble: View {
                       + [m.delivery == .suppressed ? "没弹通知：\(m.suppressReason ?? "打扰规则拦下")" : nil, m.reaction?.youLabel]
                         .compactMap { $0 }).joined(separator: " · "))
                     .font(.caption2).foregroundStyle(.secondary)
-                if m.reaction == nil, let center {
+                if let reflow, let drift {
+                    if let note = drift.notes[reflow.proposalId] {
+                        Text(note).font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        if reflow.kind == "notStarted" {
+                            Button("我在做") { Task { await drift.imDoing(proposalId: reflow.proposalId); await center?.react(m.id, .acknowledged) } }
+                                .font(.caption).buttonStyle(.borderedProminent).accessibilityIdentifier("bc.reflow.doing")
+                        }
+                        Button("撤回顺延") { Task { await drift.undoReflow(proposalId: reflow.proposalId); await center?.react(m.id, .acknowledged) } }
+                            .font(.caption).buttonStyle(.bordered).accessibilityIdentifier("bc.reflow.undo")
+                        if m.reaction == nil, let center { Button("好") { Task { await center.react(m.id, .acknowledged) } }.font(.caption) }
+                    }
+                } else if m.reaction == nil, let center {
                     Button("好") { Task { await center.react(m.id, .acknowledged) } }.font(.caption)
                     Button("没用") { Task { await center.react(m.id, .notUseful) } }.font(.caption)   // W42：只由你点，哨兵据此校准
                 }

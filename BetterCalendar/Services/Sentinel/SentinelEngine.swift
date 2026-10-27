@@ -5,7 +5,8 @@
 //  SPEC §19 C1 W14：哨兵调度器（组装点创建；测试环境不启动循环）。W42 起 Mac 与 iPhone 都有，只有在场设备判断（presenceGate）；
 //  iPhone 只在 App 打开时跑（看不到设备活动）。你对叫醒后消息点的「没用」回来校准门槛、当天不再为同一件事叫醒（SentinelFeedback）。
 //  每一拍（默认 3 秒）：闸门（开关/桥接/打扰设置/每日花费上限）→ 只读收集（设备活动每拍读；计划与计时按 contextRefreshSeconds 刷新）
-//  → 变化指纹 → 该判断时：摘要 → 判断器（按首选顺序 Jev → OpenAI → Claude，不可用或失败就换下一个，最后规则兜底；兜底一律可见）
+//  → 变化指纹 → 该判断时：摘要 → **只用你选的那一个判断器**（原则 10，Jason 2026-10-19：Jev / OpenAI / Claude / 规则是哨兵的不同实现，
+//     供你选用，不是替身链；不可用或失败 = 这一拍不判断、面板直说，绝不静默换别的）
 //  → 概率过阈值才算「该叫醒」→ 防风暴 → 写 sentinel_wake 事件 → 决策日志一行 → 状态文件 runtime/sentinel.json（心跳读）。
 //  防风暴（Jason 2026-10-18：决策模型可能几秒一判，别让智能体被反复叫醒、互相冲突）：
 //    ① 智能体正在运行（或队列里还有事件）/ 离上次叫醒不到 minWakeGap / 到每小时上限 → 不写新叫醒，攒进「待发叫醒」，
@@ -39,6 +40,10 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     /// W42（原则 11）：这台此刻不该判断的原因（别的设备在场）；nil = 判断。
     var presenceGate: () -> String? = { nil }
     var recentUserChat: () -> [(at: Date, text: String)] = { [] }
+    /// W51（0.80）：共享记忆 / 最近 24 小时对话 / 待批提案——智能体有、哨兵以前没有的那几样（见 SentinelDigestInput）。
+    var sharedMemory: () -> String? = { nil }
+    var recentChat: () -> [(at: Date, fromUser: Bool, text: String)] = { [] }
+    var pendingProposals: () -> [(at: Date, title: String)] = { [] }
     /// 打扰设置（与智能体主动通知共用一份：静音一处生效）。
     var attention: () -> AttentionSettings = { AttentionSettings.load() }
     /// 智能体忙不忙（默认读桥接：调度器 running 或队列里有事件）；测试可注入。
@@ -136,6 +141,9 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
 
     func stop() { loop?.cancel(); loop = nil }
 
+    /// W51：计划刚被改过（自动顺延写入后）→ 作废缓存的计划 / 计时上下文，下一拍重读；否则会继续对推走的块报「开始时间已过」。
+    func invalidateContext() { cachedContext = nil }
+
     /// 一拍：闸门 → 收集 → 指纹 → 该判断就判断 → 试着发出攒着的叫醒 → 写状态。
     func tick() async {
         guard !evaluating else { return }
@@ -213,10 +221,17 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     private func evaluate(trigger: SentinelTrigger, at t: Date, context: AgentContextInput, events: [ActivityEvent]) async {
         let own = recent.filter { $0.outcome == .woke }.map { SentinelRecentWake(at: $0.at, kind: "sentinel_wake", summary: $0.verdict.reason) }
         let notices = recentNotices()
-        let input = SentinelDigestInput(now: t, context: context, activity: events, activityWindowMinutes: settings.activityWindowMinutes,
+        var input = SentinelDigestInput(now: t, context: context, activity: events, activityWindowMinutes: settings.activityWindowMinutes,
                                         recentWakes: own + recentAgentWakes().filter { $0.kind != SentinelBridgeFiles.wakeKind },
                                         recentNotices: notices, attention: attention(), timeZone: timeZone,
                                         pendingBlockIDs: pendingBlockIDs(), recentUserChat: recentUserChat())
+        // W51：补上智能体有、哨兵没有的几样
+        input.sharedMemory = sharedMemory()
+        input.recentChat = recentChat()
+        input.pendingProposals = pendingProposals()
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: DayContext.logicalStartOfDay(t)) {
+            input.tomorrow = context.upcoming.items.filter { DayContext.logicalStartOfDay($0.start) == tomorrow }
+        }
         let digest = SentinelDigestBuilder.build(input)
 
         // 只用你选的判断器（原则 10）：失败 = 这一拍不判断、直说，下一拍再试；不换替身。

@@ -13,7 +13,8 @@ import Foundation
 nonisolated enum ProposalPresentation {
     /// 卡片标题那一句（低风险自动通过的回执带「已自动通过：」）。
     static func headline(_ p: Proposal) -> String {
-        (p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId ? "已自动通过：" : "") + p.cardHeadline
+        (p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId ? "已自动通过：" : p.preauth?.ruleId == PreauthPolicy.autoReflowRuleId ? "已自动顺延：" : "")
+            + p.cardHeadline
     }
 
     /// 正文：改动前 → 后（不含越级点名、不含后果行）。
@@ -63,6 +64,7 @@ nonisolated enum ProposalPresentation {
     static func compactStatus(_ p: Proposal, at now: Date) -> String {
         if p.undoneAt != nil { return "已撤销" }
         if p.preauth?.ruleId == PreauthPolicy.lowRiskRuleId, p.state == .applied { return "已自动通过" }
+        if p.preauth?.ruleId == PreauthPolicy.autoReflowRuleId, p.state == .applied { return "已自动顺延" }
         switch p.effectiveState(at: now) {
         case .applied: return "已批准"
         case .approved: return "已批准，执行中"

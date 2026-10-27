@@ -68,6 +68,7 @@ final class AppContainer {
     let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
     let sentinel: SentinelEngine?              // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（W42 起 Mac 与 iPhone 都有；测试环境为 nil）
+    let drift: PlanDriftMonitor?               // W51（0.80）自动顺延：落后 10 分钟本地按原顺序往后挪（可撤回、可点「我在做」）；测试环境为 nil
     /// W30（原则 11）：在场设备（你此刻在哪台）+ 一处响的触达出口。测试环境为 nil（通知照旧、不碰 iCloud KV）。
     let presence: DevicePresence?
     let reach: ReachOutlet?
@@ -84,7 +85,7 @@ final class AppContainer {
     /// 通道跟着当前智能体走（Claude Code = Mac 的桥接目录；内置 = 进程内送达，见 AgentSentinelChannel）。
     private static func makeSentinel(hub: AgentHub, bridge: AgentBridge?, activityLog: FileActivityLog, context: AgentContextGatherer,
                                      proposals: ProposalCenter, chat: AgentChatCenter, messages: AgentMessageCenter,
-                                     presence: DevicePresence?) -> SentinelEngine {
+                                     memory: AgentSharedMemoryStore, presence: DevicePresence?) -> SentinelEngine {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("BetterCalendar/BuiltinAgent/sentinel", isDirectory: true)   // 沙盒容器内：日用 / Dev 各自一份
         let sentinel = SentinelEngine(judges: [JevSentinelJudge(), OpenAIDecisionsSentinelJudge(), ClaudeSentinelJudge()],
@@ -106,6 +107,13 @@ final class AppContainer {
             (chat?.messages ?? []).filter { $0.author == .user }.suffix(10).map { (at: $0.createdAt, text: $0.text) }
         }
         sentinel.attention = { [weak messages] in messages?.settings ?? AttentionSettings.load() }
+        // W51：共享记忆 / 最近 24 小时对话 / 待批提案（智能体有、哨兵以前没有的）
+        sentinel.sharedMemory = { [weak memory] in memory?.memory?.text }
+        sentinel.recentChat = { [weak chat] in
+            let cut = Date.now.addingTimeInterval(-24 * 3600)
+            return (chat?.messages ?? []).filter { $0.createdAt >= cut }.suffix(12).map { (at: $0.createdAt, fromUser: $0.author == .user, text: $0.text) }
+        }
+        sentinel.pendingProposals = { [weak proposals] in (proposals?.pending ?? []).map { (at: $0.createdAt, title: $0.cardHeadline) } }
         // W42（原则 11）：只有在场设备判断
         sentinel.presenceGate = { [weak presence] in
             guard let p = presence?.current() else { return nil }
@@ -558,9 +566,44 @@ final class AppContainer {
             self.sentinel = nil
         } else {
             let sentinel = Self.makeSentinel(hub: agentHub, bridge: sentinelBridge, activityLog: activity.log, context: context,
-                                             proposals: proposals, chat: agentChat, messages: agentMessages, presence: presence)
+                                             proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory, presence: presence)
             self.sentinel = sentinel
             sentinel.start()
+        }
+        // W51（0.80）自动顺延：本地漂移监视器——落后 10 分钟按原顺序往后挪（走审批中心的自动顺延规则，可撤回）；
+        // 只有在场设备推（同哨兵）；推过收工线 / 二次漂 / 放不下才叫智能体；回执上的「我在做」= 撤回 + 从原开始时间起计时。
+        if TestHost.isActive {
+            self.drift = nil
+        } else {
+            let drift = PlanDriftMonitor(planStore: planStore)
+            drift.progress = execution
+            let calendarForDrift = calendarStore
+            drift.occupiedEvents = { window in
+                ExternalCalendarSettings.busy(try await calendarForDrift.externalEvents(in: window), excluding: ExternalCalendarSettings.excludedTitles)
+            }
+            drift.isLooseDay = { [weak looseDays] in looseDays?.isLoose($0) ?? false }
+            drift.presenceGate = { [weak presence] in
+                guard let p = presence?.current() else { return nil }
+                #if os(macOS)
+                let isMac = true
+                #else
+                let isMac = false
+                #endif
+                return SentinelFeedback.presenceSkip(p, myDeviceID: ProposalDevice.id, isMac: isMac)
+            }
+            drift.syncCaution = { now in await DataSyncMonitor.shared.agentCaution(now: now) }
+            drift.submit = { [weak proposals] in await proposals?.submit($0) }
+            drift.proposal = { [weak proposals] id in proposals?.proposals.first { $0.id == id } }
+            drift.undo = { [weak proposals] id in await proposals?.undo(id) ?? false }
+            drift.notify = { [weak agentMessages] in await agentMessages?.receive($0) }
+            drift.message = { [weak agentMessages] id in agentMessages?.messages.first { $0.id == id } }
+            drift.acknowledge = { [weak agentMessages] id in await agentMessages?.react(id, .acknowledged) }
+            drift.emit = { [weak agentHub] kind, summary, payload in agentHub?.emit(kind: kind, summary: summary, payload: payload) }
+            drift.afterApplied = { [weak sentinel = self.sentinel] in sentinel?.invalidateContext() }
+            drift.startTimer = { [weak execution] id, at in try await execution?.proposalStartTimer(blockId: id, title: nil, at: at) }
+            notificationDelegate.handleReflowDoing = { [weak drift] id in await drift?.imDoing(messageId: id) }
+            self.drift = drift
+            drift.start()
         }
         // W20：做完一件事 → 当前智能体（两端；Claude Code 只在 Mac 有通道）。
         execution.onBlockFinished = { [weak agentHub] title, seconds in

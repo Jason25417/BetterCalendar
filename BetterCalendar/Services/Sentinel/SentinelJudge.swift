@@ -11,7 +11,8 @@
 //    - ClaudeSentinelJudge：Claude Haiku 4.5，结构化输出（output_config.format + JSON schema），**不用 prefill**；
 //      稳定的指令段放 cachedSystemPrefix（客户端支持 cache_control）。⚠️ Haiku 4.5 最小可缓存前缀 4096 token，
 //      这段指令不到，实际不会命中缓存（无害；决策日志的 cacheRead 可实证）。
-//    - RuleSentinelJudge：没有 key / 云端关 / 调用失败时的朴素规则兜底（用摘要里算好的事实）。兜底一律可见（DevLog + 面板）。
+//    - RuleSentinelJudge：朴素规则（只用摘要里算好的事实），零成本的一种实现。
+//  原则 10（Jason 2026-10-19）：这四个是哨兵的**不同实现，供你在面板里选一个**；不是降级链——选中的不可用或失败 = 哨兵暂停并直说。
 //
 
 import Foundation

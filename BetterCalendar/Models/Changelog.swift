@@ -28,6 +28,12 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.80.0", date: "2026-10", changes: [
+            "自动顺延（Dev 默认开、日用默认关：设置 → 审批记录与规则）：一块开始时间过了 10 分钟还没开始计时，或正在做的超过计划 10 分钟，App 自己把后面的弹性块按原顺序往后挪（时长不变；固定安排、你亲手放的图钉、你的日历不动），对话里留一张「已顺延」回执，可一键撤回",
+            "回执和通知上多了「我在做」：你其实已经在做、只是没计时 → 点一下就撤回顺延、从那块原来的开始时间起计时",
+            "智能体只在三种情况开口：有块被推过收工线、同一块今天第二次漂、后面的放不下；其余顺延它不说话。哨兵（Jev）现在也看得到共享记忆、最近 24 小时的对话、待批提案和明天的计划，不再为你说过「别催」的事反复叫醒",
+            "哨兵的判断器注释改正：四个判断器是供你选用的不同实现，不是降级链（10-19 原则 10 已落地，注释一直没改）"
+        ]),
         ChangelogEntry(version: "0.79.1", date: "2026-10", changes: [
             "Mac：数据档案（含每日自动快照）和开发日志不再写进「下载」文件夹，改存 App 自己的容器（Application Support/BetterCalendar/Data 与 SyncedLogs）；「下载」文件夹权限随之去掉",
             "你要做什么：无。旧的 ~/Downloads/BetterCalendar-Data、BetterCalendar-logs 可以删"
