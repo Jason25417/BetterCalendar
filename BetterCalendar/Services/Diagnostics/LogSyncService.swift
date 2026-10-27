@@ -191,22 +191,18 @@ final class LogSyncService {
         dumpToFiles()
     }
 
-    /// （macOS）全部设备日志 → 纯文本，命令行可读。写两处：
-    /// ① 容器 Application Support/BetterCalendar/SyncedLogs/（沙盒内，受 TCC 保护、外部进程读不到）
-    /// ② **`~/Downloads/BetterCalendar-logs/`**（需 downloads.read-write entitlement）——Claude/命令行直接可读，
-    ///    **自动化拉取日志**：不用再手动 copy 到 Downloads（0.18.29）。
+    /// （macOS）全部设备日志 → 纯文本，命令行可读：容器 Application Support/BetterCalendar/SyncedLogs/
+    /// （`~/Library/Containers/<bundle>/Data/Library/Application Support/BetterCalendar/SyncedLogs/`，Claude/命令行直接可读——
+    /// 旧注释说「受 TCC 保护读不到」是错的，普通第三方 App 容器不受 TCC 保护）。
+    /// 0.18.29–0.79.0 还镜像一份到 ~/Downloads/BetterCalendar-logs/，0.79.1 去掉（Jason 不要「下载」里堆日志夹，2026-10-27）。
     private func dumpToFiles() {
         #if os(macOS)
         guard dumpEnabled else { return }
-        // W19b 发现：在主线程同步写 ~/Downloads 时，系统等「下载」文件夹授权会把整个 App 卡死 → 先取出纯文本，写文件放后台
+        // W19b 发现：主线程同步写文件会卡 App → 先取出纯文本，写文件放后台
         let files = fetchAll().map { (name: $0.deviceName.replacingOccurrences(of: "/", with: "-") + "-\($0.dayKey).log", text: $0.text) }
-        let fm = FileManager.default
         var dirs: [URL] = []
-        if let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+        if let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             dirs.append(base.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true))
-        }
-        if let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first {
-            dirs.append(dl.appendingPathComponent("BetterCalendar-logs", isDirectory: true))
         }
         Task.detached(priority: .utility) { Self.writeLogFiles(files, to: dirs) }
         #endif

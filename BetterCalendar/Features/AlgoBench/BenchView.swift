@@ -169,9 +169,10 @@ final class BenchViewModel {
     /// 「最新跑分.md」每次整份覆盖 + 另存时间戳+能力组名副本——2026-07-11 吃过亏：
     /// 16:23 的解析跑分被 17:10 的润色跑分整份盖掉，只能从 DevLog 人工重建。
     private func autoSaveReport(partial: Bool = false) {
-        guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        // 0.79.1：落到容器日志目录 Application Support/BetterCalendar/SyncedLogs/（与设备日志同处；以前写 ~/Downloads/BetterCalendar-logs）
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return }
-        let dir = downloads.appendingPathComponent("BetterCalendar-logs", isDirectory: true)
+        let dir = support.appendingPathComponent("BetterCalendar/SyncedLogs", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var md = exportMarkdown()
         if partial { md = "> ⚠️ 部分报告：中止于 \(progressDone)/\(progressTotal) 次运行。\n\n" + md }
@@ -180,7 +181,7 @@ final class BenchViewModel {
         try? data?.write(to: latest, options: .atomic)
         let archive = archiveReportURL(in: dir)
         try? data?.write(to: archive, options: .atomic)
-        DevLog.shared.info("试验台", "跑分已落盘 \(latest.lastPathComponent) + 副本 \(archive.lastPathComponent)（BetterCalendar-logs）")
+        DevLog.shared.info("试验台", "跑分已落盘 \(latest.lastPathComponent) + 副本 \(archive.lastPathComponent)（容器 SyncedLogs）")
     }
 
     /// 副本文件名：algo-bench-<yyyyMMdd-HHmm>-<能力组>.md（能力组 = 本轮实际有结果的能力，多个用 + 连）。

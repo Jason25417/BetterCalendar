@@ -28,6 +28,10 @@ struct ChangelogEntry: Identifiable {
 /// 更新日志：以后每改一版，在最前面加 / 更新一条。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "0.79.1", date: "2026-10", changes: [
+            "Mac：数据档案（含每日自动快照）和开发日志不再写进「下载」文件夹，改存 App 自己的容器（Application Support/BetterCalendar/Data 与 SyncedLogs）；「下载」文件夹权限随之去掉",
+            "你要做什么：无。旧的 ~/Downloads/BetterCalendar-Data、BetterCalendar-logs 可以删"
+        ]),
         ChangelogEntry(version: "0.79.0", date: "2026-10", changes: [
             "哨兵（Mac）现在会看设备活动判断你是不是开始了、或停下了某件事，不再只会「到点提醒」：它从你的计时记录里学每件事平时用什么 App，像开始了就提醒你计时、像做完了就让智能体出一张「记为做了」的卡给你确认",
             "设置 → 哨兵：多了「像是开始了」「像是做完了」两根灵敏度滑杆，和原来的「到点没开始」分开调",

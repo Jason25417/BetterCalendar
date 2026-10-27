@@ -53,7 +53,7 @@ nonisolated enum AppChannel: String, CaseIterable, Sendable {
     /// Handoff 活动类型。须与 Info.plist 的 NSUserActivityTypes（`$(PRODUCT_BUNDLE_IDENTIFIER).handoff`）一致。
     var handoffActivityType: String { (self == .dev ? "com.jason.BetterCalendar.dev" : "com.jason.BetterCalendar") + ".handoff" }
 
-    /// 本机数据档案 / 开发修改入口所在目录名（Mac 在「下载」下，iPhone 在 App 的「文稿」下）。
+    /// 本机数据档案 / 开发修改入口所在目录名（iPhone 在 App 的「文稿」下；Mac 自 0.79.1 起存容器 Application Support/BetterCalendar/Data，不再用此名）。
     var dataFolderName: String { self == .dev ? "BetterCalendar-Dev-Data" : "BetterCalendar-Data" }
 
     /// BetterCalendar 自建日历 / 提醒列表的名字。label = 「计划」「实际」「预览」「要紧事」。

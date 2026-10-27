@@ -5,7 +5,7 @@
   日用版 --channel daily（默认）：双端串行 archive + 上传 TestFlight。发版纪律（Jason 2026-10-19 定）：
     · 每周 1–2 次、晚上发；每次带一句话说明「改了什么 / 你要做什么」（--note，必填）；回滚 = TestFlight 里装上一个 build。
     · 发版前自动检查（任何一项不过就不发，什么都不会上传）：
-        ① 数据快照：Mac 日用版 24 小时内导出过完整数据档案（App 每天自动存到 ~/Downloads/BetterCalendar-Data/auto/，
+        ① 数据快照：Mac 日用版 24 小时内导出过完整数据档案（App 每天自动存到容器 Application Support/BetterCalendar/Data/auto/，
            或设置 → 开发者选项 → 「导出完整数据档案」）。快照只在本机，脚本只读它、不上传。
         ② CloudKit schema 只加不改（scripts/cloudkit_schema_check.py，只读 export-schema）：Development 有而 Production
            没有的要先 Deploy；上次发版后删/改名的 @Model 属性一律拒绝。
@@ -26,7 +26,8 @@ ROOT = Path(__file__).resolve().parent.parent
 STABLE_XCODE = '/Applications/Xcode.app/Contents/Developer'
 DAILY_BUNDLE = 'com.jason.BetterCalendar'
 DEV_BUNDLE = 'com.jason.BetterCalendar.dev'
-SNAPSHOT_DIR = Path.home() / 'Downloads' / 'BetterCalendar-Data'   # 与 AppChannel.daily.dataFolderName 一致
+# 0.79.1 起：日用版容器里的 Application Support/BetterCalendar/Data（与 DataMaintenance.directory 一致；以前是 ~/Downloads/BetterCalendar-Data）
+SNAPSHOT_DIR = Path.home() / 'Library' / 'Containers' / DAILY_BUNDLE / 'Data' / 'Library' / 'Application Support' / 'BetterCalendar' / 'Data'
 SNAPSHOT_MAX_AGE_H = 24
 AUTH = ['-allowProvisioningUpdates', '-authenticationKeyPath', str(Path.home() / '.appstoreconnect/private_keys/AuthKey_MFLQ74N9N7.p8'),
         '-authenticationKeyID', 'MFLQ74N9N7', '-authenticationKeyIssuerID', 'f6b800c3-7e46-4bbb-914e-4c8ca018e8f1']
@@ -69,7 +70,7 @@ def snapshot_guard(allow_stale: bool):
            else f'{SNAPSHOT_DIR} 里没有任何完整数据档案')
     help_text = (f'{why}。发日用版前必须有 {SNAPSHOT_MAX_AGE_H} 小时内的快照：\n'
                  '    打开 Mac 上的 BetterCalendar（日用版）→ 设置 → 开发者选项 → 「导出完整数据档案」，\n'
-                 '    或保持 App 开着等它每天自动存一份（~/Downloads/BetterCalendar-Data/auto/）。然后重跑本命令。')
+                 f'    或保持 App 开着等它每天自动存一份（{SNAPSHOT_DIR}/auto/）。然后重跑本命令。')
     if allow_stale:
         print('  ⚠️ ' + help_text + '\n  ⚠️ 已按 --allow-stale-snapshot 继续（只在 Jason 明确同意时用）')
         return

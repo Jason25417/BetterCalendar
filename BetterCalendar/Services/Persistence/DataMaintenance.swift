@@ -18,11 +18,14 @@ final class DataMaintenance {
     }
     var directory: URL {
         #if os(macOS)
-        let base = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        // 0.79.1：Mac 改存容器 Application Support/BetterCalendar/Data/（Dev 版有自己的容器，天然分开；命令行/Claude 直接可读）。
+        // 以前写 ~/Downloads/<dataFolderName>——Jason 不要「下载」里堆数据夹（2026-10-27），downloads 权限随之去掉。
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("BetterCalendar/Data", isDirectory: true)
         #else
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        #endif
         return base.appendingPathComponent(AppChannel.current.dataFolderName, isDirectory: true)   // W17：Dev 版单独目录（开发修改入口也不串）
+        #endif
     }
 
     func start() {
