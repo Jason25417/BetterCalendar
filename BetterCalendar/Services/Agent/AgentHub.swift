@@ -200,6 +200,8 @@ extension AgentBridge: ClaudeCodeAgentChannel {
     var planSuggestEnabled = !TestHost.isActive
 
     static let resolvedKey = "agent.builtin.resolvedEmitted"
+    /// 0.79 W49：智能体提的补记（actualRecord）被拒绝 / 过期 → 告诉哨兵那段活动不是这件事（签名负样本）。
+    var onActualRecordRejected: ((String, Date, Date) -> Void)?
 
     /// 本机发起的、内置智能体提的提案有了结论（2 小时内）→ proposal_resolved（每份一次）。你回了一句的不发（那句话本身会唤醒它）。
     func proposalsRefreshed() {
@@ -215,6 +217,7 @@ extension AgentBridge: ClaudeCodeAgentChannel {
             guard state.isClosed else { continue }
             done.insert(p.id.uuidString); changed = true
             guard t.timeIntervalSince(p.appliedAt ?? p.decidedAt ?? p.expiresAt) < 7200 else { continue }
+            if state != .applied, case let .actualRecord(_, _, title, start, end) = p.executedAction { onActualRecordRejected?(title, start, end) }
             // 0.78.1（智能体上报：payload 只有 id 和 state）：带上标题、种类、结果说明、能否撤销，不必再查一次
             var payload: [String: Any] = ["proposalId": p.id.uuidString, "state": state.rawValue, "stateLabel": state.label,
                                           "title": p.title, "kind": p.executedAction.kind,

@@ -29,6 +29,8 @@ nonisolated struct SentinelVerdict: Codable, Equatable, Sendable {
     var probability: Double? = nil
     /// 决策模型选的理由类别（SentinelSignal 的 rawValue）。
     var category: String? = nil
+    /// 0.79 W49（C）：决策模型分问的各题概率（wake / started / finished）；引擎各按各的阈值定 wake。
+    var scores: [String: Double]? = nil
 }
 
 /// 信号标识（固定词表，结构化输出用 enum 约束；英文 id 方便日后统计误报/漏报）。
@@ -186,6 +188,10 @@ nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
     /// 决策模型的「该叫醒」概率阈值。漏叫一次的代价小（下一拍/例行检查/心跳还会看），
     /// 误叫一次要花 Claude Code 额度、还可能多一条通知 → 偏保守，起步 0.85；按决策日志里的概率分布再调。
     var wakeThreshold = 0.75   // 2026-10-19 按 Jev 实测校准：一天 340 次判断最高 0.81，0.85 等于永不叫醒（Jason 定 75%）
+    /// 0.79 W49（C）：「像是开始了」「像是做完了」各自分问、各自的阈值（10 月实测：和「到点没开始」共用一条线时这两类最高只到 0.56，结构性死掉）。
+    /// 起步 0.6；按决策日志里 scores 的分布再调。
+    var startThreshold = 0.6
+    var finishThreshold = 0.6
     /// 调度节拍：每隔多少秒看一眼（只读本地数据，不调用模型）。
     var tickSeconds: Double = 3
     /// 决策模型：两次判断的最短间隔 / 防抖（变化后安静多久才判断）/ 连续变化时最多等多久。
@@ -224,6 +230,8 @@ nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
         enabled = v(.enabled, d.enabled)
         preferredJudge = v(.preferredJudge, d.preferredJudge)
         wakeThreshold = v(.wakeThreshold, d.wakeThreshold)
+        startThreshold = v(.startThreshold, d.startThreshold)
+        finishThreshold = v(.finishThreshold, d.finishThreshold)
         tickSeconds = v(.tickSeconds, d.tickSeconds)
         minIntervalSeconds = v(.minIntervalSeconds, d.minIntervalSeconds)
         debounceSeconds = v(.debounceSeconds, d.debounceSeconds)

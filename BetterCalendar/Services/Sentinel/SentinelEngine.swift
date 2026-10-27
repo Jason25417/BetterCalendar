@@ -30,6 +30,8 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     private let activity: any ActivityLog
     private let gather: (Date) async -> AgentContextInput
     private let defaults: UserDefaults
+    /// 0.79 W49（A）：计划块 ↔ 活动的签名（Mac 学、Mac 用；nil = 不用）。
+    let signatures: ActivitySignatureStore?
     /// 最近唤醒智能体的记录（调度器运行记录，来自桥接 runtime/runs.jsonl）。
     var recentAgentWakes: () -> [SentinelRecentWake] = { [] }
     /// 最近的主动通知（智能体消息中心）。
@@ -75,9 +77,10 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
 
     init(judges: [any SentinelJudge], log: any SentinelDecisionLogging,
          bridge: any SentinelBridgeAccess, activity: any ActivityLog, defaults: UserDefaults = .standard,
+         signatures: ActivitySignatureStore? = nil,
          now: @escaping () -> Date = Date.init, gather: @escaping (Date) async -> AgentContextInput) {
         self.judges = judges; self.log = log; self.bridge = bridge; self.activity = activity
-        self.defaults = defaults; self.gather = gather; self.now = now
+        self.defaults = defaults; self.gather = gather; self.now = now; self.signatures = signatures
         settings = SentinelSettings.load(defaults)
         recent = log.entries(since: now().addingTimeInterval(-8 * 86400))
         lastRunAt = recent.last { $0.trigger != .flush }?.at
@@ -194,6 +197,7 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         } else {
             ctx = await gather(t)
             cachedContext = (t, ctx)
+            await learnSignatures(from: ctx, at: t)
         }
         // 多读 2 小时：知道窗口开始时前台是谁（汇总只算窗口内）。
         let window = DateInterval(start: t.addingTimeInterval(-settings.activityWindowMinutes * 60 - 7200), end: t)
@@ -210,13 +214,39 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         }
     }
 
+    /// 0.79 W49（A）：每条新的实际记录（计时结束 / 补记）= 一个正样本：读那段时间的活动并进这个标题的签名。幂等、每次最多学 3 条。
+    private func learnSignatures(from ctx: AgentContextInput, at t: Date) async {
+        guard let signatures else { return }
+        var learned = 0
+        for a in ctx.actuals.items.sorted(by: { $0.end > $1.end }) where learned < 3 {
+            let interval = DateInterval(start: a.start, end: min(a.end, t))
+            guard interval.duration >= ActivitySignatureStore.minSampleMinutes * 60,
+                  t.timeIntervalSince(a.end) < ActivitySignatureStore.learnWindow,
+                  !signatures.hasLearned(title: a.title, interval: interval) else { continue }
+            let events = (try? await activity.events(in: DateInterval(start: a.start.addingTimeInterval(-7200), end: interval.end))) ?? []
+            if signatures.learn(title: a.title, interval: interval, events: events, now: t) {
+                DevLog.shared.info("哨兵", "学到「\(a.title)」的活动签名（\(Int(interval.duration / 60)) 分钟样本）")
+            }
+            learned += 1
+        }
+    }
+
+    /// 0.79 W49（D→A）：推断出来的补记被拒 → 那段活动对这个标题是负样本。
+    func unlearn(title: String, start: Date, end: Date) async {
+        guard let signatures else { return }
+        let events = (try? await activity.events(in: DateInterval(start: start.addingTimeInterval(-7200), end: end))) ?? []
+        signatures.unlearn(title: title, interval: DateInterval(start: start, end: end), events: events, now: now())
+        DevLog.shared.info("哨兵", "「\(title)」的推断补记被拒，已按负样本调整签名")
+    }
+
     private func evaluate(trigger: SentinelTrigger, at t: Date, context: AgentContextInput, events: [ActivityEvent]) async {
         let own = recent.filter { $0.outcome == .woke }.map { SentinelRecentWake(at: $0.at, kind: "sentinel_wake", summary: $0.verdict.reason) }
         let notices = recentNotices()
-        let input = SentinelDigestInput(now: t, context: context, activity: events, activityWindowMinutes: settings.activityWindowMinutes,
+        var input = SentinelDigestInput(now: t, context: context, activity: events, activityWindowMinutes: settings.activityWindowMinutes,
                                         recentWakes: own + recentAgentWakes().filter { $0.kind != SentinelBridgeFiles.wakeKind },
                                         recentNotices: notices, attention: attention(), timeZone: timeZone,
                                         pendingBlockIDs: pendingBlockIDs(), recentUserChat: recentUserChat())
+        input.signatures = { [weak signatures] in signatures?.signature(for: $0) }
         let digest = SentinelDigestBuilder.build(input)
 
         // 只用你选的判断器（原则 10）：失败 = 这一拍不判断、直说，下一拍再试；不换替身。
@@ -236,9 +266,9 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         let latencyMs = Int((clock.now - started) / .milliseconds(1))
         consecutiveErrors = 0
         // 决策模型：概率过阈值才算该叫醒。W42：门槛按你的「没用」校准（这类信号近 14 天每个「没用」+0.05，上限 0.95）。
+        // 0.79 W49（C）：started / finished 分问分阈值，过线的补进 signals。
+        j.verdict = SentinelFeedback.apply(j.verdict, facts: digest.facts, settings: settings, notices: notices, now: t)
         let feedbackKey = SentinelFeedback.key(signals: j.verdict.signals, facts: digest.facts)
-        let threshold = SentinelFeedback.threshold(base: settings.wakeThreshold, signals: j.verdict.signals, notices: notices, now: t)
-        if let p = j.verdict.probability { j.verdict.wake = p >= threshold }
 
         let id = UUID()
         var outcome = SentinelOutcome.noWake
@@ -410,6 +440,8 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
             "enabled": settings.enabled, "state": stateLabel, "gateReason": gate.reason ?? NSNull(),
             "lastTickAt": opt(lastTickAt), "lastRunAt": opt(lastRunAt),
             "judge": judgeInUse.rawValue, "preferredJudge": settings.preferredJudge.rawValue, "wakeThreshold": settings.wakeThreshold,
+            "startThreshold": settings.startThreshold, "finishThreshold": settings.finishThreshold,
+            "signatures": signatures.map { ["learnedTitles": $0.profiles.count] as [String: Any] } ?? NSNull(),
             "fallbackReason": primaryUnavailableReason ?? lastEntry?.fallbackReason ?? NSNull(),
             "lastError": lastError.map { ["at": iso.string(from: $0.at), "message": $0.message] as [String: Any] } ?? NSNull(),
             "consecutiveErrors": consecutiveErrors, "activityError": activityError ?? NSNull(),
