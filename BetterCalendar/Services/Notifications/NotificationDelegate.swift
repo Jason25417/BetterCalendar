@@ -20,6 +20,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
     var handleAgentMessage: ((UUID, AgentMessage.Reaction?) async -> Void)?
     /// W51：自动顺延通知上的「我在做」（消息 id）。
     var handleReflowDoing: ((UUID) async -> Void)?
+    /// W52：哨兵问句通知上的回答（消息 id，yes = 在做 / 停了）。
+    var handleSentinelAnswer: ((UUID, Bool) async -> Void)?
     /// SPEC §19 A1：智能体对话通知；text 非 nil = 在通知上直接回复了一句，nil = 只打开对话。
     var handleAgentChat: ((UUID, String?) async -> Void)?
     /// W30 一处响：你在本机点了某条通知 = 处理了 → 其他设备上的那份收起（提案有自己的收起机制，不走这里）。
@@ -52,6 +54,10 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         }
         if let id = LocalAgentMessageNotifier.doingRoute(userInfo: info, actionIdentifier: response.actionIdentifier) {
             await handleReflowDoing?(id)
+            return
+        }
+        if let route = LocalAgentMessageNotifier.askRoute(userInfo: info, actionIdentifier: response.actionIdentifier) {
+            await handleSentinelAnswer?(route.id, route.yes)
             return
         }
         if let route = LocalAgentMessageNotifier.route(userInfo: info, actionIdentifier: response.actionIdentifier) {

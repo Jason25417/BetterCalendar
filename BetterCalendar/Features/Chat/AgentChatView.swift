@@ -53,6 +53,8 @@ struct AgentChatView: View {
     var notices: AgentMessageCenter? = nil
     /// W51（0.80）：自动顺延的回执气泡上「我在做」/「撤回顺延」要用；nil = 不显示这两个按钮。
     var drift: PlanDriftMonitor? = nil
+    /// W52：哨兵问句（在做吗 / 停了吗）气泡上的回答按钮要用；nil = 不显示。
+    var asks: SentinelAskCenter? = nil
     /// 从通知「查看详情」进来时要高亮的提案（router.proposalFocusId）。
     var focusId: UUID? = nil
     @State private var draft = ""
@@ -79,7 +81,7 @@ struct AgentChatView: View {
                         ForEach(items) { item in
                             switch item {
                             case let .chat(m): bubble(m).id(m.id)
-                            case let .notice(m): AgentNoticeBubble(message: m, center: notices, drift: drift).id(m.id)
+                            case let .notice(m): AgentNoticeBubble(message: m, center: notices, drift: drift, asks: asks).id(m.id)
                             }
                         }
                     }
@@ -407,13 +409,16 @@ struct AgentNoticeBubble: View {
     let center: AgentMessageCenter?
     /// W51：自动顺延回执（parentRef = reflow:<提案 id>:<kind>）的「我在做」/「撤回顺延」。
     var drift: PlanDriftMonitor? = nil
+    /// W52：哨兵问句（parentRef = ask:<started|stopped>:<块 id>）的回答按钮。
+    var asks: SentinelAskCenter? = nil
 
     var body: some View {
         let m = message
         let reflow = PlanDriftRules.parseMessageRef(m.parentRef)
+        let ask = SentinelAskCenter.parseMessageRef(m.parentRef)
         VStack(alignment: .leading, spacing: 6) {
-            Label(reflow != nil ? "自动顺延" : m.wakeSignature != nil ? "主动提醒（哨兵叫醒）" : "主动提醒",
-                  systemImage: reflow != nil ? "arrow.right.to.line" : "bell")
+            Label(ask != nil ? "哨兵问你" : reflow != nil ? "自动顺延" : m.wakeSignature != nil ? "主动提醒（哨兵叫醒）" : "主动提醒",
+                  systemImage: ask != nil ? "questionmark.bubble" : reflow != nil ? "arrow.right.to.line" : "bell")
                 .font(.caption).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(m.title).font(.subheadline.bold())
@@ -426,7 +431,16 @@ struct AgentNoticeBubble: View {
                       + [m.delivery == .suppressed ? "没弹通知：\(m.suppressReason ?? "打扰规则拦下")" : nil, m.reaction?.youLabel]
                         .compactMap { $0 }).joined(separator: " · "))
                     .font(.caption2).foregroundStyle(.secondary)
-                if let reflow, let drift {
+                if let ask, let asks {
+                    if let note = asks.notes[m.id] {
+                        Text(note).font(.caption2).foregroundStyle(.secondary)
+                    } else if m.reaction == nil {
+                        Button(ask == .started ? "在做" : "停了") { Task { await asks.answer(messageId: m.id, yes: true) } }
+                            .font(.caption).buttonStyle(.borderedProminent).accessibilityIdentifier("bc.ask.yes")
+                        Button(ask == .started ? "没在做" : "还在做") { Task { await asks.answer(messageId: m.id, yes: false) } }
+                            .font(.caption).buttonStyle(.bordered).accessibilityIdentifier("bc.ask.no")
+                    }
+                } else if let reflow, let drift {
                     if let note = drift.notes[reflow.proposalId] {
                         Text(note).font(.caption2).foregroundStyle(.secondary)
                     } else {

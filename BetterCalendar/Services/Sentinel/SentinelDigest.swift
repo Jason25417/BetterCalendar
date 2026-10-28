@@ -25,6 +25,13 @@ struct SentinelFacts: Equatable {
     /// 当前空闲 / 锁屏 / 睡眠已持续多少分钟（nil = 在用电脑或不知道）。
     var idleMinutes: Int?
     var timerRunning = false
+    // —— W52：可以问他的候选（问不问由判断器的 started / stopped 概率定）——
+    struct AskStarted: Equatable { var id: UUID; var title: String; var start: Date; var minutesSinceStart: Int; var reflowedFrom: Date? }
+    struct AskStopped: Equatable { var id: UUID?; var title: String; var awayMinutes: Int? }
+    /// 开始时间已过（5 分钟以上）、还没计时、没有实际记录的弹性块（最近开始的那块；刚被自动顺延的也算，带原定时间）。
+    var askStarted: AskStarted?
+    /// 正在前台计时的那块（awayMinutes = 已离开电脑多久；nil = 在用）。
+    var askStopped: AskStopped?
 }
 
 struct SentinelDigest {
@@ -61,6 +68,11 @@ struct SentinelDigestInput {
     var pendingProposals: [(at: Date, title: String)] = []
     /// 明天（逻辑日）的计划块（来自 context.upcoming）。
     var tomorrow: [AgentContextInput.Block] = []
+    // —— W52 ——
+    /// 今天被自动顺延过的块：原定开始时间（摘要里标「已自动顺延，原定 HH:MM」；判断「像是开始了」时要知道）。
+    var recentReflows: [(blockId: UUID, originalStart: Date, at: Date)] = []
+    /// 最近 24 小时 App 问过他什么、他怎么答（yes / no / nil = 还没答）。
+    var recentAsks: [(at: Date, kind: String, title: String, answer: String?)] = []
 }
 
 /// 设备活动汇总（Mac 前台状态机 + 浏览器域名 + iPhone / iPad 各自的打开次数；W28 起按设备类别分开，旧记录按 iPhone 计）。
@@ -184,6 +196,7 @@ enum SentinelDigestBuilder {
             if b.isFixed { tags.append("固定") }
             if b.important { tags.append("要紧") }
             if let d = b.deadline { tags.append("截止 \(hm.string(from: d))") }
+            if let id = b.id, let r = input.recentReflows.first(where: { $0.blockId == id }) { tags.append("已自动顺延，原定 \(hm.string(from: r.originalStart))") }
             let status: String
             if runningTitles.contains(norm(b.title)) { status = "正在计时" }
             else if hasActual(b, ctx.actuals.items) { status = "已有实际记录" }
@@ -283,6 +296,25 @@ enum SentinelDigestBuilder {
             lines.append(clip(memory, 2000))
         }
 
+        // W52：可以问他的候选 + 问过的记录（判断器据此答 started / stopped；问过且他答了的别再问）
+        var askLines: [String] = []
+        if let s = facts.askStarted {
+            askLines.append("可能已开始但没计时：「\(clip(s.title))」（" + (s.reflowedFrom.map { "原定 \(hm.string(from: $0))，已自动顺延到 \(hm.string(from: s.start))" } ?? "计划 \(hm.string(from: s.start)) 开始")
+                            + "，已过 \(s.minutesSinceStart) 分）")
+        }
+        if let s = facts.askStopped {
+            askLines.append("正在计时、可能已停下：「\(clip(s.title))」" + (s.awayMinutes.map { "（已离开电脑 \($0) 分）" } ?? "（还在用电脑）"))
+        }
+        if !askLines.isEmpty { lines.append("【可以问他的】" + askLines.joined(separator: "；")) }
+        let asks = input.recentAsks.filter { $0.at <= now && now.timeIntervalSince($0.at) < 24 * 3600 }.sorted { $0.at > $1.at }.prefix(6)
+        if !asks.isEmpty {
+            lines.append("【最近 24 小时问过他】" + asks.map { a in
+                let q = a.kind == "started" ? "在做「\(clip(a.title))」吗" : "「\(clip(a.title))」停了吗"
+                let ans = a.answer.map { $0 == "yes" ? (a.kind == "started" ? "在做" : "停了") : (a.kind == "started" ? "没在做" : "还在做") } ?? "还没答"
+                return "\(hm.string(from: a.at)) \(q) → \(ans)"
+            }.joined(separator: "；"))
+        }
+
         // 预先算好的事实（帮模型少算；规则兜底也用它）
         var hints: [String] = []
         if let l = facts.overdueStart { hints.append("「\(clip(l.title))」开始时间已过 \(l.minutesLate) 分，没见开始迹象") }
@@ -335,6 +367,20 @@ enum SentinelDigestBuilder {
             f.deadlineSoon = .init(title: c.0, minutesLeft: Int(c.1.timeIntervalSince(now) / 60))
         }
         if activity.current.isAway, let since = activity.currentSince { f.idleMinutes = Int(now.timeIntervalSince(since) / 60) }
+        // W52：可以问他的候选。started：最近开始（5 分钟以上、90 分钟内）、还没结束、不是固定 / 图钉、没计时、没有实际记录；
+        // 刚被自动顺延的块也算（它的开始时间 = 顺延时刻，带原定时间）。stopped：前台正在计时的那块。
+        if !inEvent,
+           let b = ctx.today.items.filter({ !$0.isFixed && !($0.pinnedUntil.map { $0 > now } ?? false)
+                                            && $0.start <= now.addingTimeInterval(-5 * 60) && $0.start > now.addingTimeInterval(-90 * 60) && $0.end > now })
+            .sorted(by: { $0.start > $1.start }).first,
+           let id = b.id, !running.contains(norm(b.title)), !hasActual(b, ctx.actuals.items), !input.pendingBlockIDs.contains(id) {
+            f.askStarted = .init(id: id, title: b.title, start: b.start, minutesSinceStart: Int(now.timeIntervalSince(b.start) / 60),
+                                 reflowedFrom: input.recentReflows.first { $0.blockId == id }?.originalStart)
+        }
+        if let fg, !ctx.running.onBreak {
+            let block = ctx.today.items.first { norm($0.title) == norm(fg.title) }
+            f.askStopped = .init(id: block?.id, title: fg.title, awayMinutes: f.idleMinutes)
+        }
         return f
     }
 

@@ -135,6 +135,9 @@ enum PlanDriftRules {
         var count = 0
         var lastByBlock: [String: Date] = [:]
         var driftsByBlock: [String: Int] = [:]
+        /// W52：这块今天第一次被顺延时的原定开始时间 + 最近一次顺延的提案 id（哨兵问「在做吗」→「在做」= 撤回那份、从原定时间起计时）。
+        var originalStartByBlock: [String: Date] = [:]
+        var proposalByBlock: [String: String] = [:]
     }
     static let ledgerKey = "plan.autoReflow.ledger.v1"
 
@@ -270,6 +273,11 @@ enum PlanDriftRules {
         guard applied.state == .applied else {
             return fail("自动顺延提案没有执行（状态 \(applied.state.label)）：\(applied.resultNote ?? "")")
         }
+        if ledger.originalStartByBlock[drift.id.uuidString] == nil, let b = blocks.first(where: { $0.id == drift.id }) {
+            ledger.originalStartByBlock[drift.id.uuidString] = b.start
+        }
+        ledger.proposalByBlock[drift.id.uuidString] = p.id.uuidString
+        save()
         afterApplied()
         let byID = Dictionary(blocks.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let moved = plan.moves.compactMap { m -> [String: Any]? in
@@ -310,6 +318,23 @@ enum PlanDriftRules {
         case let .notStarted(_, _, late): "开始时间已过 \(late) 分钟没开始"
         case let .overrun(_, _, over): "计时已超过计划结束 \(over) 分钟"
         }
+    }
+
+    // MARK: 给哨兵
+
+    /// 今天被自动顺延过的块（原定开始时间 + 顺延时刻）。
+    func recentReflows() -> [(blockId: UUID, originalStart: Date, at: Date)] {
+        ledger.originalStartByBlock.compactMap { key, start in
+            guard let id = UUID(uuidString: key), let at = ledger.lastByBlock[key] else { return nil }
+            return (id, start, at)
+        }
+    }
+
+    /// 这块有没有一份已执行、未撤回的自动顺延（哨兵问句「在做」要撤回它）。
+    func appliedReflowProposal(for blockId: UUID) -> UUID? {
+        guard let raw = ledger.proposalByBlock[blockId.uuidString], let pid = UUID(uuidString: raw),
+              let p = proposal(pid), p.state == .applied, p.undoneAt == nil else { return nil }
+        return pid
     }
 
     // MARK: 「我在做」/ 撤回

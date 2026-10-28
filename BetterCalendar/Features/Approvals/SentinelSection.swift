@@ -42,6 +42,17 @@ struct SentinelSection: View {
                 }
             }
 
+            Toggle("主动问我「在做吗 / 停了吗」", isOn: $engine.settings.askEnabled)
+            Text("哨兵每次判断顺便答两个把握：一块开始时间过了还没计时、你像不像已经在做；正在计时的那块像不像已经停了。过了下面这条线，BetterCalendar 直接发一条带按钮的消息问你（在做 / 没在做、停了 / 还在做），点一下就计时或结束计时，不经过智能体。同一块 \(Int(engine.settings.askCooldownMinutes)) 分钟内不重复问，两次说没在做当天不再问。")
+                .font(.caption).foregroundStyle(.secondary)
+            if engine.settings.askEnabled {
+                Slider(value: $engine.settings.askThreshold, in: 0.3...0.95, step: 0.05) {
+                    Text("把握超过 \(Int((engine.settings.askThreshold * 100).rounded()))% 就问")
+                }
+                Stepper("同一块 \(Int(engine.settings.askCooldownMinutes)) 分钟内不重复问", value: $engine.settings.askCooldownMinutes, in: 15...240, step: 15)
+                LabeledContent("今天问过", value: "\(engine.asksToday.count) 次")
+            }
+
             if let e = engine.lastError {
                 Label("上次错误（\(e.at.formatted(date: .omitted, time: .shortened))）：\(e.message)", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange).font(.caption)

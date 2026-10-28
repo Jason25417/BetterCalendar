@@ -259,7 +259,7 @@ import Testing
         #expect(format?["type"] as? String == "json_schema")
         let schema = format?["schema"] as? [String: Any]
         #expect(schema?["additionalProperties"] as? Bool == false)
-        #expect(Set(schema?["required"] as? [String] ?? []) == ["wake", "reason", "urgency", "signals"])
+        #expect(Set(schema?["required"] as? [String] ?? []) == ["wake", "reason", "urgency", "signals", "started", "stopped"])
         let system = body["system"] as? [[String: Any]]
         #expect(system?.count == 1 && (system?[0]["cache_control"] as? [String: Any])?["type"] as? String == "ephemeral")
         #expect((system?[0]["text"] as? String) == ClaudeSentinelJudge.instructions)
@@ -325,8 +325,8 @@ import Testing
         let body = try JSONSerialization.jsonObject(with: req.httpBody!) as! [String: Any]
         #expect(body["model"] as? String == "gpt-6-luna" && body["input"] as? String == digest.text)
         let qs = body["questions"] as! [[String: Any]]
-        #expect(qs.map { $0["type"] as? String } == ["predicate", "choice", "score"])
-        #expect(qs.map { $0["name"] as? String } == ["wake", "category", "urgency"])
+        #expect(qs.map { $0["type"] as? String } == ["predicate", "choice", "score", "predicate", "predicate"])
+        #expect(qs.map { $0["name"] as? String } == ["wake", "category", "urgency", "started", "stopped"])
         #expect((qs[1]["choices"] as? [[String: Any]])?.count == SentinelSignal.allCases.count && (qs[2]["levels"] as? [[String: Any]])?.count == 3)
         // 拒答 → 抛错（可见）
         let refused = OpenAIDecisionsSentinelJudge(apiKey: { "k" }, transport: http(200, ["answers": [["type": "refusal", "name": "wake"]]]))

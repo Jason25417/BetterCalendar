@@ -68,6 +68,7 @@ final class AppContainer {
     let aggregator = LearningAggregator()      // 学习层聚合桶（L3：只算不用，切生产=L5 回放门控）
     let timeline: TimelineCoordinator          // 时间线协调器（E5b 影子接生产：算/写/标/记）
     let sentinel: SentinelEngine?              // SPEC §19 C1 W14 哨兵：要不要叫醒智能体（W42 起 Mac 与 iPhone 都有；测试环境为 nil）
+    let sentinelAsks: SentinelAskCenter?       // W52（0.80）哨兵问「在做吗 / 停了吗」（App 直接问，带按钮）；测试环境为 nil
     let drift: PlanDriftMonitor?               // W51（0.80）自动顺延：落后 10 分钟本地按原顺序往后挪（可撤回、可点「我在做」）；测试环境为 nil
     /// W30（原则 11）：在场设备（你此刻在哪台）+ 一处响的触达出口。测试环境为 nil（通知照旧、不碰 iCloud KV）。
     let presence: DevicePresence?
@@ -564,10 +565,20 @@ final class AppContainer {
         // W42：Mac 与 iPhone 都有；只有在场设备判断（判断不了时 Mac 判断、iPhone 不判断）；你点的「没用」回来校准它。
         if TestHost.isActive {
             self.sentinel = nil
+            self.sentinelAsks = nil
         } else {
             let sentinel = Self.makeSentinel(hub: agentHub, bridge: sentinelBridge, activityLog: activity.log, context: context,
                                              proposals: proposals, chat: agentChat, messages: agentMessages, memory: agentMemory, presence: presence)
+            // W52：哨兵判断「像是开始了 / 像是停了」→ App 直接问（带按钮）；答案直接执行（计时 / 结束计时 / 撤回顺延）
+            let asks = SentinelAskCenter()
+            asks.notify = { [weak agentMessages] in await agentMessages?.receive($0) }
+            asks.acknowledge = { [weak agentMessages] id in await agentMessages?.react(id, .acknowledged) }
+            asks.startTimer = { [weak execution] id, at in try await execution?.proposalStartTimer(blockId: id, title: nil, at: at) }
+            asks.stopTimer = { [weak execution] in try await execution?.proposalStopTimer() }
+            sentinel.askCenter = asks
+            notificationDelegate.handleSentinelAnswer = { [weak asks] id, yes in await asks?.answer(messageId: id, yes: yes) }
             self.sentinel = sentinel
+            self.sentinelAsks = asks
             sentinel.start()
         }
         // W51（0.80）自动顺延：本地漂移监视器——落后 10 分钟按原顺序往后挪（走审批中心的自动顺延规则，可撤回）；
@@ -602,6 +613,10 @@ final class AppContainer {
             drift.afterApplied = { [weak sentinel = self.sentinel] in sentinel?.invalidateContext() }
             drift.startTimer = { [weak execution] id, at in try await execution?.proposalStartTimer(blockId: id, title: nil, at: at) }
             notificationDelegate.handleReflowDoing = { [weak drift] id in await drift?.imDoing(messageId: id) }
+            // W52：哨兵看得到今天顺延过什么；「在做」= 撤回那份顺延 + 从原定时间起计时
+            self.sentinel?.recentReflows = { [weak drift] in drift?.recentReflows() ?? [] }
+            self.sentinelAsks?.reflowProposalFor = { [weak drift] id in drift?.appliedReflowProposal(for: id) }
+            self.sentinelAsks?.imDoing = { [weak drift] pid in await drift?.imDoing(proposalId: pid) }
             self.drift = drift
             drift.start()
         }

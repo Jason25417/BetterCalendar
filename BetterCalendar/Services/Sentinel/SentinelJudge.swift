@@ -68,8 +68,10 @@ struct ClaudeSentinelJudge: SentinelJudge {
             "reason": ["type": "string"],
             "urgency": ["type": "string", "enum": SentinelUrgency.allCases.map(\.rawValue)],
             "signals": ["type": "array", "items": ["type": "string", "enum": SentinelSignal.allCases.map(\.rawValue)]],
+            "started": ["type": "number"],
+            "stopped": ["type": "number"],
         ] as [String: Any],
-        "required": ["wake", "reason", "urgency", "signals"],
+        "required": ["wake", "reason", "urgency", "signals", "started", "stopped"],
         "additionalProperties": false,
     ]
 
@@ -84,6 +86,8 @@ struct ClaudeSentinelJudge: SentinelJudge {
         if v.reason.count > 120 { v.reason = String(v.reason.prefix(120)) + "…" }
         let known = Set(SentinelSignal.allCases.map(\.rawValue))
         v.signals = Array(Set(v.signals.map { known.contains($0) ? $0 : SentinelSignal.other.rawValue })).sorted()
+        v.started = v.started.map { min(1, max(0, $0)) }
+        v.stopped = v.stopped.map { min(1, max(0, $0)) }
         return v
     }
 
@@ -111,6 +115,8 @@ struct ClaudeSentinelJudge: SentinelJudge {
     - reason：一句白话中文（不超过 60 字），说清为什么（不）叫醒。不要点名具体的 App 或网站（用「编程工具」「视频网站」这类类别说法），不评判、不说「落后 / 拖延 / 失败」。
     - urgency：low / normal / high。只有时间很紧（例如几十分钟内截止、固定安排马上开始却在做别的）才用 high；不叫醒时用 low。
     - signals：从固定词表里选（可多个，不叫醒时可以为空）：planned_start_passed（计划开始已过没见开始）、timer_over_plan（计时超计划）、deadline_near_no_progress（截止临近没推进）、long_idle_daytime（白天长时间没操作）、untracked_context_switch（像是开始了没记的事）、seems_finished（像是做完了一件事）、other。
+    - started（0–1）：摘要「可以问他的」里**可能已开始但没计时**的那块，他此刻已经在做它的把握有多大（设备在用、前台像是在做这件事、不是在别的安排里 → 高；离开电脑、明显在做别的、刚答过「没在做」→ 低；没有候选 → 0）。App 会按这个概率直接问他「在做吗」。
+    - stopped（0–1）：摘要里**正在计时、可能已停下**的那块，他已经不在做它的把握有多大（离开电脑 / 锁屏 / 长时间切到无关的事 → 高；还在相关 App 里 → 低；没有候选 → 0）。App 会按这个概率问他「停了吗」。
     - 只输出 JSON。
     """
 }
@@ -127,6 +133,24 @@ nonisolated enum SentinelDecisionQuestions {
     static let wakeTrue = "Something likely needs the agent's attention now: a planned block is overdue to start with no sign of starting, a timer is far past plan, a deadline is near with no progress, unexplained long idle in daytime, Jason seems to have started something untracked, or seems to have just finished something."
     static let wakeFalse = "Nothing needs the agent now: things are on track, the situation is unclear, it was already handled by a recent wake, or Jason is resting, away by plan, muted, or in a fixed event."
     static let categoryInstructions = "Which single reason best describes why the agent might be needed now? Choose 'other' if none applies."
+    // W52：两个独立的「该不该问他」概率（App 直接按它问，带按钮；不经智能体）
+    static let startedInstructions = """
+    Look at the digest section 【可以问他的】 for a block marked 可能已开始但没计时 (planned start passed, no timer running). \
+    Has Jason most likely ALREADY STARTED working on that block right now, just without starting the timer? \
+    Evidence for yes: the computer is in active use, the foreground app or sites fit that kind of work, he is not inside a calendar event or fixed block, \
+    a recent chat line says he is on it. Evidence for no: he is idle, locked or asleep; he is clearly doing something unrelated; \
+    he answered 没在做 to this question recently (see 【最近 24 小时问过他】). If there is no such candidate, answer false.
+    """
+    static let startedTrue = "Jason has most likely already started that block without a timer."
+    static let startedFalse = "He has probably not started it, it is unclear, there is no candidate, or he recently said he is not doing it."
+    static let stoppedInstructions = """
+    Look at the digest section 【可以问他的】 for a block marked 正在计时、可能已停下 (a timer is running). \
+    Has Jason most likely STOPPED working on it while the timer keeps running? \
+    Evidence for yes: away from the computer for a while (idle, locked, asleep), or switched for a long time to clearly unrelated activity. \
+    Evidence for no: still in related apps, short breaks, or he answered 还在做 recently. If no timer is running, answer false.
+    """
+    static let stoppedTrue = "Jason has most likely stopped working on the timed block (timer still running)."
+    static let stoppedFalse = "He is probably still on it, it is unclear, no timer is running, or he recently said he is still doing it."
     static let urgencyInstructions = "How time-critical is it for the agent to look now?"
     static let urgencyLevels: [(label: String, description: String)] = [
         ("low", "Can wait; nothing time-critical."),
@@ -146,12 +170,14 @@ nonisolated enum SentinelDecisionQuestions {
         return category == .other ? "决策模型判断该叫醒的把握 \(pct)%" : "\(category.label)（把握 \(pct)%）"
     }
 
-    static func verdict(probability: Double, category raw: String?, urgencyScore: Double?) -> SentinelVerdict {
+    static func verdict(probability: Double, category raw: String?, urgencyScore: Double?,
+                        started: Double? = nil, stopped: Double? = nil) -> SentinelVerdict {
         let category = raw.flatMap(SentinelSignal.init(rawValue:)) ?? .other
         // wake 由引擎按阈值定；这里先按 0.5 填一个参考值，日志里以 probability 为准。
         return SentinelVerdict(wake: probability >= 0.5, reason: reason(category: category, probability: probability),
                                urgency: urgency(score: urgencyScore), signals: category == .other ? [] : [category.rawValue],
-                               probability: min(1, max(0, probability)), category: category.rawValue)
+                               probability: min(1, max(0, probability)), category: category.rawValue,
+                               started: started.map { min(1, max(0, $0)) }, stopped: stopped.map { min(1, max(0, $0)) })
     }
 }
 
@@ -219,6 +245,9 @@ struct JevSentinelJudge: SentinelJudge {
                 "wake": ["type": "noul", "instructions": Q.wakeInstructions, "criteria": ["true": Q.wakeTrue, "false": Q.wakeFalse]],
                 "category": ["type": "choice", "instructions": Q.categoryInstructions, "criteria": categories],
                 "urgency": ["type": "score", "instructions": Q.urgencyInstructions, "criteria": Q.urgencyLevels.map { "\($0.label): \($0.description)" }],
+                // W52：问他的两个独立概率
+                "started": ["type": "noul", "instructions": Q.startedInstructions, "criteria": ["true": Q.startedTrue, "false": Q.startedFalse]],
+                "stopped": ["type": "noul", "instructions": Q.stoppedInstructions, "criteria": ["true": Q.stoppedTrue, "false": Q.stoppedFalse]],
             ] as [String: Any],
             "state": digest.text,
         ]
@@ -238,10 +267,13 @@ struct JevSentinelJudge: SentinelJudge {
         }
         let category = (answers["category"] as? [String: Any])?["choice"] as? String
         let score = ((answers["urgency"] as? [String: Any])?["score"] as? NSNumber)?.doubleValue
+        let started = ((answers["started"] as? [String: Any])?["noul"] as? NSNumber)?.doubleValue
+        let stopped = ((answers["stopped"] as? [String: Any])?["noul"] as? NSNumber)?.doubleValue
         let usage = o["usage"] as? [String: Any]
         let input = (usage?["input_tokens"] as? NSNumber)?.intValue ?? SentinelHTTP.estimateTokens(digest.text)
         let cost = (usage?["cost"] as? NSNumber)?.doubleValue ?? SentinelPricing.jev(input: input)
-        return SentinelJudgment(verdict: SentinelDecisionQuestions.verdict(probability: p, category: category, urgencyScore: score),
+        return SentinelJudgment(verdict: SentinelDecisionQuestions.verdict(probability: p, category: category, urgencyScore: score,
+                                                                           started: started, stopped: stopped),
                                 judge: .jev, model: o["model"] as? String ?? model,
                                 usage: SentinelUsage(inputTokens: input, outputTokens: (usage?["output_tokens"] as? NSNumber)?.intValue ?? 0, costUsd: cost))
     }
@@ -278,6 +310,8 @@ struct OpenAIDecisionsSentinelJudge: SentinelJudge {
                  "choices": SentinelSignal.allCases.map { ["value": $0.rawValue, "description": $0.criterion] }],
                 ["type": "score", "name": "urgency", "instructions": Q.urgencyInstructions,
                  "levels": Q.urgencyLevels.map { ["label": $0.label, "description": $0.description] }],
+                ["type": "predicate", "name": "started", "instructions": Q.startedInstructions + " True means: " + Q.startedTrue],
+                ["type": "predicate", "name": "stopped", "instructions": Q.stoppedInstructions + " True means: " + Q.stoppedTrue],
             ] as [[String: Any]],
         ]
     }
@@ -301,7 +335,9 @@ struct OpenAIDecisionsSentinelJudge: SentinelJudge {
         let usage = o["usage"] as? [String: Any]
         let input = (usage?["input_tokens"] as? NSNumber)?.intValue ?? SentinelHTTP.estimateTokens(digest.text)
         return SentinelJudgment(verdict: SentinelDecisionQuestions.verdict(probability: p, category: answer("category")?["choice"] as? String,
-                                                                           urgencyScore: (answer("urgency")?["score"] as? NSNumber)?.doubleValue),
+                                                                           urgencyScore: (answer("urgency")?["score"] as? NSNumber)?.doubleValue,
+                                                                           started: (answer("started")?["probability"] as? NSNumber)?.doubleValue,
+                                                                           stopped: (answer("stopped")?["probability"] as? NSNumber)?.doubleValue),
                                 judge: .openai, model: o["model"] as? String ?? model,
                                 usage: SentinelUsage(inputTokens: input, costUsd: SentinelPricing.openAIDecisions(input: input)))
     }
@@ -332,6 +368,10 @@ struct RuleSentinelJudge: SentinelJudge {
         } else {
             verdict = .init(wake: false, reason: "规则判断：此刻没有需要智能体处理的信号", urgency: .low, signals: [])
         }
-        return SentinelJudgment(verdict: verdict, judge: .rule)
+        var v = verdict
+        // W52 朴素规则：在用电脑且候选块开始 5 分钟以上 → 像是开始了；正在计时却离开 ≥ 15 分钟 → 像是停了。
+        v.started = (f.askStarted != nil && f.idleMinutes == nil) ? 0.7 : 0
+        v.stopped = (f.askStopped != nil && (f.askStopped?.awayMinutes ?? 0) >= 15) ? 0.8 : 0
+        return SentinelJudgment(verdict: v, judge: .rule)
     }
 }

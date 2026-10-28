@@ -29,6 +29,11 @@ nonisolated struct SentinelVerdict: Codable, Equatable, Sendable {
     var probability: Double? = nil
     /// 决策模型选的理由类别（SentinelSignal 的 rawValue）。
     var category: String? = nil
+    // —— W52（0.80）：两个独立的「该不该问他」概率（Optional：旧日志照常解码）——
+    /// 开始时间已过的那块，他像是已经在做、只是没计时。
+    var started: Double? = nil
+    /// 正在计时的那块像是停了（离开 / 锁屏 / 长时间切到别处）。
+    var stopped: Double? = nil
 }
 
 /// 信号标识（固定词表，结构化输出用 enum 约束；英文 id 方便日后统计误报/漏报）。
@@ -174,6 +179,8 @@ nonisolated struct SentinelDecisionEntry: Codable, Equatable, Sendable, Identifi
     var mergedSignatures: [String]? = nil
     /// held / merged：当时为什么没发（智能体忙 / 离上次叫醒太近 / 每小时上限）。
     var holdReason: String? = nil
+    /// W52：这次判断后 App 问了他什么（"started:写论文" / "stopped:整理笔记"）；nil = 没问。
+    var asked: String? = nil
 }
 
 /// 哨兵设置（Mac 本机；默认值 = 实验期起步值，面板可调）。
@@ -212,6 +219,13 @@ nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
     var maxWakesPerHour = 6
     /// 稳定性上限（**不是产品规则**）：每天估算花费上限（美元）。到了今天不再调用、面板与心跳可见。
     var dailyBudgetUsd: Double = 1.0
+    // —— W52（0.80）主动问「在做吗 / 停了吗」（App 直接问，带按钮；不经智能体）——
+    var askEnabled = true
+    /// 提问线：started / stopped 概率过了就问（比叫醒线低 → 更积极）。
+    var askThreshold = 0.6
+    /// 同一块两次提问至少隔多久（分钟）；每块每天最多问几次。
+    var askCooldownMinutes: Double = 90
+    var askDailyCap = 3
 
     static let key = "sentinel.settings.v1"
 
@@ -239,6 +253,10 @@ nonisolated struct SentinelSettings: Codable, Equatable, Sendable {
         pendingMaxAgeMinutes = v(.pendingMaxAgeMinutes, d.pendingMaxAgeMinutes)
         maxWakesPerHour = v(.maxWakesPerHour, d.maxWakesPerHour)
         dailyBudgetUsd = v(.dailyBudgetUsd, d.dailyBudgetUsd)
+        askEnabled = v(.askEnabled, d.askEnabled)
+        askThreshold = v(.askThreshold, d.askThreshold)
+        askCooldownMinutes = v(.askCooldownMinutes, d.askCooldownMinutes)
+        askDailyCap = v(.askDailyCap, d.askDailyCap)
     }
 
     /// 某个判断器用的节奏（决策模型快、LLM/规则慢）。

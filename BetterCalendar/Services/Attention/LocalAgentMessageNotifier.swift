@@ -17,6 +17,11 @@ import UserNotifications
     /// W51：自动顺延回执（漂的是「没开始」的块）——按钮「我在做」= 撤回顺延 + 从原开始时间起计时。
     static let reflowCategory = "BC_AGENT_MESSAGE_REFLOW"
     static let doingAction = "BC_AGENT_MESSAGE_DOING"
+    /// W52：哨兵的问句（在做吗 / 停了吗）——两个类别，按钮各自措辞；动作 id 共用 yes / no。
+    static let askStartedCategory = "BC_AGENT_MESSAGE_ASK_STARTED"
+    static let askStoppedCategory = "BC_AGENT_MESSAGE_ASK_STOPPED"
+    static let askYesAction = "BC_AGENT_MESSAGE_ASK_YES"
+    static let askNoAction = "BC_AGENT_MESSAGE_ASK_NO"
     static let idPrefix = "bc.agentmsg."
     static let userInfoKey = "bcAgentMessageId"
 
@@ -33,10 +38,21 @@ import UserNotifications
         let messages = UNNotificationCategory(identifier: category, actions: [ack, notUseful, mute], intentIdentifiers: [], options: [])
         let doing = UNNotificationAction(identifier: doingAction, title: "我在做", options: [])
         let reflow = UNNotificationCategory(identifier: reflowCategory, actions: [doing, ack], intentIdentifiers: [], options: [])
+        let askStarted = UNNotificationCategory(identifier: askStartedCategory,
+                                                actions: [UNNotificationAction(identifier: askYesAction, title: "在做", options: []),
+                                                          UNNotificationAction(identifier: askNoAction, title: "没在做", options: [])],
+                                                intentIdentifiers: [], options: [])
+        let askStopped = UNNotificationCategory(identifier: askStoppedCategory,
+                                                actions: [UNNotificationAction(identifier: askYesAction, title: "停了", options: []),
+                                                          UNNotificationAction(identifier: askNoAction, title: "还在做", options: [])],
+                                                intentIdentifiers: [], options: [])
+        let mine: Set<String> = [category, reflowCategory, askStartedCategory, askStoppedCategory]
         var categories = await center.notificationCategories()
-        categories = categories.filter { $0.identifier != category && $0.identifier != reflowCategory }
+        categories = categories.filter { !mine.contains($0.identifier) }
         categories.insert(messages)
         categories.insert(reflow)
+        categories.insert(askStarted)
+        categories.insert(askStopped)
         center.setNotificationCategories(categories)
     }
 
@@ -46,9 +62,17 @@ import UserNotifications
         return UUID(uuidString: raw)
     }
 
-    /// 这条消息用哪个类别：自动顺延且漂的是「没开始」的块 → 带「我在做」。
+    /// W52：通知上的「在做 / 停了」（yes）或「没在做 / 还在做」（no）。
+    static func askRoute(userInfo: [AnyHashable: Any], actionIdentifier: String) -> (id: UUID, yes: Bool)? {
+        guard actionIdentifier == askYesAction || actionIdentifier == askNoAction,
+              let raw = userInfo[userInfoKey] as? String, let id = UUID(uuidString: raw) else { return nil }
+        return (id, actionIdentifier == askYesAction)
+    }
+
+    /// 这条消息用哪个类别：自动顺延且漂的是「没开始」的块 → 带「我在做」；哨兵问句 → 在做 / 没在做 或 停了 / 还在做。
     static func categoryFor(_ message: AgentMessage) -> String {
-        PlanDriftRules.parseMessageRef(message.parentRef)?.kind == "notStarted" ? reflowCategory : category
+        if let kind = SentinelAskCenter.parseMessageRef(message.parentRef) { return kind == .started ? askStartedCategory : askStoppedCategory }
+        return PlanDriftRules.parseMessageRef(message.parentRef)?.kind == "notStarted" ? reflowCategory : category
     }
 
     static func route(userInfo: [AnyHashable: Any], actionIdentifier: String) -> (id: UUID, reaction: AgentMessage.Reaction?)? {

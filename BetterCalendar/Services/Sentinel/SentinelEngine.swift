@@ -44,6 +44,9 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
     var sharedMemory: () -> String? = { nil }
     var recentChat: () -> [(at: Date, fromUser: Bool, text: String)] = { [] }
     var pendingProposals: () -> [(at: Date, title: String)] = { [] }
+    /// W52：今天被自动顺延过的块（原定时间）；主动问「在做吗 / 停了吗」的通道（nil = 不问）。
+    var recentReflows: () -> [(blockId: UUID, originalStart: Date, at: Date)] = { [] }
+    var askCenter: SentinelAskCenter?
     /// 打扰设置（与智能体主动通知共用一份：静音一处生效）。
     var attention: () -> AttentionSettings = { AttentionSettings.load() }
     /// 智能体忙不忙（默认读桥接：调度器 running 或队列里有事件）；测试可注入。
@@ -232,6 +235,8 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: DayContext.logicalStartOfDay(t)) {
             input.tomorrow = context.upcoming.items.filter { DayContext.logicalStartOfDay($0.start) == tomorrow }
         }
+        input.recentReflows = recentReflows()
+        input.recentAsks = askCenter?.recentAsks() ?? []
         let digest = SentinelDigestBuilder.build(input)
 
         // 只用你选的判断器（原则 10）：失败 = 这一拍不判断、直说，下一拍再试；不换替身。
@@ -296,6 +301,17 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
                 }
             }
         }
+        // W52：问不问他（与叫不叫醒无关；App 直接问，带按钮）。started 优先（没计时的更值得补），其次 stopped。
+        var asked: String? = nil
+        if settings.askEnabled, let askCenter {
+            if let p = j.verdict.started, p >= settings.askThreshold, let c = digest.facts.askStarted {
+                if await askCenter.ask(SentinelAsk(kind: .started, blockId: c.id, title: c.title, start: c.reflowedFrom ?? c.start, probability: p),
+                                       settings: settings) { asked = "started:\(c.title)" }
+            } else if let p = j.verdict.stopped, p >= settings.askThreshold, let c = digest.facts.askStopped {
+                if await askCenter.ask(SentinelAsk(kind: .stopped, blockId: c.id, title: c.title, start: nil, probability: p),
+                                       settings: settings) { asked = "stopped:\(c.title)" }
+            }
+        }
         let u = j.usage
         var entry = SentinelDecisionEntry(id: id, at: t, trigger: trigger, judge: j.judge, model: j.model,
                                           fallbackReason: fallbackReason, digestHash: digest.hash, digestBytes: digest.bytes,
@@ -305,10 +321,14 @@ nonisolated struct SentinelErrorNote: Equatable, Sendable {
                                           costUsd: u?.costUsd ?? 0, error: (errors + [wakeError].compactMap { $0 }).joined(separator: "；").nilIfEmpty,
                                           eventId: eventId, signature: signature)
         entry.holdReason = holdReason
+        entry.asked = asked
         record(entry, at: t)
         SentinelCadence.ran(&cadence, at: t)
         lastRunAt = t
     }
+
+    /// W52：今天问了几次。
+    var asksToday: [SentinelDecisionEntry] { today.filter { $0.asked != nil } }
 
     /// 攒着的叫醒：条件满足时合并成一次发出；等太久就丢弃（记一笔）。闸门关着（安静时段 / 关了）不发。
     private func flushPending(at t: Date) async {
